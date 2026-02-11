@@ -1,0 +1,23 @@
+services:
+  bot:
+    image: ${BOT_IMAGE:-clawdapus-runner:latest}
+    build:
+      context: ${BOT_BUILD_CONTEXT:-./runner}
+      dockerfile: ${BOT_DOCKERFILE:-Dockerfile}
+    restart: unless-stopped
+    environment:
+      BOT_NAME: ${BOT_NAME:-bot}
+      BOT_COMMAND: ${BOT_COMMAND:-echo "Set BOT_COMMAND in your bot env file"}
+      BOT_INTERVAL_SECONDS: ${BOT_INTERVAL_SECONDS:-600}
+      BOT_JITTER_SECONDS: ${BOT_JITTER_SECONDS:-0}
+      BOT_TIMEOUT_SECONDS: ${BOT_TIMEOUT_SECONDS:-540}
+      BOT_FAIL_DELAY_SECONDS: ${BOT_FAIL_DELAY_SECONDS:-30}
+      BOT_WORKDIR: /workspace
+      TZ: ${TZ:-UTC}
+    volumes:
+      - type: bind
+        source: ${BOT_REPO_PATH:-.}
+        target: /workspace
+      - type: bind
+        source: ${BOT_STATE_PATH:-./runtime/default}
+        target: /state

@@ -1,0 +1,12 @@
+# Bot crontab — the agent owns this file. Edit freely.
+# All jobs source /etc/bot-env.sh for environment variables.
+# Logs go to /workspace/state/logs/. The agent can change any of this.
+
+# Balance sync — every minute
+* * * * * . /etc/bot-env.sh && node /opt/polymarket-sync/sync-balance.mjs >> /workspace/state/logs/balance-sync.log 2>&1
+
+# CLOB opportunity scan — every 2 minutes
+*/2 * * * * . /etc/bot-env.sh && node /workspace/scripts/clob_scan_opportunities.cjs >> /workspace/state/logs/clob-scan.log 2>&1
+
+# Full adaptive cycle — every 2 minutes (offset by 1 min from scan)
+1-59/2 * * * * . /etc/bot-env.sh && node /workspace/scripts/run_cycle.cjs >> /workspace/state/logs/run-cycle.log 2>&1
