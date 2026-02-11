@@ -83,6 +83,14 @@ if [[ -z "${SESSION_FILE}" || ! -f "${SESSION_FILE}" ]]; then
   exit 1
 fi
 
+# Kill stale tail -F processes on session JSONL files from previous invocations.
+# docker exec orphans these when the host-side script is interrupted.
+for f in /proc/[0-9]*/cmdline; do
+  pid="${f#/proc/}"; pid="${pid%%/*}"
+  cmd="$(tr '\0' ' ' < "$f" 2>/dev/null)" || continue
+  [[ "$cmd" == *tail*-F*.jsonl* ]] && kill "$pid" 2>/dev/null || true
+done
+
 echo "Tailing session: ${SESSION_FILE}"
 
 if [[ "${WITH_TOOLS:-0}" == "1" ]]; then

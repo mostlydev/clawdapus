@@ -1,66 +1,128 @@
 # Clawdapus
 
-Docker-based runtime for running one or many autonomous bots in parallel.
+Docker-based runtime for running one or many autonomous [OpenClaw](https://docs.openclaw.ai) bots in parallel, each with isolated workspace and state.
 
-Two modes:
+## Features
 
-- **Generic Loop Runner** (`compose.yml` + `runner/`) — runs any shell command on an interval inside a container. Bring your own bot logic; Clawdapus handles scheduling, timeouts, jitter, and per-bot isolation.
-- **OpenClaw Stack** (`openclaw/`) — full agent runtime powered by [OpenClaw](https://docs.openclaw.ai). Heartbeat-driven scheduling, workspace-backed memory, tool execution, and cron-scheduled periodic tasks.
+- Per-bot isolated OpenClaw container with cron-scheduled periodic tasks
+- Immutable config — `openclaw.json` is generated on the host and bind-mounted read-only; the bot cannot change its own heartbeat frequency or model
+- System heartbeat cron (`/etc/cron.d/`) fires at the operator-set interval regardless of bot behavior
+- Bot-managed workspace crons for tasks the bot controls
+- Workspace-backed memory and editable strategy files
+- Tool/runtime execution inside the mounted workspace
 
-## Layout
+## Quick Start
 
-- `compose.yml`: generic loop-runner compose file
-- `runner/`: generic loop-runner image
-- `bots/*.env`: per-bot env files for generic loop runner
-- `openclaw/`: OpenClaw-specific stack, workspaces, and docs
-- `scripts/`: start/stop/log helper scripts for both modes
-- `runtime/`: per-bot persisted runtime state
-
-## Mode 1: Generic Loop Runner
-
-Use this when you already have your own bot logic and only need scheduling/containerization.
-
-### Quick Start
-
-1. Create env files:
+1. Create a bot env file:
 
 ```bash
-cp bots/example.env bots/alpha.env
-cp bots/example.env bots/beta.env
+cp openclaw/bots/example.env openclaw/bots/alpha.env
 ```
 
-2. Edit each env:
+2. Edit at minimum:
 
-- `BOT_REPO_PATH`: host path to mounted workspace
-- `BOT_COMMAND`: command executed each cycle inside `/workspace`
-- Optional: `BOT_INTERVAL_SECONDS`, `BOT_FAIL_DELAY_SECONDS`, provider keys
+- `BOT_REPO_PATH` — host path to the bot workspace
+- `AGENTS_FILE_PATH` — host path to the agent instructions file
+- model/provider keys (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, etc.)
+- heartbeat/cycle settings you want enabled
 
 3. Start:
 
 ```bash
-bash scripts/fleet-up.sh
+bash scripts/openclaw-up.sh alpha
 ```
 
-4. Logs:
+4. Stop:
 
 ```bash
-bash scripts/fleet-logs.sh alpha
+bash scripts/openclaw-down.sh alpha
 ```
 
-5. Stop:
+## Run Multiple Bots
+
+Create one env file per bot in `openclaw/bots/`, each with its own workspace/state paths.
+
+Start all:
 
 ```bash
-bash scripts/fleet-down.sh
+bash scripts/openclaw-up.sh
 ```
 
-## Mode 2: OpenClaw Stack
+Stop all:
 
-Use this when you want agent runtime behavior (heartbeat, memory files, tool execution, isolated sessions).
+```bash
+bash scripts/openclaw-down.sh
+```
 
-See `openclaw/README.md`.
+## Operate and Observe
 
-## Notes
+Run OpenClaw CLI in-container:
 
-- Keys are not required by the framework itself. Provide only what your bot needs in each bot env file.
-- Keep credentials isolated per bot env.
-- Generic loop runner logs persist under `runtime/<bot>/logs`.
+```bash
+bash scripts/openclaw-cmd.sh alpha 'openclaw health --json'
+```
+
+Log streams:
+
+```bash
+bash scripts/openclaw-logs.sh alpha                       # docker compose logs
+bash scripts/openclaw-tail-session.sh alpha --with-tools   # live session JSONL stream
+bash scripts/openclaw-console.sh alpha                     # health + heartbeat + live conversation
+bash scripts/openclaw-last.sh alpha                        # health + balance + last assistant message
+bash scripts/openclaw-live.sh alpha                        # combined session + cron job logs
+```
+
+## Directory Layout
+
+```
+openclaw/
+  compose.yml          # Docker Compose stack definition
+  bots/*.env           # per-bot configuration
+  workspaces/<bot>/    # bot workspace (strategy files, scripts, state)
+  runner/              # Dockerfile + entrypoint
+  runtime/<bot>/       # persisted runtime state (gitignored)
+scripts/openclaw-*.sh  # lifecycle and observability helpers
+```
+
+Container mounts:
+
+- `BOT_REPO_PATH -> /workspace` (read/write)
+- `AGENTS_FILE_PATH -> /workspace/AGENTS.md` (read-only)
+- `BOT_STATE_PATH -> /state` (read/write)
+
+## Configuration
+
+Core:
+
+- `OPENCLAW_MODEL_PRIMARY` — model identifier (e.g. `openrouter/anthropic/claude-sonnet-4`)
+- `OPENCLAW_HEARTBEAT_EVERY` — heartbeat interval (e.g. `30m`)
+- `OPENCLAW_HEARTBEAT_TARGET` — heartbeat target (e.g. `none`)
+
+Credentials (as needed):
+
+- `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`
+- venue credentials required by your strategy
+
+Cron-scheduled tasks (configured via workspace `crontab`):
+
+- Balance sync: `POLYMARKET_SYNC_*`
+- Opportunity scan: `POLY_SCAN_*`
+
+See `openclaw/API_KEYS.md` for full key setup guide.
+
+## Adding a New Bot
+
+```bash
+cp openclaw/bots/example.env openclaw/bots/mybot.env
+# Edit: set BOT_REPO_PATH, AGENTS_FILE_PATH, model/provider keys
+# Create workspace:
+mkdir -p openclaw/workspaces/mybot
+cp openclaw/workspaces/default/AGENTS.md openclaw/workspaces/mybot/
+bash scripts/openclaw-up.sh mybot
+```
+
+## Publishing Notes
+
+- Remove secrets from all `*.env` files before publishing.
+- Keep `openclaw/bots/example.env` as template-only.
+- Avoid committing runtime state under `openclaw/workspaces/*/state` unless intentional.
