@@ -22,14 +22,9 @@ RUN node -e "const fs=require('fs');const dir='/usr/local/lib/node_modules/openc
 # Lock down openclaw package — defense in depth against runtime self-patching.
 RUN chmod -R a-w /usr/local/lib/node_modules/openclaw/
 
-WORKDIR /opt/polymarket-sync
-COPY polymarket-sync/package.json /opt/polymarket-sync/package.json
-RUN npm install --omit=dev
-
 WORKDIR /workspace
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY polymarket-sync/sync-balance.mjs /opt/polymarket-sync/sync-balance.mjs
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
