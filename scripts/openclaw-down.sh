@@ -32,8 +32,13 @@ resolve_env_file() {
 collect_targets() {
   if [[ $# -eq 0 ]]; then
     shopt -s nullglob
-    local files=("${BOTS_DIR}"/*.env)
+    local all=("${BOTS_DIR}"/*.env)
     shopt -u nullglob
+    local files=()
+    for f in "${all[@]}"; do
+      [[ "$(basename "$f")" == "example.env" ]] && continue
+      files+=("$f")
+    done
     printf '%s\n' "${files[@]}"
     return 0
   fi

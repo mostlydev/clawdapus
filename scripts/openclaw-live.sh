@@ -48,6 +48,19 @@ trap cleanup EXIT INT TERM
 ) &
 pids+=($!)
 
+# Kill stale tail -F processes on cron log files from previous invocations.
+docker compose \
+  --project-name "${project}" \
+  --file "${COMPOSE_FILE}" \
+  --env-file "${env_file}" \
+  exec -T openclaw bash -c '
+    for f in /proc/[0-9]*/cmdline; do
+      pid="${f#/proc/}"; pid="${pid%%/*}"
+      cmd="$(tr "\0" " " < "$f" 2>/dev/null)" || continue
+      [[ "$cmd" == *tail*-F*.log* ]] && kill "$pid" 2>/dev/null || true
+    done
+  ' 2>/dev/null || true
+
 (
   docker compose \
     --project-name "${project}" \
