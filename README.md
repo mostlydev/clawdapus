@@ -1,128 +1,114 @@
 # Clawdapus
 
-Docker-based runtime for running one or many autonomous [OpenClaw](https://docs.openclaw.ai) bots in parallel, each with isolated workspace and state.
+Infrastructure-layer governance for AI agent containers.
 
-## Features
+Clawdapus is to agent bots what Docker is to applications — the layer below the framework, above the operating system, where deployment meets governance. It treats AI agents as untrusted workloads: reproducible, inspectable, diffable, and killable.
 
-- Per-bot isolated OpenClaw container with cron-scheduled periodic tasks
-- Immutable config — `openclaw.json` is generated on the host and bind-mounted read-only; the bot cannot change its own heartbeat frequency or model
-- System heartbeat cron (`/etc/cron.d/`) fires at the operator-set interval regardless of bot behavior
-- Bot-managed workspace crons for tasks the bot controls
-- Workspace-backed memory and editable strategy files
-- Tool/runtime execution inside the mounted workspace
+> **Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you.**
 
-## Quick Start
+---
 
-1. Create a bot env file:
+## Status
 
-```bash
-cp openclaw/bots/example.env openclaw/bots/alpha.env
-```
+**Active development — pre-release.**
 
-2. Edit at minimum:
+The `claw` CLI is being built from scratch in Go. See the documents below for where we are and where we're going.
 
-- `BOT_REPO_PATH` — host path to the bot workspace
-- `AGENTS_FILE_PATH` — host path to the agent instructions file
-- model/provider keys (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, etc.)
-- heartbeat/cycle settings you want enabled
+| Document | Purpose |
+|----------|---------|
+| [`MANIFESTO.md`](./MANIFESTO.md) | Full vision and principles — the source of truth |
+| [`docs/plans/2026-02-18-clawdapus-architecture.md`](./docs/plans/2026-02-18-clawdapus-architecture.md) | Architecture decisions and phased implementation plan |
 
-3. Start:
+The prior OpenClaw-based runtime (Docker shell scripts for running OpenClaw bots) lives in [`archive/openclaw-runtime/`](./archive/openclaw-runtime/) for reference.
 
-```bash
-bash scripts/openclaw-up.sh alpha
-```
+---
 
-4. Stop:
-
-```bash
-bash scripts/openclaw-down.sh alpha
-```
-
-## Run Multiple Bots
-
-Create one env file per bot in `openclaw/bots/`, each with its own workspace/state paths.
-
-Start all:
-
-```bash
-bash scripts/openclaw-up.sh
-```
-
-Stop all:
-
-```bash
-bash scripts/openclaw-down.sh
-```
-
-## Operate and Observe
-
-Run OpenClaw CLI in-container:
-
-```bash
-bash scripts/openclaw-cmd.sh alpha 'openclaw health --json'
-```
-
-Log streams:
-
-```bash
-bash scripts/openclaw-logs.sh alpha                       # docker compose logs
-bash scripts/openclaw-tail-session.sh alpha --with-tools   # live session JSONL stream
-bash scripts/openclaw-console.sh alpha                     # health + heartbeat + live conversation
-bash scripts/openclaw-last.sh alpha                        # health + balance + last assistant message
-bash scripts/openclaw-live.sh alpha                        # combined session + cron job logs
-```
-
-## Directory Layout
+## What It Will Do
 
 ```
-openclaw/
-  compose.yml          # Docker Compose stack definition
-  bots/*.env           # per-bot configuration
-  workspaces/<bot>/    # bot workspace (strategy files, scripts, state)
-  runner/              # Dockerfile + entrypoint
-  runtime/<bot>/       # persisted runtime state (gitignored)
-scripts/openclaw-*.sh  # lifecycle and observability helpers
+claw build                # Clawfile → Dockerfile → docker build
+claw up                   # claw-pod.yml → compose.yml → docker compose up
+claw ps                   # Fleet status with drift scores and cllama health
+claw logs <claw>          # Stream logs from a running Claw
+claw skillmap <claw>      # Show assembled capability inventory
+claw audit <claw>         # cllama intervention history and drift events
+claw snapshot <claw>      # Snapshot a running Claw as a new image
 ```
 
-Container mounts:
+### The Clawfile
 
-- `BOT_REPO_PATH -> /workspace` (read/write)
-- `AGENTS_FILE_PATH -> /workspace/AGENTS.md` (read-only)
-- `BOT_STATE_PATH -> /state` (read/write)
+An extended Dockerfile. Any valid Dockerfile is a valid Clawfile. Extended directives add bot-specific governance:
 
-## Configuration
+```dockerfile
+FROM openclaw:latest
 
-Core:
+CLAW_TYPE openclaw
+AGENT AGENTS.md
 
-- `OPENCLAW_MODEL_PRIMARY` — model identifier (e.g. `openrouter/anthropic/claude-sonnet-4`)
-- `OPENCLAW_HEARTBEAT_EVERY` — heartbeat interval (e.g. `30m`)
-- `OPENCLAW_HEARTBEAT_TARGET` — heartbeat target (e.g. `none`)
+MODEL primary anthropic/claude-sonnet-4-6
+CLLAMA cllama-org-policy/anthropic/claude-haiku-4-5 purpose/on-mission tone/professional
 
-Credentials (as needed):
+INVOKE 0 */4 * * *  run-cycle
+INVOKE 0 9 * * 1-5  morning-brief
 
-- `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`
-- venue credentials required by your strategy
+SURFACE volume://shared-cache    read-write
+SURFACE service://company-crm   read-write
 
-Cron-scheduled tasks (configured via workspace `crontab`):
-
-- Balance sync: `POLYMARKET_SYNC_*`
-- Opportunity scan: `POLY_SCAN_*`
-
-See `openclaw/API_KEYS.md` for full key setup guide.
-
-## Adding a New Bot
-
-```bash
-cp openclaw/bots/example.env openclaw/bots/mybot.env
-# Edit: set BOT_REPO_PATH, AGENTS_FILE_PATH, model/provider keys
-# Create workspace:
-mkdir -p openclaw/workspaces/mybot
-cp openclaw/workspaces/default/AGENTS.md openclaw/workspaces/mybot/
-bash scripts/openclaw-up.sh mybot
+TRACK apt pip npm
+PRIVILEGE runtime claw-user
 ```
 
-## Publishing Notes
+`claw build` compiles this to a standard Dockerfile and calls `docker build`. Output is an ordinary OCI image — runnable on any Docker host.
 
-- Remove secrets from all `*.env` files before publishing.
-- Keep `openclaw/bots/example.env` as template-only.
-- Avoid committing runtime state under `openclaw/workspaces/*/state` unless intentional.
+### The claw-pod.yml
+
+An extended docker-compose file. The `x-claw` extension namespace is already ignored by Docker natively. Mixed clusters of Claws and plain containers:
+
+```yaml
+x-claw:
+  pod: my-ops
+  master: fleet-master
+
+services:
+  my-claw:
+    build:
+      context: .
+      dockerfile: Clawfile
+    x-claw:
+      agent: ./AGENTS.md
+      count: 3
+      surfaces:
+        - volume://shared-cache: read-write
+        - service://company-crm: read-write
+
+  company-crm:
+    image: custom/crm-mcp-bridge:latest
+    x-claw:
+      expose:
+        protocol: mcp
+        port: 3100
+      require_cllama:
+        - policy/pii-gate
+```
+
+---
+
+## Core Concepts
+
+**Behavioral Contract** — A read-only bind-mounted file (AGENTS.md, CLAUDE.md, etc.) defining purpose. Lives on the host. Even a root-compromised container cannot rewrite its mission.
+
+**Persona** — Mutable workspace of identity, memory, and interaction history. Versionable and forkable as OCI artifacts.
+
+**cllama** — An independent LLM-powered judgment proxy between the Claw and the world. The runner never sees cllama's evaluation. Think twice, act once.
+
+**Surfaces** — Declared communication channels. Give operators topology visibility; give bots capability discovery via assembled skill maps.
+
+**Drift scoring** — Independent audit of outputs against contract and cllama policy. Triggers capability restriction or quarantine.
+
+See [`MANIFESTO.md`](./MANIFESTO.md) for the full architecture.
+
+---
+
+## Contributing
+
+The project is pre-release. The best place to engage is the [architecture plan PR](https://github.com/mostlydev/clawdapus/pull/2).
