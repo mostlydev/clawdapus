@@ -4,7 +4,7 @@
 
 ### A Manifesto for Containerized Agent Infrastructure
 
-v0.8 — February 2026
+v0.9 — February 2026
 
 ---
 
@@ -20,6 +20,10 @@ This is infrastructure-layer containment for cognitive workloads. Clawdapus does
 
 Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you. Different trust model. Different stack.
 
+### Terminology
+
+**Clawdapus** is the platform — the `claw` CLI and its runtime. **Claw** is a running agent container managed by Clawdapus.
+
 ---
 
 ## II. The Anatomy of a Claw
@@ -32,7 +36,7 @@ A running Claw bifurcates cognition into two independent layers: internal execut
 
 **The Persona (The History)** — A mutable workspace of identity, memory, knowledge, style, and accumulated interaction history. This is the *who* — who the Claw has become over time. Personas are downloadable, versionable, forkable OCI artifacts. They grow during operation and can be snapshotted and promoted.
 
-**cllama (The Judgment Proxy)** — An external, LLM-powered proxy that sits between the Claw and the world. It uses the identity of the Claw *and* the identity of the outside party to apply policy, shape tone, enforce strategy, and gate risk. cllama handles the *should*. Should this output reach the world? Should this action proceed? Should this communication go to this recipient in this tone? The runner never sees cllama's evaluation. The two cognitive layers are independent: the runner optimizes for capability, cllama optimizes for judgment.
+**cllama (The Judgment Proxy)** — A bidirectional LLM proxy that sits between the runner and its model. Outbound: it intercepts prompts before they reach the LLM — gating what the runner is allowed to ask. Inbound: it intercepts responses before they reach the runner — adjusting, rewriting, or dropping output that violates policy. The runner thinks it's talking directly to the LLM. It never sees cllama's evaluation. cllama handles the *should* — should this prompt be sent, should this response be delivered, should this tool call proceed. The two cognitive layers are independent: the runner optimizes for capability, cllama optimizes for judgment.
 
 These four components — runner, contract, persona, cllama — are the anatomy of every Claw. They are independently versioned, independently deployable, and independently auditable. Swap the runner without touching the persona. Swap the persona without touching the contract. Swap the judgment layer without touching any of them.
 
@@ -80,7 +84,7 @@ The traditional answer is to put guardrails inside the prompt. But prompt-level 
 
 ### The Solution
 
-Think twice, act once. cllama is a separate LLM-powered process — running its own model, with its own policy configuration, under the operator's exclusive control — that evaluates the bot's output before it reaches the world. The runner thinks about what to say. cllama thinks about whether to say it. The bot never sees cllama's evaluation. It never knows its output was modified or dropped. Two independent cognitive processes, two independent models, one gate.
+Think twice, act once. cllama is a bidirectional LLM proxy — a separate process, running its own model, with its own policy configuration, under the operator's exclusive control. It sits between the runner and the LLM provider, intercepting both directions. Outbound: it evaluates prompts before the LLM sees them — preventing the model from being asked things that violate policy. Inbound: it evaluates responses before the runner sees them — adjusting, rewriting, or dropping output that drifts from purpose. When a response fails policy, cllama can engage in its own conversation with the LLM to arrive at a compliant response before passing it to the runner's stream of thought. The runner never knows. It thinks it's talking directly to the model.
 
 While the runner handles the logic of a task, cllama answers the institutional questions:
 
@@ -129,7 +133,7 @@ cllama can be configured procedurally — rigid code for high-security rails, ha
 
 ### API Keys
 
-API keys for LLMs, platform APIs, and external services are exported as environment variables. Standard Docker practice. cllama has its own keys, configured separately — the bot's keys and cllama's keys are independent. Optional hardened mode routes all bot outbound calls through cllama so the bot never holds keys in process memory, but that's not the default.
+The cllama sidecar holds the real LLM provider API keys. The runner's LLM base URL is rewritten to point at the sidecar — the runner never sees real provider keys. This is the default, not an optional hardened mode. Platform API keys for external services are exported as environment variables per standard Docker practice.
 
 ---
 
@@ -149,17 +153,17 @@ This means Clawdapus inherits the entire Docker ecosystem: registries, layer cac
 
 ### Claw Types: The Base Image
 
-A claw type is a base image with an agent runner installed in a predictable location. That's it.
+A claw type is a base image with an agent runner installed at a known path. The requirement is minimal: the runner reads a behavioral contract whose filename is part of the type's convention. Clawdapus wraps all runners identically.
 
-An OpenClaw claw type is a Linux image with OpenClaw installed — its Gateway control plane, its channel adapters, its cron system, its skill registry, the Pi Agent Core runtime, its built-in tools, and its multi-model routing with provider failover. It is a substantial runtime — a full agent operating system. It expects AGENTS.md. Heavyweight. 430,000+ lines. 15+ channel adapters.
+| Claw Type | Runner | Contract | Weight Class |
+|-----------|--------|----------|-------------|
+| OpenClaw | Full agent OS — Gateway, channels, skills, multi-model routing | AGENTS.md | Heavyweight |
+| Nanobot | Lean agent loop — skills, memory, MCP-native | config.json | Lightweight |
+| NanoClaw | Claude Code in isolated container groups | CLAUDE.md | Medium |
+| Claude Code | Single-execution runner | CLAUDE.md | One-shot |
+| Custom | Any script or framework | Runner-defined | Any |
 
-A Nanobot claw type is a Linux image with Nanobot installed — its agent loop, its skill system, its memory module, its provider routing, and its channel adapters. It is the same fundamental architecture as OpenClaw stripped to essentials. ~4,000 lines of Python. Sub-second cold start. 45MB memory footprint. MCP-native for modular tool composition. It reads config.json and workspace skills. Lightweight runners are not lesser claw types. They are different weight classes for different problems.
-
-A NanoClaw claw type wraps Claude Code as its runtime, running each agent group in its own container sandbox with isolated filesystems and per-group CLAUDE.md memory. NanoClaw already does its own container isolation — Clawdapus wrapping NanoClaw is not redundant sandboxing, it is additive governance: purpose contracts, judgment proxies, lifecycle management, surface topology, and fleet coordination that NanoClaw doesn't provide.
-
-A Claude Code claw type is simpler still — a Linux environment with Claude Code as a single-execution runner. It handles one task at a time. It expects CLAUDE.md.
-
-Any agent runner can be a claw type. The requirement is that the runner is installed at a known path and reads a behavioral contract whose filename is part of the claw type's convention. Clawdapus wraps them all identically. The operator picks the weight class that fits the problem: OpenClaw for persistent multi-channel assistants, Nanobot for lean MCP-driven agents, NanoClaw for Claude Code with isolation, Claude Code for one-shot tasks, or a custom script for anything else.
+The operator picks the weight class that fits the problem. Lightweight runners are not lesser claw types — they are different weight classes for different problems. Wrapping a runner that already sandboxes (like NanoClaw) is not redundant — Clawdapus adds governance (contracts, cllama, surfaces, drift) that the runner doesn't provide.
 
 ### Extended Directives
 
@@ -547,7 +551,7 @@ Low drift: continue normally. Moderate drift: restrict capabilities. High drift:
 
 **Docker compatibility** — Built entirely on Docker primitives. Clawfiles are Dockerfiles. claw-pod.yml is a compose file. Images are OCI images. A Clawfile-built image runs on any Docker host, even without the Clawdapus runtime.
 
-**Runner compatibility** — Clawdapus operates beneath agent runners and wraps them all identically. OpenClaw (430K+ lines), Nanobot (~4K lines), NanoClaw, Claude Code, custom scripts. Adoption is incremental — take an existing bot, containerize it in a Clawfile, add a behavioral contract, and you have a managed Claw.
+**Runner compatibility** — Clawdapus wraps all runners identically, from full agent operating systems to single-execution tools to custom scripts. Adoption is incremental — take an existing bot, containerize it in a Clawfile, add a behavioral contract, and you have a managed Claw.
 
 **cllama module ecosystem** — The standard defines the module interface but doesn't restrict what modules do. Organizations maintain their own judgment stacks under their own policy namespace.
 
@@ -589,15 +593,10 @@ Clawdapus is infrastructure for bots the way Docker is infrastructure for applic
 
 ---
 
-## XV. Implementation Notes
+## XV. Implementation
 
-*This section will be updated as architectural decisions are made.*
+Architecture decisions and implementation plans live alongside this manifesto:
 
-### Build/Runtime Split (decided Feb 2026)
-
-Clawdapus uses a hybrid approach:
-
-- **Build phase** — `claw build` transpiles the Clawfile into a standard Dockerfile and calls `docker build`. Output is an inspectable build artifact, not something you edit directly — like a compiled binary.
-- **Runtime phase** — `clawdapus` drives container lifecycle, injects environment, mediates surfaces, runs cllama. Always go through `claw` commands at runtime.
-
-This gives inspectable builds and full runtime control. The `x-claw` extensions in claw-pod.yml are parsed by Clawdapus, not by Docker Compose directly.
+- [Architecture Plan](docs/plans/2026-02-18-clawdapus-architecture.md) — phased implementation, invariants, CLI surface
+- [ADR-001: cllama Transport](docs/decisions/001-cllama-transport.md) — sidecar HTTP proxy as bidirectional LLM interceptor
+- [ADR-002: Runtime Authority](docs/decisions/002-runtime-authority.md) — compose-only lifecycle, SDK read-only

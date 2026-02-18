@@ -16,22 +16,29 @@ The `claw` CLI is being built from scratch in Go. See the documents below for wh
 
 | Document | Purpose |
 |----------|---------|
-| [`MANIFESTO.md`](./MANIFESTO.md) | Full vision and principles — the source of truth |
-| [`docs/plans/2026-02-18-clawdapus-architecture.md`](./docs/plans/2026-02-18-clawdapus-architecture.md) | Architecture decisions and phased implementation plan |
+| [`MANIFESTO.md`](./MANIFESTO.md) | Vision and principles — the source of truth |
+| [`docs/plans/2026-02-18-clawdapus-architecture.md`](./docs/plans/2026-02-18-clawdapus-architecture.md) | Architecture plan and phased implementation |
+| [`docs/decisions/001-cllama-transport.md`](./docs/decisions/001-cllama-transport.md) | ADR: cllama sidecar as bidirectional LLM proxy |
+| [`docs/decisions/002-runtime-authority.md`](./docs/decisions/002-runtime-authority.md) | ADR: compose-only lifecycle, SDK read-only |
 
-The prior OpenClaw-based runtime (Docker shell scripts for running OpenClaw bots) lives in [`archive/openclaw-runtime/`](./archive/openclaw-runtime/) for reference.
+The prior OpenClaw-based runtime lives in [`archive/openclaw-runtime/`](./archive/openclaw-runtime/) for reference.
 
 ---
 
 ## What It Will Do
 
 ```
-claw build                # Clawfile → Dockerfile → docker build
-claw up                   # claw-pod.yml → compose.yml → docker compose up
-claw ps                   # Fleet status with drift scores and cllama health
+claw doctor               # Check Docker, BuildKit, compose versions
+claw build [path]         # Clawfile → Dockerfile → docker build
+claw inspect <image>      # Show resolved Claw labels from built image
+claw up [pod]             # claw-pod.yml → compose.yml → docker compose up
+claw down [pod]           # Stop and remove pod containers
+claw ps [pod]             # Fleet status with drift scores and cllama health
 claw logs <claw>          # Stream logs from a running Claw
 claw skillmap <claw>      # Show assembled capability inventory
 claw audit <claw>         # cllama intervention history and drift events
+claw recipe <claw>        # Suggested recipe from mutation log
+claw bake <claw>          # Apply recipe to rebuild image
 claw snapshot <claw>      # Snapshot a running Claw as a new image
 ```
 
