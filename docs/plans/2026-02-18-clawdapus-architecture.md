@@ -1,9 +1,9 @@
 # Clawdapus Architecture Plan
 
 **Date:** 2026-02-18
-**Status:** v3 — post-deliberation consensus
+**Status:** v4 — driver model + cllama deferral
 **Source of truth:** `MANIFESTO.md`
-**Reviews:** Grok (structural critique), Codex (architecture + suggestions), operator (cllama clarification)
+**Reviews:** Grok (structural critique), Codex (architecture + driver model), operator (cllama clarification, enforcement model)
 **Deliberation:** 3-agent talking stick (alpha/Codex, beta/Claude, gamma/Grok) — arch-review room, 3 rounds, consensus reached
 
 ---
@@ -22,11 +22,12 @@ Invariants are stated as goals from the start. Each is promoted from SHOULD to M
 
 | Invariant | Enforcement mechanism | Promoted to MUST in |
 |-----------|----------------------|---------------------|
-| No contract → no start | File existence check on `agent:` host path before compose emit | Phase 2A |
-| No cllama decision on egress → deny | Sidecar exists and proxies all LLM traffic; no direct egress allowed | Phase 2B |
-| Missing required policy module → deny service call | Sidecar checks policy modules before routing tool calls to services | Phase 3 |
-| Purpose is immutable from inside | Contract bind mount is always `:ro` | Phase 2A |
-| One lifecycle authority | `docker compose` is sole lifecycle authority; Docker SDK is read-only | Phase 2A |
+| No contract → no start | File existence check on `agent:` host path before compose emit | Phase 2 |
+| Purpose is immutable from inside | Contract bind mount is always `:ro` | Phase 2 |
+| One lifecycle authority | `docker compose` is sole lifecycle authority; Docker SDK is read-only | Phase 2 |
+| Driver enforcement verified before up | Preflight validation: all enforcement ops applied and verified | Phase 2 |
+| No cllama decision on egress → deny | Sidecar exists and proxies all LLM traffic; no direct egress allowed | Phase 4 |
+| Missing required policy module → deny service call | Sidecar checks policy modules before routing tool calls to services | Phase 4 |
 
 See also: [ADR-001: cllama Transport](../decisions/001-cllama-transport.md), [ADR-002: Runtime Authority](../decisions/002-runtime-authority.md)
 
@@ -46,7 +47,10 @@ See also: [ADR-001: cllama Transport](../decisions/001-cllama-transport.md), [AD
 **Runtime phase** (`claw up`, `claw ps`, `claw down`, etc.)
 - Reads a `claw-pod.yml` (extended docker-compose syntax)
 - Parses `x-claw` extension blocks
-- Wires surfaces, assembles skill maps, injects cllama sidecars
+- Loads the claw-type driver for each service
+- Executes enforcement ops (config injection, env vars, mounts) via the driver
+- Optionally injects cllama sidecars (when `CLLAMA` directive is present)
+- Wires surfaces, assembles skill maps
 - Emits a clean `compose.generated.yml` (no `x-claw` keys)
 - Shells out to `docker compose` for **all** container lifecycle operations
 - Uses Docker SDK **only** for read operations: inspect, logs, events
@@ -66,13 +70,46 @@ See also: [ADR-001: cllama Transport](../decisions/001-cllama-transport.md), [AD
 `claw-pod.yml` is a valid `docker-compose.yml`. The `x-claw` extension namespace is already ignored by Docker natively. Clawdapus:
 1. Parses `claw-pod.yml` using a Go YAML library
 2. Processes `x-claw` blocks (surfaces, cllama config, count scaling, skill maps)
-3. Injects cllama sidecar containers for each Claw service
-4. Emits a clean compose file without `x-claw` keys
-5. Shells out to `docker compose` with the generated file
+3. Loads the claw-type driver for each Claw service
+4. Executes enforcement ops through the driver
+5. Optionally injects cllama sidecar containers (when configured)
+6. Emits a clean compose file without `x-claw` keys
+7. Shells out to `docker compose` with the generated file
 
-### 4. cllama as Bidirectional LLM Proxy
+### 4. CLAW_TYPE as Driver Selector
 
-**This is the core insight and the hardest design problem.** cllama is not just an output filter — it is a bidirectional proxy that sits between the runner and the LLM provider.
+`CLAW_TYPE` is not just a label — it selects a **runtime driver** that knows how to enforce Clawfile directives for a specific runner.
+
+**The Clawfile declares WHAT. The driver translates to HOW.**
+
+`MODEL primary anthropic/claude-sonnet-4-6` means the same thing regardless of runner. But the enforcement mechanism differs:
+- OpenClaw driver: `openclaw config set agents.defaults.model.primary anthropic/claude-sonnet-4-6` (JSON5-aware, uses runner's own CLI)
+- Claude Code driver: write to `settings.json` or set env var
+- Generic driver: `ENV MODEL_PRIMARY=anthropic/claude-sonnet-4-6`
+
+Each driver implements the **driver contract** (see below). `CLAW_TYPE` still compiles to a label at build time (`LABEL claw.type=openclaw`) for image introspection, but at runtime it selects behavior.
+
+### 5. Enforcement via Config Injection (not cllama)
+
+The primary enforcement model is **config injection** — surgically writing specific config branches into the runner's existing configuration, using the runner's own tools. This works without cllama.
+
+What config injection enforces:
+- **Model restriction** — pin which models the runner can use
+- **Behavioral contract** — read-only mount of AGENTS.md / CLAUDE.md
+- **Tool/exec permissions** — restrict what the runner is allowed to execute
+- **Scheduling** — system-level cron that the runner cannot modify
+- **API key delivery** — operator controls which keys the container gets
+
+What config injection cannot enforce (requires cllama):
+- **Prompt/response interception** — modifying what the LLM sees or returns
+- **Key isolation** — hiding real provider keys from the runner
+- **LLM-level drift scoring** — independent evaluation of conversation quality
+
+cllama is an **enhancement layer**, not a prerequisite. A Claw can run with config-injection-only enforcement. cllama adds deeper LLM-level governance when needed.
+
+### 6. cllama as Optional Bidirectional LLM Proxy
+
+cllama is not just an output filter — it is a bidirectional proxy that sits between the runner and the LLM provider. **It is optional.** A Claw without a `CLLAMA` directive runs with config-injection-only enforcement.
 
 **Outbound (runner → LLM):** Intercepts prompts before they reach the LLM. Prevents the model from seeing content that violates policy. Gates what the runner is allowed to *ask* — role gating, thought gating, tool-use gating.
 
@@ -80,21 +117,21 @@ See also: [ADR-001: cllama Transport](../decisions/001-cllama-transport.md), [AD
 
 **The runner never knows.** It thinks it's talking directly to the LLM. cllama is transparent — same API shape in, same API shape out.
 
-**Transport: sidecar per Claw (default mode).**
-- Each Claw gets a `cllama-sidecar` container, injected automatically by `claw up`
+**Transport: sidecar per Claw (when enabled).**
+- Each Claw with a `CLLAMA` directive gets a `cllama-sidecar` container, injected by `claw up`
 - Sidecar exposes an OpenAI-compatible API endpoint on a private network
 - Runner's LLM base URL is rewritten to point at the sidecar (via ENV injection)
 - Sidecar applies the cllama pipeline: purpose → policy → tone → obfuscation
 - Sidecar holds real API keys — runner never sees provider keys
 - Sidecar also intercepts tool calls and enforces `require_cllama` constraints
 
-**Dual modes (deliberation consensus):**
-- **Proxy mode (default):** HTTP sidecar. Works with any runner that makes HTTP calls to an LLM endpoint. No runner integration needed. Built first.
-- **Adapter mode (future):** SDK-level hook for runners using local models or embedded clients that don't go through an HTTP base URL. Requires runner-specific integration. Documented as a known gap; not built until a concrete runner needs it.
+**Dual modes:**
+- **Proxy mode (default):** HTTP sidecar. Works with any runner that makes HTTP calls to an LLM endpoint. No runner integration needed.
+- **Adapter mode (future):** SDK-level hook for runners using local models or embedded clients. Documented as a known gap; not built until a concrete runner needs it.
 
 See [ADR-001: cllama Transport](../decisions/001-cllama-transport.md) for full decision record.
 
-### 5. Persona as Runtime Mount (not baked into image)
+### 7. Persona as Runtime Mount (not baked into image)
 
 - At build time: `PERSONA` compiles to `LABEL claw.persona.default=<registry-ref>` — declares the default, does not fetch
 - At runtime: `claw up` resolves the persona ref, fetches the OCI artifact via `oras`, bind-mounts into container
@@ -102,14 +139,89 @@ See [ADR-001: cllama Transport](../decisions/001-cllama-transport.md) for full d
 
 **Rationale:** Persona is content, not infrastructure. Independent layer versioning.
 
-### 6. Security Defaults
+### 8. Security Defaults
 
 Every Claw container gets these by default (overridable via `PRIVILEGE`):
 
 - `--read-only` rootfs except `/workspace` and `/claw/tmp`
 - User namespace with `claw-user:1000`
-- Runner's LLM keys are never real provider keys — always sidecar-local endpoints
-- Network policy: only cllama sidecar outbound unless explicitly allowed via surfaces
+- Network policy: egress restricted to declared surfaces only (enforced at compose/network level, not driver level)
+- When cllama is enabled: runner's LLM keys are sidecar-local endpoints, not real provider keys
+
+---
+
+## The Driver Contract
+
+A claw-type driver implements the following interface. Drivers are Go packages under `internal/driver/`.
+
+### Capability Map
+
+Each driver declares what it supports:
+
+```go
+type DriverCapabilities struct {
+    ModelPin       bool  // can enforce model selection
+    ContractMount  bool  // can mount behavioral contract
+    Schedule       bool  // can inject/override scheduling
+    ConfigWrite    bool  // can write runner-specific config
+    Healthcheck    bool  // can report runner health
+    Restart        bool  // can trigger graceful restart
+    Reload         bool  // can reload config without restart (optional)
+}
+```
+
+### Abstract Enforcement Ops
+
+Drivers translate Clawfile directives into these abstract operations:
+
+| Op | Parameters | What it does |
+|----|-----------|--------------|
+| `set` | `path`, `value` | Write a config branch (driver picks mechanism) |
+| `unset` | `path` | Remove a config branch |
+| `mount_ro` | `host_path`, `container_path` | Read-only bind mount |
+| `env` | `name`, `value` | Set environment variable |
+| `cron_upsert` | `schedule`, `command` | Create/update a system cron entry |
+| `healthcheck` | `command` | Set container healthcheck |
+| `wake` | `command` | Invocation trigger |
+
+**Network restriction** (`restrict_network`) is NOT a driver op — it is enforced at the pod/compose level during compose generation. Drivers can declare network needs, but Clawdapus enforces topology consistently across all claw types.
+
+### Validation Hooks
+
+Each driver provides:
+- **Preflight** — validate that enforcement can be applied (config file exists, runner CLI is available, etc.) before `claw up` proceeds
+- **Post-apply** — verify that enforcement was actually applied (read back config, check env vars) after ops execute but before compose up
+
+**Fail-closed:** If preflight fails or post-apply verification fails, `claw up` refuses to start the container.
+
+### OpenClaw Driver (reference implementation)
+
+| Directive | Enforcement mechanism |
+|-----------|----------------------|
+| `AGENT` | `mount_ro` AGENTS.md to `/workspace/AGENTS.md` |
+| `MODEL primary ...` | `set agents.defaults.model.primary` via `openclaw config set` (JSON5-aware) |
+| `MODEL fallbacks ...` | `set agents.defaults.model.fallbacks` via `openclaw config set` |
+| `INVOKE` | System cron in `/etc/cron.d/` (bot-unmodifiable) + `wake` via gateway RPC |
+| Config path | `env OPENCLAW_CONFIG_PATH` + `mount_ro` openclaw.json |
+| Healthcheck | `healthcheck` via `openclaw health --json` |
+| Heartbeat | `set agents.defaults.heartbeat.every` + system cron override |
+
+**Important:** OpenClaw config is JSON5, not JSON. The driver must use `openclaw config set/get/unset` or a JSON5-aware patcher — never raw `jq`.
+
+### Common Runner Control Contract
+
+Claw-type developers who want easy Clawdapus integration should support these conventions:
+
+| Convention | Purpose |
+|-----------|---------|
+| `CONTRACT_PATH` env var | Where the runner looks for its behavioral contract file |
+| `MODEL_PRIMARY` env var | Model pin (or equivalent model slot) |
+| `HEALTHCHECK_CMD` | Command that returns 0 when runner is healthy |
+| `WAKE_CMD` | Command to trigger an invocation (heartbeat, scheduled task) |
+| `RELOAD_CMD` (optional) | Reload config without full restart |
+| Graceful `SIGTERM` handling | Clean shutdown on container stop |
+
+Runners that support these get a generic driver for free. Runners that don't need a bespoke driver with runner-specific enforcement.
 
 ---
 
@@ -134,13 +246,23 @@ clawdapus/
 │   │   ├── directives.go         # Directive types: CLAW_TYPE, AGENT, CLLAMA, etc.
 │   │   └── emit.go               # Emit standard Dockerfile from parsed AST
 │   │
+│   ├── driver/                   # Claw-type driver framework
+│   │   ├── contract.go           # Driver interface, capability map, enforcement ops
+│   │   ├── registry.go           # Driver registry (CLAW_TYPE → driver lookup)
+│   │   ├── openclaw/             # OpenClaw driver
+│   │   │   └── driver.go         # JSON5-aware config injection via openclaw CLI
+│   │   ├── generic/              # Generic driver (env var conventions)
+│   │   │   └── driver.go         # CONTRACT_PATH, MODEL_PRIMARY, HEALTHCHECK_CMD
+│   │   └── validate.go           # Preflight and post-apply verification
+│   │
 │   ├── pod/                      # claw-pod.yml parser and compose emitter
 │   │   ├── parser.go             # Parse claw-pod.yml, extract x-claw blocks
 │   │   ├── types.go              # Pod, Service, Surface, ClawConfig types
 │   │   ├── identity.go           # Claw naming, ordinal identity, rescale semantics
-│   │   └── emit.go               # Emit clean compose.yml (with cllama sidecars injected)
+│   │   ├── network.go            # Network restriction enforcement (pod-level)
+│   │   └── emit.go               # Emit clean compose.yml
 │   │
-│   ├── cllama/                   # cllama sidecar orchestration
+│   ├── cllama/                   # cllama sidecar orchestration (Phase 4)
 │   │   ├── sidecar.go            # Sidecar container config generation
 │   │   ├── policy.go             # Policy module resolution and layering
 │   │   └── proxy.go              # LLM API proxy logic (bidirectional interception)
@@ -185,10 +307,10 @@ All directives translate to standard Dockerfile primitives at build time.
 
 | Directive | Translates to | Purpose |
 |-----------|--------------|---------|
-| `CLAW_TYPE` | `LABEL claw.type=...` | Declares runner type |
+| `CLAW_TYPE` | `LABEL claw.type=...` | Declares runner type; selects runtime driver |
 | `AGENT` | `LABEL claw.agent.file=...` | Contract filename convention |
 | `MODEL` | `LABEL claw.model.<slot>=...` | Named model slot bindings |
-| `CLLAMA` | `LABEL claw.cllama.default=...` | Default judgment stack (overridable at deploy) |
+| `CLLAMA` | `LABEL claw.cllama.default=...` | Judgment stack (optional; omit for config-injection-only enforcement) |
 | `PERSONA` | `LABEL claw.persona.default=...` | Default persona ref (fetched and mounted at runtime, not baked) |
 | `CONFIGURE` | Entrypoint wrapper script (`/claw/configure.sh`) | Shell mutations run at container init before the runner starts |
 | `INVOKE` | `RUN echo "..." >> /etc/cron.d/claw` | Cron schedule entries |
@@ -210,7 +332,7 @@ Standard Dockerfile directives (`FROM`, `RUN`, `COPY`, `ENV`, `ENTRYPOINT`, etc.
 | `CLAW_TYPE` | yes | no |
 | `AGENT` | yes (default filename) | yes (`agent:` path) |
 | `MODEL` | yes (default slots) | yes |
-| `CLLAMA` | yes (default stack) | yes |
+| `CLLAMA` | yes (default stack) | yes (or omit entirely) |
 | `PERSONA` | yes (default ref) | yes |
 | `INVOKE` | yes (default schedule) | yes |
 | `CONFIGURE` | yes | no (runs from image) |
@@ -237,7 +359,7 @@ x-claw:
 x-claw:
   agent: <path-to-contract-file>     # host path, bind-mounted read-only
   persona: <registry-ref>            # override Clawfile default
-  cllama: <stack-spec>               # override Clawfile default
+  cllama: <stack-spec>               # override Clawfile default (omit for no cllama)
   count: <n>                         # scale to N identical containers
   surfaces:                          # consumed surfaces
     - <uri>: <access-mode>
@@ -253,7 +375,7 @@ x-claw:
   expose:
     protocol: mcp | rest | grpc
     port: <n>
-  require_cllama:
+  require_cllama:                    # only enforced when cllama is enabled
     - <policy-module>
   describe:
     role: <string>
@@ -349,75 +471,91 @@ Verify every directive translates cleanly for all four. Especially:
 
 **Success criteria:** All four test Clawfiles build to runnable OCI images. `claw inspect` shows correct labels. Generated Dockerfile is valid and inspectable.
 
-### Phase 2A — Pod Runtime (parallel with 2B)
+### Phase 2 — Driver Framework + Pod Runtime + OpenClaw Driver
 
-**Goal:** `claw up` / `claw down` / `claw ps` work with basic container lifecycle.
+**Goal:** `claw up` / `claw down` / `claw ps` work with config-injection enforcement. No cllama required.
 
 **Invariants promoted to MUST:**
 - No contract → no start (file existence check)
 - Purpose is immutable from inside (`:ro` bind mount)
 - One lifecycle authority (compose-only)
+- Driver enforcement verified before up (preflight + post-apply)
 
-1. Parse `claw-pod.yml`, extract `x-claw` blocks
-2. Handle `count` scaling with ordinal identity
-3. Validate contract paths exist on host (**fail-closed: no contract → refuse to emit compose**)
-4. Wire agent bind mounts as read-only
-5. Emit clean `compose.generated.yml`
-6. Shell out to `docker compose up`
+**Driver framework:**
+1. Define the driver interface (capability map, enforcement ops, validation hooks)
+2. Implement driver registry (`CLAW_TYPE` label → driver lookup)
+3. Implement preflight and post-apply verification (fail-closed)
 
-**Success criteria:** A claw-pod.yml starts correctly. Missing contract blocks startup with a clear error. `claw ps` shows container status.
+**OpenClaw driver (reference implementation):**
+4. Contract mount: `AGENT` → read-only bind mount of AGENTS.md
+5. Model pin: `MODEL` → `openclaw config set` (JSON5-aware, never raw jq)
+6. Schedule: `INVOKE` → system cron in `/etc/cron.d/` + gateway wake RPC
+7. Config injection: generate and mount `openclaw.json` read-only
+8. Healthcheck: `openclaw health --json`
 
-### Phase 2B — cllama Pass-Through Sidecar (parallel with 2A)
+**Pod runtime:**
+9. Parse `claw-pod.yml`, extract `x-claw` blocks
+10. Handle `count` scaling with ordinal identity
+11. Validate contract paths exist on host (**fail-closed**)
+12. Execute driver enforcement ops per service
+13. Run preflight validation; abort if any driver fails
+14. Enforce network restrictions at compose level (not driver level)
+15. Emit clean `compose.generated.yml`
+16. Shell out to `docker compose up`
+17. Run post-apply verification; warn if enforcement couldn't be confirmed
 
-**Goal:** Every Claw's LLM traffic routes through a transparent sidecar.
+**Success criteria:** A claw-pod.yml with an OpenClaw service starts correctly with enforced model pin and read-only contract. Missing contract blocks startup. Failed driver preflight blocks startup. `claw ps` shows container status and driver enforcement state.
 
-**Invariants promoted to MUST:**
-- No cllama decision on egress → deny (sidecar exists and proxies)
+### Phase 3 — Surfaces + Skill Maps + Multi-Driver
 
-1. Build a minimal cllama sidecar image (Go binary, OpenAI-compatible API proxy)
-2. For each Claw service, inject a `<name>-cllama` sidecar into the generated compose
-3. Rewrite runner's LLM base URL env vars to point at sidecar
-4. Sidecar holds real provider API keys; runner never sees them
-5. **Pass-through mode only** — no policy evaluation, just transparent proxy + request/response logging
-
-**Success criteria:** Each Claw's LLM calls route through its sidecar. Sidecar logs all requests. Direct LLM egress is blocked.
-
-### Phase 3 — Surfaces + Skill Maps
-
-**Goal:** `claw skillmap` works. `require_cllama` is enforced.
-
-**Invariants promoted to MUST:**
-- Missing required policy module → deny service call
+**Goal:** `claw skillmap` works. Multiple claw types supported.
 
 1. Resolve surface declarations against expose blocks
 2. Query MCP servers for tool listings at pod init
 3. Assemble per-Claw skill maps
 4. Write skill maps to read-only skill mount at `/claw/skillmap.json`
-5. Enforce `require_cllama` — sidecar checks policy modules before routing tool calls to services
+5. Implement generic driver (env var conventions: `CONTRACT_PATH`, `MODEL_PRIMARY`, etc.)
+6. Implement Claude Code driver (settings.json + CLAUDE.md contract)
+7. Prove the driver abstraction works across at least 3 runner types
 
-**Success criteria:** `claw skillmap <claw>` shows correct capability inventory. `require_cllama` blocks tool calls without the right policy. Adding a service updates the skill map.
+**Success criteria:** `claw skillmap <claw>` shows correct capability inventory. Mixed pods with different claw types start correctly, each with appropriate driver enforcement.
 
-### Phase 4 — Full cllama Policy Pipeline
+### Phase 4 — cllama Sidecar + Policy Pipeline
 
-**Goal:** Complete bidirectional interception with all pipeline stages.
+**Goal:** Optional bidirectional LLM interception for Claws that need it.
 
-1. Purpose evaluation — does this prompt/response serve the operator's goal?
-2. Policy enforcement — hard rails (financial advice, PII, legal exposure)
-3. Tone shaping — voice consistency on responses
-4. Obfuscation — timing jitter, vocabulary rotation on outputs
-5. cllama can engage in its own conversation with the LLM to rework non-compliant responses before passing them to the runner
-6. Tool call interception — gate dangerous tool invocations
+**Invariants promoted to MUST:**
+- No cllama decision on egress → deny (when cllama is enabled)
+- Missing required policy module → deny service call (when `require_cllama` is declared)
 
-**Success criteria:** `claw audit` shows intervention history. Pipeline stages are independently configurable and swappable.
+**Pass-through sidecar:**
+1. Build a minimal cllama sidecar image (Go binary, OpenAI-compatible API proxy)
+2. For each Claw with a `CLLAMA` directive, inject a `<name>-cllama` sidecar into generated compose
+3. Rewrite runner's LLM base URL env vars to point at sidecar
+4. Sidecar holds real provider API keys; runner never sees them
+5. Pass-through mode: transparent proxy + request/response logging
+
+**Policy pipeline:**
+6. Purpose evaluation — does this prompt/response serve the operator's goal?
+7. Policy enforcement — hard rails (financial advice, PII, legal exposure)
+8. Tone shaping — voice consistency on responses
+9. Obfuscation — timing jitter, vocabulary rotation on outputs
+10. cllama can engage in its own conversation with the LLM to rework non-compliant responses
+11. Tool call interception — gate dangerous tool invocations
+12. Enforce `require_cllama` — sidecar checks policy modules before routing tool calls to services
+
+**Success criteria:** Claws without `CLLAMA` run normally with config-injection-only enforcement. Claws with `CLLAMA` route LLM traffic through sidecar. `claw audit` shows intervention history. Pipeline stages are independently configurable. `require_cllama` blocks tool calls without the right policy.
 
 ### Phase 5 — Drift Scoring + Fleet Governance
 
 **Goal:** `claw ps` shows drift scores. Master Claw operates.
 
-1. Independent drift scoring process (sidecar or Clawdapus daemon)
-2. Drift thresholds → capability restriction → quarantine escalation
-3. Master Claw contract and lifecycle management
-4. `claw audit` shows full intervention + drift history
+1. Independent drift scoring process
+2. When cllama is present: score from sidecar logs (LLM-level)
+3. When cllama is absent: score from config-level checks and output sampling
+4. Drift thresholds → capability restriction → quarantine escalation
+5. Master Claw contract and lifecycle management
+6. `claw audit` shows full intervention + drift history
 
 ### Phase 6 — Recipe Promotion + Worker Mode
 
@@ -439,3 +577,7 @@ Verify every directive translates cleanly for all four. Especially:
 3. **cllama sidecar image** — What base image? What LLM client library? Needs to be extremely lightweight since every Claw gets one. Likely a small Go binary.
 
 4. **Versioned schemas** — Clawfile directives, x-claw schema, and skill-map format should be independently versioned with compatibility rules. When to formalize this?
+
+5. **Driver discovery** — Should third-party drivers be loadable as plugins, or compiled in? For now, compiled in. Plugin model is a future consideration.
+
+6. **Config injection timing** — Enforcement ops happen before `docker compose up`. But some ops (like `openclaw config set`) need the container's filesystem to exist. Options: (a) write config on host, mount read-only; (b) run ops in an init container; (c) run ops in the entrypoint wrapper. Leaning toward (a) for OpenClaw since `openclaw-up.sh` already works this way.

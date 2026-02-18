@@ -11,8 +11,11 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 ## Architecture (summary)
 
 - **Clawfile** → extended Dockerfile. `claw build` transpiles to standard Dockerfile, calls `docker build`. Output is OCI image.
-- **claw-pod.yml** → extended docker-compose. `claw up` parses `x-claw` blocks, injects cllama sidecars, emits clean `compose.generated.yml`, calls `docker compose`.
-- **cllama sidecar** → bidirectional LLM proxy per Claw. Intercepts prompts outbound and responses inbound. Runner never knows.
+- **CLAW_TYPE** → selects a runtime **driver** that knows how to enforce directives for a specific runner. Not just a label.
+- **Driver framework** → abstract enforcement ops (set, unset, mount_ro, env, cron_upsert, healthcheck, wake). Each driver translates Clawfile directives into runner-specific config injection. Fail-closed: preflight + post-apply verification.
+- **claw-pod.yml** → extended docker-compose. `claw up` parses `x-claw` blocks, runs driver enforcement, optionally injects cllama sidecars, emits clean `compose.generated.yml`, calls `docker compose`.
+- **cllama sidecar** → optional bidirectional LLM proxy per Claw. Intercepts prompts outbound and responses inbound. Runner never knows. Only injected when `CLLAMA` directive is present.
+- **Config injection** → primary enforcement model. Surgically writes specific config branches using the runner's own tools (e.g. `openclaw config set` for JSON5-aware OpenClaw config). Works without cllama.
 - **docker compose** is the sole lifecycle authority. Docker SDK is read-only (inspect, logs, events).
 
 ## Language & Build
