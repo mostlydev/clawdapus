@@ -13,3 +13,4 @@ openclaw/workspaces/*/logs/
 # Misc local artifacts
 *.log
 *.tmp
+.DS_Store
