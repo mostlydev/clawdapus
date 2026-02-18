@@ -121,4 +121,4 @@ See [`MANIFESTO.md`](./MANIFESTO.md) for the full architecture.
 
 ## Contributing
 
-The project is pre-release. The best place to engage is the [architecture plan PR](https://github.com/mostlydev/clawdapus/pull/2).
+The project is pre-release. Start with the [architecture plan](./docs/plans/2026-02-18-clawdapus-architecture.md) and [MANIFESTO.md](./MANIFESTO.md).
