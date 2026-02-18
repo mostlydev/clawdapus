@@ -56,31 +56,31 @@ The Behavioral Contract is bind-mounted and read-only. The bot reads its purpose
 
 ### Principle 2: The Workspace Is Alive
 
-Everything else is mutable. The bot can install packages, write scripts, modify configuration, and reshape its environment. Sometimes as root. But mutations are intercepted by the tracking layer and become redeployment recipes — suggestions for what the next base image should include. The operator reviews the recipe and decides what to promote. Ad hoc evolution becomes permanent infrastructure through a human gate.
+Everything else is mutable. The bot can install packages, write scripts, modify configuration, and reshape its environment — sometimes as root. But mutations are tracked. Every install, every file change becomes a redeployment recipe: a suggestion for what the next base image should include. The operator reviews and decides what to promote. Ad hoc evolution becomes permanent infrastructure through a human gate.
 
-### Principle 3: Think Twice, Act Once
-
-Think twice, act once where judgment risk warrants it. A reasoning model cannot be its own judge. Prompt-level guardrails are visible to the model and subject to the same reasoning they're trying to constrain. You're asking the engine to also be the brakes. cllama separates them. The runner thinks. cllama thinks again. Only then does the output reach the world. Deployments can still run without cllama and enforce purpose, model, schedule, and contract through runtime drivers. When cllama is enabled, high-risk output is thought about twice before leaving the Claw.
-
-### Principle 4: Compute Is a Privilege
-
-Every cognitive cycle is an authorized expenditure of resources. Inference cost containment is managed by the host, not by the bot. The Claw is gated — it runs when invoked, using the models the operator assigns, within the resource boundaries the operator defines. The bot does not choose its own model, its own context window, or its own inference budget.
-
-### Principle 5: Configuration Is Code
+### Principle 3: Configuration Is Code
 
 Every Claw's configuration is a documented deviation from its base image's defaults. Configurations are diffable across Claws. Behavior changes are tracked in version control. The fleet is auditable at every layer.
 
-### Principle 6: Drift Is Quantifiable
+### Principle 4: Drift Is Quantifiable
 
-Every Claw has a drift score — how far actual behavior deviates from the expected envelope. We do not trust a bot's self-report. We audit its outputs against its contract and its cllama policy. Drift scoring is performed by an independent process. High drift triggers escalation. The operator always sees what the bot tried to do versus what it was allowed to do.
+Every Claw has a drift score — how far actual behavior deviates from the expected envelope. We do not trust a bot's self-report. An independent process audits outputs against the contract and the cllama policy. High drift triggers escalation. The operator always sees what the bot tried to do versus what it was allowed to do.
 
-### Principle 7: Surfaces Are Declared and Described
+### Principle 5: Surfaces Are Declared and Described
 
-Bots within a pod communicate and act through shared surfaces — volumes, message queues, chat channels, APIs, databases, whatever the operator declares. Surfaces serve two audiences: the operator gets topology visibility (where can communication happen?), and the bots get capability discovery (what tools and services can I use?). Service containers — a company CRM, a market data API, a ticketing system — describe what they offer using their native protocols (MCP tool listings, OpenAPI specs, or static declarations). Those descriptions get assembled into a skill map that the runner can consume. Clawdapus enforces access modes only where it has authority — container mounts. For everything else, surfaces declare topology, not permissions.
+Bots within a pod communicate through shared surfaces — volumes, chat channels, APIs, databases, whatever the operator declares. Surfaces serve two audiences: operators get topology visibility, bots get capability discovery. Service containers describe what they offer using their native protocols — MCP tool listings, OpenAPI specs, or static declarations. Those descriptions get assembled into a skill map that the runner can consume. Clawdapus enforces access modes only on container mounts, where Docker has authority. For everything else, surfaces declare topology, not permissions.
 
-### Principle 8: Claws Are Users
+### Principle 6: Claws Are Users
 
-A Claw is a user of the services it consumes, not a privileged process. It authenticates with credentials delivered through standard mechanisms — environment variables, Docker secrets, mounted files — and those credentials determine what it can do, the same as any human or system user. Clawdapus does not grant special access and does not attempt to enforce access control where it has no authority. It controls what it owns: container mounts, network topology, and the judgment layer. Everything else is between the Claw and the service. If a Claw connects to a database, the database credentials govern what it can read and write. If it mounts a network share, the share's permissions govern access. If it calls an API, the API token's scopes apply. Clawdapus declares the surface for topology visibility and injects configuration where needed — but the service is the authority on what the Claw is allowed to do within it.
+A Claw is a user of the services it consumes, not a privileged process. It authenticates with standard credentials — environment variables, Docker secrets, mounted files — and those credentials determine what it can do. Clawdapus does not enforce access control where it has no authority. It controls what it owns: container mounts, network topology, and the judgment layer. Everything else is between the Claw and the service.
+
+### Principle 7: Compute Is a Privilege
+
+Every cognitive cycle is an authorized expenditure of resources. The Claw runs when invoked, using the models the operator assigns, within the resource boundaries the operator defines. The bot does not choose its own model, its own context window, or its own inference budget. Inference cost is managed by the host, not by the bot.
+
+### Principle 8: Think Twice, Act Once
+
+A reasoning model cannot be its own judge. Prompt-level guardrails are part of the same cognitive process they are trying to constrain. cllama separates execution from judgment — a second model, in a separate process, evaluating output against policy before it reaches the world. The runner optimizes for capability. cllama optimizes for restraint. Claws can run without cllama when the risk profile doesn't warrant it. When it's enabled, nothing leaves the Claw without being judged independently.
 
 ---
 

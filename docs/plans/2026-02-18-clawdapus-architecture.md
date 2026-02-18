@@ -235,7 +235,7 @@ Runners that support these get a generic driver for free. Runners that don't nee
 
 ## Surface Taxonomy
 
-Surfaces are declared communication channels — they tell Clawdapus what a Claw can talk to. A Claw is a user of the services it consumes (Principle 8): it authenticates with standard credentials, and the service determines what those credentials allow. Clawdapus enforces access modes only on mounts where Docker has authority. Surfaces split into two categories based on where enforcement happens.
+Surfaces are declared communication channels — they tell Clawdapus what a Claw can talk to. A Claw is a user of the services it consumes (Principle 6): it authenticates with standard credentials, and the service determines what those credentials allow. Clawdapus enforces access modes only on mounts where Docker has authority. Surfaces split into two categories based on where enforcement happens.
 
 ### Pod-Level Surfaces (universal, enforced by Clawdapus)
 
