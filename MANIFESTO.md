@@ -4,8 +4,6 @@
 
 ### A Manifesto for Containerized Agent Infrastructure
 
-v0.9 — February 2026
-
 ---
 
 ## I. The Thesis
