@@ -1,9 +1,10 @@
 # Clawdapus Architecture Plan
 
 **Date:** 2026-02-18
-**Status:** Draft v2 — incorporating review feedback
+**Status:** v3 — post-deliberation consensus
 **Source of truth:** `MANIFESTO.md`
 **Reviews:** Grok (structural critique), Codex (architecture + suggestions), operator (cllama clarification)
+**Deliberation:** 3-agent talking stick (alpha/Codex, beta/Claude, gamma/Grok) — arch-review room, 3 rounds, consensus reached
 
 ---
 
@@ -15,17 +16,19 @@ Clawdapus is not an agent framework. It is the infrastructure layer beneath agen
 
 ---
 
-## Hard Invariants
+## Invariants
 
-These are non-negotiable. Every phase must respect them. They are the fail-closed defaults of the system.
+Invariants are stated as goals from the start. Each is promoted from SHOULD to MUST when its enforcement mechanism ships in the corresponding phase. Until enforcement exists, the invariant is documented but not claimed as a guarantee.
 
-| Invariant | Enforcement |
-|-----------|-------------|
-| No contract → no start | `claw up` refuses to start a Claw if the `agent:` bind mount path does not exist on the host |
-| No cllama decision on egress → deny | Any LLM API call or external action without cllama approval is blocked by default |
-| Missing required policy module → deny service call | `require_cllama` is checked before routing any Claw request to a service |
-| Purpose is immutable from inside | Contract bind mount is always `:ro`. No runtime override path exists |
-| One lifecycle authority | `docker compose` is the sole lifecycle authority. Docker SDK is used only for inspection, logs, and events — never for start/stop |
+| Invariant | Enforcement mechanism | Promoted to MUST in |
+|-----------|----------------------|---------------------|
+| No contract → no start | File existence check on `agent:` host path before compose emit | Phase 2A |
+| No cllama decision on egress → deny | Sidecar exists and proxies all LLM traffic; no direct egress allowed | Phase 2B |
+| Missing required policy module → deny service call | Sidecar checks policy modules before routing tool calls to services | Phase 3 |
+| Purpose is immutable from inside | Contract bind mount is always `:ro` | Phase 2A |
+| One lifecycle authority | `docker compose` is sole lifecycle authority; Docker SDK is read-only | Phase 2A |
+
+See also: [ADR-001: cllama Transport](../decisions/001-cllama-transport.md), [ADR-002: Runtime Authority](../decisions/002-runtime-authority.md)
 
 ---
 
@@ -67,7 +70,7 @@ These are non-negotiable. Every phase must respect them. They are the fail-close
 4. Emits a clean compose file without `x-claw` keys
 5. Shells out to `docker compose` with the generated file
 
-### 4. cllama as Bidirectional LLM Proxy (promoted from open question)
+### 4. cllama as Bidirectional LLM Proxy
 
 **This is the core insight and the hardest design problem.** cllama is not just an output filter — it is a bidirectional proxy that sits between the runner and the LLM provider.
 
@@ -75,28 +78,29 @@ These are non-negotiable. Every phase must respect them. They are the fail-close
 
 **Inbound (LLM → runner):** Intercepts model responses before they reach the runner. Adjusts, rewrites, or drops responses that violate policy, drift from purpose, or fail tone requirements. Can engage in its own conversation with the LLM to arrive at a compliant response before passing it to the runner's stream of thought.
 
-**The runner never knows.** It thinks it's talking directly to the LLM. cllama is transparent — same API shape in, same API shape out. The runner's experience is: "I called the model and got a response." What happened in between is invisible.
+**The runner never knows.** It thinks it's talking directly to the LLM. cllama is transparent — same API shape in, same API shape out.
 
-**Transport: sidecar per Claw.**
-- Each Claw gets a `cllama-sidecar` container, injected automatically by `claw up` into the generated compose file
-- Sidecar exposes an LLM-compatible API endpoint (OpenAI-compatible) on a private network
+**Transport: sidecar per Claw (default mode).**
+- Each Claw gets a `cllama-sidecar` container, injected automatically by `claw up`
+- Sidecar exposes an OpenAI-compatible API endpoint on a private network
 - Runner's LLM base URL is rewritten to point at the sidecar (via ENV injection)
 - Sidecar applies the cllama pipeline: purpose → policy → tone → obfuscation
-- Sidecar holds its own API keys for the actual LLM provider — the runner never sees real provider keys
+- Sidecar holds real API keys — runner never sees provider keys
 - Sidecar also intercepts tool calls and enforces `require_cllama` constraints
 
-**Why sidecar:** Works with any runner without SDK changes. OpenClaw, Nanobot, Claude Code, custom scripts — anything that makes HTTP calls to an LLM endpoint gets intercepted. No runner integration needed.
+**Dual modes (deliberation consensus):**
+- **Proxy mode (default):** HTTP sidecar. Works with any runner that makes HTTP calls to an LLM endpoint. No runner integration needed. Built first.
+- **Adapter mode (future):** SDK-level hook for runners using local models or embedded clients that don't go through an HTTP base URL. Requires runner-specific integration. Documented as a known gap; not built until a concrete runner needs it.
+
+See [ADR-001: cllama Transport](../decisions/001-cllama-transport.md) for full decision record.
 
 ### 5. Persona as Runtime Mount (not baked into image)
 
-**Changed from v1:** `PERSONA` in the Clawfile no longer compiles to `RUN claw-persona-fetch`. Instead:
-
-- At build time: `PERSONA` compiles to `LABEL claw.persona.default=<registry-ref>` — declares the default persona, does not fetch it
-- At runtime: `claw up` resolves the persona ref (from Clawfile label or claw-pod.yml override), fetches the OCI artifact, and bind-mounts it into the container
-- Personas are OCI artifacts with custom media types (`application/vnd.claw.persona.v1.tar+gzip`), fetched via `oras` under the hood
+- At build time: `PERSONA` compiles to `LABEL claw.persona.default=<registry-ref>` — declares the default, does not fetch
+- At runtime: `claw up` resolves the persona ref, fetches the OCI artifact via `oras`, bind-mounts into container
 - Swap a persona without rebuilding the image
 
-**Rationale:** Aligns with manifesto principle of independent layer versioning. Persona is content, not infrastructure.
+**Rationale:** Persona is content, not infrastructure. Independent layer versioning.
 
 ### 6. Security Defaults
 
@@ -115,7 +119,8 @@ Every Claw container gets these by default (overridable via `PRIVILEGE`):
 clawdapus/
 ├── MANIFESTO.md                  # Source of truth for vision and principles
 ├── docs/
-│   └── plans/                    # Architecture and feature plans
+│   ├── plans/                    # Architecture and feature plans
+│   └── decisions/                # Architecture Decision Records (ADRs)
 ├── archive/
 │   └── openclaw-runtime/         # Former openclaw Docker runtime (reference)
 │
@@ -149,7 +154,7 @@ clawdapus/
 │   │   ├── registry.go           # OCI artifact resolution via oras
 │   │   └── mount.go              # Bind mount generation for compose
 │   │
-│   ├── runtime/                  # Docker SDK wrapper (read-only operations)
+│   ├── runtime/                  # Docker SDK wrapper (read-only operations only)
 │   │   ├── client.go             # Docker client initialization
 │   │   └── inspect.go            # Status, logs, events (never lifecycle)
 │   │
@@ -185,7 +190,7 @@ All directives translate to standard Dockerfile primitives at build time.
 | `MODEL` | `LABEL claw.model.<slot>=...` | Named model slot bindings |
 | `CLLAMA` | `LABEL claw.cllama.default=...` | Default judgment stack (overridable at deploy) |
 | `PERSONA` | `LABEL claw.persona.default=...` | Default persona ref (fetched and mounted at runtime, not baked) |
-| `CONFIGURE` | Entrypoint wrapper script | Shell mutations run at container init before the runner starts |
+| `CONFIGURE` | Entrypoint wrapper script (`/claw/configure.sh`) | Shell mutations run at container init before the runner starts |
 | `INVOKE` | `RUN echo "..." >> /etc/cron.d/claw` | Cron schedule entries |
 | `TRACK` | `RUN claw-track-install apt pip npm` | Install package manager wrappers |
 | `ACT` | `RUN ...` (worker mode only) | Worker-mode setup commands |
@@ -319,15 +324,17 @@ claw doctor                    # Check Docker version, BuildKit, compose plugin,
 
 ### Phase 1 — Clawfile Parser + Build
 
-**Goal:** `claw build` and `claw inspect` work end-to-end.
+**Goal:** `claw build`, `claw inspect`, and `claw doctor` work end-to-end.
 
-1. Parse a Clawfile using buildkit's Dockerfile parser as base
-2. Identify and extract Claw-specific directives
-3. Translate directives to Dockerfile primitives (LABELs, ENV, entrypoint wrapper for CONFIGURE)
-4. Emit `Dockerfile.generated`
-5. Shell out to `docker build`
-6. `claw inspect` reads labels from built image and displays resolved config
-7. `claw doctor` checks Docker, BuildKit, compose plugin versions
+**Invariants gated:** None (build-only phase, no runtime invariants yet).
+
+1. `claw doctor` — check Docker, BuildKit, compose plugin versions
+2. Parse a Clawfile using buildkit's Dockerfile parser as base
+3. Identify and extract Claw-specific directives
+4. Translate directives to Dockerfile primitives (LABELs, ENV, entrypoint wrapper for CONFIGURE)
+5. Emit `Dockerfile.generated`
+6. Shell out to `docker build`
+7. `claw inspect` reads labels from built image and displays resolved config
 
 **Validation:** Create four test Clawfiles before writing the parser:
 - OpenClaw (heavyweight, AGENTS.md contract)
@@ -342,41 +349,55 @@ Verify every directive translates cleanly for all four. Especially:
 
 **Success criteria:** All four test Clawfiles build to runnable OCI images. `claw inspect` shows correct labels. Generated Dockerfile is valid and inspectable.
 
-### Phase 2 — claw-pod.yml + cllama Sidecar (parallel tracks)
+### Phase 2A — Pod Runtime (parallel with 2B)
 
-**Goal:** `claw up` / `claw down` / `claw ps` work. cllama sidecars are injected and proxying.
+**Goal:** `claw up` / `claw down` / `claw ps` work with basic container lifecycle.
 
-**Track A: Pod runtime**
+**Invariants promoted to MUST:**
+- No contract → no start (file existence check)
+- Purpose is immutable from inside (`:ro` bind mount)
+- One lifecycle authority (compose-only)
+
 1. Parse `claw-pod.yml`, extract `x-claw` blocks
 2. Handle `count` scaling with ordinal identity
-3. Validate contract paths exist on host (fail-closed: no contract → refuse to start)
+3. Validate contract paths exist on host (**fail-closed: no contract → refuse to emit compose**)
 4. Wire agent bind mounts as read-only
 5. Emit clean `compose.generated.yml`
 6. Shell out to `docker compose up`
 
-**Track B: cllama sidecar**
-1. Build a minimal cllama sidecar image (OpenAI-compatible API proxy)
+**Success criteria:** A claw-pod.yml starts correctly. Missing contract blocks startup with a clear error. `claw ps` shows container status.
+
+### Phase 2B — cllama Pass-Through Sidecar (parallel with 2A)
+
+**Goal:** Every Claw's LLM traffic routes through a transparent sidecar.
+
+**Invariants promoted to MUST:**
+- No cllama decision on egress → deny (sidecar exists and proxies)
+
+1. Build a minimal cllama sidecar image (Go binary, OpenAI-compatible API proxy)
 2. For each Claw service, inject a `<name>-cllama` sidecar into the generated compose
 3. Rewrite runner's LLM base URL env vars to point at sidecar
 4. Sidecar holds real provider API keys; runner never sees them
-5. Implement pass-through mode first (no policy evaluation, just transparent proxy)
-6. Add basic policy evaluation: purpose check on outbound prompts, compliance check on inbound responses
+5. **Pass-through mode only** — no policy evaluation, just transparent proxy + request/response logging
 
-**Success criteria:** A claw-pod.yml with mixed Claws and plain services starts correctly. Agent contracts are bind-mounted read-only. Missing contract blocks startup. Each Claw's LLM calls route through its sidecar. `claw ps` shows container status.
+**Success criteria:** Each Claw's LLM calls route through its sidecar. Sidecar logs all requests. Direct LLM egress is blocked.
 
 ### Phase 3 — Surfaces + Skill Maps
 
 **Goal:** `claw skillmap` works. `require_cllama` is enforced.
 
+**Invariants promoted to MUST:**
+- Missing required policy module → deny service call
+
 1. Resolve surface declarations against expose blocks
 2. Query MCP servers for tool listings at pod init
 3. Assemble per-Claw skill maps
 4. Write skill maps to read-only skill mount at `/claw/skillmap.json`
-5. Enforce `require_cllama` — the cllama sidecar (already running from Phase 2) checks policy modules before routing tool calls to services
+5. Enforce `require_cllama` — sidecar checks policy modules before routing tool calls to services
 
 **Success criteria:** `claw skillmap <claw>` shows correct capability inventory. `require_cllama` blocks tool calls without the right policy. Adding a service updates the skill map.
 
-### Phase 4 — Full cllama Pipeline
+### Phase 4 — Full cllama Policy Pipeline
 
 **Goal:** Complete bidirectional interception with all pipeline stages.
 
@@ -409,7 +430,7 @@ Verify every directive translates cleanly for all four. Especially:
 
 ---
 
-## Open Questions (reduced from v1)
+## Open Questions
 
 1. **Skill mount format** — JSON with a runner-agnostic schema? MCP tool definition format? OpenAPI fragments? Leaning toward a simple JSON format at `/claw/skillmap.json` that each runner adapter knows how to read.
 
