@@ -1,7 +1,7 @@
 # Clawdapus Architecture Plan
 
 **Date:** 2026-02-18
-**Status:** v4 — driver model + cllama deferral
+**Status:** v5 — volume surfaces moved to Phase 2
 **Source of truth:** `MANIFESTO.md`
 **Reviews:** Grok (structural critique), Codex (architecture + driver model), operator (cllama clarification, enforcement model)
 **Deliberation:** 3-agent talking stick (alpha/Codex, beta/Claude, gamma/Grok) — arch-review room, 3 rounds, consensus reached
@@ -471,9 +471,9 @@ Verify every directive translates cleanly for all four. Especially:
 
 **Success criteria:** All four test Clawfiles build to runnable OCI images. `claw inspect` shows correct labels. Generated Dockerfile is valid and inspectable.
 
-### Phase 2 — Driver Framework + Pod Runtime + OpenClaw Driver
+### Phase 2 — Driver Framework + Pod Runtime + OpenClaw Driver + Volume Surfaces
 
-**Goal:** `claw up` / `claw down` / `claw ps` work with config-injection enforcement. No cllama required.
+**Goal:** `claw up` / `claw down` / `claw ps` work with config-injection enforcement and shared volume access. No cllama required.
 
 **Invariants promoted to MUST:**
 - No contract → no start (file existence check)
@@ -502,23 +502,33 @@ Verify every directive translates cleanly for all four. Especially:
 14. Enforce network restrictions at compose level (not driver level)
 15. Emit clean `compose.generated.yml`
 16. Shell out to `docker compose up`
-17. Run post-apply verification; warn if enforcement couldn't be confirmed
+17. Run post-apply verification; fail-closed if enforcement cannot be confirmed
 
-**Success criteria:** A claw-pod.yml with an OpenClaw service starts correctly with enforced model pin and read-only contract. Missing contract blocks startup. Failed driver preflight blocks startup. `claw ps` shows container status and driver enforcement state.
+**Volume surfaces:**
+18. Parse `SURFACE volume://...` declarations from `x-claw` service blocks and volume-level `x-claw.access` ACLs
+19. Generate `volumes:` top-level declarations in `compose.generated.yml`
+20. Generate per-service volume mounts with correct access modes (`ro` for read-only, default for read-write)
+21. Enforce ACL — if a service claims an access mode not permitted by the volume's `x-claw.access` block, fail preflight
 
-### Phase 3 — Surfaces + Skill Maps + Multi-Driver
+Volume surfaces use the existing `mount_ro` enforcement op at the driver level and require no external dependencies. They are compose generation only.
+
+**Success criteria:** A claw-pod.yml with an OpenClaw service starts correctly with enforced model pin and read-only contract. Missing contract blocks startup. Failed driver preflight blocks startup. `claw ps` shows container status and driver enforcement state. Claws sharing a volume can read/write shared files according to their declared access mode; a Claw without declared access to a volume cannot mount it.
+
+### Phase 3 — Service Surfaces + Skill Maps + Multi-Driver
 
 **Goal:** `claw skillmap` works. Multiple claw types supported.
 
-1. Resolve surface declarations against expose blocks
+Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds service surfaces — external processes, MCP servers, queues, and HTTP APIs that Claws consume.
+
+1. Resolve `service://`, `http://`, `queue://`, and other non-volume surface declarations against expose blocks
 2. Query MCP servers for tool listings at pod init
-3. Assemble per-Claw skill maps
+3. Assemble per-Claw skill maps combining service capabilities and already-wired volume surfaces
 4. Write skill maps to read-only skill mount at `/claw/skillmap.json`
 5. Implement generic driver (env var conventions: `CONTRACT_PATH`, `MODEL_PRIMARY`, etc.)
 6. Implement Claude Code driver (settings.json + CLAUDE.md contract)
 7. Prove the driver abstraction works across at least 3 runner types
 
-**Success criteria:** `claw skillmap <claw>` shows correct capability inventory. Mixed pods with different claw types start correctly, each with appropriate driver enforcement.
+**Success criteria:** `claw skillmap <claw>` shows correct capability inventory including both volume and service surfaces. Mixed pods with different claw types start correctly, each with appropriate driver enforcement.
 
 ### Phase 4 — cllama Sidecar + Policy Pipeline
 

@@ -38,7 +38,7 @@ A running Claw bifurcates cognition into two independent layers: internal execut
 
 **cllama (The Judgment Proxy)** — A bidirectional LLM proxy that sits between the runner and its model. Outbound: it intercepts prompts before they reach the LLM — gating what the runner is allowed to ask. Inbound: it intercepts responses before they reach the runner — adjusting, rewriting, or dropping output that violates policy. The runner thinks it's talking directly to the LLM. It never sees cllama's evaluation. cllama handles the *should* — should this prompt be sent, should this response be delivered, should this tool call proceed. The two cognitive layers are independent: the runner optimizes for capability, cllama optimizes for judgment.
 
-These four components — runner, contract, persona, cllama — are the anatomy of every Claw. They are independently versioned, independently deployable, and independently auditable. Swap the runner without touching the persona. Swap the persona without touching the contract. Swap the judgment layer without touching any of them.
+The runner, contract, and persona are the mandatory anatomy of every Claw. cllama is an optional judgment layer that can be attached when a deployment needs bidirectional LLM interception. These layers are independently versioned, independently deployable, and independently auditable. Swap the runner without touching the persona. Swap the persona without touching the contract. Add or replace the judgment layer without changing the rest.
 
 ---
 
@@ -54,7 +54,7 @@ Everything else is mutable. The bot can install packages, write scripts, modify 
 
 ### Principle 3: Think Twice, Act Once
 
-Think twice, act once. A reasoning model cannot be its own judge. Prompt-level guardrails are visible to the model and subject to the same reasoning they're trying to constrain. You're asking the engine to also be the brakes. cllama separates them. The runner thinks. cllama thinks again. Only then does the output reach the world. Two independent cognitive processes, two independent models, one gate. Nothing leaves the Claw without being thought about twice.
+Think twice, act once where judgment risk warrants it. A reasoning model cannot be its own judge. Prompt-level guardrails are visible to the model and subject to the same reasoning they're trying to constrain. You're asking the engine to also be the brakes. cllama separates them. The runner thinks. cllama thinks again. Only then does the output reach the world. Deployments can still run without cllama and enforce purpose, model, schedule, and contract through runtime drivers. When cllama is enabled, high-risk output is thought about twice before leaving the Claw.
 
 ### Principle 4: Compute Is a Privilege
 
@@ -75,6 +75,8 @@ Bots within a pod communicate and act through shared surfaces — volumes, messa
 ---
 
 ## IV. cllama: The Judgment Proxy
+
+cllama is an enhancement layer, not a prerequisite for Claw operation. Claws can run without it. When enabled, it adds bidirectional LLM interception and policy judgment as a separate cognitive layer.
 
 ### The Problem
 
@@ -133,7 +135,7 @@ cllama can be configured procedurally — rigid code for high-security rails, ha
 
 ### API Keys
 
-The cllama sidecar holds the real LLM provider API keys. The runner's LLM base URL is rewritten to point at the sidecar — the runner never sees real provider keys. This is the default, not an optional hardened mode. Platform API keys for external services are exported as environment variables per standard Docker practice.
+When cllama is enabled, the cllama sidecar holds the real LLM provider API keys. The runner's LLM base URL is rewritten to point at the sidecar — the runner never sees real provider keys. Platform API keys for external services are exported as environment variables per standard Docker practice.
 
 ---
 
@@ -151,9 +153,13 @@ Extended directives compile to LABELs (metadata the runtime interprets), ENV var
 
 This means Clawdapus inherits the entire Docker ecosystem: registries, layer caching, multi-stage builds, BuildKit, CI/CD pipelines, and every tool that understands OCI images. A compiled Clawfile is just a Dockerfile. A built Claw is just a Docker image. Anyone can inspect the compiled output, debug with standard tools, or eject from Clawdapus entirely and still have a working container.
 
-### Claw Types: The Base Image
+### Directive Intent, Driver Enforcement
 
-A claw type is a base image with an agent runner installed at a known path. The requirement is minimal: the runner reads a behavioral contract whose filename is part of the type's convention. Clawdapus wraps all runners identically.
+Clawfile directives declare intent, not raw mutation commands. Runtime enforcement is handled by the claw-type driver selected by `CLAW_TYPE`. The driver translates directives into runner-specific actions: config branch writes, env pins, read-only mounts, schedule wiring, lifecycle hooks, and health checks. The interface stays portable while mechanisms remain runner-native (for example JSON, JSON5, or runner CLI config operations).
+
+### Claw Types: Runner + Driver
+
+A claw type is a runner family plus a driver implementation. The base image carries the runner. The driver knows where runner config lives and how to enforce Clawfile directives for that runner at runtime. The minimal requirement remains: the runner reads a behavioral contract by convention. Clawdapus keeps one abstract directive interface while drivers handle runner-specific enforcement.
 
 | Claw Type | Runner | Contract | Weight Class |
 |-----------|--------|----------|-------------|
@@ -167,13 +173,13 @@ The operator picks the weight class that fits the problem. Lightweight runners a
 
 ### Extended Directives
 
-**CLAW_TYPE** — Declares the base image and therefore the agent runner.
+**CLAW_TYPE** — Declares the runner family and selects the runtime driver that enforces directives for that runner.
 
 **AGENT** — Names the behavioral contract file. Bind-mounted read-only from the host. Filename follows the runner's convention.
 
-**CONFIGURE** — Shell commands that run at container init, mutating base defaults into this Claw's setup. Tools like jq and sed for fine-grained changes. `claw-module enable/disable` for schema-aware cascading changes.
+**CONFIGURE** — Shell commands that run at container init, mutating base defaults into this Claw's setup. Tools like jq/sed, JSON5-aware patchers, or runner-native config CLIs may be used depending on claw type. `claw-module enable/disable` handles schema-aware cascading changes where available.
 
-**CLLAMA** — The default judgment proxy baked into the image. Namespaced policy prefix, provider, model, then module declarations. Overridable per-deployment in claw-pod.yml, same as CMD is overridable by compose's command.
+**CLLAMA** — Optional default judgment proxy configuration. Namespaced policy prefix, provider, model, then module declarations. Overridable per-deployment in claw-pod.yml, same as CMD is overridable by compose's command.
 
 **INVOKE** — Invocation schedules. For simple runners and lightweight runners like Nanobot that use external cron, INVOKE entries trigger execution directly. For runners like OpenClaw that have their own internal scheduling, INVOKE manages the container lifecycle on a macro schedule while the runner handles micro-scheduling internally.
 
@@ -187,7 +193,7 @@ The operator picks the weight class that fits the problem. Lightweight runners a
 
 **ACT** — Worker-mode directives. Install packages, import knowledge, configure the runtime. Snapshot when done.
 
-**SURFACE** — Declares what this Claw consumes. Volumes, queues, chat platforms, APIs, MCP services. Clawdapus resolves service references against expose blocks in the pod, assembles the skill map, and enforces service-side cllama requirements.
+**SURFACE** — Declares what this Claw consumes. Volumes, queues, chat platforms, APIs, MCP services. Clawdapus resolves service references against expose blocks in the pod, assembles the skill map, and enforces declared service policy requirements (including cllama requirements where configured).
 
 ### A Complete Clawfile
 

@@ -33,10 +33,10 @@ claw build [path]         # Clawfile → Dockerfile → docker build
 claw inspect <image>      # Show resolved Claw labels from built image
 claw up [pod]             # claw-pod.yml → compose.yml → docker compose up
 claw down [pod]           # Stop and remove pod containers
-claw ps [pod]             # Fleet status with drift scores and cllama health
+claw ps [pod]             # Fleet status with drift scores and policy-layer health
 claw logs <claw>          # Stream logs from a running Claw
 claw skillmap <claw>      # Show assembled capability inventory
-claw audit <claw>         # cllama intervention history and drift events
+claw audit <claw>         # Policy interventions (cllama when enabled) and drift events
 claw recipe <claw>        # Suggested recipe from mutation log
 claw bake <claw>          # Apply recipe to rebuild image
 claw snapshot <claw>      # Snapshot a running Claw as a new image
@@ -66,6 +66,7 @@ PRIVILEGE runtime claw-user
 ```
 
 `claw build` compiles this to a standard Dockerfile and calls `docker build`. Output is an ordinary OCI image — runnable on any Docker host.
+Directives express intent, not runner-specific mutation commands. At runtime, `CLAW_TYPE` selects a driver that enforces those intents using runner-native mechanisms (for example JSON/JSON5 config writes, env pins, and read-only mounts).
 
 ### The claw-pod.yml
 
@@ -106,11 +107,13 @@ services:
 
 **Persona** — Mutable workspace of identity, memory, and interaction history. Versionable and forkable as OCI artifacts.
 
-**cllama** — An independent LLM-powered judgment proxy between the Claw and the world. The runner never sees cllama's evaluation. Think twice, act once.
+**Claw Type Driver** — `CLAW_TYPE` selects the runtime driver for a runner family. Drivers translate abstract directive intent into runner-specific enforcement actions.
+
+**cllama** — Optional LLM-powered judgment proxy layer between the Claw and the world. When enabled, the runner never sees cllama's evaluation.
 
 **Surfaces** — Declared communication channels. Give operators topology visibility; give bots capability discovery via assembled skill maps.
 
-**Drift scoring** — Independent audit of outputs against contract and cllama policy. Triggers capability restriction or quarantine.
+**Drift scoring** — Independent audit of outputs against contract and configured policy layers (including cllama where enabled). Triggers capability restriction or quarantine.
 
 See [`MANIFESTO.md`](./MANIFESTO.md) for the full architecture.
 
