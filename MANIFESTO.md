@@ -18,6 +18,14 @@ It is a container that can think, and like any container, it must be reproducibl
 
 This is infrastructure-layer containment for cognitive workloads. Clawdapus does not replace agent runners any more than Docker replaces Flask. It operates beneath them — the layer where deployment meets governance.
 
+But containment is only half the picture. We are past inference. We are designing the structure of brains.
+
+Cognition is no longer a single call to a single model. It is distributed — placed into multiple components with roles that are deliberately in tension with one another. A runner optimizes for capability. A judgment proxy optimizes for restraint. A contract holds purpose fixed while the workspace evolves. These are not arbitrary divisions. They mirror biological architecture: systems that compete, check, and modulate each other so that the whole organism behaves better than any single part would alone. Fleets of hippocampuses and fleets of cortexes, each specializing, each constraining the others.
+
+An artificial brain built this way is a cyborg. Part thinking, part API. Part reasoning model, part database query, part cron job, part message queue. The form is open-ended — there is no single right topology for a cognitive system, just as there is no single right topology for a biological one. But we need a language to describe how the parts relate to one another, what each part is, and then the tools to test and construct them. That is what Clawdapus provides: opinionated cognitive architecture. Not opinions about how agents should think — opinions about how they should be structured, deployed, governed, and composed into systems that are greater than their parts.
+
+Rails did not tell you how to write business logic. It told you where your models go, where your routes go, where your migrations go. Convention over configuration. Clawdapus does the same for agents: where your contract goes, where your config goes, where your surfaces connect, how your state persists, how your judgment layer attaches. Without this structure, models make messes. They corrupt their own configs, overwrite their instructions, hallucinate permissions, lose track of state. Every team running agents hits the same wall — the model is capable but structurally undisciplined. Clawdapus is the discipline.
+
 Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you. Different trust model. Different stack.
 
 ### Terminology
@@ -70,7 +78,11 @@ Every Claw has a drift score — how far actual behavior deviates from the expec
 
 ### Principle 7: Surfaces Are Declared and Described
 
-Bots within a pod communicate and act through shared surfaces — volumes, message queues, chat channels, APIs, databases, whatever the operator declares. Surfaces serve two audiences: the operator gets topology visibility (where can communication happen?), and the bots get capability discovery (what tools and services can I use?). Service containers — a company CRM, a market data API, a ticketing system — expose surfaces with machine-readable descriptions of what they offer. Those descriptions get assembled into a skill map that the runner can consume. The standard requires that surfaces be declared and that service surfaces describe themselves well enough for bots to use them.
+Bots within a pod communicate and act through shared surfaces — volumes, message queues, chat channels, APIs, databases, whatever the operator declares. Surfaces serve two audiences: the operator gets topology visibility (where can communication happen?), and the bots get capability discovery (what tools and services can I use?). Service containers — a company CRM, a market data API, a ticketing system — describe what they offer using their native protocols (MCP tool listings, OpenAPI specs, or static declarations). Those descriptions get assembled into a skill map that the runner can consume. Clawdapus enforces access modes only where it has authority — container mounts. For everything else, surfaces declare topology, not permissions.
+
+### Principle 8: Claws Are Users
+
+A Claw is a user of the services it consumes, not a privileged process. It authenticates with credentials delivered through standard mechanisms — environment variables, Docker secrets, mounted files — and those credentials determine what it can do, the same as any human or system user. Clawdapus does not grant special access and does not attempt to enforce access control where it has no authority. It controls what it owns: container mounts, network topology, and the judgment layer. Everything else is between the Claw and the service. If a Claw connects to a database, the database credentials govern what it can read and write. If it mounts a network share, the share's permissions govern access. If it calls an API, the API token's scopes apply. Clawdapus declares the surface for topology visibility and injects configuration where needed — but the service is the authority on what the Claw is allowed to do within it.
 
 ---
 
@@ -193,7 +205,7 @@ The operator picks the weight class that fits the problem. Lightweight runners a
 
 **ACT** — Worker-mode directives. Install packages, import knowledge, configure the runtime. Snapshot when done.
 
-**SURFACE** — Declares what this Claw consumes. Volumes, queues, chat platforms, APIs, MCP services. Clawdapus resolves service references against expose blocks in the pod, assembles the skill map, and enforces declared service policy requirements (including cllama requirements where configured).
+**SURFACE** — Declares what this Claw connects to. Volumes, queues, chat platforms, APIs, MCP services. Clawdapus resolves service references against expose blocks in the pod and assembles the skill map. Access modes are enforced only on mounts (volumes, host paths) where Docker has authority. For services, channels, and APIs, the Claw authenticates with standard credentials — Clawdapus declares topology, not permissions.
 
 ### A Complete Clawfile
 
@@ -236,10 +248,9 @@ INVOKE 0 */4 * * *   drift-check
 
 # Communication surfaces
 SURFACE volume://shared-cache       read-write
-SURFACE queue://fleet/signals       subscribe
-SURFACE discord://crypto-ops/general read-write
-SURFACE service://company-crm       read-write
-SURFACE http://master:9000/api      report
+SURFACE channel://discord
+SURFACE service://company-crm
+SURFACE service://fleet-master
 
 # Privilege modes
 PRIVILEGE worker    root
@@ -283,8 +294,8 @@ INVOKE */15 * * * *  market-scan
 INVOKE 0 8 * * 1-5  morning-brief
 
 # Communication surfaces
-SURFACE queue://fleet/signals    subscribe
-SURFACE service://market-scanner read-only
+SURFACE service://fleet-master
+SURFACE service://market-scanner
 
 # Privilege
 PRIVILEGE worker   root
@@ -375,7 +386,7 @@ The Clawfile bakes defaults into the image. The claw-pod.yml overrides per-deplo
 
 ### Mixed Clusters
 
-A pod is not a collection of bots. It is a mixed cluster of cognitive and non-cognitive services. Regular Docker containers participate as first-class pod members via `describe` blocks — machine-readable self-description of what they do, what they produce, what they consume.
+A pod is not a collection of bots. It is a mixed cluster of cognitive and non-cognitive services. Regular Docker containers participate as first-class pod members. Services self-describe using their native protocols — MCP servers via tool listings, REST APIs via OpenAPI specs, or static `describe` blocks for services that can't self-describe at runtime. Claws authenticate to services with standard credentials delivered through environment variables, the same as any other user.
 
 ```yaml
 # claw-pod.yml — crypto-ops
@@ -397,8 +408,8 @@ volumes:
     x-claw:
       access:
         - crypto-crusher-*: read-write
-        - market-scanner: write
-        - dashboard: read
+        - market-scanner: read-write
+        - dashboard: read-only
 
 services:
 
@@ -425,13 +436,21 @@ services:
       count: 3
       surfaces:
         - volume://shared-cache: read-write
-        - discord://crypto-ops/general: read-write
-        - http://market-scanner:8080/api: read
-        - service://company-crm: read-write
+        - channel://discord:
+            guilds:
+              "1465489501551067136":
+                require_mention: true
+            dm: { enabled: true }
+        - service://market-scanner
+        - service://company-crm
       describe:
         role: "Original crypto market commentary"
         outputs: ["tweets", "threads", "discord posts"]
         inputs: ["market data", "timeline context"]
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      CRM_API_KEY: ${CRM_API_KEY}
+      CRM_INSTANCE_URL: ${CRM_INSTANCE_URL}
     networks:
       - internal
       - public-egress
@@ -442,8 +461,12 @@ services:
   market-scanner:
     image: custom/market-scanner:latest
     x-claw:
+      expose:
+        protocol: rest
+        port: 8080
+        discover: auto
       surfaces:
-        - volume://shared-cache: write
+        - volume://shared-cache: read-write
       describe:
         role: "Aggregates crypto market data from CoinGecko and on-chain sources"
         outputs: ["JSON snapshots to shared-cache", "REST API on :8080"]
@@ -484,29 +507,30 @@ services:
 
 ### Surfaces, Skill Maps, and Skill Mounts
 
-Services expose. Claws consume. At pod startup, Clawdapus assembles a skill map for each Claw — the complete set of capabilities available based on surface access. MCP services self-describe via tool listing. Non-MCP services declare capabilities in their describe block.
+Services describe themselves. Claws discover what's available. At pod startup, Clawdapus queries each declared service surface for its self-description — MCP servers via tool listing, REST APIs via OpenAPI specs, or static `describe` blocks for services that can't self-describe at runtime. The responses reflect what the Claw's credentials allow. Clawdapus assembles the results into a skill map per Claw.
 
 ```
 $ claw skillmap crypto-crusher-0
 
 Available capabilities for crypto-crusher-0:
 
-  FROM market-scanner (http://market-scanner:8080/api):
+  FROM market-scanner (service://market-scanner):
     get_price            Current and historical token price data
     get_whale_activity   Large wallet movements in last N hours
     get_market_sentiment Aggregated fear/greed and social volume
+    [discovered via OpenAPI]
 
-  FROM company-crm (mcp, auto-discovered):
+  FROM company-crm (service://company-crm, mcp):
     lookup_customer      Find customer by name, email, or account ID
     create_ticket        Open support ticket linked to a customer
     get_deal_status      Current pipeline stage and value for any deal
     ⚠ requires cllama: policy/customer-data-access, policy/pii-gate
 
   FROM shared-cache (volume://shared-cache):
-    read-write           File-based data exchange
+    read-write mount
 
-  FROM fleet/signals (queue://fleet/signals):
-    subscribe            Fleet coordination messages
+  FROM discord (channel://discord):
+    guild 1465489501551067136, DMs enabled
 ```
 
 The skill map is delivered via a read-only skill mount. Add a service, the skill map grows. Remove a service, it shrinks. No code changes. No retraining.
@@ -577,7 +601,9 @@ Low drift: continue normally. Moderate drift: restrict capabilities. High drift:
 
 **Why track mutations instead of preventing them?** Prevention kills capability. Untracked mutation is drift. Tracked mutation is evolution.
 
-**Why defined surfaces?** Not just to restrict communication — to give the operator a topology map *and* to give the bots a skill map. Surfaces are dual-purpose.
+**Why defined surfaces?** Not to restrict communication — to give the operator a topology map *and* to give the bots a skill map. Surfaces declare where communication happens. Access control within a service is the service's job.
+
+**Why are Claws users, not privileged processes?** Because every service already has an authorization model. Duplicating it in the infrastructure layer is both incomplete and fragile. Give the Claw credentials, let the service decide what those credentials allow. The operator's control point is which credentials to issue, not which API endpoints to allowlist.
 
 **Why do services declare cllama requirements?** Because the service knows its own risk profile. The Claw's cllama governs what the bot says. The service's required cllama governs what the bot does — to the service's data, through the service's API.
 

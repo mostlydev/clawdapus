@@ -14,3 +14,4 @@ openclaw/workspaces/*/logs/
 *.log
 *.tmp
 .DS_Store
+packages/

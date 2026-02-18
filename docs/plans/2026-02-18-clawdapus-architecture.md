@@ -1,7 +1,7 @@
 # Clawdapus Architecture Plan
 
 **Date:** 2026-02-18
-**Status:** v6 — surface taxonomy + driver-mediated channel bindings
+**Status:** v7 — Claws Are Users principle, simplified surface/credential model
 **Source of truth:** `MANIFESTO.md`
 **Reviews:** Grok (structural critique), Codex (architecture + driver model), operator (cllama clarification, enforcement model)
 **Deliberation:** 3-agent talking stick (alpha/Codex, beta/Claude, gamma/Grok) — arch-review room, 3 rounds, consensus reached
@@ -98,12 +98,17 @@ What config injection enforces:
 - **Behavioral contract** — read-only mount of AGENTS.md / CLAUDE.md
 - **Tool/exec permissions** — restrict what the runner is allowed to execute
 - **Scheduling** — system-level cron that the runner cannot modify
-- **API key delivery** — operator controls which keys the container gets
+
+What compose generation enforces (no driver involvement):
+- **Mount access modes** — read-only or read-write on volumes and host paths, written directly into `compose.generated.yml`
 
 What config injection cannot enforce (requires cllama):
 - **Prompt/response interception** — modifying what the LLM sees or returns
 - **Key isolation** — hiding real provider keys from the runner
 - **LLM-level drift scoring** — independent evaluation of conversation quality
+
+What Clawdapus does not enforce at all:
+- **Service-level access control** — the Claw authenticates to services with standard credentials (env vars, Docker secrets). The service's own authorization determines what the Claw can do. Clawdapus declares topology, not permissions.
 
 cllama is an **enhancement layer**, not a prerequisite. A Claw can run with config-injection-only enforcement. cllama adds deeper LLM-level governance when needed.
 
@@ -205,9 +210,9 @@ Each driver provides:
 | Config path | `env OPENCLAW_CONFIG_PATH` + `mount_ro` openclaw.json |
 | Healthcheck | `healthcheck` via `openclaw health --json` |
 | Heartbeat | `set agents.defaults.heartbeat.every` + system cron override |
-| `SURFACE channel://discord` | `set channels.discord.*` via `openclaw config set` + `env` for token |
-| `SURFACE channel://slack` | `set channels.slack.*` via `openclaw config set` + `env` for token |
-| `SURFACE channel://telegram` | `set channels.telegram.*` via `openclaw config set` + `env` for token |
+| `SURFACE channel://discord` | `set channels.discord.*` via `openclaw config set` (token from standard env) |
+| `SURFACE channel://slack` | `set channels.slack.*` via `openclaw config set` (token from standard env) |
+| `SURFACE channel://telegram` | `set channels.telegram.*` via `openclaw config set` (token from standard env) |
 
 **Important:** OpenClaw config is JSON5, not JSON. The driver must use `openclaw config set/get/unset` or a JSON5-aware patcher — never raw `jq`.
 
@@ -230,20 +235,22 @@ Runners that support these get a generic driver for free. Runners that don't nee
 
 ## Surface Taxonomy
 
-Surfaces are declared communication channels — they tell Clawdapus what a Claw can talk to and how. Surfaces split into two categories based on where enforcement happens.
+Surfaces are declared communication channels — they tell Clawdapus what a Claw can talk to. A Claw is a user of the services it consumes (Principle 8): it authenticates with standard credentials, and the service determines what those credentials allow. Clawdapus enforces access modes only on mounts where Docker has authority. Surfaces split into two categories based on where enforcement happens.
 
 ### Pod-Level Surfaces (universal, enforced by Clawdapus)
 
 These are enforced during compose generation. Every claw type gets them — no driver involvement needed.
 
-| Scheme | What it is | Enforcement |
-|--------|-----------|-------------|
-| `volume://<name>` | Named Docker volume shared between Claws | Compose `volumes:` + per-service mount with access mode |
-| `host://<path>` | Operator's host filesystem path | Compose bind mount (`:ro` or `:rw`) |
-| `service://<name>` | MCP/REST/gRPC service in the pod | Compose networking + expose block matching |
-| `egress://<domain>` | Allowed outbound HTTP target | Network policy (compose network + firewall rules) |
+| Scheme | What it is | Enforcement | Access mode? |
+|--------|-----------|-------------|:---:|
+| `volume://<name>` | Named Docker volume shared between Claws | Compose `volumes:` + per-service mount | Yes — `:ro` or `:rw` (Docker enforces) |
+| `host://<path>` | Operator's host filesystem path | Compose bind mount | Yes — `:ro` or `:rw` (Docker enforces) |
+| `service://<name>` | MCP/REST/gRPC service in the pod | Compose networking + expose block matching | No — service auth governs |
+| `egress://<domain>` | Allowed outbound HTTP target | Network policy (compose network + firewall rules) | No — just allow/deny |
 
 Pod-level surfaces are wired by Clawdapus directly into `compose.generated.yml`. If a Claw doesn't declare a surface, it doesn't get access — the network and volume topology are locked to declarations.
+
+**Access modes are enforced only on mounts** (`volume://`, `host://`) where Docker has authority. For services and egress, the surface declaration controls network reachability. What the Claw can do within a service is determined by its credentials — delivered through standard compose mechanisms (`environment:`, `secrets:`, or mounted credential files).
 
 ### Driver-Level Surfaces (runner-specific, mediated by driver)
 
@@ -251,15 +258,15 @@ These represent external platform bindings that require runner-specific config i
 
 | Scheme | What it is | Enforcement |
 |--------|-----------|-------------|
-| `channel://<platform>` | Messaging platform binding (Discord, Slack, Telegram, etc.) | Driver injects platform config + credentials into runner's config |
+| `channel://<platform>` | Messaging platform binding (Discord, Slack, Telegram, etc.) | Driver injects platform config into runner's config |
 | `webhook://<name>` | Inbound webhook endpoint | Driver configures runner's HTTP endpoint handling |
 
 **Channels are the key example.** Connecting an OpenClaw bot to Discord requires:
-- A bot token (secret, delivered via env var)
+- A bot token (delivered via standard `environment:` block — Clawdapus doesn't manage secrets)
 - Channel routing config (which guilds, which users, DM policies, approval flows)
 - Agent-to-channel bindings
 
-None of this is a Docker mount or network rule. It's runner config. The driver mediates.
+The token is a standard env var. The routing config is driver-mediated. The driver reads the channel surface declaration and translates it to runner config ops, referencing env vars by convention.
 
 ### Channel Surface Example
 
@@ -271,9 +278,8 @@ services:
       agent: ./AGENTS.md
       surfaces:
         - volume://shared-cache: read-write
-        - service://company-crm: read-write
+        - service://company-crm
         - channel://discord:
-            token: ${OPENCLAW_DISCORD_TOKEN}
             guilds:
               "1465489501551067136":
                 policy: allowlist
@@ -283,22 +289,24 @@ services:
               enabled: true
               policy: allowlist
               allow_from: ["167037070349434880"]
+    environment:                        # standard compose — not x-claw
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      CRM_API_KEY: ${CRM_API_KEY}
 ```
 
 **What happens at `claw up`:**
 
-1. `volume://shared-cache` → Clawdapus generates compose volume mount (pod-level)
+1. `volume://shared-cache` → Clawdapus generates compose volume mount with `:rw` (pod-level)
 2. `service://company-crm` → Clawdapus generates compose network wiring (pod-level)
 3. `channel://discord` → passed to the OpenClaw driver, which translates to:
    ```
    op=set  channels.discord.enabled          true
-   op=set  channels.discord.token            ${OPENCLAW_DISCORD_TOKEN}
    op=set  channels.discord.guilds.1465489501551067136.requireMention  true
    op=set  channels.discord.guilds.1465489501551067136.users  [...]
    op=set  channels.discord.dmPolicy         allowlist
    op=set  channels.discord.allowFrom        [...]
-   op=env  OPENCLAW_DISCORD_TOKEN            <value>
    ```
+   The driver references `DISCORD_TOKEN` from the standard environment by convention — it doesn't manage the secret itself.
 
 **If the driver doesn't support a surface scheme:** preflight fails with a clear error ("openclaw driver supports channel://discord; generic driver does not"). The Claw doesn't start.
 
@@ -457,15 +465,15 @@ x-claw:
   persona: <registry-ref>            # override Clawfile default
   cllama: <stack-spec>               # override Clawfile default (omit for no cllama)
   count: <n>                         # scale to N identical containers
-  surfaces:                          # consumed surfaces
-    # Pod-level (enforced by Clawdapus directly):
+  surfaces:                          # topology declarations
+    # Mounts (access mode enforced by Docker):
     - volume://shared-cache: read-write
-    - service://company-crm: read-write
     - host:///path/to/data: read-only
-    - egress://api.example.com: https
-    # Driver-level (mediated by claw-type driver):
+    # Services (no access mode — service auth governs):
+    - service://company-crm
+    - egress://api.example.com
+    # Driver-mediated (routing config, no credentials here):
     - channel://discord:
-        token: ${OPENCLAW_DISCORD_TOKEN}
         guilds:
           "1465489501551067136":
             policy: allowlist
@@ -474,6 +482,10 @@ x-claw:
     role: <string>
     inputs: [...]
     outputs: [...]
+# Credentials go in standard compose blocks (environment, secrets), not in x-claw
+environment:
+  CRM_API_KEY: ${CRM_API_KEY}
+  DISCORD_TOKEN: ${DISCORD_TOKEN}
 ```
 
 **Service-level (plain container):**
@@ -482,9 +494,10 @@ x-claw:
   expose:
     protocol: mcp | rest | grpc
     port: <n>
-  require_cllama:                    # only enforced when cllama is enabled
-    - <policy-module>
-  describe:
+    discover: auto                     # auto-detect (tries MCP, then OpenAPI, then static describe). Extensible.
+  require_cllama:                    # pre-call policy gate; does not replace service auth,
+    - <policy-module>                # adds an additional allow/deny decision before the request is sent
+  describe:                          # static fallback when service can't self-describe
     role: <string>
     capabilities: [...]
 ```
@@ -617,7 +630,7 @@ Verify every directive translates cleanly for all four. Especially:
 20. Generate per-service volume mounts with correct access modes (`ro` for read-only, default for read-write)
 21. Enforce ACL — if a service claims an access mode not permitted by the volume's `x-claw.access` block, fail preflight
 
-Volume surfaces use the existing `mount_ro` enforcement op at the driver level and require no external dependencies. They are compose generation only.
+Volume surfaces are enforced at the compose generation level — Clawdapus writes volume mount entries directly into `compose.generated.yml` with the declared access mode (`:ro` or `:rw`). No driver involvement needed.
 
 **Success criteria:** A claw-pod.yml with an OpenClaw service starts correctly with enforced model pin and read-only contract. Missing contract blocks startup. Failed driver preflight blocks startup. `claw ps` shows container status and driver enforcement state. Claws sharing a volume can read/write shared files according to their declared access mode; a Claw without declared access to a volume cannot mount it.
 
@@ -630,7 +643,7 @@ Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds serv
 **Service surfaces (pod-level):**
 1. Resolve `service://` declarations against expose blocks in the pod
 2. Wire compose networking so declared services are reachable
-3. Query MCP servers for tool listings at pod init
+3. Run the service discovery pipeline (steps 11-13) to collect capability descriptions
 4. Assemble per-Claw skill maps combining volume, service, and channel capabilities
 5. Write skill maps to read-only skill mount at `/claw/skillmap.json`
 
@@ -638,13 +651,19 @@ Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds serv
 6. Parse `channel://<platform>` surface declarations from `x-claw`
 7. Pass channel config to the driver for runner-specific injection
 8. Driver translates channel YAML to runner config ops (e.g. `openclaw config set channels.discord.*`)
-9. Secrets (tokens) delivered via env vars, never written to config files
+9. Driver references platform tokens from standard compose `environment:` by convention (Clawdapus does not manage credentials)
 10. Preflight validates driver supports the declared channel schemes
 
+**Service discovery:**
+11. Query MCP services for tool listings via MCP protocol
+12. Query REST services for OpenAPI specs (if available)
+13. Fall back to static `describe` blocks for services that can't self-describe
+14. Skill map reflects what the service reports to the authenticated Claw
+
 **Multi-driver:**
-11. Implement generic driver (env var conventions: `CONTRACT_PATH`, `MODEL_PRIMARY`, etc.)
-12. Implement Claude Code driver (settings.json + CLAUDE.md contract)
-13. Prove the driver abstraction works across at least 3 runner types
+15. Implement generic driver (env var conventions: `CONTRACT_PATH`, `MODEL_PRIMARY`, etc.)
+16. Implement Claude Code driver (settings.json + CLAUDE.md contract)
+17. Prove the driver abstraction works across at least 3 runner types
 
 **Success criteria:** `claw skillmap <claw>` shows correct capability inventory including volume, service, and channel surfaces. A `channel://discord` surface in a pod with an OpenClaw Claw results in correct Discord config injection. Mixed pods with different claw types start correctly, each with appropriate driver enforcement. A channel surface on a driver that doesn't support it fails preflight with a clear error.
 
@@ -670,7 +689,7 @@ Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds serv
 9. Obfuscation — timing jitter, vocabulary rotation on outputs
 10. cllama can engage in its own conversation with the LLM to rework non-compliant responses
 11. Tool call interception — gate dangerous tool invocations
-12. Enforce `require_cllama` — sidecar checks policy modules before routing tool calls to services
+12. Enforce `require_cllama` — sidecar checks policy modules before routing tool calls to services. This is a pre-call policy gate, not a replacement for service authentication; credentials still determine what the Claw can do, cllama determines whether it should
 
 **Success criteria:** Claws without `CLLAMA` run normally with config-injection-only enforcement. Claws with `CLLAMA` route LLM traffic through sidecar. `claw audit` shows intervention history. Pipeline stages are independently configurable. `require_cllama` blocks tool calls without the right policy.
 
@@ -698,7 +717,7 @@ Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds serv
 
 ## Open Questions
 
-1. **Skill mount format** — JSON with a runner-agnostic schema? MCP tool definition format? OpenAPI fragments? Leaning toward a simple JSON format at `/claw/skillmap.json` that each runner adapter knows how to read.
+1. **Skill mount format** — JSON with a runner-agnostic schema? MCP tool definition format? OpenAPI fragments? Leaning toward a simple JSON format at `/claw/skillmap.json` that each runner adapter knows how to read. The skill map is assembled from multiple discovery protocols (MCP tool listings, OpenAPI specs, static describe blocks) and unified into one format.
 
 2. **Persona registry** — OCI artifacts via `oras` is the leading option. Need to define the artifact structure (manifest, memory, knowledge, style fingerprint as separate layers? or single tarball?).
 

@@ -59,7 +59,7 @@ INVOKE 0 */4 * * *  run-cycle
 INVOKE 0 9 * * 1-5  morning-brief
 
 SURFACE volume://shared-cache    read-write
-SURFACE service://company-crm   read-write
+SURFACE service://company-crm
 
 TRACK apt pip npm
 PRIVILEGE runtime claw-user
@@ -87,7 +87,7 @@ services:
       count: 3
       surfaces:
         - volume://shared-cache: read-write
-        - service://company-crm: read-write
+        - service://company-crm
 
   company-crm:
     image: custom/crm-mcp-bridge:latest
