@@ -1,19 +1,35 @@
+# Environment files
 *.env
 !openclaw/bots/example.env
 
 # Runtime state
 openclaw/runtime/
-
-# Bot workspace generated dirs
 openclaw/workspaces/*/state/
 openclaw/workspaces/*/memory/
 openclaw/workspaces/*/research/
 openclaw/workspaces/*/logs/
 
-# Misc local artifacts
+# Build output
+/bin/
+/claw
+Dockerfile.generated
+
+# Standard Go ignores
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+cover.out
+.coverprofile
+
+# Local/OS artifacts
 *.log
 *.tmp
+err.txt
+out.txt
 .DS_Store
 packages/
-bin/
-Dockerfile.generated
