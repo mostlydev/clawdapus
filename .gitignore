@@ -15,3 +15,5 @@ openclaw/workspaces/*/logs/
 *.tmp
 .DS_Store
 packages/
+bin/
+Dockerfile.generated

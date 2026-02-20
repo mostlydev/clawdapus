@@ -204,17 +204,23 @@ Each driver provides:
 | Directive | Enforcement mechanism |
 |-----------|----------------------|
 | `AGENT` | `mount_ro` AGENTS.md to `/workspace/AGENTS.md` |
-| `MODEL primary ...` | `set agents.defaults.model.primary` via `openclaw config set` (JSON5-aware) |
-| `MODEL fallbacks ...` | `set agents.defaults.model.fallbacks` via `openclaw config set` |
+| `MODEL primary ...` | `set agents.defaults.model.primary` via Go-native JSON5 patch |
+| `MODEL fallbacks ...` | `set agents.defaults.model.fallbacks` via Go-native JSON5 patch |
 | `INVOKE` | System cron in `/etc/cron.d/` (bot-unmodifiable) + `wake` via gateway RPC |
 | Config path | `env OPENCLAW_CONFIG_PATH` + `mount_ro` openclaw.json |
-| Healthcheck | `healthcheck` via `openclaw health --json` |
-| Heartbeat | `set agents.defaults.heartbeat.every` + system cron override |
-| `SURFACE channel://discord` | `set channels.discord.*` via `openclaw config set` (token from standard env) |
-| `SURFACE channel://slack` | `set channels.slack.*` via `openclaw config set` (token from standard env) |
-| `SURFACE channel://telegram` | `set channels.telegram.*` via `openclaw config set` (token from standard env) |
+| Healthcheck | `healthcheck` via `openclaw health --json` (stdout only — see caveat below) |
+| Heartbeat | `set agents.defaults.heartbeat.every` via Go-native JSON5 patch + system cron override |
+| `SURFACE channel://discord` | `set channels.discord.*` via Go-native JSON5 patch (token from standard env) |
+| `SURFACE channel://slack` | `set channels.slack.*` via Go-native JSON5 patch (token from standard env) |
+| `SURFACE channel://telegram` | `set channels.telegram.*` via Go-native JSON5 patch (token from standard env) |
 
-**Important:** OpenClaw config is JSON5, not JSON. The driver must use `openclaw config set/get/unset` or a JSON5-aware patcher — never raw `jq`.
+**Config injection strategy:** The OpenClaw driver does NOT shell out to `openclaw config set`. The `openclaw` CLI is verbose (splash banners, doctor checks, `.bak` file creation, Node.js cold-start penalty per invocation) and shelling out N times for N config operations is prohibitively slow and noisy. Instead, the driver uses a Go JSON5 library to: (1) read the base `openclaw.json`, (2) apply all required `set` operations in-memory, (3) write the finalized config to the host, and (4) `mount_ro` it into the container. This aligns with the "write config on host, mount read-only" strategy.
+
+**Important:** OpenClaw config is JSON5, not JSON. The driver must use a JSON5-aware patcher — never raw `jq` or standard JSON marshaling.
+
+**Healthcheck caveat:** `openclaw health --json` emits `Config warnings:` to stderr when plugins are misconfigured. The driver must use `cmd.Output()` (stdout only) and ignore stderr. When used as a Docker `HEALTHCHECK CMD` (where Docker merges stdout/stderr into the health status string), the parser must scan for the first `{` rather than assuming the entire output is pure JSON.
+
+**Schema awareness:** OpenClaw validates config keys against an internal Zod schema. Arbitrary keys are rejected at startup (`Unrecognized key: "..."` error). The driver must track the OpenClaw schema and only inject keys that exist in the schema. This is a feature for fail-closed enforcement — config drift by injection of unknown keys is structurally impossible — but the driver must be updated when OpenClaw's schema evolves.
 
 ### Common Runner Control Contract
 
@@ -727,4 +733,4 @@ Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds serv
 
 5. **Driver discovery** — Should third-party drivers be loadable as plugins, or compiled in? For now, compiled in. Plugin model is a future consideration.
 
-6. **Config injection timing** — Enforcement ops happen before `docker compose up`. But some ops (like `openclaw config set`) need the container's filesystem to exist. Options: (a) write config on host, mount read-only; (b) run ops in an init container; (c) run ops in the entrypoint wrapper. Leaning toward (a) for OpenClaw since `openclaw-up.sh` already works this way.
+6. **Config injection timing** — **Resolved.** The driver writes finalized config on the host and mounts it read-only into the container. This avoids needing the container's filesystem to exist before enforcement. The OpenClaw driver uses Go-native JSON5 patching to assemble `openclaw.json` on the host, then bind-mounts it `:ro`. This matches how the prior `openclaw-up.sh` worked and avoids the performance/noise problems of shelling out to `openclaw config set` (splash banners, doctor checks, `.bak` files, Node.js cold-start per invocation).

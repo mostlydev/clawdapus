@@ -1,0 +1,52 @@
+package inspect
+
+import "testing"
+
+func TestParseLabelsExtractsClawLabels(t *testing.T) {
+	raw := map[string]string{
+		"claw.type":              "openclaw",
+		"claw.agent.file":        "AGENTS.md",
+		"claw.model.primary":     "openrouter/anthropic/claude-sonnet-4",
+		"claw.surface.1":         "service://fleet-master",
+		"claw.surface.0":         "channel://discord",
+		"claw.privilege.worker":  "root",
+		"claw.privilege.runtime": "claw-user",
+		"maintainer":             "someone",
+	}
+
+	info := ParseLabels(raw)
+
+	if info.ClawType != "openclaw" {
+		t.Fatalf("expected openclaw claw type, got %q", info.ClawType)
+	}
+	if info.Agent != "AGENTS.md" {
+		t.Fatalf("expected AGENTS.md, got %q", info.Agent)
+	}
+	if info.Models["primary"] != "openrouter/anthropic/claude-sonnet-4" {
+		t.Fatalf("unexpected model map: %#v", info.Models)
+	}
+	if len(info.Surfaces) != 2 {
+		t.Fatalf("expected 2 surfaces, got %d", len(info.Surfaces))
+	}
+	if info.Surfaces[0] != "channel://discord" || info.Surfaces[1] != "service://fleet-master" {
+		t.Fatalf("expected sorted surfaces, got %#v", info.Surfaces)
+	}
+	if info.Privileges["worker"] != "root" {
+		t.Fatalf("expected worker privilege root, got %q", info.Privileges["worker"])
+	}
+	if info.Privileges["runtime"] != "claw-user" {
+		t.Fatalf("expected runtime privilege claw-user, got %q", info.Privileges["runtime"])
+	}
+}
+
+func TestParseLabelsIgnoresNonClawLabels(t *testing.T) {
+	raw := map[string]string{
+		"org.opencontainers.image.title": "something",
+		"maintainer":                     "someone",
+	}
+
+	info := ParseLabels(raw)
+	if info.ClawType != "" {
+		t.Fatalf("expected empty claw type, got %q", info.ClawType)
+	}
+}

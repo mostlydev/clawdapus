@@ -1,0 +1,25 @@
+FROM node:24-bookworm-slim
+
+CLAW_TYPE openclaw
+AGENT AGENTS.md
+
+MODEL primary openrouter/anthropic/claude-sonnet-4
+
+CONFIGURE openclaw config set agents.defaults.heartbeat.every 30m
+CONFIGURE openclaw config set agents.defaults.heartbeat.target none
+
+INVOKE 0,30 * * * * heartbeat
+
+TRACK apt pip npm
+
+SURFACE channel://discord
+SURFACE service://fleet-master
+
+PRIVILEGE worker root
+PRIVILEGE runtime claw-user
+
+RUN apt-get update && apt-get install -y bash ca-certificates cron curl git jq tini
+RUN npm install -g openclaw@2026.2.9
+COPY entrypoint.sh /claw/entrypoint.sh
+RUN chmod +x /claw/entrypoint.sh
+ENTRYPOINT ["/usr/bin/tini", "--", "/claw/entrypoint.sh"]
