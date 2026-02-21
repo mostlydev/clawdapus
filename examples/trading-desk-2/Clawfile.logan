@@ -1,0 +1,18 @@
+FROM claw-trading-base-2:latest
+
+AGENT agents/LOGAN.md
+
+CONFIGURE openclaw config set integrations.alpaca.apiKey ${ALPACA_API_KEY}
+CONFIGURE openclaw config set integrations.alpaca.secretKey ${ALPACA_SECRET_KEY}
+
+SURFACE service://trading-api
+SURFACE volume://trading-shared read-write
+
+SKILL ./policy/risk-limits.md
+
+CONFIGURE openclaw config set agents.defaults.heartbeat.every 20m
+CONFIGURE openclaw config set agents.defaults.heartbeat.to channel:1464509330731696213
+
+INVOKE 15 7 * * 1-5 "Fundamental watchlist scan and thesis updates."
+INVOKE 15 12 * * 1-5 "Valuation drift check for open positions."
+INVOKE 45 16 * * 1-5 "EOD value thesis log update."

@@ -85,7 +85,9 @@ services:
   # ── Tiverton — Coordinator, Compliance, News Synthesis ───────────────────
 
   tiverton:
-    image: claw-trading-tiverton:latest
+    build:
+      context: .
+      dockerfile: Clawfile.tiverton
     x-claw:
       agent: ./agents/TIVERTON.md
       handles:
@@ -115,7 +117,9 @@ services:
   # ── Westin — Momentum / Tech Stocks ──────────────────────────────────────
 
   westin:
-    image: claw-trading-westin:latest
+    build:
+      context: .
+      dockerfile: Clawfile.westin
     x-claw:
       agent: ./agents/WESTIN.md
       handles:
@@ -142,7 +146,9 @@ services:
   # ── Logan — Value / Fundamentals ─────────────────────────────────────────
 
   logan:
-    image: claw-trading-logan:latest
+    build:
+      context: .
+      dockerfile: Clawfile.logan
     x-claw:
       agent: ./agents/LOGAN.md
       handles:
@@ -169,7 +175,9 @@ services:
   # ── Gerrard — Macro / Sector Rotation ────────────────────────────────────
 
   gerrard:
-    image: claw-trading-gerrard:latest
+    build:
+      context: .
+      dockerfile: Clawfile.gerrard
     x-claw:
       agent: ./agents/GERRARD.md
       handles:
@@ -196,7 +204,9 @@ services:
   # ── Dundas — Event Trader + News Dispatcher ───────────────────────────────
 
   dundas:
-    image: claw-trading-dundas:latest
+    build:
+      context: .
+      dockerfile: Clawfile.dundas
     x-claw:
       agent: ./agents/DUNDAS.md
       handles:
@@ -225,7 +235,9 @@ services:
   # ── Boulton — Pump Trader, High-Risk / Crypto ────────────────────────────
 
   boulton:
-    image: claw-trading-boulton:latest
+    build:
+      context: .
+      dockerfile: Clawfile.boulton
     x-claw:
       agent: ./agents/BOULTON.md
       handles:
@@ -253,7 +265,9 @@ services:
   # ── Allen — Systems Monitor ───────────────────────────────────────────────
 
   allen:
-    image: claw-trading-allen:latest
+    build:
+      context: .
+      dockerfile: Clawfile.allen
     x-claw:
       agent: ./agents/ALLEN.md
       handles:

@@ -8,7 +8,9 @@ services:
       - "80"
 
   researcher:
-    image: claw-openclaw-example
+    build:
+      context: .
+      dockerfile: Clawfile
     x-claw:
       agent: ./agents/RESEARCHER.md
       skills:
@@ -22,7 +24,9 @@ services:
         - "service://api-server"
 
   analyst:
-    image: claw-openclaw-example
+    build:
+      context: .
+      dockerfile: Clawfile
     x-claw:
       agent: ./agents/ANALYST.md
       surfaces:

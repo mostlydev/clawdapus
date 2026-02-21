@@ -1,0 +1,18 @@
+FROM claw-trading-base-2:latest
+
+AGENT agents/WESTIN.md
+
+CONFIGURE openclaw config set integrations.alpaca.apiKey ${ALPACA_API_KEY}
+CONFIGURE openclaw config set integrations.alpaca.secretKey ${ALPACA_SECRET_KEY}
+
+SURFACE service://trading-api
+SURFACE volume://trading-shared read-write
+
+SKILL ./policy/risk-limits.md
+
+CONFIGURE openclaw config set agents.defaults.heartbeat.every 15m
+CONFIGURE openclaw config set agents.defaults.heartbeat.to channel:1464509330731696213
+
+INVOKE 0 7 * * 1-5 "Pre-market momentum scan and report."
+INVOKE 0 12 * * 1-5 "Midday stop and sizing review."
+INVOKE 30 16 * * 1-5 "Close report with actions for tomorrow."

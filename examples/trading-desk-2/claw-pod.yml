@@ -1,0 +1,228 @@
+x-claw:
+  pod: trading-desk-2
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: trading_api_development
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    expose:
+      - "5432"
+
+  trading-api:
+    # Expected to self-describe trade workflow via:
+    #   LABEL claw.skill.emit=/app/skills/surface-trading-api.md
+    image: tiverton/trading-api:dev
+    environment:
+      RAILS_ENV: development
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/trading_api_development
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+    expose:
+      - "4000"
+
+  tiverton:
+    image: claw-trading-tiverton-2:latest
+    x-claw:
+      agent: ./agents/TIVERTON.md
+      handles:
+        discord:
+          id: "1464508146579148851"
+          username: Tiverton
+          guilds:
+            - id: "1464493841045258392"
+              name: Trading Floor
+              channels:
+                - id: "1464509330731696213"
+                  name: trading-floor
+                - id: "1464796137893662843"
+                  name: infra
+      surfaces:
+        - "service://trading-api"
+        - "volume://tiverton-workspace read-write"
+        - "volume://trading-shared read-write"
+      skills:
+        - ./policy/risk-limits.md
+        - ./policy/approval-workflow.md
+    environment:
+      DISCORD_BOT_TOKEN: ${TIVERTON_BOT_TOKEN}
+      DISCORD_APP_ID: "1464508146579148851"
+      ALPACA_API_KEY: ${ALPACA_API_KEY}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY}
+      TRADING_API_BASE_URL: http://trading-api:4000
+
+  westin:
+    image: claw-trading-westin-2:latest
+    x-claw:
+      agent: ./agents/WESTIN.md
+      handles:
+        discord:
+          id: "1464508643742584904"
+          username: Westin
+          guilds:
+            - id: "1464493841045258392"
+              channels:
+                - id: "1464509330731696213"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://westin-workspace read-write"
+        - "volume://trading-shared read-write"
+      skills:
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: ${WESTIN_BOT_TOKEN}
+      DISCORD_APP_ID: "1464508643742584904"
+      ALPACA_API_KEY: ${ALPACA_API_KEY}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY}
+      TRADING_API_BASE_URL: http://trading-api:4000
+
+  logan:
+    image: claw-trading-logan-2:latest
+    x-claw:
+      agent: ./agents/LOGAN.md
+      handles:
+        discord:
+          id: "1464522019822375016"
+          username: Logan
+          guilds:
+            - id: "1464493841045258392"
+              channels:
+                - id: "1464509330731696213"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://logan-workspace read-write"
+        - "volume://trading-shared read-write"
+      skills:
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: ${LOGAN_BOT_TOKEN}
+      DISCORD_APP_ID: "1464522019822375016"
+      ALPACA_API_KEY: ${ALPACA_API_KEY}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY}
+      TRADING_API_BASE_URL: http://trading-api:4000
+
+  gerrard:
+    image: claw-trading-gerrard-2:latest
+    x-claw:
+      agent: ./agents/GERRARD.md
+      handles:
+        discord:
+          id: "1467937502240182323"
+          username: Gerrard
+          guilds:
+            - id: "1464493841045258392"
+              channels:
+                - id: "1464509330731696213"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://gerrard-workspace read-write"
+        - "volume://trading-shared read-write"
+      skills:
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: ${GERRARD_BOT_TOKEN}
+      DISCORD_APP_ID: "1467937502240182323"
+      ALPACA_API_KEY: ${ALPACA_API_KEY}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY}
+      TRADING_API_BASE_URL: http://trading-api:4000
+
+  dundas:
+    image: claw-trading-dundas-2:latest
+    x-claw:
+      agent: ./agents/DUNDAS.md
+      handles:
+        discord:
+          id: "1464840602649628764"
+          username: Dundas
+          guilds:
+            - id: "1464493841045258392"
+              channels:
+                - id: "1464509330731696213"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://dundas-workspace read-write"
+        - "volume://trading-shared read-write"
+      skills:
+        - ./skills/news-routing.md
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: ${DUNDAS_BOT_TOKEN}
+      DISCORD_APP_ID: "1464840602649628764"
+      ALPACA_API_KEY: ${ALPACA_API_KEY}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY}
+      TRADING_API_BASE_URL: http://trading-api:4000
+
+  boulton:
+    image: claw-trading-boulton-2:latest
+    x-claw:
+      agent: ./agents/BOULTON.md
+      handles:
+        discord:
+          id: "1469917753157750897"
+          username: Boulton
+          guilds:
+            - id: "1464493841045258392"
+              channels:
+                - id: "1464509330731696213"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://boulton-workspace read-write"
+        - "volume://trading-shared read-write"
+      skills:
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: ${BOULTON_BOT_TOKEN}
+      DISCORD_APP_ID: "1469917753157750897"
+      ALPACA_API_KEY: ${ALPACA_API_KEY}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY}
+      TRADING_API_BASE_URL: http://trading-api:4000
+
+  allen:
+    image: claw-trading-allen-2:latest
+    x-claw:
+      agent: ./agents/ALLEN.md
+      handles:
+        discord:
+          id: "1464507736044863491"
+          username: Allen
+          guilds:
+            - id: "1464493841045258392"
+              channels:
+                - id: "1464796137893662843"
+                  name: infra
+                - id: "1464509330731696213"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "service://tiverton"
+        - "service://westin"
+        - "service://logan"
+        - "service://gerrard"
+        - "service://dundas"
+        - "service://boulton"
+        - "volume://allen-workspace read-write"
+        - "volume://trading-shared read-only"
+      skills:
+        - ./skills/infra.md
+        - ./policy/approval-workflow.md
+    environment:
+      DISCORD_BOT_TOKEN: ${ALLEN_BOT_TOKEN}
+      DISCORD_APP_ID: "1464507736044863491"
+      TRADING_API_BASE_URL: http://trading-api:4000
+
+volumes:
+  trading-shared:
+  postgres-data:
+  tiverton-workspace:
+  westin-workspace:
+  logan-workspace:
+  gerrard-workspace:
+  dundas-workspace:
+  boulton-workspace:
+  allen-workspace:

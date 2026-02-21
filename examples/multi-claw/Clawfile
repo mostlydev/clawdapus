@@ -1,0 +1,11 @@
+FROM openclaw:latest
+
+CLAW_TYPE openclaw
+
+# Model defaults — overridable per-deployment via MODEL in pod or subclass
+MODEL primary anthropic/claude-sonnet-4-6
+
+TRACK apt npm
+
+PRIVILEGE worker root
+PRIVILEGE runtime claw-user

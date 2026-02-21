@@ -1,0 +1,21 @@
+FROM claw-trading-base-2:latest
+
+AGENT agents/ALLEN.md
+
+SURFACE service://trading-api
+SURFACE service://tiverton
+SURFACE service://westin
+SURFACE service://logan
+SURFACE service://gerrard
+SURFACE service://dundas
+SURFACE service://boulton
+SURFACE volume://trading-shared read-only
+
+SKILL ./skills/infra.md
+SKILL ./policy/approval-workflow.md
+
+CONFIGURE openclaw config set agents.defaults.heartbeat.every 30m
+CONFIGURE openclaw config set agents.defaults.heartbeat.to channel:1464796137893662843
+
+INVOKE */10 * * * * "Run API and service health checks; post only actionable alerts."
+INVOKE */30 * * * * "Summarize infra posture in infra channel."

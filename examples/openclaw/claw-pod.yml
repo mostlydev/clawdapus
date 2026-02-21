@@ -3,7 +3,9 @@ x-claw:
 
 services:
   gateway:
-    image: claw-openclaw-example
+    build:
+      context: .
+      dockerfile: Clawfile
     x-claw:
       agent: ./AGENTS.md
       skills:
