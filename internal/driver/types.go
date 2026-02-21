@@ -18,10 +18,16 @@ type ResolvedClaw struct {
 	AgentHostPath string            // resolved host path for bind mount
 	Models        map[string]string // slot -> provider/model
 	Surfaces      []ResolvedSurface
+	Skills        []ResolvedSkill
 	Privileges    map[string]string
 	Configures    []string          // openclaw config set commands from labels
 	Count         int               // from pod x-claw (default 1)
 	Environment   map[string]string // from pod environment block
+}
+
+type ResolvedSkill struct {
+	Name     string // basename (e.g., "custom-workflow.md")
+	HostPath string // resolved absolute host path
 }
 
 type ResolvedSurface struct {
@@ -43,6 +49,7 @@ type MaterializeResult struct {
 	Healthcheck *Healthcheck
 	ReadOnly    bool              // default: true
 	Restart     string            // default: "on-failure"
+	SkillDir    string            // container path for skills (e.g., "/claw/skills")
 }
 
 type Mount struct {
