@@ -46,6 +46,23 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 	// Track whether any claw service exists to conditionally add network
 	hasClaw := false
 
+	// Collect service surface targets — non-claw services that need claw-internal network
+	serviceSurfaceTargets := make(map[string]struct{})
+	for _, svc := range p.Services {
+		if svc.Claw == nil {
+			continue
+		}
+		for _, raw := range svc.Claw.Surfaces {
+			surface, err := ParseSurface(raw)
+			if err != nil {
+				continue // validated later in main loop
+			}
+			if surface.Scheme == "service" {
+				serviceSurfaceTargets[strings.TrimSpace(surface.Target)] = struct{}{}
+			}
+		}
+	}
+
 	// Sort service names for deterministic output
 	serviceNames := sortedServiceNames(p.Services)
 
@@ -154,6 +171,8 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 			}
 
 			if isClaw {
+				cs.Networks = []string{"claw-internal"}
+			} else if _, isTarget := serviceSurfaceTargets[name]; isTarget {
 				cs.Networks = []string{"claw-internal"}
 			}
 
