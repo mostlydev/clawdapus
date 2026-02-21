@@ -7,6 +7,7 @@ type ClawConfig struct {
 	Models      map[string]string
 	Cllama      string
 	Persona     string
+	Handles     []string
 	Surfaces    []Surface
 	Skills      []string
 	Invocations []Invocation
@@ -30,6 +31,7 @@ type Invocation struct {
 func NewClawConfig() *ClawConfig {
 	return &ClawConfig{
 		Models:      make(map[string]string),
+		Handles:     make([]string, 0),
 		Surfaces:    make([]Surface, 0),
 		Skills:      make([]string, 0),
 		Invocations: make([]Invocation, 0),

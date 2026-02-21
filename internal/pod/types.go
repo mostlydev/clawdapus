@@ -1,5 +1,7 @@
 package pod
 
+import "github.com/mostlydev/clawdapus/internal/driver"
+
 // Pod represents a parsed claw-pod.yml.
 type Pod struct {
 	Name     string
@@ -20,6 +22,7 @@ type ClawBlock struct {
 	Persona  string
 	Cllama   string
 	Count    int
+	Handles  map[string]*driver.HandleInfo // platform → contact card
 	Surfaces []string
 	Skills   []string
 }

@@ -2,6 +2,7 @@ package openclaw
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -45,9 +46,61 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		}
 	}
 
+	// Handles
+	if len(rc.Handles) > 0 {
+		b.WriteString("## Handles\n\n")
+		b.WriteString("Your channel identities on social platforms. Other agents use these to reach you.\n\n")
+
+		// Sort platform names for determinism
+		platforms := make([]string, 0, len(rc.Handles))
+		for p := range rc.Handles {
+			platforms = append(platforms, p)
+		}
+		sort.Strings(platforms)
+
+		for _, platform := range platforms {
+			info := rc.Handles[platform]
+			if info == nil {
+				continue
+			}
+			b.WriteString(fmt.Sprintf("### %s\n", platform))
+			b.WriteString(fmt.Sprintf("- **ID:** %s\n", info.ID))
+			if info.Username != "" {
+				b.WriteString(fmt.Sprintf("- **Username:** %s\n", info.Username))
+			}
+			for _, guild := range info.Guilds {
+				guildLine := fmt.Sprintf("- **Guild:** %s", guild.ID)
+				if guild.Name != "" {
+					guildLine += fmt.Sprintf(" (%s)", guild.Name)
+				}
+				b.WriteString(guildLine + "\n")
+				for _, ch := range guild.Channels {
+					chLine := fmt.Sprintf("  - **Channel:** %s", ch.ID)
+					if ch.Name != "" {
+						chLine += fmt.Sprintf(" (#%s)", ch.Name)
+					}
+					b.WriteString(chLine + "\n")
+				}
+			}
+			b.WriteString("\n")
+		}
+	}
+
 	// Skills index
 	b.WriteString("## Skills\n\n")
 	var skillEntries []string
+
+	// Handle skills (one per declared platform)
+	if len(rc.Handles) > 0 {
+		handlePlatforms := make([]string, 0, len(rc.Handles))
+		for p := range rc.Handles {
+			handlePlatforms = append(handlePlatforms, p)
+		}
+		sort.Strings(handlePlatforms)
+		for _, p := range handlePlatforms {
+			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/handle-%s.md` — %s channel identity", p, p))
+		}
+	}
 
 	// Surface-generated skills (service surfaces)
 	for _, s := range rc.Surfaces {
@@ -56,8 +109,11 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		}
 	}
 
-	// Explicit operator skills
+	// Operator-provided skills (exclude auto-generated handle-* and surface-* files)
 	for _, sk := range rc.Skills {
+		if strings.HasPrefix(sk.Name, "handle-") || strings.HasPrefix(sk.Name, "surface-") {
+			continue
+		}
 		skillEntries = append(skillEntries, fmt.Sprintf("- `skills/%s` — operator-provided skill", sk.Name))
 	}
 

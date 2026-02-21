@@ -2,151 +2,161 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** `HANDLE <platform>` in Clawfile declares an agent's public social identity. Two things happen: (1) the driver enables the platform in the runner's native config (so the agent can communicate on it), and (2) `claw up` aggregates handles across the pod and broadcasts `CLAW_HANDLE_<SERVICE>_<PLATFORM>=<user-id>` environment variables into every service — so a Rails API, another agent, or any pod member can target a specific agent by name on a platform.
+**Goal:** `HANDLE <platform>` in Clawfile declares an agent's public social identity. Two things happen: (1) the driver enables the platform in the runner's native config (so the agent can communicate on it), and (2) `claw up` aggregates handles across the pod and broadcasts `CLAW_HANDLE_<SERVICE>_<PLATFORM>_*` environment variables into every service — so a Rails API, another agent, or any pod member can route to a specific agent on a platform without hardcoding.
 
-**The Leviathan Pattern:** A trading bot needs human approval before executing a large trade. A Rails API monitors positions and needs to ping the right agent on Discord. It reads `CLAW_HANDLE_TIVERTON_DISCORD` and constructs `<@123456789>`. The agent sees the mention, reviews, approves. No hardcoding, no service discovery — just an env var injected by Clawdapus.
+**The Leviathan Pattern:** A trading bot needs human approval before executing a large trade. A Rails API monitors positions and needs to ping the right agent on Discord. It reads `CLAW_HANDLE_TIVERTON_DISCORD_ID=123456789` and constructs `<@123456789>` in the right guild channel from `CLAW_HANDLE_TIVERTON_DISCORD_GUILDS`. The agent sees the mention, reviews, approves. No hardcoding, no service discovery — just env vars injected by Clawdapus.
 
 **Architecture:**
 
 - `HANDLE discord` in Clawfile → `LABEL claw.handle.discord=true` at build time
-- `handles: { discord: "123456789" }` in x-claw service block → declares the agent's user ID on that platform
-- At `claw up`: collect all `(service, platform, user-id)` triples from the pod, generate env vars, inject into every service's environment
-- OpenClaw driver: `HANDLE discord` → `set channels.discord.enabled true` in JSON5 config
-- CLAWDAPUS.md: `## Handles` section so the agent knows its own public identities
+- `handles:` in x-claw service block → declares the agent's full contact card per platform
+- At `claw up`: collect all handle contact cards, generate env vars, inject into every service
+- OpenClaw driver: `HANDLE discord` → `channels.discord.enabled = true` in JSON5 config
+- CLAWDAPUS.md: `## Handles` section with guild/channel membership tree
+- `skills/handle-<platform>.md`: full contact card skill file per platform
+
+**Data model:**
+
+```go
+// HandleInfo is the full contact card for an agent on a platform.
+type HandleInfo struct {
+    ID       string      // platform user ID for @mentions (required)
+    Username string      // display name/handle (optional)
+    Guilds   []GuildInfo // guild/server memberships for routing (optional)
+}
+
+type GuildInfo struct {
+    ID       string        // guild/server/workspace ID
+    Name     string        // optional human label
+    Channels []ChannelInfo // channels within this guild the agent monitors
+}
+
+type ChannelInfo struct {
+    ID   string // channel ID
+    Name string // optional human label
+}
+```
+
+**x-claw schema (two forms):**
+
+```yaml
+# String shorthand — just the platform user ID
+handles:
+  discord: "123456789"
+
+# Full contact card
+handles:
+  discord:
+    id: "123456789"
+    username: "crypto-bot"
+    guilds:
+      - id: "111222333"
+        name: "Crypto Ops HQ"
+        channels:
+          - id: "987654321"
+            name: "bot-commands"
+          - id: "555666777"
+            name: "crypto-alerts"
+```
+
+**Env vars emitted to ALL pod services:**
+
+```
+CLAW_HANDLE_CRYPTO_CRUSHER_DISCORD_ID=123456789
+CLAW_HANDLE_CRYPTO_CRUSHER_DISCORD_USERNAME=crypto-bot          # only if set
+CLAW_HANDLE_CRYPTO_CRUSHER_DISCORD_GUILDS=111222333             # comma-sep, only if set
+CLAW_HANDLE_CRYPTO_CRUSHER_DISCORD_JSON={"id":"123456789",...}  # always, full schema
+```
+
+Service name is uppercased, hyphens replaced with underscores.
 
 **Key reference files:**
 - `internal/clawfile/directives.go` — directive type definitions
 - `internal/clawfile/parser.go` — Clawfile line parser
 - `internal/clawfile/emit.go` — Dockerfile label emission
 - `internal/inspect/inspect.go` — label parsing from built image
-- `internal/pod/types.go` — ClawBlock, ResolvedClaw types
+- `internal/pod/types.go` — ClawBlock, HandleInfo types
 - `internal/pod/parser.go` — x-claw YAML parsing
 - `internal/driver/types.go` — ResolvedClaw
 - `cmd/claw/compose_up.go` — main orchestration
 - `internal/pod/compose_emit.go` — compose YAML generation
 - `internal/driver/openclaw/driver.go` — config injection
 - `internal/driver/openclaw/clawdapus_md.go` — CLAWDAPUS.md generation
+- `internal/driver/openclaw/handle_skill.go` — handle skill file generation (new)
 
 ---
 
-## Task 1: Add HandleDirective to Clawfile parser
+## Task 1: Add HandleDirective to Clawfile parser ✅ DONE
 
-**File:** `internal/clawfile/directives.go`
-
-Add a `HandleDirective` struct alongside the existing directive types:
-
-```go
-type HandleDirective struct {
-    Platform string // "discord", "slack", "telegram"
-}
-```
-
-**File:** `internal/clawfile/parser.go`
-
-Parse `HANDLE <platform>` lines. The directive takes a single argument (the platform name, lowercased). Multiple `HANDLE` directives are allowed for multiple platforms.
-
-- If no argument: parse error
-- If more than one token: parse error (platform names are single words)
-- Collect into `ParsedClawfile.Handles []HandleDirective`
-
-Add `Handles []HandleDirective` field to `ParsedClawfile`.
-
-**Test:** `internal/clawfile/parser_test.go`
-
-- `HANDLE discord` → HandleDirective{Platform: "discord"}
-- `HANDLE slack` → HandleDirective{Platform: "slack"}
-- Two HANDLE directives in one file → both collected
-- `HANDLE` with no argument → error
-- `HANDLE discord extra` → error
+**File:** `internal/clawfile/directives.go` — Added `Handles []string` to `ClawConfig`.
+**File:** `internal/clawfile/parser.go` — Added `"handle"` to `knownDirectives`. Parses `HANDLE <platform>`, single arg, lowercased, appended to `config.Handles`.
 
 ---
 
-## Task 2: Emit HANDLE labels in Dockerfile
+## Task 2: Emit HANDLE labels in Dockerfile ✅ DONE
 
-**File:** `internal/clawfile/emit.go`
-
-For each HandleDirective, emit:
-```
-LABEL claw.handle.<platform>=true
-```
-
-e.g. `LABEL claw.handle.discord=true`
-
-The value is `true` (a boolean flag — the user ID is declared in claw-pod.yml, not the image). Multiple HANDLE directives produce multiple LABEL lines.
-
-Add HANDLE to the directive table in the emitted Dockerfile comment block if one exists.
-
-**Test:** `internal/clawfile/emit_test.go`
-
-- `HANDLE discord` → `LABEL claw.handle.discord=true` present in generated Dockerfile
-- `HANDLE discord` + `HANDLE slack` → both labels present
+**File:** `internal/clawfile/emit.go` — Emits `LABEL claw.handle.<platform>=true` for each handle.
 
 ---
 
-## Task 3: Parse claw.handle.* labels in inspect
+## Task 3: Parse claw.handle.* labels in inspect ✅ DONE
 
-**File:** `internal/inspect/inspect.go`
-
-Add `Handles []string` to `ClawInfo`. Platforms are collected from `claw.handle.*` labels:
-
-```go
-case strings.HasPrefix(key, "claw.handle."):
-    platform := strings.TrimPrefix(key, "claw.handle.")
-    info.Handles = append(info.Handles, platform)
-```
-
-Order: sort `Handles` alphabetically for deterministic output.
-
-**Test:** `internal/inspect/inspect_test.go`
-
-- Image with `claw.handle.discord=true` → ClawInfo.Handles = ["discord"]
-- Image with both discord and slack labels → both present, sorted
+**File:** `internal/inspect/inspect.go` — Added `Handles []string` to `ClawInfo`. Collects `claw.handle.*` keys, sorts alphabetically.
 
 ---
 
-## Task 4: Add handles to x-claw block and pod parser
+## Task 4: Add HandleInfo type and x-claw parser support
 
 **File:** `internal/pod/types.go`
 
-Add to `ClawBlock`:
+Add `HandleInfo`, `GuildInfo`, `ChannelInfo` structs. Update `ClawBlock`:
+
 ```go
-Handles map[string]string // platform → user ID, e.g. {"discord": "123456789"}
+type HandleInfo struct {
+    ID       string
+    Username string
+    Guilds   []GuildInfo
+}
+
+type GuildInfo struct {
+    ID       string
+    Name     string
+    Channels []ChannelInfo
+}
+
+type ChannelInfo struct {
+    ID   string
+    Name string
+}
+
+// In ClawBlock:
+Handles map[string]*HandleInfo // platform → contact card
 ```
 
 **File:** `internal/pod/parser.go`
 
-Parse `handles:` from the x-claw service block:
+Parse `handles:` from x-claw. Support two forms:
+- String: `discord: "123456789"` → `&HandleInfo{ID: "123456789"}`
+- Map: `discord: {id: "...", username: "...", guilds: [...]}` → full struct
 
-```yaml
-x-claw:
-  agent: ./AGENTS.md
-  handles:
-    discord: "123456789"
-    slack: "U12345678"
-```
+YAML guild/channel entries: `{id: "...", name: "..."}` or just `"<id>"` string shorthand for channels.
 
-`handles:` values are strings. Numeric values in YAML (if the user forgets quotes) should be coerced to string, following the same pattern as `parseExpose`.
-
-Add `rawHandles map[string]interface{}` to `rawClawBlock`. Coerce values to string in parsing.
-
-**Test:** `internal/pod/parser_test.go` or new `internal/pod/parser_handles_test.go`
-
-- `handles: { discord: "123456789" }` → ClawBlock.Handles = map[string]string{"discord": "123456789"}
-- Numeric value `discord: 123456789` → coerced to "123456789"
-- Missing `handles:` → nil map (not an error)
+Numeric values (unquoted IDs) coerced to string.
 
 ---
 
-## Task 5: Add Handles to ResolvedClaw and driver types
+## Task 5: Add Handles to ResolvedClaw
 
 **File:** `internal/driver/types.go`
 
-Add to `ResolvedClaw`:
 ```go
-Handles map[string]string // platform → user ID (from x-claw handles block)
+// In ResolvedClaw:
+Handles map[string]*HandleInfo // platform → contact card (from x-claw)
 ```
 
-This is the per-service handles map. The pod-wide broadcast env vars are computed from all services' handles at compose time, not stored here.
+Where `HandleInfo`, `GuildInfo`, `ChannelInfo` are imported from `internal/pod` or moved to `internal/driver` (prefer driver package to avoid import cycle).
+
+> **Note on package placement:** If `ResolvedClaw` is in `internal/driver` and `ClawBlock` is in `internal/pod`, define `HandleInfo` in `internal/driver/types.go` and have the pod parser construct `driver.HandleInfo` values. Check for import cycles before deciding.
 
 ---
 
@@ -154,7 +164,7 @@ This is the per-service handles map. The pod-wide broadcast env vars are compute
 
 **File:** `cmd/claw/compose_up.go`
 
-When building `ResolvedClaw` for each service, populate `rc.Handles` from `svc.Claw.Handles`.
+When building `ResolvedClaw` for each service, copy `svc.Claw.Handles` into `rc.Handles`.
 
 ---
 
@@ -162,62 +172,51 @@ When building `ResolvedClaw` for each service, populate `rc.Handles` from `svc.C
 
 **File:** `cmd/claw/compose_up.go`
 
-After all services are resolved, compute the handle broadcast map:
+After all services are resolved, compute handle broadcast env vars:
 
 ```go
-// Collect all (service, platform, userID) triples from the pod
 handleEnvs := map[string]string{}
-for _, (name, rc) := range resolvedClaws {
-    for platform, userID := range rc.Handles {
-        envKey := fmt.Sprintf("CLAW_HANDLE_%s_%s",
-            strings.ToUpper(name),
-            strings.ToUpper(platform),
-        )
-        handleEnvs[envKey] = userID
+for name, rc := range resolvedClaws {
+    prefix := "CLAW_HANDLE_" + envName(name) + "_"
+    for platform, info := range rc.Handles {
+        pfx := prefix + strings.ToUpper(platform)
+        handleEnvs[pfx+"_ID"] = info.ID
+        if info.Username != "" {
+            handleEnvs[pfx+"_USERNAME"] = info.Username
+        }
+        if len(info.Guilds) > 0 {
+            ids := collectGuildIDs(info.Guilds)
+            handleEnvs[pfx+"_GUILDS"] = strings.Join(ids, ",")
+        }
+        jsonBytes, _ := json.Marshal(info)
+        handleEnvs[pfx+"_JSON"] = string(jsonBytes)
     }
 }
 ```
 
-Pass `handleEnvs` to the compose emitter so it can inject them into every service (both claw and non-claw services — the whole point is that Rails, APIs, etc. can read them).
+Where `envName` uppercases and replaces hyphens with underscores.
+
+Pass `handleEnvs` to compose emitter — injected into ALL services (claw and non-claw). Handle env vars are lower-priority: they never override existing env vars. Sort keys for determinism.
 
 **File:** `internal/pod/compose_emit.go`
 
-Accept the handle env vars. For each service in the pod (all services, not just claws), merge `handleEnvs` into the service's environment. Handle env vars never override existing env vars — they are lower-priority. Sorted for determinism.
-
-**Tests:** `internal/pod/compose_emit_handle_test.go`
-
-- Pod with one agent with `handles: { discord: "123" }` → every service gets `CLAW_HANDLE_GATEWAY_DISCORD=123`
-- Two agents with different handles → both broadcast to all services
-- No handles declared → no CLAW_HANDLE_* vars injected
-- Existing env var with same name as CLAW_HANDLE_* → existing wins (not overridden)
+Accept and merge handle env vars into every service's environment block.
 
 ---
 
 ## Task 8: OpenClaw driver — HANDLE enables platform config
 
-**File:** `internal/driver/openclaw/driver.go` (or a new `handle.go`)
+**File:** `internal/driver/openclaw/driver.go` (or `handle.go`)
 
-During `Materialize`, for each platform in `rc.Handles` (or from the image labels if no user ID declared), apply:
-
-```
-op=set  channels.<platform>.enabled  true
-```
-
-This is a JSON patch on the openclaw config. The token itself comes from the standard environment (`DISCORD_TOKEN`, `SLACK_BOT_TOKEN`, etc.) — Clawdapus doesn't manage credentials and doesn't inject them. The runner reads them from env vars at startup.
-
-For the OpenClaw driver specifically:
+During `Materialize`, for each platform in `rc.Handles`, apply:
 - `discord` → `channels.discord.enabled = true`
 - `slack` → `channels.slack.enabled = true`
 - `telegram` → `channels.telegram.enabled = true`
-- Unknown platform → log a warning, continue (don't fail — the driver may not support every platform)
+- Unknown platform → log warning, continue
 
-Note: `SURFACE channel://discord` (Phase 3 Slice 3) will apply the full routing config. `HANDLE discord` alone just enables the platform with defaults. When both are present, `SURFACE channel://discord` takes precedence for routing details; `HANDLE` still fires for env var broadcasting regardless.
+Token/credentials come from env vars (`DISCORD_TOKEN`, etc.) — Clawdapus doesn't manage them.
 
-**Test:** Update `internal/driver/openclaw/driver_test.go` or add `handle_test.go`
-
-- ResolvedClaw with Handles={"discord": "123"} → generated config has `channels.discord.enabled = true`
-- HANDLE slack → `channels.slack.enabled = true`
-- HANDLE unknown-platform → no error, warning logged
+When `SURFACE channel://discord` is also declared (Phase 3 Slice 3), it applies full routing config on top. `HANDLE` alone enables with defaults.
 
 ---
 
@@ -225,65 +224,93 @@ Note: `SURFACE channel://discord` (Phase 3 Slice 3) will apply the full routing 
 
 **File:** `internal/driver/openclaw/clawdapus_md.go`
 
-Add a `## Handles` section to the generated CLAWDAPUS.md, placed after Identity and before Surfaces:
+Add `## Handles` section after Identity, before Surfaces. Emit nested guild/channel tree:
 
 ```markdown
 ## Handles
-- **discord:** @123456789
-- **slack:** U12345678
+### discord
+- **ID:** 123456789
+- **Username:** @crypto-bot
+- **Guilds:**
+  - Crypto Ops HQ (111222333)
+    - #bot-commands (987654321)
+    - #crypto-alerts (555666777)
 ```
 
-Only included when `rc.Handles` is non-empty.
-
-**Test:** `internal/driver/openclaw/clawdapus_md_test.go`
-
-- ResolvedClaw with discord handle → CLAWDAPUS.md contains `## Handles` section
-- Empty handles → no `## Handles` section
+Only emit when `rc.Handles` is non-empty.
 
 ---
 
-## Task 10: Update the openclaw example
+## Task 10: Generate skills/handle-<platform>.md skill files
+
+**File:** `internal/driver/openclaw/handle_skill.go` (new)
+
+For each platform in `rc.Handles`, generate `skills/handle-<platform>.md`:
+
+```markdown
+# Discord Handle: @crypto-bot
+
+## Identity
+- **User ID:** 123456789
+- **Username:** crypto-bot
+
+## Guild Membership
+
+### Crypto Ops HQ (111222333)
+- **#bot-commands** (987654321)
+- **#crypto-alerts** (555666777)
+
+## How to Mention
+Mention this agent with `<@123456789>`.
+
+## How to Route a Message to This Agent
+Post in one of the channels above and include `<@123456789>` in your message.
+DMs: send a direct message to user ID 123456789.
+```
+
+Wire `resolveHandleSkills` into `Materialize` — mount each generated skill file read-only into the runner's `SkillDir`. Add to CLAWDAPUS.md skills index.
+
+---
+
+## Task 11: Update the openclaw example
 
 **File:** `examples/openclaw/claw-pod.yml`
 
-Add a `handles:` block to the gateway service:
+Update crypto-crusher x-claw block with structured handles:
+
 ```yaml
-x-claw:
-  agent: ./AGENTS.md
-  handles:
-    discord: "${DISCORD_USER_ID}"
-  surfaces:
-    - "channel://discord"
-    - "service://fleet-master"
+handles:
+  discord:
+    id: "${DISCORD_USER_ID}"
+    username: "crypto-crusher-bot"
+    guilds:
+      - id: "${DISCORD_GUILD_ID}"
+        name: "Crypto Ops"
+        channels:
+          - id: "${DISCORD_CHANNEL_ID}"
+            name: "bot-commands"
 ```
-
-**File:** `examples/openclaw/Clawfile`
-
-Already has `SURFACE channel://discord` (restored). No HANDLE directive needed unless we want to show the simple enablement path — but since the example uses `SURFACE channel://discord`, HANDLE is redundant for enablement. The example claw-pod.yml `handles:` block is the right place for the user ID.
 
 ---
 
-## Task 11: Final verification
+## Task 12: Final verification
 
 ```bash
+go build ./...
 go test ./...
-go build -o bin/claw ./cmd/claw
 go vet ./...
 ```
 
-All pass. Then:
-
-- Build the openclaw example: `claw build -t claw-openclaw-example examples/openclaw`
-- `claw inspect claw-openclaw-example` shows `claw.handle.discord=true` in labels
-- A test pod with handles generates correct CLAW_HANDLE_* env vars in compose.generated.yml
+All pass. Inspect the openclaw example image, verify handle labels. Check a generated compose.generated.yml for `CLAW_HANDLE_*` env vars in all services.
 
 ---
 
 ## Success Criteria
 
 - `HANDLE discord` in Clawfile → `LABEL claw.handle.discord=true` in built image
-- `handles: { discord: "123" }` in x-claw → `CLAW_HANDLE_<SERVICE>_DISCORD=123` in every service's environment in compose.generated.yml
-- OpenClaw driver enables Discord in JSON5 config when HANDLE discord is declared
-- CLAWDAPUS.md includes `## Handles` section when handles are declared
-- No claw without a declared handle receives a CLAW_HANDLE_* var for itself
+- `handles: { discord: "123" }` (string form) → `CLAW_HANDLE_<SVC>_DISCORD_ID=123` + `CLAW_HANDLE_<SVC>_DISCORD_JSON={"id":"123",...}` in every service
+- Full structured handles with guilds → `_GUILDS` var populated, `_JSON` includes full tree
+- OpenClaw driver enables platform in config when HANDLE declared
+- CLAWDAPUS.md includes `## Handles` section with guild/channel tree
+- `skills/handle-discord.md` generated and mounted, indexed in CLAWDAPUS.md
 - All existing tests continue to pass

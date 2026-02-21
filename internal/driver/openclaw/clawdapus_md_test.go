@@ -137,6 +137,175 @@ func TestGenerateClawdapusMDServiceSkillInSkillsSection(t *testing.T) {
 	}
 }
 
+func TestGenerateClawdapusMDHandlesSection(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "bot",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {
+				ID:       "123456789",
+				Username: "crypto-bot",
+				Guilds: []driver.GuildInfo{
+					{
+						ID:   "111222333",
+						Name: "Crypto Ops HQ",
+						Channels: []driver.ChannelInfo{
+							{ID: "987654321", Name: "bot-commands"},
+							{ID: "555666777", Name: "crypto-alerts"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	if !strings.Contains(md, "## Handles") {
+		t.Error("expected Handles section header")
+	}
+	if !strings.Contains(md, "### discord") {
+		t.Error("expected discord platform header")
+	}
+	if !strings.Contains(md, "123456789") {
+		t.Error("expected handle ID")
+	}
+	if !strings.Contains(md, "crypto-bot") {
+		t.Error("expected username")
+	}
+	if !strings.Contains(md, "111222333") {
+		t.Error("expected guild ID")
+	}
+	if !strings.Contains(md, "Crypto Ops HQ") {
+		t.Error("expected guild name")
+	}
+	if !strings.Contains(md, "987654321") {
+		t.Error("expected channel ID")
+	}
+	if !strings.Contains(md, "#bot-commands") {
+		t.Error("expected channel name with # prefix")
+	}
+}
+
+func TestGenerateClawdapusMDHandlesSectionSortedAlphabetically(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "bot",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"telegram": {ID: "333"},
+			"discord":  {ID: "111"},
+			"slack":    {ID: "U222"},
+		},
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	discordPos := strings.Index(md, "### discord")
+	slackPos := strings.Index(md, "### slack")
+	telegramPos := strings.Index(md, "### telegram")
+
+	if discordPos < 0 || slackPos < 0 || telegramPos < 0 {
+		t.Fatal("expected all three platform headers")
+	}
+	if !(discordPos < slackPos && slackPos < telegramPos) {
+		t.Error("expected platforms sorted alphabetically: discord < slack < telegram")
+	}
+}
+
+func TestGenerateClawdapusMDHandlesSectionAbsentWhenNoHandles(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "bot",
+		ClawType:    "openclaw",
+		Handles:     nil,
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	if strings.Contains(md, "## Handles") {
+		t.Error("expected no Handles section when no handles declared")
+	}
+}
+
+func TestGenerateClawdapusMDHandleWithoutUsername(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "bot",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"slack": {ID: "U012345"},
+		},
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	if !strings.Contains(md, "U012345") {
+		t.Error("expected Slack handle ID")
+	}
+	if strings.Contains(md, "**Username:**") {
+		t.Error("expected no username line when username is empty")
+	}
+}
+
+func TestGenerateClawdapusMDHandleGuildWithoutName(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "bot",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {
+				ID: "123",
+				Guilds: []driver.GuildInfo{
+					{ID: "999"},
+				},
+			},
+		},
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	if !strings.Contains(md, "999") {
+		t.Error("expected guild ID")
+	}
+	// Should not have parentheses for guild name when name is empty
+	if strings.Contains(md, "999 (") {
+		t.Error("expected no parenthesized name when guild name is empty")
+	}
+}
+
+func TestGenerateClawdapusMDHandleSkillsInSkillsSection(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "bot",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"discord":  {ID: "111"},
+			"telegram": {ID: "333"},
+		},
+		Skills: []driver.ResolvedSkill{
+			{Name: "custom-workflow.md", HostPath: "/tmp/skills/custom-workflow.md"},
+			// Auto-generated handle skills that should be filtered from operator section
+			{Name: "handle-discord.md", HostPath: "/tmp/.claw-runtime/bot/skills/handle-discord.md"},
+			{Name: "handle-telegram.md", HostPath: "/tmp/.claw-runtime/bot/skills/handle-telegram.md"},
+		},
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	// Handle skills appear in Skills section
+	if !strings.Contains(md, "skills/handle-discord.md") {
+		t.Error("expected handle-discord.md in skills section")
+	}
+	if !strings.Contains(md, "skills/handle-telegram.md") {
+		t.Error("expected handle-telegram.md in skills section")
+	}
+	// Operator skill appears too
+	if !strings.Contains(md, "skills/custom-workflow.md") {
+		t.Error("expected operator skill in skills section")
+	}
+	// Handle skills should NOT appear twice (once from rc.Handles, not again from rc.Skills)
+	discordCount := strings.Count(md, "handle-discord.md")
+	if discordCount != 1 {
+		t.Errorf("expected handle-discord.md once in skills section, found %d times", discordCount)
+	}
+}
+
 func TestGenerateClawdapusMDVolumeReadOnly(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		ServiceName: "analyst",

@@ -8,8 +8,19 @@ services:
       agent: ./AGENTS.md
       skills:
         - ./skills/surface-fleet-master.md
+      handles:
+        discord:
+          id: "123456789012345678"
+          username: "my-claw-bot"
+          guilds:
+            - id: "987654321098765432"
+              name: "Ops Server"
+              channels:
+                - id: "111222333444555666"
+                  name: "bot-commands"
+                - id: "777888999000111222"
+                  name: "alerts"
       surfaces:
-        - "channel://discord"
         - "service://fleet-master"
     environment:
       OPENCLAW_PORT: "18789"

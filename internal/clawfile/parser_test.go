@@ -173,3 +173,85 @@ func TestParseRejectsInvalidInvokeSchedule(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestParseHandleDirective(t *testing.T) {
+	result, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nHANDLE discord\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Config.Handles) != 1 {
+		t.Fatalf("expected 1 handle, got %d", len(result.Config.Handles))
+	}
+	if result.Config.Handles[0] != "discord" {
+		t.Errorf("expected handle 'discord', got %q", result.Config.Handles[0])
+	}
+}
+
+func TestParseHandleLowercases(t *testing.T) {
+	result, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nHANDLE Discord\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Config.Handles[0] != "discord" {
+		t.Errorf("expected lowercased 'discord', got %q", result.Config.Handles[0])
+	}
+}
+
+func TestParseMultipleHandleDirectives(t *testing.T) {
+	result, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nHANDLE discord\nHANDLE slack\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Config.Handles) != 2 {
+		t.Fatalf("expected 2 handles, got %d: %v", len(result.Config.Handles), result.Config.Handles)
+	}
+	if result.Config.Handles[0] != "discord" {
+		t.Errorf("expected first handle 'discord', got %q", result.Config.Handles[0])
+	}
+	if result.Config.Handles[1] != "slack" {
+		t.Errorf("expected second handle 'slack', got %q", result.Config.Handles[1])
+	}
+}
+
+func TestParseHandleRequiresArgument(t *testing.T) {
+	_, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nHANDLE\n"))
+	if err == nil {
+		t.Fatal("expected HANDLE with no argument to fail")
+	}
+	if !strings.Contains(err.Error(), "HANDLE requires exactly one platform name") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseHandleRejectsMultipleTokens(t *testing.T) {
+	_, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nHANDLE discord extra\n"))
+	if err == nil {
+		t.Fatal("expected HANDLE with extra tokens to fail")
+	}
+	if !strings.Contains(err.Error(), "HANDLE requires exactly one platform name") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseHandleDuplicateErrors(t *testing.T) {
+	_, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nHANDLE discord\nHANDLE discord\n"))
+	if err == nil {
+		t.Fatal("expected duplicate HANDLE to fail")
+	}
+	if !strings.Contains(err.Error(), "duplicate HANDLE") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseHandleNotPresentMeansEmpty(t *testing.T) {
+	result, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Config.Handles == nil {
+		t.Fatal("expected non-nil Handles slice (empty, not nil)")
+	}
+	if len(result.Config.Handles) != 0 {
+		t.Errorf("expected 0 handles, got %d", len(result.Config.Handles))
+	}
+}

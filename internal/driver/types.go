@@ -17,12 +17,34 @@ type ResolvedClaw struct {
 	Agent         string            // filename from image labels (e.g., "AGENTS.md")
 	AgentHostPath string            // resolved host path for bind mount
 	Models        map[string]string // slot -> provider/model
+	Handles       map[string]*HandleInfo // platform -> contact card (from x-claw handles block)
 	Surfaces      []ResolvedSurface
 	Skills        []ResolvedSkill
 	Privileges    map[string]string
 	Configures    []string          // openclaw config set commands from labels
 	Count         int               // from pod x-claw (default 1)
 	Environment   map[string]string // from pod environment block
+}
+
+// HandleInfo is the full contact card for an agent on a platform.
+// Enables sibling services to mention, message, and route to this agent.
+type HandleInfo struct {
+	ID       string      `json:"id"`
+	Username string      `json:"username,omitempty"`
+	Guilds   []GuildInfo `json:"guilds,omitempty"`
+}
+
+// GuildInfo describes one guild/server/workspace membership.
+type GuildInfo struct {
+	ID       string        `json:"id"`
+	Name     string        `json:"name,omitempty"`
+	Channels []ChannelInfo `json:"channels,omitempty"`
+}
+
+// ChannelInfo describes a single channel within a guild.
+type ChannelInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
 }
 
 type ResolvedSkill struct {

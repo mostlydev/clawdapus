@@ -16,6 +16,7 @@ var knownDirectives = map[string]bool{
 	"model":     true,
 	"cllama":    true,
 	"persona":   true,
+	"handle":    true,
 	"surface":   true,
 	"invoke":    true,
 	"privilege": true,
@@ -97,6 +98,18 @@ func Parse(r io.Reader) (*ParseResult, error) {
 			if err := setSingleton("PERSONA", &config.Persona, args[0], node.StartLine); err != nil {
 				return nil, err
 			}
+
+		case "handle":
+			if len(args) != 1 {
+				return nil, fmt.Errorf("line %d: HANDLE requires exactly one platform name", node.StartLine)
+			}
+			platform := strings.ToLower(args[0])
+			for _, existing := range config.Handles {
+				if existing == platform {
+					return nil, fmt.Errorf("line %d: duplicate HANDLE directive for platform %q", node.StartLine, platform)
+				}
+			}
+			config.Handles = append(config.Handles, platform)
 
 		case "surface":
 			surface, err := parseSurface(args)

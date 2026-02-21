@@ -11,6 +11,9 @@ func TestClawConfigEmpty(t *testing.T) {
 	if len(config.Models) != 0 {
 		t.Fatalf("expected no models, got %d", len(config.Models))
 	}
+	if len(config.Handles) != 0 {
+		t.Fatalf("expected no handles, got %d", len(config.Handles))
+	}
 	if len(config.Surfaces) != 0 {
 		t.Fatalf("expected no surfaces, got %d", len(config.Surfaces))
 	}

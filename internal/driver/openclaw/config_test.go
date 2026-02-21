@@ -126,3 +126,161 @@ func TestGenerateConfigRejectsUnknownCommand(t *testing.T) {
 		t.Fatal("expected error for unrecognized CONFIGURE command")
 	}
 }
+
+func TestGenerateConfigHandleEnablesDiscord(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {ID: "123456789"},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	channels, ok := config["channels"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected channels key in config")
+	}
+	discord, ok := channels["discord"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected channels.discord in config")
+	}
+	if discord["enabled"] != true {
+		t.Errorf("expected channels.discord.enabled=true, got %v", discord["enabled"])
+	}
+}
+
+func TestGenerateConfigHandleEnablesSlack(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"slack": {ID: "U123456"},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	channels := config["channels"].(map[string]interface{})
+	slack := channels["slack"].(map[string]interface{})
+	if slack["enabled"] != true {
+		t.Errorf("expected channels.slack.enabled=true, got %v", slack["enabled"])
+	}
+}
+
+func TestGenerateConfigHandleEnablesTelegram(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"telegram": {ID: "987654321"},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	channels := config["channels"].(map[string]interface{})
+	telegram := channels["telegram"].(map[string]interface{})
+	if telegram["enabled"] != true {
+		t.Errorf("expected channels.telegram.enabled=true, got %v", telegram["enabled"])
+	}
+}
+
+func TestGenerateConfigHandleMultiplePlatforms(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {ID: "111"},
+			"slack":   {ID: "U222"},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	channels := config["channels"].(map[string]interface{})
+	if channels["discord"].(map[string]interface{})["enabled"] != true {
+		t.Error("expected channels.discord.enabled=true")
+	}
+	if channels["slack"].(map[string]interface{})["enabled"] != true {
+		t.Error("expected channels.slack.enabled=true")
+	}
+}
+
+func TestGenerateConfigHandleUnknownPlatformNoError(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"mastodon": {ID: "@bot@example.social"},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error for unknown platform: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Unknown platform should not create a channels entry
+	if channels, ok := config["channels"]; ok {
+		if channelMap, ok := channels.(map[string]interface{}); ok {
+			if _, hasMastodon := channelMap["mastodon"]; hasMastodon {
+				t.Error("expected no channels.mastodon entry for unknown platform")
+			}
+		}
+	}
+}
+
+func TestGenerateConfigHandleNilMeansNoChannels(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles:    nil,
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	if _, ok := config["channels"]; ok {
+		t.Error("expected no channels key when Handles is nil")
+	}
+}

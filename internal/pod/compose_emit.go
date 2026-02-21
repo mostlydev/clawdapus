@@ -1,6 +1,7 @@
 package pod
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -62,6 +63,10 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 			}
 		}
 	}
+
+	// Compute pod-wide CLAW_HANDLE_* env vars from all claw service handles.
+	// These are injected into every service (claw and non-claw) at lowest priority.
+	handleEnvs := computeHandleEnvs(p.Services)
 
 	// Sort service names for deterministic output
 	serviceNames := sortedServiceNames(p.Services)
@@ -196,8 +201,11 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 				cs.Volumes = mounts
 			}
 
-			// Environment: merge pod env + driver env (driver wins on conflict)
+			// Environment: handle envs (lowest) < pod env < driver env (highest).
 			env := make(map[string]string)
+			for k, v := range handleEnvs {
+				env[k] = v
+			}
 			for k, v := range svc.Environment {
 				env[k] = v
 			}
@@ -251,6 +259,63 @@ func sortedServiceNames(services map[string]*Service) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// computeHandleEnvs collects handles from all claw services and builds the
+// pod-wide CLAW_HANDLE_<SERVICE>_<PLATFORM>_* env var map.
+func computeHandleEnvs(services map[string]*Service) map[string]string {
+	envs := make(map[string]string)
+
+	// Sort service names for determinism
+	names := make([]string, 0, len(services))
+	for n := range services {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		svc := services[name]
+		if svc.Claw == nil || len(svc.Claw.Handles) == 0 {
+			continue
+		}
+
+		svcKey := strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
+
+		// Sort platforms for determinism
+		platforms := make([]string, 0, len(svc.Claw.Handles))
+		for p := range svc.Claw.Handles {
+			platforms = append(platforms, p)
+		}
+		sort.Strings(platforms)
+
+		for _, platform := range platforms {
+			info := svc.Claw.Handles[platform]
+			if info == nil {
+				continue
+			}
+			pfx := "CLAW_HANDLE_" + svcKey + "_" + strings.ToUpper(platform)
+
+			envs[pfx+"_ID"] = info.ID
+
+			if info.Username != "" {
+				envs[pfx+"_USERNAME"] = info.Username
+			}
+
+			if len(info.Guilds) > 0 {
+				ids := make([]string, 0, len(info.Guilds))
+				for _, g := range info.Guilds {
+					ids = append(ids, g.ID)
+				}
+				envs[pfx+"_GUILDS"] = strings.Join(ids, ",")
+			}
+
+			if jsonBytes, err := json.Marshal(info); err == nil {
+				envs[pfx+"_JSON"] = string(jsonBytes)
+			}
+		}
+	}
+
+	return envs
 }
 
 func surfaceAccessMode(surface driver.ResolvedSurface) (string, error) {

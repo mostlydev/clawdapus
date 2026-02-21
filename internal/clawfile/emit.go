@@ -64,6 +64,10 @@ func buildLabelLines(config *ClawConfig) []string {
 		lines = append(lines, formatLabel("claw.model."+slot, config.Models[slot]))
 	}
 
+	for _, platform := range config.Handles {
+		lines = append(lines, formatLabel("claw.handle."+platform, "true"))
+	}
+
 	for i, surface := range config.Surfaces {
 		lines = append(lines, formatLabel(fmt.Sprintf("claw.surface.%d", i), surface.Raw))
 	}

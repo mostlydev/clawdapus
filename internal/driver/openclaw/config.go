@@ -31,6 +31,20 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 	}
 
+	// Apply HANDLE directives: enable each platform in channels config.
+	for platform := range rc.Handles {
+		switch platform {
+		case "discord", "slack", "telegram":
+			if err := setPath(config, "channels."+platform+".enabled", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE %s: %w", platform, err)
+			}
+		default:
+			// Unknown platform — no native config path known; log and skip.
+			// The env var broadcast still fires regardless.
+			fmt.Printf("[claw] warning: openclaw driver has no config mapping for HANDLE platform %q; skipping channel enablement\n", platform)
+		}
+	}
+
 	// Always enable bootstrap-extra-files hook and ensure CLAWDAPUS.md is in paths.
 	// Force enabled=true (CLAWDAPUS.md injection is required for clawdapus to function).
 	// Merge paths: preserve any user-added paths from CONFIGURE directives.

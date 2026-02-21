@@ -16,6 +16,7 @@ type ClawInfo struct {
 	Models     map[string]string
 	Cllama     string
 	Persona    string
+	Handles    []string
 	Surfaces   []string
 	Skills     []string
 	Privileges map[string]string
@@ -26,6 +27,7 @@ type ClawInfo struct {
 func ParseLabels(labels map[string]string) *ClawInfo {
 	info := &ClawInfo{
 		Models:     make(map[string]string),
+		Handles:    make([]string, 0),
 		Surfaces:   make([]string, 0),
 		Skills:     make([]string, 0),
 		Privileges: make(map[string]string),
@@ -38,6 +40,7 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 		Value string
 	}
 
+	handles := make([]string, 0)
 	surfaces := make([]indexedEntry, 0)
 	skills := make([]indexedEntry, 0)
 	configures := make([]indexedEntry, 0)
@@ -59,6 +62,11 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 			info.Cllama = value
 		case key == "claw.persona.default":
 			info.Persona = value
+		case strings.HasPrefix(key, "claw.handle."):
+			if value == "true" || value == "1" {
+				platform := strings.TrimPrefix(key, "claw.handle.")
+				handles = append(handles, platform)
+			}
 		case strings.HasPrefix(key, "claw.privilege."):
 			mode := strings.TrimPrefix(key, "claw.privilege.")
 			info.Privileges[mode] = value
@@ -99,6 +107,9 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 			})
 		}
 	}
+
+	sort.Strings(handles)
+	info.Handles = handles
 
 	sort.Slice(surfaces, func(i int, j int) bool {
 		if surfaces[i].Index == surfaces[j].Index {

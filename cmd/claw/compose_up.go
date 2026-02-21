@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
-	_ "github.com/mostlydev/clawdapus/internal/driver/openclaw"
+	"github.com/mostlydev/clawdapus/internal/driver/openclaw"
 	"github.com/mostlydev/clawdapus/internal/inspect"
 	"github.com/mostlydev/clawdapus/internal/pod"
 	"github.com/mostlydev/clawdapus/internal/runtime"
@@ -145,6 +145,13 @@ func runComposeUp(podFile string) error {
 		if err != nil {
 			return fmt.Errorf("service %q: resolve generated service skills: %w", name, err)
 		}
+		handleSkills, err := resolveHandleSkills(svcRuntimeDir, svc.Claw.Handles)
+		if err != nil {
+			return fmt.Errorf("service %q: resolve handle skills: %w", name, err)
+		}
+		if len(handleSkills) > 0 {
+			generatedSkills = mergeResolvedSkills(generatedSkills, handleSkills)
+		}
 		podSkills := make([]driver.ResolvedSkill, 0)
 		if svc.Claw != nil {
 			podSkills, err = runtime.ResolveSkills(podDir, svc.Claw.Skills)
@@ -165,6 +172,7 @@ func runComposeUp(podFile string) error {
 			Agent:         agentFile,
 			AgentHostPath: agentHostPath,
 			Models:        info.Models,
+			Handles:       svc.Claw.Handles,
 			Configures:    info.Configures,
 			Privileges:    info.Privileges,
 			Count:         svc.Claw.Count,
@@ -339,6 +347,33 @@ func resolveServiceGeneratedSkills(runtimeDir string, surfaces []driver.Resolved
 		})
 	}
 
+	return generated, nil
+}
+
+func resolveHandleSkills(runtimeDir string, handles map[string]*driver.HandleInfo) ([]driver.ResolvedSkill, error) {
+	if len(handles) == 0 {
+		return nil, nil
+	}
+	skillsDir := filepath.Join(runtimeDir, "skills")
+	if err := os.MkdirAll(skillsDir, 0700); err != nil {
+		return nil, fmt.Errorf("create handle skill dir: %w", err)
+	}
+	generated := make([]driver.ResolvedSkill, 0, len(handles))
+	for platform, info := range handles {
+		if info == nil {
+			continue
+		}
+		name := fmt.Sprintf("handle-%s.md", platform)
+		skillPath := filepath.Join(skillsDir, name)
+		content := openclaw.GenerateHandleSkill(platform, info)
+		if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
+			return nil, fmt.Errorf("write handle skill %q: %w", name, err)
+		}
+		generated = append(generated, driver.ResolvedSkill{
+			Name:     name,
+			HostPath: skillPath,
+		})
+	}
 	return generated, nil
 }
 

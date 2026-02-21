@@ -82,6 +82,96 @@ func TestParseLabelsExtractsSkillEmit(t *testing.T) {
 	}
 }
 
+func TestParseLabelsExtractsHandles(t *testing.T) {
+	raw := map[string]string{
+		"claw.type":           "openclaw",
+		"claw.handle.discord": "true",
+	}
+
+	info := ParseLabels(raw)
+
+	if len(info.Handles) != 1 {
+		t.Fatalf("expected 1 handle, got %d: %v", len(info.Handles), info.Handles)
+	}
+	if info.Handles[0] != "discord" {
+		t.Errorf("expected handle 'discord', got %q", info.Handles[0])
+	}
+}
+
+func TestParseLabelsHandlesSortedAlphabetically(t *testing.T) {
+	raw := map[string]string{
+		"claw.type":           "openclaw",
+		"claw.handle.slack":   "true",
+		"claw.handle.discord": "true",
+		"claw.handle.telegram": "true",
+	}
+
+	info := ParseLabels(raw)
+
+	if len(info.Handles) != 3 {
+		t.Fatalf("expected 3 handles, got %d: %v", len(info.Handles), info.Handles)
+	}
+	if info.Handles[0] != "discord" {
+		t.Errorf("expected sorted first handle 'discord', got %q", info.Handles[0])
+	}
+	if info.Handles[1] != "slack" {
+		t.Errorf("expected sorted second handle 'slack', got %q", info.Handles[1])
+	}
+	if info.Handles[2] != "telegram" {
+		t.Errorf("expected sorted third handle 'telegram', got %q", info.Handles[2])
+	}
+}
+
+func TestParseLabelsIgnoresFalseyHandleValues(t *testing.T) {
+	raw := map[string]string{
+		"claw.type":           "openclaw",
+		"claw.handle.discord": "false",
+		"claw.handle.slack":   "0",
+		"claw.handle.telegram": "yes",
+		"claw.handle.matrix":  "true",
+	}
+
+	info := ParseLabels(raw)
+
+	if len(info.Handles) != 1 {
+		t.Fatalf("expected only 1 truthy handle, got %d: %v", len(info.Handles), info.Handles)
+	}
+	if info.Handles[0] != "matrix" {
+		t.Errorf("expected handle 'matrix' (only truthy one), got %q", info.Handles[0])
+	}
+}
+
+func TestParseLabelsAcceptsOneAsTruthy(t *testing.T) {
+	raw := map[string]string{
+		"claw.type":           "openclaw",
+		"claw.handle.discord": "1",
+	}
+
+	info := ParseLabels(raw)
+
+	if len(info.Handles) != 1 {
+		t.Fatalf("expected 1 handle, got %d: %v", len(info.Handles), info.Handles)
+	}
+	if info.Handles[0] != "discord" {
+		t.Errorf("expected handle 'discord', got %q", info.Handles[0])
+	}
+}
+
+func TestParseLabelsNoHandlesMeansEmpty(t *testing.T) {
+	raw := map[string]string{
+		"claw.type": "openclaw",
+	}
+
+	info := ParseLabels(raw)
+
+	if info.Handles == nil {
+		t.Fatal("expected non-nil Handles slice")
+	}
+	if len(info.Handles) != 0 {
+		t.Errorf("expected 0 handles, got %d: %v", len(info.Handles), info.Handles)
+	}
+}
+
 func TestParseLabelsIgnoresNonClawLabels(t *testing.T) {
 	raw := map[string]string{
 		"org.opencontainers.image.title": "something",

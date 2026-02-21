@@ -328,6 +328,194 @@ func TestEmitComposeMultiServiceSharedVolume(t *testing.T) {
 	}
 }
 
+func TestEmitComposeHandleEnvsBroadcastToAllServices(t *testing.T) {
+	p := &Pod{
+		Name: "crypto-ops",
+		Services: map[string]*Service{
+			"crusher": {
+				Image: "openclaw:latest",
+				Claw: &ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {ID: "123456789", Username: "crypto-bot"},
+					},
+				},
+			},
+			"api": {
+				Image: "custom/api:latest",
+				// Not a claw — no x-claw block
+			},
+		},
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"crusher": {ReadOnly: true, Restart: "on-failure"},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	// Both crusher and api should have the CLAW_HANDLE vars
+	if !strings.Contains(out, "CLAW_HANDLE_CRUSHER_DISCORD_ID: \"123456789\"") {
+		t.Error("expected CLAW_HANDLE_CRUSHER_DISCORD_ID in output")
+	}
+	if !strings.Contains(out, "CLAW_HANDLE_CRUSHER_DISCORD_USERNAME: crypto-bot") {
+		t.Error("expected CLAW_HANDLE_CRUSHER_DISCORD_USERNAME in output")
+	}
+	if !strings.Contains(out, "CLAW_HANDLE_CRUSHER_DISCORD_JSON") {
+		t.Error("expected CLAW_HANDLE_CRUSHER_DISCORD_JSON in output")
+	}
+}
+
+func TestEmitComposeHandleEnvsMultipleServicesAndPlatforms(t *testing.T) {
+	p := &Pod{
+		Name: "multi-pod",
+		Services: map[string]*Service{
+			"alpha": {
+				Image: "openclaw:latest",
+				Claw: &ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {ID: "111"},
+						"slack":   {ID: "U222"},
+					},
+				},
+			},
+			"beta": {
+				Image: "openclaw:latest",
+				Claw: &ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {ID: "333"},
+					},
+				},
+			},
+		},
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"alpha": {ReadOnly: true, Restart: "on-failure"},
+		"beta":  {ReadOnly: true, Restart: "on-failure"},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	// All handle vars should appear across all services
+	if !strings.Contains(out, "CLAW_HANDLE_ALPHA_DISCORD_ID") {
+		t.Error("expected CLAW_HANDLE_ALPHA_DISCORD_ID")
+	}
+	if !strings.Contains(out, "CLAW_HANDLE_ALPHA_SLACK_ID") {
+		t.Error("expected CLAW_HANDLE_ALPHA_SLACK_ID")
+	}
+	if !strings.Contains(out, "CLAW_HANDLE_BETA_DISCORD_ID") {
+		t.Error("expected CLAW_HANDLE_BETA_DISCORD_ID")
+	}
+}
+
+func TestEmitComposeHandleEnvWithGuilds(t *testing.T) {
+	p := &Pod{
+		Name: "guild-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "openclaw:latest",
+				Claw: &ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							ID: "999",
+							Guilds: []driver.GuildInfo{
+								{ID: "aaa", Channels: []driver.ChannelInfo{{ID: "bbb"}}},
+								{ID: "ccc"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"bot": {ReadOnly: true, Restart: "on-failure"},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	if !strings.Contains(out, "CLAW_HANDLE_BOT_DISCORD_GUILDS") {
+		t.Error("expected CLAW_HANDLE_BOT_DISCORD_GUILDS")
+	}
+	if !strings.Contains(out, "aaa,ccc") {
+		t.Errorf("expected comma-separated guild IDs 'aaa,ccc' in output:\n%s", out)
+	}
+}
+
+func TestEmitComposeHandleEnvsDoNotOverrideExisting(t *testing.T) {
+	p := &Pod{
+		Name: "override-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "openclaw:latest",
+				Claw: &ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {ID: "111"},
+					},
+				},
+				Environment: map[string]string{
+					// Operator explicitly overrides the auto-generated _ID var
+					"CLAW_HANDLE_BOT_DISCORD_ID": "operator-set",
+				},
+			},
+		},
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"bot": {ReadOnly: true, Restart: "on-failure"},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	// Operator-declared _ID should win over auto-computed one
+	if !strings.Contains(out, "operator-set") {
+		t.Error("expected operator-set value to appear in output")
+	}
+	// Auto-computed _ID value "111" should not appear as the _ID value
+	// (it may still appear in _JSON, which is expected — _JSON reflects struct)
+	if strings.Contains(out, "CLAW_HANDLE_BOT_DISCORD_ID: \"111\"") {
+		t.Error("expected handle _ID env var to be overridden by operator env, but found auto-computed value")
+	}
+}
+
+func TestEmitComposeNoHandlesMeansNoHandleEnvs(t *testing.T) {
+	p := &Pod{
+		Name: "no-handles-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "openclaw:latest",
+				Claw:  &ClawBlock{},
+			},
+		},
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"bot": {ReadOnly: true, Restart: "on-failure"},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	if strings.Contains(out, "CLAW_HANDLE_") {
+		t.Error("expected no CLAW_HANDLE_* vars when no handles declared")
+	}
+}
+
 func TestEmitComposeIsDeterministic(t *testing.T) {
 	p := &Pod{
 		Name: "det-pod",

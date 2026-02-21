@@ -130,21 +130,34 @@ All 15 tasks done (11 core + 4 hardening). Exit criteria met:
 ## Phase 3.5: HANDLE Directive + Social Topology Projection
 
 **Plan:** `docs/plans/2026-02-21-phase35-handle-directive.md`
-**Status:** PENDING
+**Status:** DONE
 
 | # | Task | Status | Commit | Notes |
 |---|------|--------|--------|-------|
-| 1 | Add HandleDirective to Clawfile parser | PENDING | — | `internal/clawfile/directives.go` + `parser.go` |
-| 2 | Emit HANDLE labels in Dockerfile | PENDING | — | `LABEL claw.handle.<platform>=true` |
-| 3 | Parse claw.handle.* labels in inspect | PENDING | — | ClawInfo.Handles []string |
-| 4 | Add handles to x-claw block and pod parser | PENDING | — | `handles: { discord: "..." }` |
-| 5 | Add Handles to ResolvedClaw | PENDING | — | `internal/driver/types.go` |
-| 6 | Wire handles into ResolvedClaw in compose_up | PENDING | — | |
-| 7 | Generate CLAW_HANDLE_* env vars + inject into all services | PENDING | — | Broadcast to every service in pod |
-| 8 | OpenClaw driver — HANDLE enables platform config | PENDING | — | `channels.<platform>.enabled = true` |
-| 9 | CLAWDAPUS.md — Handles section | PENDING | — | Agent's own public identities |
-| 10 | Update openclaw example | PENDING | — | `handles:` in claw-pod.yml |
-| 11 | Final verification | PENDING | — | `go test ./...` |
+| 1 | Add HandleDirective to Clawfile parser | DONE | — | `Handles []string` in ClawConfig, HANDLE directive parsed + dedup guard |
+| 2 | Emit HANDLE labels in Dockerfile | DONE | — | `LABEL claw.handle.<platform>=true` |
+| 3 | Parse claw.handle.* labels in inspect | DONE | — | `ClawInfo.Handles []string`, sorted, only "true"/"1" accepted |
+| 4 | Add handles to x-claw block and pod parser | DONE | — | String shorthand + full map form with guild/channel hierarchy |
+| 5 | Add Handles to ResolvedClaw | DONE | — | `HandleInfo{ID, Username, Guilds[]GuildInfo{Channels[]ChannelInfo}}` in driver/types.go |
+| 6 | Wire handles into ResolvedClaw in compose_up | DONE | — | `rc.Handles = svc.Claw.Handles` |
+| 7 | Generate CLAW_HANDLE_* env vars + inject into all services | DONE | — | `_ID`, `_USERNAME`, `_GUILDS`, `_JSON` broadcast to every service in pod |
+| 8 | OpenClaw driver — HANDLE enables platform config | DONE | — | `channels.<platform>.enabled = true` for discord/slack/telegram |
+| 9 | CLAWDAPUS.md — Handles section | DONE | — | Guild/channel tree + handle skills in skills index |
+| 10 | Generate handle skill files | DONE | — | `skills/handle-<platform>.md` per claw; `resolveHandleSkills` in compose_up |
+| 11 | Update openclaw example | DONE | — | `handles:` with full discord guild/channel map in claw-pod.yml |
+| 12 | Final verification | DONE | — | `go test ./...`, `go build`, `go vet` all clean |
+
+### Design decisions (Phase 3.5)
+
+- HandleInfo carries full membership schema: guild IDs + names + channel IDs + names
+- Platform keys normalized to lowercase in pod parser (bug fix from Codex review)
+- Duplicate HANDLE directives in Clawfile → hard parse error (fail-closed)
+- Label value semantics: only `"true"` or `"1"` treated as enabled in inspect
+- CLAW_HANDLE_* env vars injected at lowest priority (below pod env, below driver env)
+- handle-<platform>.md skills generated per claw in svcRuntimeDir/skills/
+- Skills section in CLAWDAPUS.md: handle-* and surface-* auto-generated filtered from operator section
+
+**Completed:** 2026-02-21
 
 ---
 

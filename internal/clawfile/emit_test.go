@@ -84,6 +84,59 @@ func TestEmitProducesValidDockerfile(t *testing.T) {
 	}
 }
 
+func TestEmitHandleLabel(t *testing.T) {
+	result, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nHANDLE discord\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := Emit(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(output, `LABEL claw.handle.discord="true"`) {
+		t.Errorf("expected claw.handle.discord label in output, got:\n%s", output)
+	}
+}
+
+func TestEmitMultipleHandleLabels(t *testing.T) {
+	result, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nHANDLE discord\nHANDLE slack\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := Emit(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(output, `LABEL claw.handle.discord="true"`) {
+		t.Error("expected claw.handle.discord label in output")
+	}
+	if !strings.Contains(output, `LABEL claw.handle.slack="true"`) {
+		t.Error("expected claw.handle.slack label in output")
+	}
+}
+
+func TestEmitHandleRawDirectiveNotLeaked(t *testing.T) {
+	result, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nHANDLE discord\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := Emit(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "HANDLE ") {
+			t.Fatalf("raw HANDLE directive leaked into output: %q", line)
+		}
+	}
+}
+
 func TestEmitIsDeterministic(t *testing.T) {
 	parsed, err := Parse(strings.NewReader(testClawfile))
 	if err != nil {
