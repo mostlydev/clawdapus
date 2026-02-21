@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
@@ -107,6 +108,9 @@ func Parse(r io.Reader) (*ParseResult, error) {
 			if len(args) < 6 {
 				return nil, fmt.Errorf("line %d: INVOKE requires 5 cron fields + command", node.StartLine)
 			}
+			if err := validateCronSchedule(args[:5]); err != nil {
+				return nil, fmt.Errorf("line %d: %w", node.StartLine, err)
+			}
 			config.Invocations = append(config.Invocations, Invocation{
 				Schedule: strings.Join(args[:5], " "),
 				Command:  strings.TrimSpace(strings.TrimPrefix(remainder, strings.Join(args[:5], " "))),
@@ -134,6 +138,10 @@ func Parse(r io.Reader) (*ParseResult, error) {
 		case "act":
 			// Included for forward compatibility with worker mode semantics.
 		}
+	}
+
+	if strings.TrimSpace(config.ClawType) == "" {
+		return nil, fmt.Errorf("missing required CLAW_TYPE directive")
 	}
 
 	return &ParseResult{Config: config, DockerNodes: dockerNodes}, nil
@@ -199,6 +207,9 @@ func parseSurface(args []string) (Surface, error) {
 	accessMode := ""
 	if len(args) > 1 {
 		accessMode = strings.Join(args[1:], " ")
+		if err := validateSurfaceAccessMode(parsed.Scheme, accessMode); err != nil {
+			return Surface{}, err
+		}
 	}
 
 	return Surface{
@@ -207,4 +218,104 @@ func parseSurface(args []string) (Surface, error) {
 		Target:     target,
 		AccessMode: accessMode,
 	}, nil
+}
+
+func validateSurfaceAccessMode(scheme, accessMode string) error {
+	mode := strings.TrimSpace(strings.ToLower(accessMode))
+	if mode == "" {
+		return nil
+	}
+
+	switch scheme {
+	case "volume", "host":
+		if mode != "read-only" && mode != "read-write" {
+			return fmt.Errorf("SURFACE %s access mode %q is invalid (expected read-only or read-write)", scheme, accessMode)
+		}
+		return nil
+	case "service", "channel", "egress":
+		return fmt.Errorf("SURFACE %s does not support access mode %q", scheme, accessMode)
+	default:
+		return fmt.Errorf("SURFACE scheme %q does not support access mode %q", scheme, accessMode)
+	}
+}
+
+func validateCronSchedule(fields []string) error {
+	if len(fields) != 5 {
+		return fmt.Errorf("INVOKE requires exactly 5 cron fields")
+	}
+
+	specs := []struct {
+		name string
+		min  int
+		max  int
+	}{
+		{name: "minute", min: 0, max: 59},
+		{name: "hour", min: 0, max: 23},
+		{name: "day", min: 1, max: 31},
+		{name: "month", min: 1, max: 12},
+		{name: "weekday", min: 0, max: 7},
+	}
+
+	for i, spec := range specs {
+		if err := validateCronField(fields[i], spec.min, spec.max); err != nil {
+			return fmt.Errorf("invalid %s field %q: %w", spec.name, fields[i], err)
+		}
+	}
+	return nil
+}
+
+func validateCronField(field string, min, max int) error {
+	parts := strings.Split(field, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return fmt.Errorf("empty value")
+		}
+
+		base := part
+		if strings.Contains(part, "/") {
+			stepParts := strings.Split(part, "/")
+			if len(stepParts) != 2 {
+				return fmt.Errorf("invalid step syntax")
+			}
+			base = stepParts[0]
+			step, err := strconv.Atoi(stepParts[1])
+			if err != nil || step <= 0 {
+				return fmt.Errorf("invalid step %q", stepParts[1])
+			}
+		}
+
+		if base == "*" {
+			continue
+		}
+
+		if strings.Contains(base, "-") {
+			rangeParts := strings.Split(base, "-")
+			if len(rangeParts) != 2 {
+				return fmt.Errorf("invalid range syntax")
+			}
+			start, err := strconv.Atoi(rangeParts[0])
+			if err != nil {
+				return fmt.Errorf("invalid range start %q", rangeParts[0])
+			}
+			end, err := strconv.Atoi(rangeParts[1])
+			if err != nil {
+				return fmt.Errorf("invalid range end %q", rangeParts[1])
+			}
+			if start < min || end > max || start > end {
+				return fmt.Errorf("range %d-%d out of bounds %d-%d", start, end, min, max)
+			}
+			continue
+		}
+
+		value, err := strconv.Atoi(base)
+		if err != nil {
+			return fmt.Errorf("invalid value %q", base)
+		}
+		if value < min || value > max {
+			return fmt.Errorf("value %d out of bounds %d-%d", value, min, max)
+		}
+	}
+
+	return nil
 }

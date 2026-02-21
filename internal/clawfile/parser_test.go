@@ -102,3 +102,40 @@ func TestParseFailsDuplicateSingleton(t *testing.T) {
 		t.Fatal("expected duplicate CLAW_TYPE to fail")
 	}
 }
+
+func TestParseRequiresClawType(t *testing.T) {
+	_, err := Parse(strings.NewReader("FROM alpine\nAGENT AGENTS.md\n"))
+	if err == nil {
+		t.Fatal("expected missing CLAW_TYPE to fail")
+	}
+	if !strings.Contains(err.Error(), "missing required CLAW_TYPE directive") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseRejectsInvalidSurfaceAccessMode(t *testing.T) {
+	_, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nSURFACE volume://cache read-only-ish\n"))
+	if err == nil {
+		t.Fatal("expected invalid surface access mode to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseRejectsSurfaceAccessModeForChannel(t *testing.T) {
+	_, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nSURFACE channel://discord read-only\n"))
+	if err == nil {
+		t.Fatal("expected channel surface with access mode to fail")
+	}
+}
+
+func TestParseRejectsInvalidInvokeSchedule(t *testing.T) {
+	_, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nINVOKE 99 * * * * heartbeat\n"))
+	if err == nil {
+		t.Fatal("expected invalid cron schedule to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid minute field") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

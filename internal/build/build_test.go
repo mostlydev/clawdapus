@@ -11,9 +11,9 @@ func TestGenerateWritesDockerfile(t *testing.T) {
 	dir := t.TempDir()
 	clawfilePath := filepath.Join(dir, "Clawfile")
 
-	input := `FROM alpine:latest
+input := `FROM alpine:latest
 
-CLAW_TYPE generic
+CLAW_TYPE openclaw
 AGENT CONTRACT.md
 
 RUN echo hello
@@ -44,7 +44,29 @@ RUN echo hello
 	if !strings.Contains(text, "FROM alpine:latest") {
 		t.Fatal("missing FROM instruction in generated output")
 	}
-	if !strings.Contains(text, `LABEL claw.type="generic"`) {
+	if !strings.Contains(text, `LABEL claw.type="openclaw"`) {
 		t.Fatal("missing claw.type label in generated output")
+	}
+}
+
+func TestGenerateRejectsUnknownClawType(t *testing.T) {
+	dir := t.TempDir()
+	clawfilePath := filepath.Join(dir, "Clawfile")
+
+	input := `FROM alpine:latest
+
+CLAW_TYPE unknown-runner
+AGENT CONTRACT.md
+`
+	if err := os.WriteFile(clawfilePath, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Generate(clawfilePath)
+	if err == nil {
+		t.Fatal("expected Generate to fail for unknown CLAW_TYPE")
+	}
+	if !strings.Contains(err.Error(), "unknown CLAW_TYPE") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

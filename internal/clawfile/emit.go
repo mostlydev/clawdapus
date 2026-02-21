@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/moby/buildkit/frontend/dockerfile/parser"
 )
 
 func Emit(result *ParseResult) (string, error) {
@@ -15,36 +13,27 @@ func Emit(result *ParseResult) (string, error) {
 	}
 
 	var b strings.Builder
-	lastFromIndex := findLastFrom(result.DockerNodes)
 	generated := buildGeneratedLines(result.Config)
 
-	for i, node := range result.DockerNodes {
+	for _, node := range result.DockerNodes {
 		original := strings.TrimSuffix(node.Original, "\n")
 		if original != "" {
 			b.WriteString(original)
 			b.WriteString("\n")
 		}
+	}
 
-		if i == lastFromIndex && len(generated) > 0 {
+	if len(generated) > 0 {
+		if b.Len() > 0 {
 			b.WriteString("\n")
-			for _, line := range generated {
-				b.WriteString(line)
-				b.WriteString("\n")
-			}
+		}
+		for _, line := range generated {
+			b.WriteString(line)
+			b.WriteString("\n")
 		}
 	}
 
 	return b.String(), nil
-}
-
-func findLastFrom(nodes []*parser.Node) int {
-	last := -1
-	for i, node := range nodes {
-		if strings.EqualFold(node.Value, "from") {
-			last = i
-		}
-	}
-	return last
 }
 
 func buildGeneratedLines(config *ClawConfig) []string {
@@ -101,8 +90,12 @@ func buildInfraLines(config *ClawConfig) []string {
 	if len(config.Invocations) > 0 {
 		lines = append(lines, "RUN mkdir -p /etc/cron.d")
 		cronLines := make([]string, 0, len(config.Invocations))
+		cronUser := "root"
+		if runtimeUser := strings.TrimSpace(config.Privileges["runtime"]); runtimeUser != "" {
+			cronUser = runtimeUser
+		}
 		for _, invocation := range config.Invocations {
-			cronLines = append(cronLines, fmt.Sprintf("%s root %s", invocation.Schedule, invocation.Command))
+			cronLines = append(cronLines, fmt.Sprintf("%s %s %s", invocation.Schedule, cronUser, invocation.Command))
 		}
 		lines = append(lines, fmt.Sprintf("RUN printf '%%s\\n' %s > /etc/cron.d/claw && chmod 0644 /etc/cron.d/claw", quoteShellArgs(cronLines)))
 	}

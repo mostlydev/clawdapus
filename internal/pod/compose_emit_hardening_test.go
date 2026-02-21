@@ -242,3 +242,32 @@ func TestEmitComposeVolumeSurfaceOpaqueURI(t *testing.T) {
 		t.Fatal("expected opaque volume URI to resolve to shared-cache mount")
 	}
 }
+
+func TestEmitComposeRejectsInvalidSurfaceAccessMode(t *testing.T) {
+	p := &Pod{
+		Name: "invalid-access-pod",
+		Services: map[string]*Service{
+			"worker": {
+				Image: "ghcr.io/example/worker:v1",
+				Claw: &ClawBlock{
+					Surfaces: []string{"volume://shared-cache read-only-ish"},
+				},
+			},
+		},
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"worker": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+		},
+	}
+
+	_, err := EmitCompose(p, results)
+	if err == nil {
+		t.Fatal("expected invalid surface access mode to fail")
+	}
+	if !strings.Contains(err.Error(), "unsupported access mode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

@@ -37,6 +37,9 @@ func TestEmitProducesValidDockerfile(t *testing.T) {
 	if !strings.Contains(output, "/etc/cron.d/claw") {
 		t.Fatal("missing cron file generation")
 	}
+	if !strings.Contains(output, "claw-user heartbeat") {
+		t.Fatal("expected INVOKE cron line to use PRIVILEGE runtime user")
+	}
 	if !strings.Contains(output, "heartbeat") {
 		t.Fatal("missing heartbeat invocation")
 	}
@@ -51,6 +54,9 @@ func TestEmitProducesValidDockerfile(t *testing.T) {
 	}
 	if !strings.Contains(output, "WORKDIR /workspace") {
 		t.Fatal("missing passthrough WORKDIR instruction")
+	}
+	if strings.Index(output, "RUN apt-get update") > strings.Index(output, "/etc/cron.d/claw") {
+		t.Fatal("expected generated infra lines to be injected after user RUN instructions")
 	}
 
 	for _, rawDirective := range []string{
@@ -88,5 +94,36 @@ func TestEmitIsDeterministic(t *testing.T) {
 
 	if a != b {
 		t.Fatal("expected deterministic emit output")
+	}
+}
+
+func TestEmitInjectsGeneratedLinesAtEndOfFinalStage(t *testing.T) {
+	input := `FROM alpine:3.20 AS base
+RUN echo base
+
+FROM alpine:3.20
+CLAW_TYPE openclaw
+AGENT AGENTS.md
+INVOKE */5 * * * * heartbeat
+PRIVILEGE runtime claw-user
+RUN echo final
+`
+	parsed, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := Emit(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	idxFinalRun := strings.LastIndex(output, "RUN echo final")
+	idxCron := strings.LastIndex(output, "/etc/cron.d/claw")
+	if idxFinalRun == -1 || idxCron == -1 {
+		t.Fatalf("expected both final RUN and cron generation in output:\n%s", output)
+	}
+	if idxCron < idxFinalRun {
+		t.Fatalf("expected generated infra lines after final stage instructions:\n%s", output)
 	}
 }

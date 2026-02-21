@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/mostlydev/clawdapus/internal/clawfile"
+	"github.com/mostlydev/clawdapus/internal/driver"
+	_ "github.com/mostlydev/clawdapus/internal/driver/openclaw" // register built-in drivers for build-time validation
 )
 
 func Generate(clawfilePath string) (string, error) {
@@ -19,6 +21,9 @@ func Generate(clawfilePath string) (string, error) {
 	parsed, err := clawfile.Parse(file)
 	if err != nil {
 		return "", fmt.Errorf("parse clawfile %s: %w", clawfilePath, err)
+	}
+	if _, err := driver.Lookup(parsed.Config.ClawType); err != nil {
+		return "", fmt.Errorf("validate CLAW_TYPE %q: %w", parsed.Config.ClawType, err)
 	}
 
 	rendered, err := clawfile.Emit(parsed)
