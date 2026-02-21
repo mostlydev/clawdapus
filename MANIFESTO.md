@@ -68,7 +68,7 @@ Every Claw has a drift score — how far actual behavior deviates from the expec
 
 ### Principle 5: Surfaces Are Declared and Described
 
-Bots within a pod communicate through shared surfaces — volumes and services, whatever the operator declares. Surfaces serve two audiences: operators get topology visibility, bots get capability discovery. Service containers describe what they offer using their native protocols — MCP tool listings, OpenAPI specs, or static declarations. Those descriptions get assembled into a skill map that the runner can consume. Clawdapus enforces access modes only on container mounts, where Docker has authority. For everything else, surfaces declare topology, not permissions.
+Bots within a pod communicate through shared surfaces — volumes, chat channels, APIs, databases, whatever the operator declares. Surfaces serve two audiences: operators get topology visibility, bots get capability discovery. Service containers describe what they offer using their native protocols — MCP tool listings, OpenAPI specs, or static declarations. Those descriptions get assembled into a skill map that the runner can consume. Clawdapus enforces access modes only on container mounts, where Docker has authority. For everything else, surfaces declare topology, not permissions.
 
 ### Principle 6: Claws Are Users
 
@@ -205,7 +205,7 @@ The operator picks the weight class that fits the problem. Lightweight runners a
 
 **HANDLE** — Declares the agent's public identity on a communication platform (e.g., `HANDLE discord`). Drivers translate this into runner-native configuration (like OpenClaw's channel settings), making it trivial to connect agents to platforms without learning the runner's underlying config JSON structure. At the pod level, handles are also broadcast to other services as environment variables so APIs know who the agents are.
 
-**SURFACE** — Declares what this Claw connects to within the infrastructure (volumes, MCP services). Clawdapus resolves service references against expose blocks in the pod and assembles the skill map. Access modes are enforced only on mounts (volumes, host paths) where Docker has authority. For services and APIs, the Claw authenticates with standard credentials (e.g. env vars).
+**SURFACE** — Declares what this Claw connects to. Volumes, queues, chat platforms, APIs, MCP services. Clawdapus resolves service references against expose blocks in the pod and assembles the skill map. Access modes are enforced only on mounts (volumes, host paths) where Docker has authority. For services, channels, and APIs, the Claw authenticates with standard credentials — Clawdapus declares topology, not permissions.
 
 **SKILL** — Mounts skill files from the host into the runner's skill directory, read-only. Skills are the manual for how to use capabilities — operator-provided guides, surface-generated usage docs, or discovery-populated API references. The driver knows where skills go per runner type. All skills are indexed in `CLAWDAPUS.md`.
 
@@ -252,6 +252,7 @@ INVOKE 0 */4 * * *   drift-check
 HANDLE discord
 
 # Communication surfaces
+SURFACE channel://discord
 SURFACE volume://shared-cache       read-write
 SURFACE service://company-crm
 SURFACE service://fleet-master
@@ -444,6 +445,11 @@ services:
       count: 3
       surfaces:
         - volume://shared-cache: read-write
+        - channel://discord:
+            guilds:
+              "1465489501551067136":
+                require_mention: true
+            dm: { enabled: true }
         - service://market-scanner
         - service://company-crm
       describe:
@@ -516,7 +522,7 @@ Every Claw receives a `CLAWDAPUS.md` — the infrastructure layer's letter to th
 
 Skills come from three sources:
 1. **Explicit SKILL directives** — operator-provided skill files from the host, mounted read-only
-2. **Surface-generated skills** — the driver generates skill files for service surfaces describing connection details, protocol, and constraints
+2. **Surface-generated skills** — the driver generates skill files for service/channel surfaces describing connection details, protocol, and constraints
 3. **Discovery-populated skills** — at pod startup, Clawdapus queries service surfaces for self-description (MCP tool listings, OpenAPI specs, static describe blocks) and populates skill content from the results
 
 The driver knows where skills go per runner type. All three sources feed the same skill directory. `CLAWDAPUS.md` indexes them all.
@@ -542,8 +548,12 @@ The driver knows where skills go per runner type. All three sources feed the sam
 - **Credentials:** `COINGECKO_KEY` (env)
 - **Skill:** `skills/surface-market-scanner.md`
 
+### discord (channel)
+- **Skill:** `skills/surface-discord.md`
+
 ## Skills
 - `skills/surface-market-scanner.md` — Market Scanner API (discovered via OpenAPI)
+- `skills/surface-discord.md` — Discord channel constraints and routing
 - `skills/crypto-feeds.md` — Crypto data feed tools (operator-provided)
 ```
 
@@ -567,6 +577,10 @@ Available capabilities for crypto-crusher-0:
 
   FROM shared-cache (volume://shared-cache):
     read-write mount at /mnt/shared-cache
+
+  FROM discord (channel://discord):
+    guild 1465489501551067136, DMs enabled
+    [skills/surface-discord.md]
 
   OPERATOR SKILLS:
     skills/crypto-feeds.md — Crypto data feed tools

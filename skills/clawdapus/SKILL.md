@@ -67,7 +67,14 @@ For `service://<name>`, Clawdapus also mounts a service skill when available:
 - Primary source: `claw.skill.emit` label in the target service image (path inside image).
 - Fallback: generated `skills/surface-<name>.md` with hostname + discovered port hints.
 
-> **Note on Application Integrations:** External services (like Discord, Slack, external APIs) are *not* Surfaces. They are configured natively by the runner via `CONFIGURE` directives and standard Docker `environment` variables.
+**Driver-mediated (runner-specific config injection):**
+
+| Scheme | Enforcement |
+|--------|------------|
+| `channel://<platform>` | Driver injects platform config (Discord, Slack, Telegram). Token comes from standard `environment:` block. |
+| `webhook://<name>` | Driver configures runner's HTTP endpoint. |
+
+If a driver doesn't support a declared surface scheme, **preflight fails** and the container doesn't start.
 
 ## Skill Mounting Semantics
 
@@ -96,6 +103,7 @@ services:
     x-claw:                      # service-level
       agent: ./AGENTS.md         # host path, mounted :ro
       surfaces:
+        - "channel://discord"
         - "service://fleet-master"
     environment:                  # standard compose, NOT x-claw
       DISCORD_TOKEN: ${DISCORD_TOKEN}

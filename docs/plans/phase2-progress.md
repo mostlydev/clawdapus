@@ -125,6 +125,57 @@ All 15 tasks done (11 core + 4 hardening). Exit criteria met:
 
 ---
 
+---
+
+## Phase 3.5: HANDLE Directive + Social Topology Projection
+
+**Plan:** `docs/plans/2026-02-21-phase35-handle-directive.md`
+**Status:** PENDING
+
+| # | Task | Status | Commit | Notes |
+|---|------|--------|--------|-------|
+| 1 | Add HandleDirective to Clawfile parser | PENDING | — | `internal/clawfile/directives.go` + `parser.go` |
+| 2 | Emit HANDLE labels in Dockerfile | PENDING | — | `LABEL claw.handle.<platform>=true` |
+| 3 | Parse claw.handle.* labels in inspect | PENDING | — | ClawInfo.Handles []string |
+| 4 | Add handles to x-claw block and pod parser | PENDING | — | `handles: { discord: "..." }` |
+| 5 | Add Handles to ResolvedClaw | PENDING | — | `internal/driver/types.go` |
+| 6 | Wire handles into ResolvedClaw in compose_up | PENDING | — | |
+| 7 | Generate CLAW_HANDLE_* env vars + inject into all services | PENDING | — | Broadcast to every service in pod |
+| 8 | OpenClaw driver — HANDLE enables platform config | PENDING | — | `channels.<platform>.enabled = true` |
+| 9 | CLAWDAPUS.md — Handles section | PENDING | — | Agent's own public identities |
+| 10 | Update openclaw example | PENDING | — | `handles:` in claw-pod.yml |
+| 11 | Final verification | PENDING | — | `go test ./...` |
+
+---
+
+## Phase 3 Slice 3: Channel Surface Bindings
+
+**Plan:** `docs/plans/2026-02-21-phase3-slice3-channel-surfaces.md`
+**Status:** PENDING
+
+| # | Task | Status | Commit | Notes |
+|---|------|--------|--------|-------|
+| 1 | Define ChannelConfig + update ResolvedSurface | PENDING | — | `internal/driver/types.go` |
+| 2 | Parse channel surfaces from x-claw (string + map forms) | PENDING | — | `internal/pod/parser.go` |
+| 3 | Wire channel surfaces through compose_up | PENDING | — | Pass ChannelConfig to driver |
+| 4 | OpenClaw driver — translate channel surface to config ops | PENDING | — | v1 hardcoded JSON5 patches |
+| 5 | Generate surface skill for channel surfaces | PENDING | — | `skills/surface-discord.md` |
+| 6 | CLAWDAPUS.md — channel surface section | PENDING | — | |
+| 7 | Preflight — driver capability check | PENDING | — | Fail on unsupported channel platform |
+| 8 | Update openclaw example | PENDING | — | |
+| 9 | Final verification | PENDING | — | `go test ./...` |
+
+---
+
+## LLM Configuration Workers (Phase X)
+
+**Plan:** `docs/plans/2026-02-21-llm-configuration-workers.md`
+**Status:** DESIGN ONLY — implement after Phase 3 Slice 3 is proven
+
+First target: migrate channel surface config translation (Phase 3 Slice 3, Task 4) from hardcoded driver ops to LLM worker intent-generator + verifier model.
+
+---
+
 ## Key Decisions Made During Execution
 
 - CONFIGURE directives now emitted as `claw.configure.N` labels (Task 1)

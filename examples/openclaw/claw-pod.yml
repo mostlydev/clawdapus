@@ -9,6 +9,7 @@ services:
       skills:
         - ./skills/surface-fleet-master.md
       surfaces:
+        - "channel://discord"
         - "service://fleet-master"
     environment:
       OPENCLAW_PORT: "18789"

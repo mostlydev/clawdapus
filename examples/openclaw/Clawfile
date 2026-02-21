@@ -15,6 +15,7 @@ INVOKE 0,30 * * * * heartbeat
 
 TRACK apt pip npm
 
+SURFACE channel://discord
 SURFACE service://fleet-master
 
 SKILL ./skills/openclaw-runbook.md

@@ -1,10 +1,27 @@
 # Clawdapus Architecture Plan
 
 **Date:** 2026-02-18
-**Status:** v7 — Claws Are Users principle, simplified surface/credential model
+**Status:** v8 — LLM configuration workers, HANDLE directive, channel surface restoration
 **Source of truth:** `MANIFESTO.md`
 **Reviews:** Grok (structural critique), Codex (architecture + driver model), operator (cllama clarification, enforcement model)
 **Deliberation:** 3-agent talking stick (alpha/Codex, beta/Claude, gamma/Grok) — arch-review room, 3 rounds, consensus reached
+
+## Implementation Status
+
+| Phase | Slice | Status |
+|-------|-------|--------|
+| Phase 1 — Clawfile parser + build | — | **DONE** |
+| Phase 2 — Driver framework + pod runtime + OpenClaw + volume surfaces | — | **DONE** |
+| Phase 3 — Surface manifests | Slice 1: CLAWDAPUS.md + multi-claw | **DONE** |
+| Phase 3 — Service surface skills | Slice 2: claw.skill.emit + fallback generation | **DONE** |
+| Phase 3.5 — HANDLE directive + social topology | — | **PENDING** — `docs/plans/2026-02-21-phase35-handle-directive.md` |
+| Phase 3 — Channel surface bindings | Slice 3: driver-mediated channel config | **PENDING** — `docs/plans/2026-02-21-phase3-slice3-channel-surfaces.md` |
+| LLM Configuration Workers | — | **DESIGN** — `docs/plans/2026-02-21-llm-configuration-workers.md` |
+| Phase 4 — cllama sidecar + policy pipeline | — | NOT STARTED |
+| Phase 5 — Drift scoring + fleet governance | — | NOT STARTED |
+| Phase 6 — Recipe promotion + worker mode | — | NOT STARTED |
+
+Progress tracker: `docs/plans/phase2-progress.md`
 
 ---
 
@@ -89,7 +106,11 @@ See also: [ADR-001: cllama Transport](../decisions/001-cllama-transport.md), [AD
 
 Each driver implements the **driver contract** (see below). `CLAW_TYPE` still compiles to a label at build time (`LABEL claw.type=openclaw`) for image introspection, but at runtime it selects behavior.
 
-### 5. Enforcement via Config Injection (not cllama)
+### 5. Enforcement via Config Injection — v1 Hardcoded, v2 LLM Workers
+
+> **Design direction:** The current driver model uses hardcoded Go logic to translate directives into config mutations. A planned evolution (documented in [`docs/plans/2026-02-21-llm-configuration-workers.md`](2026-02-21-llm-configuration-workers.md)) replaces the translation step with an ephemeral LLM worker that runs inside the runner image, applies intents using the runner's own tools, and reports what it did for independent verification. The driver shrinks from *translator* to *intent-generator + verifier*. Phase 2 ships the v1 model (hardcoded). Channel surface config (Phase 3 Slice 3) is the first feature implemented worker-first.
+
+### 5a. Enforcement via Config Injection (not cllama)
 
 The primary enforcement model is **config injection** — surgically writing specific config branches into the runner's existing configuration, using the runner's own tools. This works without cllama.
 
@@ -213,6 +234,9 @@ Each driver provides:
 | Heartbeat | `set agents.defaults.heartbeat.every` via Go-native JSON5 patch + system cron override |
 | `HANDLE discord` | `set channels.discord.enabled true` via Go-native JSON5 patch (token from standard env) |
 | `HANDLE slack` | `set channels.slack.enabled true` via Go-native JSON5 patch (token from standard env) |
+| `SURFACE channel://discord` | `set channels.discord.*` via Go-native JSON5 patch (token from standard env) |
+| `SURFACE channel://slack` | `set channels.slack.*` via Go-native JSON5 patch (token from standard env) |
+| `SURFACE channel://telegram` | `set channels.telegram.*` via Go-native JSON5 patch (token from standard env) |
 
 **Config injection strategy:** The OpenClaw driver does NOT shell out to `openclaw config set`. The `openclaw` CLI is verbose (splash banners, doctor checks, `.bak` file creation, Node.js cold-start penalty per invocation) and shelling out N times for N config operations is prohibitively slow and noisy. Instead, the driver uses a Go JSON5 library to: (1) read the base `openclaw.json`, (2) apply all required `set` operations in-memory, (3) write the finalized config to the host, and (4) `mount_ro` it into the container. This aligns with the "write config on host, mount read-only" strategy.
 
@@ -255,7 +279,65 @@ These are enforced during compose generation. Every claw type gets them — no d
 
 Pod-level surfaces are wired by Clawdapus directly into `compose.generated.yml`. If a Claw doesn't declare a surface, it doesn't get access — the network and volume topology are locked to declarations.
 
-**Access modes are enforced only on mounts** (`volume://`, `host://`) where Docker has authority. For services, the surface declaration controls network reachability. What the Claw can do within a service is determined by its credentials — delivered through standard compose mechanisms (`environment:`, `secrets:`, or mounted credential files). External applications (like Discord or Slack) are not Surfaces; they are configured natively by the runner via `CONFIGURE` and standard Docker `environment` blocks.
+**Access modes are enforced only on mounts** (`volume://`, `host://`) where Docker has authority. For services, the surface declaration controls network reachability. What the Claw can do within a service is determined by its credentials — delivered through standard compose mechanisms (`environment:`, `secrets:`, or mounted credential files).
+
+### Driver-Level Surfaces (runner-specific, mediated by driver)
+
+These represent external platform bindings that require runner-specific config injection. The claw-pod.yml declares intent; the driver translates to runner-native configuration.
+
+| Scheme | What it is | Enforcement |
+|--------|-----------|-------------|
+| `channel://<platform>` | Messaging platform binding (Discord, Slack, Telegram, etc.) | Driver injects platform config into runner's config |
+| `webhook://<name>` | Inbound webhook endpoint | Driver configures runner's HTTP endpoint handling |
+
+**Channels are the key example.** Connecting an OpenClaw bot to Discord requires:
+- A bot token (delivered via standard `environment:` block — Clawdapus doesn't manage secrets)
+- Channel routing config (which guilds, which users, DM policies, approval flows)
+- Agent-to-channel bindings
+
+The token is a standard env var. The routing config is driver-mediated. The driver reads the channel surface declaration and translates it to runner config ops, referencing env vars by convention.
+
+### Channel Surface Example
+
+**In claw-pod.yml:**
+```yaml
+services:
+  my-claw:
+    x-claw:
+      agent: ./AGENTS.md
+      surfaces:
+        - volume://shared-cache: read-write
+        - service://company-crm
+        - channel://discord:
+            guilds:
+              "1465489501551067136":
+                policy: allowlist
+                users: ["167037070349434880"]
+                require_mention: true
+            dm:
+              enabled: true
+              policy: allowlist
+              allow_from: ["167037070349434880"]
+    environment:                        # standard compose — not x-claw
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      CRM_API_KEY: ${CRM_API_KEY}
+```
+
+**What happens at `claw up`:**
+
+1. `volume://shared-cache` → Clawdapus generates compose volume mount with `:rw` (pod-level)
+2. `service://company-crm` → Clawdapus generates compose network wiring (pod-level)
+3. `channel://discord` → passed to the OpenClaw driver, which translates to:
+   ```
+   op=set  channels.discord.enabled          true
+   op=set  channels.discord.guilds.1465489501551067136.requireMention  true
+   op=set  channels.discord.guilds.1465489501551067136.users  [...]
+   op=set  channels.discord.dmPolicy         allowlist
+   op=set  channels.discord.allowFrom        [...]
+   ```
+   The driver references `DISCORD_TOKEN` from the standard environment by convention — it doesn't manage the secret itself.
+
+**If the driver doesn't support a surface scheme:** preflight fails with a clear error ("openclaw driver supports channel://discord; generic driver does not"). The Claw doesn't start.
 
 ### Driver Capability Map (updated)
 
@@ -268,10 +350,11 @@ type DriverCapabilities struct {
     Healthcheck    bool      // can report runner health
     Restart        bool      // can trigger graceful restart
     Reload         bool      // can reload config without restart (optional)
+    Surfaces       []string  // supported surface schemes: ["channel", "webhook", ...]
 }
 ```
 
-Pod-level surface schemes (`volume`, `host`, `service`) are universal and handled by Clawdapus.
+Pod-level surface schemes (`volume`, `host`, `service`) are NOT listed in the driver's `Surfaces` field — they're universal and handled by Clawdapus. Only driver-mediated schemes appear here.
 
 ---
 
@@ -366,6 +449,7 @@ All directives translate to standard Dockerfile primitives at build time.
 | `INVOKE` | `RUN echo "..." >> /etc/cron.d/claw` | Cron schedule entries |
 | `TRACK` | `RUN claw-track-install apt pip npm` | Install package manager wrappers |
 | `ACT` | `RUN ...` (worker mode only) | Worker-mode setup commands |
+| `HANDLE` | `LABEL claw.handle.<platform>=...` | Platform identity declaration; driver enables integration, emitter broadcasts identity to pod |
 | `SURFACE` | `LABEL claw.surface.<n>=...` | Consumed surface declarations |
 | `SKILL` | `LABEL claw.skill.<n>=...` | Skill files to mount read-only into the runner's skill directory |
 | `PRIVILEGE` | `LABEL claw.privilege.<mode>=...` | Per-mode privilege config |
@@ -389,6 +473,7 @@ Standard Dockerfile directives (`FROM`, `RUN`, `COPY`, `ENV`, `ENTRYPOINT`, etc.
 | `CONFIGURE` | yes | no (runs from image) |
 | `TRACK` | yes | no |
 | `ACT` | yes | no |
+| `HANDLE` | yes | yes (additive) |
 | `SURFACE` | yes (default declarations) | yes (additive) |
 | `SKILL` | yes (default skills) | yes (additive) |
 | `PRIVILEGE` | yes (default modes) | yes |
@@ -578,11 +663,11 @@ Volume surfaces are enforced at the compose generation level — Clawdapus write
 
 **Success criteria:** A claw-pod.yml with an OpenClaw service starts correctly with enforced model pin and read-only contract. Missing contract blocks startup. Failed driver preflight blocks startup. `claw ps` shows container status and driver enforcement state. Claws sharing a volume can read/write shared files according to their declared access mode; a Claw without declared access to a volume cannot mount it.
 
-### Phase 3 — Surface Manifests + Skills + Multi-Driver
+### Phase 3 — Surface Manifests + Skills + Channel Bindings + Multi-Driver
 
 **Goal:** Surfaces generate two layers of context: a bootstrapped manifest (SURFACES.md) always visible to the agent, and per-surface skill files for complex surfaces. `claw skillmap` works. Multiple claw types and surface types supported.
 
-Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds surface context injection, service surfaces (pod-internal MCP/REST/gRPC endpoints), and skill generation.
+Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds surface context injection, service surfaces (pod-internal MCP/REST/gRPC endpoints), driver-mediated surfaces (channel bindings), and skill generation.
 
 **Slice 1 — Surface manifests + multi-claw example (volume surfaces):**
 1. Parse pod-level `surfaces` from `x-claw` into `ResolvedSurface` structs, wire into `ResolvedClaw`
@@ -596,18 +681,26 @@ Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds surf
 7. Driver generates skill files for service surfaces: `skills/surface-<name>.md` containing host, port, protocol, credential env vars, and usage documentation from service discovery
 8. Skills are mounted read-only into the container's skills directory — agents discover them through the runner's standard skill mechanism
 9. SURFACES.md references skill files: `"See skills/surface-<name>.md for usage"`
-10. Run the service discovery pipeline (steps 11-14) to populate skill content
+10. Run the service discovery pipeline (steps 17-20) to populate skill content
+
+**Slice 3 — Channel bindings (driver-mediated):**
+11. Parse `channel://<platform>` surface declarations from `x-claw`
+12. Pass channel config to the driver for runner-specific injection
+13. Driver translates channel YAML to runner config ops (e.g. `openclaw config set channels.discord.*`)
+14. Driver generates skill files for channel surfaces describing platform capabilities and constraints
+15. Driver references platform tokens from standard compose `environment:` by convention (Clawdapus does not manage credentials)
+16. Preflight validates driver supports the declared channel schemes
 
 **Service discovery:**
-11. Query MCP services for tool listings via MCP protocol
-12. Query REST services for OpenAPI specs (if available)
-13. Fall back to static `describe` blocks for services that can't self-describe
-14. Discovery results populate skill file content — the skill is the "manual" for the surface
+17. Query MCP services for tool listings via MCP protocol
+18. Query REST services for OpenAPI specs (if available)
+19. Fall back to static `describe` blocks for services that can't self-describe
+20. Discovery results populate skill file content — the skill is the "manual" for the surface
 
 **Multi-driver:**
-15. Implement generic driver (env var conventions: `CONTRACT_PATH`, `MODEL_PRIMARY`, etc.)
-16. Implement Claude Code driver (settings.json + CLAUDE.md contract)
-17. Prove the driver abstraction works across at least 3 runner types
+21. Implement generic driver (env var conventions: `CONTRACT_PATH`, `MODEL_PRIMARY`, etc.)
+22. Implement Claude Code driver (settings.json + CLAUDE.md contract)
+23. Prove the driver abstraction works across at least 3 runner types
 
 **CLAWDAPUS.md — single context injection point:**
 The driver generates a `CLAWDAPUS.md` file — the infrastructure layer's letter to the agent. Always bootstrapped into the agent's context. Contains identity (pod, service, type), surfaces (name, type, access, location), and a skills index (what skill files are available). This is the agent's map of its environment.
@@ -620,8 +713,9 @@ A new `SKILL` directive in Clawfile and `skills:` in x-claw allows operators to 
 - **Skills** (`skills/` directory) = the manual. Detailed usage guides for complex surfaces and operator-provided skills. Agents look them up on demand through the runner's standard skill mechanism. Read-only mounted.
 - Volume surfaces are simple enough that CLAWDAPUS.md alone covers them.
 - Service surfaces get a companion skill with host, port, protocol, credential env vars, and discovered capabilities.
+- Channel surfaces get a companion skill describing platform capabilities, routing config, and constraints.
 
-**Success criteria:** Every Claw receives a `CLAWDAPUS.md` bootstrapped into its context with identity, surfaces, and skill index. SKILL directives and surface-generated skills are mounted into the runner's skill directory. `claw skillmap <claw>` shows correct capability inventory. Mixed pods with different claw types start correctly.
+**Success criteria:** Every Claw receives a `CLAWDAPUS.md` bootstrapped into its context with identity, surfaces, and skill index. SKILL directives and surface-generated skills are mounted into the runner's skill directory. `claw skillmap <claw>` shows correct capability inventory. A `channel://discord` surface results in correct config injection plus a generated skill. Mixed pods with different claw types start correctly. A channel surface on a driver that doesn't support it fails preflight with a clear error.
 
 ### Phase 3.5 — Social Topology Projection (Leviathan Pattern)
 
