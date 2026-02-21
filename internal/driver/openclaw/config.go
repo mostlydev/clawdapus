@@ -13,8 +13,27 @@ import (
 func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 	config := make(map[string]interface{})
 
-	// Apply MODEL directives
+	// Gateway must run in local mode inside managed containers (not cloud/hosted mode).
+	// Required: without this openclaw refuses to start the gateway.
+	if err := setPath(config, "gateway.mode", "local"); err != nil {
+		return nil, fmt.Errorf("config generation: %w", err)
+	}
+
+	// Set workspace to /claw so openclaw finds AGENTS.md (mounted there) and workspace skills
+	// (/claw/skills/). Bootstrap-extra-files paths (e.g. "CLAWDAPUS.md") are also relative
+	// to workspace, so /claw/CLAWDAPUS.md resolves correctly.
+	if err := setPath(config, "agents.defaults.workspace", "/claw"); err != nil {
+		return nil, fmt.Errorf("config generation: %w", err)
+	}
+
+	// Apply MODEL directives. openclaw uses "fallbacks" ([]string), not "fallback" (string).
 	for slot, model := range rc.Models {
+		if slot == "fallback" {
+			if err := setPath(config, "agents.defaults.model.fallbacks", []string{model}); err != nil {
+				return nil, fmt.Errorf("config generation: %w", err)
+			}
+			continue
+		}
 		if err := setPath(config, "agents.defaults.model."+slot, model); err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
 		}
@@ -69,13 +88,6 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 	}
 
-	// Always enable bootstrap-extra-files hook and ensure CLAWDAPUS.md is in paths.
-	// Force enabled=true (CLAWDAPUS.md injection is required for clawdapus to function).
-	// Merge paths: preserve any user-added paths from CONFIGURE directives.
-	if err := ensureBootstrapHook(config); err != nil {
-		return nil, fmt.Errorf("config generation: %w", err)
-	}
-
 	return json.MarshalIndent(config, "", "  ")
 }
 
@@ -102,37 +114,6 @@ func parseConfigSetCommand(cmd string) (string, interface{}, error) {
 	return path, value, nil
 }
 
-// ensureBootstrapHook forces the bootstrap-extra-files hook to be enabled and
-// ensures "CLAWDAPUS.md" is in its paths list, merging with any user-configured paths.
-func ensureBootstrapHook(config map[string]interface{}) error {
-	// Navigate to hooks.bootstrap-extra-files, creating intermediate maps as needed.
-	hookPath := "hooks.bootstrap-extra-files"
-	hookObj, err := getOrCreatePath(config, hookPath)
-	if err != nil {
-		return err
-	}
-
-	// Force enabled=true — CLAWDAPUS.md injection is non-negotiable.
-	hookObj["enabled"] = true
-
-	// Merge "CLAWDAPUS.md" into existing paths (dedupe).
-	const required = "CLAWDAPUS.md"
-	existing := extractStringSlice(hookObj["paths"])
-	found := false
-	for _, p := range existing {
-		if p == required {
-			found = true
-			break
-		}
-	}
-	if !found {
-		existing = append(existing, required)
-	}
-	hookObj["paths"] = existing
-
-	return nil
-}
-
 // getOrCreatePath navigates a dotted path in config, creating intermediate maps,
 // and returns the final map node.
 func getOrCreatePath(obj map[string]interface{}, path string) (map[string]interface{}, error) {
@@ -153,29 +134,6 @@ func getOrCreatePath(obj map[string]interface{}, path string) (map[string]interf
 		current = next
 	}
 	return current, nil
-}
-
-// extractStringSlice converts an interface{} (expected to be []interface{} of strings
-// from prior JSON/setPath operations) into a []string. Returns nil for non-slice values.
-func extractStringSlice(v interface{}) []string {
-	if v == nil {
-		return nil
-	}
-	// Direct []string (from our own setPath calls)
-	if ss, ok := v.([]string); ok {
-		return ss
-	}
-	// []interface{} (from JSON unmarshal or mixed operations)
-	if arr, ok := v.([]interface{}); ok {
-		out := make([]string, 0, len(arr))
-		for _, item := range arr {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return nil
 }
 
 // setPath sets a nested value in a map using a dotted path.

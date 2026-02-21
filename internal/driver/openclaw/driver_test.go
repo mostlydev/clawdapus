@@ -58,10 +58,11 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Config file should exist
-	configPath := filepath.Join(dir, "openclaw.json")
+	// Config file should exist inside the config/ subdirectory.
+	// The whole directory is bind-mounted so openclaw can write temp files alongside it.
+	configPath := filepath.Join(dir, "config", "openclaw.json")
 	if _, err := os.Stat(configPath); err != nil {
-		t.Fatalf("config file not written: %v", err)
+		t.Fatalf("config file not written at config/openclaw.json: %v", err)
 	}
 
 	// Result should include config mount + agent mount
@@ -85,19 +86,16 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Errorf("expected OPENCLAW_STATE_DIR=/app/state, got %q", result.Environment["OPENCLAW_STATE_DIR"])
 	}
 
-	// Verify new state-dir tmpfs layout
+	// /app/state must be a single tmpfs covering all openclaw state subdirs.
 	tmpfsSet := make(map[string]bool, len(result.Tmpfs))
 	for _, p := range result.Tmpfs {
 		tmpfsSet[p] = true
 	}
-	if !tmpfsSet["/app/state/logs"] {
-		t.Error("missing required tmpfs mount /app/state/logs")
+	if !tmpfsSet["/app/state"] {
+		t.Error("expected single /app/state tmpfs (covers identity, logs, memory, agents, etc.)")
 	}
 	if tmpfsSet["/root/.openclaw"] {
 		t.Error("unexpected tmpfs /root/.openclaw — should use /app/state now")
-	}
-	if tmpfsSet["/app/data"] {
-		t.Error("unexpected tmpfs /app/data — unused path should be removed")
 	}
 
 	if result.Restart != "on-failure" {

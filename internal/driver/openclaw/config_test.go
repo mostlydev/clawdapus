@@ -78,7 +78,32 @@ func TestGenerateConfigIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestGenerateConfigAlwaysAddsBootstrapHook(t *testing.T) {
+func TestGenerateConfigSetsGatewayModeLocal(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+	}
+
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	gateway, ok := config["gateway"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected gateway key in config")
+	}
+	if gateway["mode"] != "local" {
+		t.Errorf("expected gateway.mode=local, got %v", gateway["mode"])
+	}
+}
+
+func TestGenerateConfigSetsWorkspace(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:     map[string]string{"primary": "test/model"},
 		Configures: []string{},
@@ -94,23 +119,52 @@ func TestGenerateConfigAlwaysAddsBootstrapHook(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
-	hooks, ok := config["hooks"].(map[string]interface{})
+	agents, ok := config["agents"].(map[string]interface{})
 	if !ok {
-		t.Fatal("expected hooks key in config")
+		t.Fatal("expected agents key in config")
 	}
-	bef, ok := hooks["bootstrap-extra-files"].(map[string]interface{})
+	defaults, ok := agents["defaults"].(map[string]interface{})
 	if !ok {
-		t.Fatal("expected hooks.bootstrap-extra-files in config")
+		t.Fatal("expected agents.defaults in config")
 	}
-	if bef["enabled"] != true {
-		t.Error("expected enabled=true")
+	if defaults["workspace"] != "/claw" {
+		t.Errorf("expected agents.defaults.workspace=/claw, got %v", defaults["workspace"])
 	}
-	paths, ok := bef["paths"].([]interface{})
-	if !ok || len(paths) == 0 {
-		t.Fatal("expected paths array with CLAWDAPUS.md")
+}
+
+func TestGenerateConfigModelFallbacksIsArray(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     map[string]string{"primary": "anthropic/claude-sonnet-4-6", "fallback": "openrouter/some/model"},
+		Configures: []string{},
 	}
-	if paths[0] != "CLAWDAPUS.md" {
-		t.Errorf("expected paths[0]=CLAWDAPUS.md, got %v", paths[0])
+
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	agents := config["agents"].(map[string]interface{})
+	defaults := agents["defaults"].(map[string]interface{})
+	model := defaults["model"].(map[string]interface{})
+
+	if model["primary"] != "anthropic/claude-sonnet-4-6" {
+		t.Errorf("expected primary=anthropic/claude-sonnet-4-6, got %v", model["primary"])
+	}
+	// "fallback" slot must be emitted as "fallbacks" array
+	fallbacks, ok := model["fallbacks"].([]interface{})
+	if !ok {
+		t.Fatalf("expected agents.defaults.model.fallbacks to be array, got %T: %v", model["fallbacks"], model["fallbacks"])
+	}
+	if len(fallbacks) != 1 || fallbacks[0] != "openrouter/some/model" {
+		t.Errorf("expected fallbacks=[openrouter/some/model], got %v", fallbacks)
+	}
+	if _, exists := model["fallback"]; exists {
+		t.Error("agents.defaults.model.fallback must not be present (wrong key name)")
 	}
 }
 

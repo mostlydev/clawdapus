@@ -38,20 +38,31 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		return nil, fmt.Errorf("openclaw driver: config generation failed: %w", err)
 	}
 
-	configPath := filepath.Join(opts.RuntimeDir, "openclaw.json")
+	// Write config into its own subdirectory and bind-mount the whole directory.
+	// openclaw performs atomic writes by creating a temp file alongside the config
+	// (openclaw.json.<n>.<uuid>.tmp → rename). The directory must be writable for
+	// that pattern to work; a read-only single-file bind-mount causes EROFS.
+	configDir := filepath.Join(opts.RuntimeDir, "config")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return nil, fmt.Errorf("openclaw driver: create config dir: %w", err)
+	}
+	configPath := filepath.Join(configDir, "openclaw.json")
 	if err := os.WriteFile(configPath, configData, 0644); err != nil {
 		return nil, fmt.Errorf("openclaw driver: failed to write config: %w", err)
 	}
 
 	mounts := []driver.Mount{
 		{
-			HostPath:      configPath,
-			ContainerPath: "/app/config/openclaw.json",
-			ReadOnly:      true,
+			// Bind-mount the directory (not the file) so openclaw can write temp files
+			// alongside the config during atomic save operations.
+			HostPath:      configDir,
+			ContainerPath: "/app/config",
+			ReadOnly:      false,
 		},
 		{
+			// Always mount as AGENTS.md so openclaw finds it at workspace root (/claw/AGENTS.md).
 			HostPath:      rc.AgentHostPath,
-			ContainerPath: "/claw/" + rc.Agent,
+			ContainerPath: "/claw/AGENTS.md",
 			ReadOnly:      true,
 		},
 	}
@@ -101,11 +112,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		Tmpfs: []string{
 			"/tmp",
 			"/run",
-			"/app/state/cron/runs",
-			"/app/state/logs",
-			"/app/state/memory",
-			"/app/state/agents",
-			"/app/state/delivery-queue",
+			// /app/state covers all openclaw state subdirs (identity, logs, memory, agents, etc.).
+			// The jobs.json bind mount layers on top of this tmpfs — Docker applies bind mounts
+			// after tmpfs, so /app/state/cron/jobs.json is accessible read-write as expected.
+			"/app/state",
 		},
 		ReadOnly: true,
 		Restart:  "on-failure",

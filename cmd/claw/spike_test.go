@@ -6,12 +6,16 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -81,22 +85,46 @@ func TestSpikeComposeUp(t *testing.T) {
 	composeUpDetach = true
 	defer func() { composeUpDetach = prev }()
 
+	// Pre-teardown: clean up any containers left over from a prior run.
+	preClean := exec.Command("docker", "compose", "-p", "trading-desk", "down", "--volumes", "--remove-orphans")
+	preClean.Stdout = os.Stdout
+	preClean.Stderr = os.Stderr
+	_ = preClean.Run()
+
 	// Run the full pipeline: parse → materialize → generate → docker compose up.
 	if err := runComposeUp(spikePodPath); err != nil {
 		t.Fatalf("runComposeUp: %v", err)
 	}
 
-	// Tear down containers (and volumes) when test ends.
-	defer func() {
+	// teardown runs the compose down and dumps logs.
+	teardown := func() {
+		for _, svc := range []string{"tiverton", "westin"} {
+			name := fmt.Sprintf("trading-desk-%s-1", svc)
+			out, _ := exec.Command("docker", "logs", "--tail", "100", name).CombinedOutput()
+			t.Logf("=== %s logs ===\n%s", name, string(out))
+		}
 		cmd := exec.Command("docker", "compose", "-f", generatedPath, "down", "--volumes")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		_ = cmd.Run()
+	}
+	defer teardown()
+
+	// Handle Ctrl-C so the containers are torn down on interrupt.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	go func() {
+		if _, ok := <-sigCh; ok {
+			fmt.Println("[spike] interrupted — tearing down containers")
+			teardown()
+			os.Exit(130)
+		}
 	}()
 
 	// ── Verify tiverton's openclaw.json ──────────────────────────────────────
 
-	configPath := filepath.Join(runtimeDir, "tiverton", "openclaw.json")
+	configPath := filepath.Join(runtimeDir, "tiverton", "config", "openclaw.json")
 	configData := spikeReadFile(t, configPath)
 	var configMap map[string]interface{}
 	if err := json.Unmarshal([]byte(configData), &configMap); err != nil {
@@ -161,7 +189,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	// ── Verify compose.generated.yml ────────────────────────────────────────
 
 	composeSrc := spikeReadFile(t, generatedPath)
-	for _, want := range []string{"jobs.json", "openclaw.json", "/app/state/cron/jobs.json", "/app/config/openclaw.json"} {
+	for _, want := range []string{"jobs.json", "/app/state/cron/jobs.json", "/app/config"} {
 		if !strings.Contains(composeSrc, want) {
 			t.Errorf("compose.generated.yml: expected to contain %q", want)
 		}
@@ -197,6 +225,33 @@ func TestSpikeComposeUp(t *testing.T) {
 	} else {
 		t.Logf("skills: %s", strings.TrimSpace(string(out3)))
 	}
+
+	// AGENTS.md must be readable at the workspace root
+	out4, err4 := exec.Command("docker", "exec", containerName, "cat", "/claw/AGENTS.md").Output()
+	if err4 != nil {
+		t.Errorf("docker exec cat /claw/AGENTS.md: %v (agent file not mounted at workspace root)", err4)
+	} else if strings.TrimSpace(string(out4)) == "" {
+		t.Error("/claw/AGENTS.md is empty — agent instructions not mounted")
+	} else {
+		t.Logf("AGENTS.md: %d bytes", len(out4))
+	}
+
+	// Log openclaw config workspace and health for diagnostics.
+	wsOut, _ := exec.Command("docker", "exec", containerName, "openclaw", "config", "get", "agents.defaults.workspace").CombinedOutput()
+	t.Logf("agents.defaults.workspace in container: %s", strings.TrimSpace(string(wsOut)))
+
+	healthOut, _ := exec.Command("docker", "exec", containerName, "openclaw", "health", "--json").Output()
+	t.Logf("openclaw health --json: %s", strings.TrimSpace(string(healthOut)))
+
+	// Wait for the Docker healthcheck to report "healthy" before polling Discord.
+	// This means openclaw gateway + Discord connection are ready.
+	spikeWaitHealthy(t, containerName, 60*time.Second)
+
+	// ── Verify startup greetings appeared in Discord ─────────────────────────
+	// Each agent sends a greeting via openclaw message send on startup.
+	// Poll the Discord channel until both messages appear (or timeout).
+	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "tiverton online", 10*time.Second)
+	spikeVerifyDiscordGreeting(t, env["WESTIN_BOT_TOKEN"], channelID, "westin online", 10*time.Second)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -281,6 +336,23 @@ func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 	}
 }
 
+// spikeWaitHealthy waits until the Docker healthcheck reports "healthy".
+// Non-fatal: logs the health state and continues even if the deadline is exceeded.
+func spikeWaitHealthy(t *testing.T, containerName string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := exec.Command("docker", "inspect", "-f", "{{.State.Health.Status}}", containerName).Output()
+		if err == nil && strings.TrimSpace(string(out)) == "healthy" {
+			t.Logf("container %q is healthy", containerName)
+			return
+		}
+		time.Sleep(5 * time.Second)
+	}
+	out, _ := exec.Command("docker", "inspect", "-f", "{{json .State.Health}}", containerName).Output()
+	t.Logf("warning: container %q not healthy after %v; health state: %s", containerName, timeout, strings.TrimSpace(string(out)))
+}
+
 func spikeWaitRunning(t *testing.T, containerName string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -294,6 +366,41 @@ func spikeWaitRunning(t *testing.T, containerName string, timeout time.Duration)
 	// Get container logs to help diagnose failures
 	logs, _ := exec.Command("docker", "logs", "--tail", "20", containerName).CombinedOutput()
 	t.Fatalf("container %q not running after %v\nlogs:\n%s", containerName, timeout, logs)
+}
+
+// spikeVerifyDiscordGreeting polls the Discord channel REST API until a message
+// containing expectedSubstr appears, or until timeout is exceeded.
+func spikeVerifyDiscordGreeting(t *testing.T, botToken, channelID, expectedSubstr string, timeout time.Duration) {
+	t.Helper()
+	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages?limit=20", channelID)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			t.Fatalf("build Discord request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bot "+botToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			var messages []map[string]interface{}
+			if json.Unmarshal(body, &messages) == nil {
+				for _, msg := range messages {
+					if content, ok := msg["content"].(string); ok {
+						if strings.Contains(strings.ToLower(content), strings.ToLower(expectedSubstr)) {
+							t.Logf("found Discord greeting %q", content)
+							return
+						}
+					}
+				}
+			}
+		} else if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(3 * time.Second)
+	}
+	t.Errorf("Discord greeting %q not found in channel %s after %v", expectedSubstr, channelID, timeout)
 }
 
 func spikeImageExists(tag string) bool {

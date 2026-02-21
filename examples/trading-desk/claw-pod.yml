@@ -74,6 +74,8 @@ services:
           to: trading-floor
     environment:
       DISCORD_BOT_TOKEN: "${TIVERTON_BOT_TOKEN}"
+      CLAW_GREETING_CHANNEL: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+      CLAW_GREETING_MESSAGE: "tiverton online."
 
   # ── Westin — Momentum / Tech Stocks ──────────────────────────────────────
 
@@ -106,3 +108,5 @@ services:
           to: trading-floor
     environment:
       DISCORD_BOT_TOKEN: "${WESTIN_BOT_TOKEN}"
+      CLAW_GREETING_CHANNEL: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+      CLAW_GREETING_MESSAGE: "westin online."

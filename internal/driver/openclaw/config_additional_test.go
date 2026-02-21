@@ -71,12 +71,12 @@ func TestGenerateConfigParsesNumericAndBooleanValues(t *testing.T) {
 	}
 }
 
-func TestGenerateConfigBootstrapHookMergesPaths(t *testing.T) {
+func TestGenerateConfigNoHooksKeyByDefault(t *testing.T) {
+	// openclaw rejects unknown keys in the hooks section. The driver must not
+	// emit any hooks config unless the operator explicitly sets one via CONFIGURE.
 	rc := &driver.ResolvedClaw{
-		Models: make(map[string]string),
-		Configures: []string{
-			`openclaw config set hooks.bootstrap-extra-files.paths ["custom-hook.md"]`,
-		},
+		Models:     map[string]string{"primary": "test/model"},
+		Configures: []string{},
 	}
 
 	data, err := GenerateConfig(rc)
@@ -89,61 +89,8 @@ func TestGenerateConfigBootstrapHookMergesPaths(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
-	hooks := config["hooks"].(map[string]interface{})
-	bef := hooks["bootstrap-extra-files"].(map[string]interface{})
-
-	// enabled must be forced true even if not set by CONFIGURE
-	if bef["enabled"] != true {
-		t.Errorf("expected enabled=true, got %v", bef["enabled"])
-	}
-
-	// paths must contain both user-configured and CLAWDAPUS.md
-	paths, ok := bef["paths"].([]interface{})
-	if !ok {
-		t.Fatalf("expected paths to be array, got %T", bef["paths"])
-	}
-	hasCustom := false
-	hasClawdapus := false
-	for _, p := range paths {
-		switch p {
-		case "custom-hook.md":
-			hasCustom = true
-		case "CLAWDAPUS.md":
-			hasClawdapus = true
-		}
-	}
-	if !hasCustom {
-		t.Error("expected user-configured custom-hook.md in paths")
-	}
-	if !hasClawdapus {
-		t.Error("expected CLAWDAPUS.md in paths")
-	}
-}
-
-func TestGenerateConfigBootstrapHookOverridesEnabledFalse(t *testing.T) {
-	rc := &driver.ResolvedClaw{
-		Models: make(map[string]string),
-		Configures: []string{
-			"openclaw config set hooks.bootstrap-extra-files.enabled false",
-		},
-	}
-
-	data, err := GenerateConfig(rc)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var config map[string]interface{}
-	if err := json.Unmarshal(data, &config); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-
-	hooks := config["hooks"].(map[string]interface{})
-	bef := hooks["bootstrap-extra-files"].(map[string]interface{})
-
-	// enabled=false from CONFIGURE must be overridden to true
-	if bef["enabled"] != true {
-		t.Errorf("expected enabled=true (forced), got %v", bef["enabled"])
+	if _, exists := config["hooks"]; exists {
+		t.Error("expected no 'hooks' key in default config (openclaw rejects unknown hook keys)")
 	}
 }
 
