@@ -50,7 +50,11 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 		svc := p.Services[name]
 		result := results[name]
 		if result == nil {
-			result = &driver.MaterializeResult{}
+			// Fail-closed: safe defaults when driver result is absent
+			result = &driver.MaterializeResult{
+				ReadOnly: true,
+				Restart:  "on-failure",
+			}
 		}
 
 		count := 1

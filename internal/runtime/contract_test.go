@@ -35,6 +35,14 @@ func TestResolveContractExistingFileReturns(t *testing.T) {
 	}
 }
 
+func TestResolveContractPathTraversalErrors(t *testing.T) {
+	dir := t.TempDir()
+	_, err := ResolveContract(dir, "../../../etc/passwd")
+	if err == nil {
+		t.Fatal("expected error for path traversal attempt")
+	}
+}
+
 func TestResolveContractEmptyFilenameErrors(t *testing.T) {
 	_, err := ResolveContract("/some/dir", "")
 	if err == nil {

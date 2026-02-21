@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ContractMount represents a verified agent contract bind mount.
@@ -20,7 +21,12 @@ func ResolveContract(baseDir string, agentFilename string) (*ContractMount, erro
 		return nil, fmt.Errorf("contract enforcement: AGENT filename is empty (no contract, no start)")
 	}
 
-	hostPath := filepath.Join(baseDir, agentFilename)
+	// Prevent path traversal: resolved path must stay within baseDir.
+	hostPath := filepath.Clean(filepath.Join(baseDir, agentFilename))
+	absBase, _ := filepath.Abs(baseDir)
+	if !strings.HasPrefix(hostPath, absBase+string(filepath.Separator)) && hostPath != absBase {
+		return nil, fmt.Errorf("contract enforcement: agent path %q escapes base directory %q", agentFilename, baseDir)
+	}
 	if _, err := os.Stat(hostPath); err != nil {
 		return nil, fmt.Errorf("contract enforcement: agent file %q not found: %w (no contract, no start)", hostPath, err)
 	}
