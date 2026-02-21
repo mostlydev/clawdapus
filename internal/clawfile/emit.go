@@ -88,6 +88,10 @@ func buildLabelLines(config *ClawConfig) []string {
 		lines = append(lines, formatLabel(fmt.Sprintf("claw.track.%d", i), track))
 	}
 
+	for i, configure := range config.Configures {
+		lines = append(lines, formatLabel(fmt.Sprintf("claw.configure.%d", i), configure))
+	}
+
 	return lines
 }
 

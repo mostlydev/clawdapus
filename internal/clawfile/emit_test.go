@@ -40,6 +40,12 @@ func TestEmitProducesValidDockerfile(t *testing.T) {
 	if !strings.Contains(output, "heartbeat") {
 		t.Fatal("missing heartbeat invocation")
 	}
+	if !strings.Contains(output, `LABEL claw.configure.0="openclaw config set agents.defaults.heartbeat.every 30m"`) {
+		t.Fatal("missing claw.configure.0 label")
+	}
+	if !strings.Contains(output, `LABEL claw.configure.1="openclaw config set agents.defaults.heartbeat.target none"`) {
+		t.Fatal("missing claw.configure.1 label")
+	}
 	if !strings.Contains(output, "/claw/configure.sh") {
 		t.Fatal("missing configure script generation")
 	}

@@ -18,6 +18,7 @@ type ClawInfo struct {
 	Persona    string
 	Surfaces   []string
 	Privileges map[string]string
+	Configures []string
 }
 
 func ParseLabels(labels map[string]string) *ClawInfo {
@@ -25,15 +26,17 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 		Models:     make(map[string]string),
 		Surfaces:   make([]string, 0),
 		Privileges: make(map[string]string),
+		Configures: make([]string, 0),
 	}
 
-	type indexedSurface struct {
+	type indexedEntry struct {
 		Index int
 		Key   string
 		Value string
 	}
 
-	surfaces := make([]indexedSurface, 0)
+	surfaces := make([]indexedEntry, 0)
+	configures := make([]indexedEntry, 0)
 
 	for key, value := range labels {
 		if !strings.HasPrefix(key, "claw.") {
@@ -61,7 +64,18 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 			if parsed, err := strconv.Atoi(suffix); err == nil {
 				index = parsed
 			}
-			surfaces = append(surfaces, indexedSurface{
+			surfaces = append(surfaces, indexedEntry{
+				Index: index,
+				Key:   key,
+				Value: value,
+			})
+		case strings.HasPrefix(key, "claw.configure."):
+			index := maxInt()
+			suffix := strings.TrimPrefix(key, "claw.configure.")
+			if parsed, err := strconv.Atoi(suffix); err == nil {
+				index = parsed
+			}
+			configures = append(configures, indexedEntry{
 				Index: index,
 				Key:   key,
 				Value: value,
@@ -78,6 +92,17 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 
 	for _, surface := range surfaces {
 		info.Surfaces = append(info.Surfaces, surface.Value)
+	}
+
+	sort.Slice(configures, func(i int, j int) bool {
+		if configures[i].Index == configures[j].Index {
+			return configures[i].Key < configures[j].Key
+		}
+		return configures[i].Index < configures[j].Index
+	})
+
+	for _, configure := range configures {
+		info.Configures = append(info.Configures, configure.Value)
 	}
 
 	return info

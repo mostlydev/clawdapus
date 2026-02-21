@@ -65,7 +65,7 @@ Smoke output confirms labels round-trip for:
 ## Goals
 
 1. Convert parsed Claw intent into enforceable runtime state.
-2. Introduce pod-level orchestration (`docker-claw up/down/ps/logs`) with generated compose.
+2. Introduce pod-level orchestration (`claw compose up/down/ps/logs`) with generated compose.
 3. Enforce contract authority (`AGENT` exists and mounts read-only) as fail-closed.
 4. Support Phase 2 pod runtime scope: `count` scaling with stable ordinals, volume surfaces, and network restriction enforcement.
 5. Enforce fail-closed checks both pre-apply and post-apply.
@@ -106,7 +106,7 @@ Acceptance:
 
 - Unknown `CLAW_TYPE` fails early.
 - Driver selection and validation unit-tested without Docker.
-- `PostApply` hook is invoked and failure aborts successful `claw up` completion.
+- `PostApply` hook is invoked and failure aborts successful `claw compose up` completion.
 
 ## Workstream B: OpenClaw Runtime Config Materialization
 
@@ -159,7 +159,7 @@ Deliverables:
 - `internal/pod/parser.go`
 - `internal/pod/compose_emit.go`
 - `internal/pod/compose_emit_test.go`
-- `cmd/docker-claw/up.go`, `cmd/docker-claw/down.go`, `cmd/docker-claw/ps.go`, `cmd/docker-claw/logs.go`
+- `cmd/claw/compose.go` (parent command), `cmd/claw/compose_up.go`, `cmd/claw/compose_down.go`, `cmd/claw/compose_ps.go`, `cmd/claw/compose_logs.go`
 
 Behavior:
 
@@ -170,14 +170,14 @@ Behavior:
 - Translate `volume://` surfaces into top-level compose `volumes:` and service mounts with explicit `:ro`/`:rw`.
 - Generate and enforce compose-level network restrictions from pod policy (`networks:`), fail-closed on invalid policy.
 - Write deterministic `compose.generated.yml`.
-- Execute lifecycle via `docker compose -f compose.generated.yml ...`, surfaced through `docker-claw ...` (with optional `docker claw ...` when installed as a Docker CLI plugin).
+- Execute lifecycle via `docker compose -f compose.generated.yml ...`, surfaced through `claw compose ...`.
 
 Acceptance:
 
 - Golden tests for generated compose.
 - Golden tests cover volume surfaces, access modes, and network restriction emission.
 - Tests cover stable ordinal naming and highest-ordinal-first scale-down behavior.
-- `docker-claw up` -> `docker-claw ps` -> `docker-claw down` smoke flow on sample pod.
+- `claw compose up` -> `claw compose ps` -> `claw compose down` smoke flow on sample pod.
 
 ## Workstream E: Health and Diagnostics
 
@@ -200,19 +200,32 @@ Acceptance:
 
 ## Phase 2 Exit Criteria
 
-1. `docker-claw up` can launch an OpenClaw pod from `claw-pod.yml` with generated compose.
+1. `claw compose up` can launch an OpenClaw pod from `claw-pod.yml` with generated compose.
 2. Driver enforces runtime config from Clawfile directives via generated JSON5 config.
 3. AGENT contract is required and mounted read-only.
 4. Driver preflight and post-apply checks both run fail-closed.
 5. `count` scaling produces stable ordinals and deterministic compose output.
 6. Volume surfaces are generated as compose volumes with explicit access modes.
 7. Network restrictions are emitted/enforced at compose level.
-8. `docker-claw ps` and `docker-claw logs` provide operational visibility.
+8. `claw compose ps` and `claw compose logs` provide operational visibility.
 9. Unit tests pass by default; integration tests pass with Docker enabled.
 
 ---
 
 ## Spike 1 Retrospective Notes
+
+### Naming decision: `claw` is the CLI
+
+The primary binary is `claw`. The command structure mirrors Docker's:
+
+- `claw build` — image-level (like `docker build`)
+- `claw inspect` — image metadata (like `docker inspect`)
+- `claw compose up/down/ps/logs` — pod orchestration (like `docker compose up/down/ps/logs`)
+- `claw doctor` — toolchain diagnostics
+
+`claw` is to Clawfile what `docker` is to Dockerfile. `claw compose` is to `claw-pod.yml` what `docker compose` is to `compose.yml`. The structural parallel is exact.
+
+Docker CLI plugin mode (`docker claw`) is a future convenience — a `claw plugin install` command that symlinks the binary into `~/.docker/cli-plugins/docker-claw`. The product name is Clawdapus; "docker-claw" is only a technical artifact of the Docker plugin protocol, never the brand.
 
 ### What worked
 

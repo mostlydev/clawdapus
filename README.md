@@ -103,7 +103,7 @@ RUN npm install -g openclaw@2026.2.9
 4. `claw-pod.yml` parsing with `count` scaling and stable ordinal identities
 5. Compose generation for volume surfaces and network restriction enforcement
 6. Fail-closed post-apply verification before reporting successful `claw up`
-7. `docker-claw up/down/ps/logs` pod lifecycle commands (optional `docker claw` plugin mode) with deterministic policy-layer behavior
+7. `claw compose up/down/ps/logs` pod lifecycle commands with deterministic policy-layer behavior
 
 ---
 
