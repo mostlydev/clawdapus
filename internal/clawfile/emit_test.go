@@ -49,6 +49,12 @@ func TestEmitProducesValidDockerfile(t *testing.T) {
 	if !strings.Contains(output, `LABEL claw.configure.1="openclaw config set agents.defaults.heartbeat.target none"`) {
 		t.Fatal("missing claw.configure.1 label")
 	}
+	if !strings.Contains(output, `LABEL claw.skill.0="./skills/custom-workflow.md"`) {
+		t.Fatal("missing claw.skill.0 label")
+	}
+	if !strings.Contains(output, `LABEL claw.skill.1="./skills/team-conventions.md"`) {
+		t.Fatal("missing claw.skill.1 label")
+	}
 	if !strings.Contains(output, "RUN apt-get update") {
 		t.Fatal("missing passthrough RUN instruction")
 	}
@@ -67,6 +73,7 @@ func TestEmitProducesValidDockerfile(t *testing.T) {
 		"INVOKE ",
 		"TRACK ",
 		"SURFACE ",
+		"SKILL ",
 		"PRIVILEGE ",
 	} {
 		for _, line := range strings.Split(output, "\n") {

@@ -22,6 +22,9 @@ TRACK apt pip npm
 SURFACE channel://discord
 SURFACE service://fleet-master
 
+SKILL ./skills/custom-workflow.md
+SKILL ./skills/team-conventions.md
+
 PRIVILEGE worker root
 PRIVILEGE runtime claw-user
 
@@ -72,6 +75,9 @@ func TestParseExtractsLists(t *testing.T) {
 	}
 	if len(result.Config.Privileges) != 2 {
 		t.Fatalf("expected 2 privileges, got %d", len(result.Config.Privileges))
+	}
+	if len(result.Config.Skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(result.Config.Skills))
 	}
 }
 
