@@ -27,6 +27,10 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		setPath(config, path, value)
 	}
 
+	// Always add bootstrap-extra-files hook for CLAWDAPUS.md injection
+	setPath(config, "hooks.bootstrap-extra-files.enabled", true)
+	setPath(config, "hooks.bootstrap-extra-files.paths", []string{"CLAWDAPUS.md"})
+
 	return json.MarshalIndent(config, "", "  ")
 }
 

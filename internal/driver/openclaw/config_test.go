@@ -78,6 +78,42 @@ func TestGenerateConfigIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigAlwaysAddsBootstrapHook(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     map[string]string{"primary": "test/model"},
+		Configures: []string{},
+	}
+
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	hooks, ok := config["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected hooks key in config")
+	}
+	bef, ok := hooks["bootstrap-extra-files"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected hooks.bootstrap-extra-files in config")
+	}
+	if bef["enabled"] != true {
+		t.Error("expected enabled=true")
+	}
+	paths, ok := bef["paths"].([]interface{})
+	if !ok || len(paths) == 0 {
+		t.Fatal("expected paths array with CLAWDAPUS.md")
+	}
+	if paths[0] != "CLAWDAPUS.md" {
+		t.Errorf("expected paths[0]=CLAWDAPUS.md, got %v", paths[0])
+	}
+}
+
 func TestGenerateConfigRejectsUnknownCommand(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:     make(map[string]string),
