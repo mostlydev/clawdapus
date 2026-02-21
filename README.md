@@ -1,98 +1,177 @@
 # Clawdapus
 
-Infrastructure-layer governance for AI agent containers.
+Infrastructure layer for AI agent runtimes.
 
-Clawdapus is to agent bots what Docker is to applications: the layer below the framework, above the operating system, where deployment meets governance. It treats AI agents as untrusted workloads that should be reproducible, inspectable, diffable, and killable.
+Clawdapus gives operator teams the same deployment primitives they already rely on for applications: reproducible builds, policy-governed mounts, composable topology, and explicit runtime contracts for inter-agent behavior.
 
-> **Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you.**
-
----
-
-## Status
-
-**Active development — pre-release.**
-
-Vertical Spike 1 (Clawfile parse/build) is now implemented in this repository.
-
-Implemented commands:
-
-```bash
-claw doctor               # Check Docker CLI, buildx, compose
-claw build [path]         # Clawfile -> Dockerfile.generated -> docker build
-claw inspect <image>      # Show parsed claw.* labels from image metadata
-claw compose up [pod]     # Launch pod from claw-pod.yml
-claw compose down         # Stop and remove pod
-claw compose ps           # Show pod status
-claw compose logs [svc]   # Stream pod logs
-claw compose health       # Probe container health
-```
-
-Recent verification:
-
-```bash
-go test ./...
-go test -tags=integration ./...
-go build -o bin/claw ./cmd/claw
-./bin/claw build -t claw-openclaw-example examples/openclaw
-./bin/claw inspect claw-openclaw-example
-```
-
-The OpenClaw reference example is in `examples/openclaw/`.
+- **Agents are workloads, not trusted infrastructure**
+- **Network and identity are explicit**
+- **Context is versioned and discoverable at runtime**
 
 ---
 
-## Quickstart: Running OpenClaw (verified)
+## What Clawdapus enables
 
-The commands below were run successfully in this repo on 2026-02-21.
+Clawdapus turns `Clawfile` + `claw-pod.yml` into a deployable, governable agent fleet:
 
-Prerequisites:
+- Build immutable agent images from familiar Dockerfile syntax plus Clawdapus directives
+- Run multiple claws and services together with explicit compose-time rules
+- Project discoverability with `SURFACE` and runtime identity with `HANDLE`
+- Feed each claw operational context through mounted `SKILL` files
+- Mount service-emitted documentation and generated fallbacks so agents can find and use peers
 
-- Docker daemon running (`docker`, `docker buildx`, `docker compose`)
-- Go toolchain (for installing `claw` from source)
+This is aimed at the same use case you described: public communication bots + internal services that can discover each other, evolve safely, and be independently operated.
 
-**1. Install `claw` from the current checkout**
+---
+
+## Why this is useful for distributed AI teams
+
+A fleet should be able to:
+
+- discover peers without manual hardcoding,
+- expose integration metadata in a controlled way,
+- evolve independently, and
+- be observable and auditable through generated manifests.
+
+Clawdapus supports this by defining **runtime intent** in code, then materializing it into concrete artifacts before startup.
+
+---
+
+## Core capabilities (today)
+
+1. `Clawfile` directives: `CLAW_TYPE`, `MODEL`, `PRIVILEGE`, `CONFIGURE`, `INVOKE`, `SURFACE`, `SKILL`, `HANDLE`, `AGENT`
+2. Deterministic build output (`claw build`) with Docker label materialization
+3. Pod lifecycle primitives (`claw compose up/down/ps/logs/health`)
+4. `claw inspect` for generated labels and metadata
+5. Skill distribution model:
+   - image-level `SKILL`
+   - pod-level `x-claw.skills`
+   - service-emitted skill extraction from service images via `claw.skill.emit`
+   - generated `surface-<target>.md` fallback when explicit skill is missing
+6. Surface reference generation for service DNS + discovered ports
+7. `CLAW_HANDLE_*` context values generated into the runtime contract
+
+---
+
+## Architecture snapshot
+
+Clawdapus has three explicit layers:
+
+1. **Clawfile** — what each agent image should include and how it behaves
+2. **claw-pod.yml** — how those images run together in a pod
+3. **Runtime driver** — how to materialize metadata, mounts, and policy at compose-time
+
+Execution flow:
+
+- Parse and validate declarations
+- Generate compose + runtime artifacts
+- Attach contract files and skill files into `/claw/skills`
+- Run the pod deterministically
+
+This keeps image build, topology, and operational context explicit and reviewable.
+
+---
+
+## Quickstart (working reference)
+
+### Prerequisites
+
+- Docker (`docker`, `docker buildx`, `docker compose`)
+- Go toolchain (to install `claw` from source)
+
+### Commands used in this repo
 
 ```bash
+
 go install ./cmd/claw
-```
-
-**2. Build the example OpenClaw image**
-
-```bash
 claw build -t claw-openclaw-example examples/openclaw
-```
-
-**3. Inspect emitted Claw metadata labels**
-
-```bash
 claw inspect claw-openclaw-example
-```
-
-**4. Launch the example pod (detached)**
-
-```bash
 claw compose -f examples/openclaw/claw-pod.yml up -d
-```
-
-**5. Check status, then tear down**
-
-```bash
 claw compose -f examples/openclaw/claw-pod.yml ps
 claw compose -f examples/openclaw/claw-pod.yml logs gateway
 claw compose -f examples/openclaw/claw-pod.yml down
 ```
 
-Notes:
+`claw compose` emits `compose.generated.yml` next to the pod file for easy inspection.
 
-- `-f` mirrors `docker compose -f` — it locates `compose.generated.yml` next to the pod file.
-- `claw compose up` writes `compose.generated.yml` next to the pod file.
-- `AGENTS.md` already exists in `examples/openclaw/`; edit it to change agent behavior contract.
+### Supported top-level commands
+
+```bash
+claw doctor
+claw build [path]
+claw inspect <image>
+claw compose up [pod]
+claw compose down
+claw compose ps
+claw compose logs [svc]
+claw compose health
+```
 
 ---
 
-## OpenClaw Image for Testing
+## Skill model and inter-service context
 
-Use `alpine/openclaw` and pin a concrete version tag for deterministic tests. Avoid `:latest` in CI.
+### 1) Operator-mounted skills
+
+```dockerfile
+SKILL ./skills/research-methods.md
+```
+
+```yaml
+x-claw:
+  skills:
+    - ./skills/research-methods.md
+```
+
+Duplicate basenames are rejected as hard validation errors.
+
+### 2) Service-emitted skills (preferred)
+
+For `SURFACE service://fleet-master`:
+
+- Service image exposes a label such as:
+  - `claw.skill.emit=/app/SKILL.md`
+- Clawdapus mounts that as:
+  - `/claw/skills/surface-fleet-master.md`
+
+### 3) Fallback skill generation
+
+If no service-emitted skill is available, Clawdapus creates a minimal skill containing:
+
+- hostname and surface target
+- known ports discovered from compose/service definitions
+- network scope and credential hints
+
+Operators may still override with explicit `skills/surface-*.md`.
+
+---
+
+## Example use patterns
+
+- **Public bot + internal control plane**
+  - Run Discord/Slack bot claws and an API/service layer in one pod
+  - Use `SURFACE` for local addressability and `HANDLE` for downstream policy wiring
+
+- **Composable workforce**
+  - Route tasks between claw roles with stable, generated identities and documented interfaces
+
+- **Evolving services**
+  - Ship richer service-provided skills over time while keeping generic fallback as a safety net
+
+---
+
+## Current status
+
+**Active development — pre-release**
+
+- Vertical Spike 1 (Clawfile parse/build) is implemented
+- Handle directives and service-surface skill behavior are in active development with ongoing hardening
+
+---
+
+## OpenClaw image reference
+
+Use pinned `alpine/openclaw` images for predictable tests.
 
 ```yaml
 version: "3.8"
@@ -112,117 +191,26 @@ services:
 
 ---
 
-## Current Design Inputs
+## Documentation and plans
 
-| Document | Purpose |
-|----------|---------|
-| [`MANIFESTO.md`](./MANIFESTO.md) | Vision and principles |
-| [`docs/plans/2026-02-18-clawdapus-architecture.md`](./docs/plans/2026-02-18-clawdapus-architecture.md) | Architecture and phased implementation |
-| [`docs/plans/2026-02-20-vertical-spike-clawfile-build.md`](./docs/plans/2026-02-20-vertical-spike-clawfile-build.md) | Spike 1 completion summary + Phase 2 plan |
-| [`docs/decisions/001-cllama-transport.md`](./docs/decisions/001-cllama-transport.md) | ADR: cllama sidecar transport |
-| [`docs/decisions/002-runtime-authority.md`](./docs/decisions/002-runtime-authority.md) | ADR: compose lifecycle, SDK read-only |
+- [`MANIFESTO.md`](./MANIFESTO.md)
+- [`docs/plans/2026-02-18-clawdapus-architecture.md`](./docs/plans/2026-02-18-clawdapus-architecture.md)
+- [`docs/plans/2026-02-20-vertical-spike-clawfile-build.md`](./docs/plans/2026-02-20-vertical-spike-clawfile-build.md)
+- [`docs/plans/2026-02-21-phase35-handle-directive.md`](./docs/plans/2026-02-21-phase35-handle-directive.md)
+- [`docs/decisions/001-cllama-transport.md`](./docs/decisions/001-cllama-transport.md)
+- [`docs/decisions/002-runtime-authority.md`](./docs/decisions/002-runtime-authority.md)
+- [`docs/reviews/handle-directive-bugs.md`](./docs/reviews/handle-directive-bugs.md)
 
----
+## AI agent guidance
 
-## Clawfile Model
+The repository includes a skill guide at [`skills/clawdapus/SKILL.md`](./skills/clawdapus/SKILL.md).
 
-A Clawfile is an extended Dockerfile. Any valid Dockerfile is still valid.
-
-```dockerfile
-FROM node:24-bookworm-slim
-RUN apt-get update && apt-get install -y bash ca-certificates cron curl git jq tini
-RUN npm install -g openclaw@2026.2.9
-
-CLAW_TYPE openclaw
-AGENT AGENTS.md
-MODEL primary openrouter/anthropic/claude-sonnet-4
-
-CONFIGURE openclaw config set agents.defaults.heartbeat.every 30m
-INVOKE 0,30 * * * * heartbeat
-
-SURFACE service://fleet-master
-
-SKILL ./skills/openclaw-runbook.md
-
-PRIVILEGE runtime claw-user
-```
-
-`claw build` transpiles directives into standard Dockerfile primitives (`LABEL`, generated helper scripts, and cron setup), then runs `docker build`.
-
----
-
-## Phase 2 Focus
-
-1. Runtime driver framework (`CLAW_TYPE` -> enforcement strategy)
-2. OpenClaw driver with Go-native JSON5 config mutation (no repeated `openclaw config set` shellouts)
-3. Contract existence + read-only mount enforcement for `AGENT` (fail-closed preflight)
-4. `claw-pod.yml` parsing with `count` scaling and stable ordinal identities
-5. Compose generation for volume surfaces and network restriction enforcement
-6. Fail-closed post-apply verification before reporting successful `claw up`
-7. `claw compose up/down/ps/logs/health` pod lifecycle commands with deterministic policy-layer behavior
-
----
-
-## AI Agent Skill
-
-A portable skill file for AI coding agents (Claude Code, etc.) is available at [`skills/clawdapus/SKILL.md`](./skills/clawdapus/SKILL.md). It teaches agents how to use the `claw` CLI, understand Clawfile directives, and work with `claw-pod.yml`.
-
-**Install for Claude Code:**
+Install for Claude Code:
 
 ```bash
 cp -r skills/clawdapus ~/.claude/skills/
 ```
 
-The skill triggers automatically when agents encounter Clawfile directives or `claw` commands.
-
-### SKILL Directive + Runtime Skills
-
-The `SKILL` directive (Clawfile) and `x-claw.skills` list (`claw-pod.yml`) let operators mount markdown files into the runner's skill directory as read-only references.
-
-```dockerfile
-SKILL ./skills/research-methods.md
-SKILL ./skills/incident-playbook.md
-```
-
-```yaml
-x-claw:
-  skills:
-    - ./skills/research-methods.md
-```
-
-- Image-level `SKILL` files are mounted first.
-- Pod-level `skills` entries override image-level files with the same basename.
-- Duplicate basenames across either layer are rejected as a hard validation error.
-- Mounted files are available at the runtime skill path declared by the driver (`/claw/skills` for OpenClaw).
-
-### Service surface skills (service-emitted, priority, fallback)
-
-Service surfaces can now provide their own skill from the service image itself.
-
-- Service image declares a label:
-  `claw.skill.emit=/app/SKILL.md`
-- During `claw compose up`, Clawdapus resolves `service://<name>` surfaces, inspects the target service image, and mounts that file as:
-  `/claw/skills/surface-<name>.md`
-- If no service-emitted skill exists, Clawdapus still creates a fallback `surface-<name>.md` stub with:
-  - Hostname (`service://<name>` target)
-  - Known ports from the pod's compose definition (if discoverable)
-  - A short "what I am and what this claw can do" section plus env-var hints
-
-By default, fallback precedence is:
-
-1. Service-emitted skill (`claw.skill.emit`) for `surface-<name>.md`
-2. Operator skill entries (`SKILL` in Clawfile and `x-claw.skills`) when they target the same `surface-<name>.md` basename
-3. Generic fallback skill generated by Clawdapus
-
-You can opt into pure operator documentation by providing `skills/surface-<name>.md` yourself; if present, it overrides the service-emitted content for that same basename.
-
-### Known examples
-
-- `examples/openclaw/Clawfile` includes `SKILL ./skills/openclaw-runbook.md`
-- `examples/openclaw/claw-pod.yml` now includes a `x-claw.skills` operator override for a service skill: `./skills/surface-fleet-master.md`
-
----
-
 ## Contributing
 
-Start with [`MANIFESTO.md`](./MANIFESTO.md), then read the architecture and spike plan documents.
+Start with [`MANIFESTO.md`](./MANIFESTO.md) and align with the plan files before contributing.
