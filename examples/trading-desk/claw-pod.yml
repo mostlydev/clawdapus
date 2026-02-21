@@ -256,13 +256,9 @@ services:
                   name: trading-floor
       surfaces:
         - "service://trading-api"
-        - "service://tiverton"
-        - "service://westin"
-        - "service://logan"
-        - "service://gerrard"
-        - "service://dundas"
-        - "service://boulton"
         - "volume://clawd-shared read-only"   # mounted at /mnt/clawd-shared
+        # Other agents are not services — Allen monitors them via Discord presence
+        # and trading-api health endpoints, not by calling into their containers.
     environment:
       DISCORD_BOT_TOKEN: "${ALLEN_BOT_TOKEN}"
       DISCORD_APP_ID: "${ALLEN_DISCORD_ID}"
