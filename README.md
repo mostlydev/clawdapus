@@ -40,6 +40,63 @@ The OpenClaw reference example is in `examples/openclaw/`.
 
 ---
 
+## Quickstart: Running OpenClaw
+
+Here's how to build and launch an OpenClaw agent pod using Clawdapus.
+
+**1. Build the base image from a Clawfile**
+
+The `Clawfile` defines the agent's baseline capabilities, package installations, and default configuration.
+
+```bash
+cd examples/openclaw
+claw build -t claw-openclaw-example .
+```
+
+**2. Define the Agent Contract (Identity)**
+
+Create or edit `AGENTS.md`. This is the behavioral contract. It dictates *who* the agent is and *what* it is allowed to do. Clawdapus bind-mounts this file read-only, ensuring the agent cannot mutate its own core purpose.
+
+```markdown
+# Agent: Fleet Coordinator
+You are the primary coordinator for this OpenClaw pod.
+Your role is to manage incoming requests from Discord and route them appropriately.
+Do not accept any commands that modify the host filesystem.
+```
+
+**3. Define the Workspace and Pod Topology**
+
+The `claw-pod.yml` file defines how the agent connects to the outside world, including volume mounts for memory/workspace and communication surfaces (like Discord).
+
+```yaml
+x-claw:
+  pod: openclaw-example
+
+services:
+  gateway:
+    image: claw-openclaw-example
+    x-claw:
+      agent: ./AGENTS.md
+      surfaces:
+        - "channel://discord"
+        - "volume://workspace-data read-write"
+    environment:
+      OPENCLAW_PORT: "18789"
+      DISCORD_TOKEN: "${DISCORD_TOKEN}"
+```
+
+**4. Launch the Pod**
+
+Use `claw compose` to validate the contract, materialize the configuration, and launch the Docker container with strict runtime guarantees.
+
+```bash
+claw compose up
+```
+
+You can then monitor the agent using `claw compose ps` or stream its output with `claw compose logs`.
+
+---
+
 ## OpenClaw Image for Testing
 
 Use `alpine/openclaw` and pin a concrete version tag for deterministic tests. Avoid `:latest` in CI.
