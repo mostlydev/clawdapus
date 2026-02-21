@@ -1,0 +1,13 @@
+x-claw:
+  pod: openclaw-example
+
+services:
+  gateway:
+    image: claw-openclaw-example
+    x-claw:
+      agent: ./AGENTS.md
+      surfaces:
+        - "channel://discord"
+        - "service://fleet-master"
+    environment:
+      OPENCLAW_PORT: "18789"
