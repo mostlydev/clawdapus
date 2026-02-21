@@ -21,7 +21,12 @@ var composeUpDetach bool
 var composeUpCmd = &cobra.Command{
 	Use:   "up [pod-file]",
 	Short: "Launch a Claw pod from claw-pod.yml",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if composePodFile != "" && len(args) > 0 {
+			return fmt.Errorf("pod file specified twice: use either '--file %s' or positional arg '%s', not both", composePodFile, args[0])
+		}
+
 		podFile := composePodFile
 		if podFile == "" && len(args) > 0 {
 			podFile = args[0]
@@ -152,6 +157,10 @@ func runComposeUp(podFile string) error {
 		return fmt.Errorf("write compose.generated.yml: %w", err)
 	}
 	fmt.Printf("[claw] wrote %s\n", generatedPath)
+
+	if len(drivers) == 0 {
+		fmt.Println("[claw] warning: no x-claw services found; running plain docker compose lifecycle")
+	}
 
 	if len(drivers) > 0 && !composeUpDetach {
 		return fmt.Errorf("claw-managed services require detached mode for fail-closed post-apply verification; rerun with 'claw compose up -d %s'", podFile)

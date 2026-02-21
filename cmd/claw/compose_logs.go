@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 
@@ -27,11 +28,14 @@ var composeLogsCmd = &cobra.Command{
 		dockerCmd := exec.Command("docker", composeArgs...)
 		dockerCmd.Stdout = os.Stdout
 		dockerCmd.Stderr = os.Stderr
-		return dockerCmd.Run()
+		if err := dockerCmd.Run(); err != nil {
+			return fmt.Errorf("docker compose logs failed: %w", err)
+		}
+		return nil
 	},
 }
 
 func init() {
-	composeLogsCmd.Flags().BoolVarP(&composeLogsFollow, "follow", "f", false, "Follow log output")
+	composeLogsCmd.Flags().BoolVar(&composeLogsFollow, "follow", false, "Follow log output")
 	composeCmd.AddCommand(composeLogsCmd)
 }

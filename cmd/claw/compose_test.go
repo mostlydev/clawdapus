@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -18,7 +19,8 @@ func TestResolveComposeGeneratedPathDefaultMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when compose.generated.yml does not exist")
 	}
-	if got := err.Error(); got != "no compose.generated.yml found (run 'claw compose up' first, or pass -f)" {
+	got := err.Error()
+	if !strings.Contains(got, "no compose.generated.yml found in ") || !strings.Contains(got, "(rerun from pod directory or pass --file <path-to-claw-pod.yml>)") {
 		t.Errorf("unexpected error message: %s", got)
 	}
 }
@@ -36,8 +38,8 @@ func TestResolveComposeGeneratedPathDefaultExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if path != "compose.generated.yml" {
-		t.Errorf("expected compose.generated.yml, got %q", path)
+	if !strings.HasSuffix(path, string(filepath.Separator)+"compose.generated.yml") {
+		t.Errorf("expected absolute compose.generated.yml path, got %q", path)
 	}
 }
 

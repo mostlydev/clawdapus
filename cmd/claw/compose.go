@@ -28,9 +28,14 @@ func resolveComposeGeneratedPath() (string, error) {
 		return generatedPath, nil
 	}
 
-	generatedPath := "compose.generated.yml"
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve current directory: %w", err)
+	}
+
+	generatedPath := filepath.Join(cwd, "compose.generated.yml")
 	if _, err := os.Stat(generatedPath); err != nil {
-		return "", fmt.Errorf("no compose.generated.yml found (run 'claw compose up' first, or pass -f)")
+		return "", fmt.Errorf("no compose.generated.yml found in %q (rerun from pod directory or pass --file <path-to-claw-pod.yml>)", cwd)
 	}
 	return generatedPath, nil
 }

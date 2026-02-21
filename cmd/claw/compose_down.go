@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 
@@ -19,7 +20,10 @@ var composeDownCmd = &cobra.Command{
 		dockerCmd := exec.Command("docker", "compose", "-f", generatedPath, "down")
 		dockerCmd.Stdout = os.Stdout
 		dockerCmd.Stderr = os.Stderr
-		return dockerCmd.Run()
+		if err := dockerCmd.Run(); err != nil {
+			return fmt.Errorf("docker compose down failed: %w", err)
+		}
+		return nil
 	},
 }
 

@@ -42,13 +42,20 @@ func resolveClawfilePath(input string) (string, error) {
 	info, err := os.Stat(input)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return filepath.Join(input, "Clawfile"), nil
+			return "", fmt.Errorf("input path %q does not exist", input)
 		}
 		return "", fmt.Errorf("stat %s: %w", input, err)
 	}
 
 	if info.IsDir() {
-		return filepath.Join(input, "Clawfile"), nil
+		clawfilePath := filepath.Join(input, "Clawfile")
+		if _, err := os.Stat(clawfilePath); err != nil {
+			if os.IsNotExist(err) {
+				return "", fmt.Errorf("no Clawfile found in directory %q", input)
+			}
+			return "", fmt.Errorf("stat %s: %w", clawfilePath, err)
+		}
+		return clawfilePath, nil
 	}
 
 	return input, nil
