@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
@@ -127,7 +128,20 @@ func (d *Driver) HealthProbe(ref driver.ContainerRef) (*driver.Health, error) {
 	}
 	defer cli.Close()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	info, err := cli.ContainerInspect(ctx, ref.ContainerID)
+	if err != nil {
+		return &driver.Health{OK: false, Detail: fmt.Sprintf("container inspect failed: %v", err)}, nil
+	}
+	if info.State == nil || !info.State.Running {
+		status := "unknown"
+		if info.State != nil && info.State.Status != "" {
+			status = info.State.Status
+		}
+		return &driver.Health{OK: false, Detail: fmt.Sprintf("container is not running (status: %s)", status)}, nil
+	}
 
 	execCfg := types.ExecConfig{
 		Cmd:          []string{"openclaw", "health", "--json"},
@@ -147,8 +161,35 @@ func (d *Driver) HealthProbe(ref driver.ContainerRef) (*driver.Health, error) {
 
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, resp.Reader); err != nil {
-		return &driver.Health{OK: false, Detail: fmt.Sprintf("exec read failed: %v", err)}, nil
+	copyDone := make(chan error, 1)
+	go func() {
+		_, copyErr := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, resp.Reader)
+		copyDone <- copyErr
+	}()
+
+	select {
+	case copyErr := <-copyDone:
+		if copyErr != nil {
+			return &driver.Health{OK: false, Detail: fmt.Sprintf("exec read failed: %v", copyErr)}, nil
+		}
+	case <-ctx.Done():
+		resp.Close()
+		return &driver.Health{OK: false, Detail: "health probe timed out after 15s"}, nil
+	}
+
+	execInspect, err := cli.ContainerExecInspect(ctx, execID.ID)
+	if err != nil {
+		return &driver.Health{OK: false, Detail: fmt.Sprintf("exec inspect failed: %v", err)}, nil
+	}
+	if execInspect.ExitCode != 0 {
+		detail := strings.TrimSpace(stderrBuf.String())
+		if detail == "" {
+			detail = strings.TrimSpace(stdoutBuf.String())
+		}
+		if detail == "" {
+			detail = "health command failed with no output"
+		}
+		return &driver.Health{OK: false, Detail: fmt.Sprintf("health command exit code %d: %s", execInspect.ExitCode, detail)}, nil
 	}
 
 	result, err := health.ParseHealthJSON(stdoutBuf.Bytes())

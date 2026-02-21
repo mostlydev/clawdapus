@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 )
@@ -16,7 +17,20 @@ type CheckResult struct {
 
 func defaultRunner(name string, args ...string) ([]byte, error) {
 	cmd := exec.Command(name, args...)
-	return cmd.CombinedOutput()
+	stdout, err := cmd.Output()
+	if err == nil {
+		return stdout, nil
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		combined := make([]byte, 0, len(stdout)+len(exitErr.Stderr))
+		combined = append(combined, stdout...)
+		combined = append(combined, exitErr.Stderr...)
+		return combined, err
+	}
+
+	return stdout, err
 }
 
 func CheckDocker(run Runner) CheckResult {
@@ -63,8 +77,5 @@ func check(name string, run Runner, binary string, args ...string) CheckResult {
 
 func firstLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
-	if len(lines) == 0 {
-		return ""
-	}
 	return strings.TrimSpace(lines[0])
 }
