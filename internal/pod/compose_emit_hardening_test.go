@@ -13,6 +13,7 @@ func TestEmitComposeAppliesFailClosedDefaultsWithoutDriverResult(t *testing.T) {
 		Services: map[string]*Service{
 			"bot": {
 				Image: "ghcr.io/example/bot:v1",
+				Claw:  &ClawBlock{},
 			},
 		},
 	}
@@ -27,6 +28,36 @@ func TestEmitComposeAppliesFailClosedDefaultsWithoutDriverResult(t *testing.T) {
 	}
 	if !strings.Contains(out, "restart: on-failure") {
 		t.Fatal("expected fail-closed restart: on-failure when driver result is absent")
+	}
+}
+
+func TestEmitComposeHostSurfaceReadOnly(t *testing.T) {
+	p := &Pod{
+		Name: "host-pod",
+		Services: map[string]*Service{
+			"worker": {
+				Image: "ghcr.io/example/worker:v1",
+				Claw: &ClawBlock{
+					Surfaces: []string{"host:///data/workspace read-only"},
+				},
+			},
+		},
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"worker": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+		},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	if !strings.Contains(out, "/data/workspace:/data/workspace:ro") {
+		t.Fatal("expected host bind mount /data/workspace:/data/workspace:ro")
 	}
 }
 

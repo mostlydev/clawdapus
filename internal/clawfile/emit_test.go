@@ -46,12 +46,6 @@ func TestEmitProducesValidDockerfile(t *testing.T) {
 	if !strings.Contains(output, `LABEL claw.configure.1="openclaw config set agents.defaults.heartbeat.target none"`) {
 		t.Fatal("missing claw.configure.1 label")
 	}
-	if !strings.Contains(output, "/claw/configure.sh") {
-		t.Fatal("missing configure script generation")
-	}
-	if !strings.Contains(output, "openclaw config set") {
-		t.Fatal("missing configure commands in script generation")
-	}
 	if !strings.Contains(output, "RUN apt-get update") {
 		t.Fatal("missing passthrough RUN instruction")
 	}

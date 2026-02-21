@@ -107,14 +107,6 @@ func buildInfraLines(config *ClawConfig) []string {
 		lines = append(lines, fmt.Sprintf("RUN printf '%%s\\n' %s > /etc/cron.d/claw && chmod 0644 /etc/cron.d/claw", quoteShellArgs(cronLines)))
 	}
 
-	if len(config.Configures) > 0 {
-		lines = append(lines, "RUN mkdir -p /claw")
-		scriptLines := make([]string, 0, len(config.Configures)+2)
-		scriptLines = append(scriptLines, "#!/bin/sh", "set -e")
-		scriptLines = append(scriptLines, config.Configures...)
-		lines = append(lines, fmt.Sprintf("RUN printf '%%s\\n' %s > /claw/configure.sh && chmod +x /claw/configure.sh", quoteShellArgs(scriptLines)))
-	}
-
 	return lines
 }
 

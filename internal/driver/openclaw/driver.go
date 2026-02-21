@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/health"
 )
@@ -144,15 +145,24 @@ func (d *Driver) HealthProbe(ref driver.ContainerRef) (*driver.Health, error) {
 	}
 	defer resp.Close()
 
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, resp.Reader); err != nil {
+	var stdoutBuf bytes.Buffer
+	var stderrBuf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, resp.Reader); err != nil {
 		return &driver.Health{OK: false, Detail: fmt.Sprintf("exec read failed: %v", err)}, nil
 	}
 
-	result, err := health.ParseHealthJSON(buf.Bytes())
+	result, err := health.ParseHealthJSON(stdoutBuf.Bytes())
 	if err != nil {
-		return &driver.Health{OK: false, Detail: fmt.Sprintf("parse failed: %v", err)}, nil
+		detail := fmt.Sprintf("parse failed: %v", err)
+		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
+			detail += fmt.Sprintf(" (stderr: %s)", stderr)
+		}
+		return &driver.Health{OK: false, Detail: detail}, nil
 	}
 
-	return &driver.Health{OK: result.OK, Detail: result.Detail}, nil
+	detail := result.Detail
+	if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
+		detail += fmt.Sprintf(" (stderr: %s)", stderr)
+	}
+	return &driver.Health{OK: result.OK, Detail: detail}, nil
 }

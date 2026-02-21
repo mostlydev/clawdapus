@@ -45,9 +45,12 @@ func runComposeUp(podFile string) error {
 		return err
 	}
 
-	podDir, _ := filepath.Abs(filepath.Dir(podFile))
+	podDir, err := filepath.Abs(filepath.Dir(podFile))
+	if err != nil {
+		return fmt.Errorf("resolve pod directory: %w", err)
+	}
 	runtimeDir := filepath.Join(podDir, ".claw-runtime")
-	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+	if err := os.MkdirAll(runtimeDir, 0700); err != nil {
 		return fmt.Errorf("create runtime dir: %w", err)
 	}
 
@@ -124,7 +127,7 @@ func runComposeUp(podFile string) error {
 		}
 
 		svcRuntimeDir := filepath.Join(runtimeDir, name)
-		if err := os.MkdirAll(svcRuntimeDir, 0755); err != nil {
+		if err := os.MkdirAll(svcRuntimeDir, 0700); err != nil {
 			return fmt.Errorf("create service runtime dir: %w", err)
 		}
 
@@ -150,6 +153,10 @@ func runComposeUp(podFile string) error {
 	}
 	fmt.Printf("[claw] wrote %s\n", generatedPath)
 
+	if len(drivers) > 0 && !composeUpDetach {
+		return fmt.Errorf("claw-managed services require detached mode for fail-closed post-apply verification; rerun with 'claw compose up -d %s'", podFile)
+	}
+
 	composeArgs := []string{"compose", "-f", generatedPath, "up"}
 	if composeUpDetach {
 		composeArgs = append(composeArgs, "-d")
@@ -162,18 +169,20 @@ func runComposeUp(podFile string) error {
 		return fmt.Errorf("docker compose up failed: %w", err)
 	}
 
-	// PostApply: verify containers are running (only in detach mode)
-	if composeUpDetach {
-		for name, d := range drivers {
-			rc := resolvedClaws[name]
-			containerID, err := resolveContainerID(generatedPath, name)
+	// PostApply: verify every generated service container.
+	for name, d := range drivers {
+		rc := resolvedClaws[name]
+		for _, generatedService := range expandedServiceNames(name, rc.Count) {
+			containerIDs, err := resolveContainerIDs(generatedPath, generatedService)
 			if err != nil {
-				return fmt.Errorf("service %q: failed to resolve container ID: %w", name, err)
+				return fmt.Errorf("service %q: failed to resolve container ID(s): %w", generatedService, err)
 			}
-			if err := d.PostApply(rc, driver.PostApplyOpts{ContainerID: containerID}); err != nil {
-				return fmt.Errorf("service %q: post-apply verification failed: %w", name, err)
+			for _, containerID := range containerIDs {
+				if err := d.PostApply(rc, driver.PostApplyOpts{ContainerID: containerID}); err != nil {
+					return fmt.Errorf("service %q: post-apply verification failed: %w", generatedService, err)
+				}
+				fmt.Printf("[claw] %s (%s): post-apply verified\n", generatedService, shortContainerIDForPostApply(containerID))
 			}
-			fmt.Printf("[claw] %s: post-apply verified\n", name)
 		}
 	}
 
@@ -181,17 +190,38 @@ func runComposeUp(podFile string) error {
 	return nil
 }
 
-func resolveContainerID(composePath, serviceName string) (string, error) {
+func resolveContainerIDs(composePath, serviceName string) ([]string, error) {
 	cmd := exec.Command("docker", "compose", "-f", composePath, "ps", "-q", serviceName)
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("docker compose ps: %w", err)
+		return nil, fmt.Errorf("docker compose ps: %w", err)
 	}
-	id := strings.TrimSpace(string(out))
-	if id == "" {
-		return "", fmt.Errorf("no container found for service %q", serviceName)
+	ids := strings.Fields(string(out))
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("no container found for service %q", serviceName)
 	}
-	return id, nil
+	return ids, nil
+}
+
+func expandedServiceNames(base string, count int) []string {
+	if count < 1 {
+		count = 1
+	}
+	if count == 1 {
+		return []string{base}
+	}
+	names := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		names = append(names, fmt.Sprintf("%s-%d", base, i))
+	}
+	return names
+}
+
+func shortContainerIDForPostApply(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12]
 }
 
 func init() {

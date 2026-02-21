@@ -23,7 +23,12 @@ func ParseSurface(raw string) (driver.ResolvedSurface, error) {
 
 	scheme := parsed.Scheme
 	target := parsed.Host
-	if target == "" {
+	switch {
+	case parsed.Host != "" && parsed.Path != "":
+		target = parsed.Host + parsed.Path
+	case parsed.Host == "" && parsed.Path != "":
+		target = parsed.Path
+	case target == "":
 		target = parsed.Opaque
 	}
 
@@ -33,7 +38,7 @@ func ParseSurface(raw string) (driver.ResolvedSurface, error) {
 
 	accessMode := ""
 	if len(parts) > 1 {
-		accessMode = parts[1]
+		accessMode = strings.Join(parts[1:], " ")
 	}
 
 	return driver.ResolvedSurface{

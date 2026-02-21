@@ -2,7 +2,6 @@ package pod
 
 import (
 	"fmt"
-	"net/url"
 	"sort"
 	"strings"
 
@@ -52,16 +51,20 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 
 	for _, name := range serviceNames {
 		svc := p.Services[name]
+		isClaw := svc.Claw != nil
 		result := results[name]
 		if result == nil {
-			// Fail-closed: safe defaults when driver result is absent
-			result = &driver.MaterializeResult{
-				ReadOnly: true,
-				Restart:  "on-failure",
+			// Fail-closed defaults apply only to Claw-managed services.
+			if isClaw {
+				result = &driver.MaterializeResult{
+					ReadOnly: true,
+					Restart:  "on-failure",
+				}
+			} else {
+				result = &driver.MaterializeResult{}
 			}
 		}
 
-		isClaw := svc.Claw != nil
 		if isClaw {
 			hasClaw = true
 		}
@@ -75,24 +78,47 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 		var volumeMounts []string
 		if svc.Claw != nil {
 			for _, raw := range svc.Claw.Surfaces {
-				parts := strings.Fields(raw)
-				if len(parts) == 0 {
-					continue
+				surface, err := ParseSurface(raw)
+				if err != nil {
+					return "", fmt.Errorf("service %q: %w", name, err)
 				}
-				parsed, err := url.Parse(parts[0])
-				if err != nil || parsed.Scheme != "volume" {
-					continue
+
+				switch surface.Scheme {
+				case "volume":
+					accessMode, err := surfaceAccessMode(surface)
+					if err != nil {
+						return "", fmt.Errorf("service %q: %w", name, err)
+					}
+					volName := strings.TrimSpace(surface.Target)
+					if volName == "" {
+						return "", fmt.Errorf("service %q: volume surface %q is missing target", name, raw)
+					}
+					cf.Volumes[volName] = nil // top-level volume declaration
+					volumeMounts = append(volumeMounts, fmt.Sprintf("%s:/mnt/%s:%s", volName, volName, accessMode))
+
+				case "host":
+					accessMode, err := surfaceAccessMode(surface)
+					if err != nil {
+						return "", fmt.Errorf("service %q: %w", name, err)
+					}
+					hostPath := strings.TrimSpace(surface.Target)
+					if hostPath == "" {
+						return "", fmt.Errorf("service %q: host surface %q is missing path", name, raw)
+					}
+					if !strings.HasPrefix(hostPath, "/") {
+						return "", fmt.Errorf("service %q: host surface %q must use an absolute host path", name, raw)
+					}
+					volumeMounts = append(volumeMounts, fmt.Sprintf("%s:%s:%s", hostPath, hostPath, accessMode))
+
+				case "service", "channel", "egress":
+					if strings.TrimSpace(surface.AccessMode) != "" {
+						return "", fmt.Errorf("service %q: surface %q does not support access mode %q", name, raw, surface.AccessMode)
+					}
+					// Topology only; no compose mounts.
+
+				default:
+					return "", fmt.Errorf("service %q: unsupported surface scheme %q in %q", name, surface.Scheme, raw)
 				}
-				volName := parsed.Host
-				if volName == "" {
-					volName = parsed.Opaque
-				}
-				accessMode := "rw"
-				if len(parts) > 1 && strings.Contains(parts[1], "read-only") {
-					accessMode = "ro"
-				}
-				cf.Volumes[volName] = nil // top-level volume declaration
-				volumeMounts = append(volumeMounts, fmt.Sprintf("%s:/mnt/%s:%s", volName, volName, accessMode))
 			}
 		}
 
@@ -196,4 +222,16 @@ func sortedServiceNames(services map[string]*Service) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func surfaceAccessMode(surface driver.ResolvedSurface) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(surface.AccessMode))
+	switch mode {
+	case "", "read-write", "rw":
+		return "rw", nil
+	case "read-only", "ro":
+		return "ro", nil
+	default:
+		return "", fmt.Errorf("surface %s://%s has unsupported access mode %q", surface.Scheme, surface.Target, surface.AccessMode)
+	}
 }

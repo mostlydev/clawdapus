@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"github.com/spf13/cobra"
 
@@ -48,14 +49,27 @@ var composeHealthCmd = &cobra.Command{
 		for _, id := range ids {
 			info, err := cli.ContainerInspect(context.Background(), id)
 			if err != nil {
-				fmt.Fprintf(w, "%s\t%s\t%s\n", id[:12], "error", fmt.Sprintf("inspect failed: %v", err))
+				fmt.Fprintf(w, "%s\t%s\t%s\n", shortContainerID(id), "error", fmt.Sprintf("inspect failed: %v", err))
 				continue
 			}
 
-			serviceName := info.Config.Labels["claw.service"]
-			clawType := info.Config.Labels["claw.type"]
+			labels := map[string]string{}
+			if info.Config != nil && info.Config.Labels != nil {
+				labels = info.Config.Labels
+			}
+
+			serviceName := labels["claw.service"]
+			if serviceName == "" {
+				serviceName = labels["com.docker.compose.service"]
+			}
+			if serviceName == "" {
+				serviceName = shortContainerID(id)
+			}
+
+			clawType := labels["claw.type"]
 			if clawType == "" {
-				// Not a claw-managed container, skip
+				status, detail := nativeContainerStatus(info)
+				fmt.Fprintf(w, "%s\t%s\t%s\n", serviceName, status, detail)
 				continue
 			}
 
@@ -84,6 +98,33 @@ var composeHealthCmd = &cobra.Command{
 		w.Flush()
 		return nil
 	},
+}
+
+func nativeContainerStatus(info types.ContainerJSON) (string, string) {
+	if info.State == nil {
+		return "unknown", "state unavailable"
+	}
+
+	if info.State.Health != nil && info.State.Health.Status != "" {
+		return info.State.Health.Status, "native docker healthcheck"
+	}
+
+	if info.State.Running {
+		return "running", "native (no claw driver)"
+	}
+
+	if info.State.Status != "" {
+		return info.State.Status, "native (no claw driver)"
+	}
+
+	return "unknown", "native (no claw driver)"
+}
+
+func shortContainerID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12]
 }
 
 func init() {
