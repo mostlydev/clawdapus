@@ -1,0 +1,10 @@
+x-claw:
+  pod: integration-test
+
+services:
+  gateway:
+    image: claw-integration-test
+    x-claw:
+      agent: ./AGENTS.md
+    environment:
+      OPENCLAW_PORT: "18789"

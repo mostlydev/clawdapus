@@ -1,0 +1,15 @@
+FROM alpine:3.20
+
+CLAW_TYPE openclaw
+AGENT AGENTS.md
+
+MODEL primary test/stub-model
+
+CONFIGURE openclaw config set agents.defaults.heartbeat.every 30m
+
+RUN apk add --no-cache bash jq tini
+COPY openclaw /usr/local/bin/openclaw
+RUN chmod +x /usr/local/bin/openclaw
+COPY entrypoint.sh /claw/entrypoint.sh
+RUN chmod +x /claw/entrypoint.sh
+ENTRYPOINT ["/sbin/tini", "--", "/claw/entrypoint.sh"]

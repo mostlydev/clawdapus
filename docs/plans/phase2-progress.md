@@ -20,6 +20,7 @@
 | 9 | CLI compose commands | DONE | `7eda8b8` | up/down/ps/logs via docker compose passthrough |
 | 10 | Health probe (stderr separation) | DONE | `fe18c80` | Scans for first `{` in stdout, ignores stderr noise |
 | 11 | Example claw-pod.yml + integration smoke | DONE | `72102a1` | Example pod + integration test behind build tag |
+| 12 | E2E Docker integration | DONE | — | Stub fixture, PostApply wiring, Docker SDK verify, 3 e2e tests |
 
 ## How to Resume
 

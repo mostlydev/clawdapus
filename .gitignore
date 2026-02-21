@@ -37,5 +37,6 @@ packages/
 # Clawdapus specific
 *.generated.yml
 .claw-runtime/
-testdata/
+testdata/*
+!testdata/openclaw-stub/
 *-notes.md

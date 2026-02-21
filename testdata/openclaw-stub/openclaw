@@ -1,0 +1,23 @@
+#!/bin/sh
+# Stub openclaw binary for integration testing.
+# Handles: health, gateway, config subcommands.
+
+case "$1" in
+  health)
+    echo '{"status":"ok","detail":"healthy","version":"test"}'
+    exit 0
+    ;;
+  gateway)
+    echo "openclaw-stub: gateway running (pid $$)" >&2
+    # Long-lived process — sleep forever
+    exec sleep infinity
+    ;;
+  config)
+    # No-op: accept any config set commands silently
+    exit 0
+    ;;
+  *)
+    echo "openclaw-stub: unknown command: $1" >&2
+    exit 1
+    ;;
+esac
