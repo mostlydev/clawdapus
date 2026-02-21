@@ -108,6 +108,15 @@ func runComposeUp(podFile string) error {
 			}
 		}
 
+		// Enrich service surfaces with port info from pod service definitions
+		for i := range surfaces {
+			if surfaces[i].Scheme == "service" {
+				if targetSvc, ok := p.Services[surfaces[i].Target]; ok {
+					surfaces[i].Ports = targetSvc.Expose
+				}
+			}
+		}
+
 		// Merge skills: image-level (from labels) + pod-level (from x-claw)
 		imageSkills, err := runtime.ResolveSkills(podDir, info.Skills)
 		if err != nil {
