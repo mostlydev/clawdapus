@@ -1,5 +1,8 @@
 FROM node:24-bookworm-slim
 
+RUN apt-get update && apt-get install -y bash ca-certificates cron curl git jq tini
+RUN npm install -g openclaw@2026.2.9
+
 CLAW_TYPE openclaw
 AGENT AGENTS.md
 
@@ -12,7 +15,6 @@ INVOKE 0,30 * * * * heartbeat
 
 TRACK apt pip npm
 
-CONFIGURE openclaw config set channels.discord.enabled true
 SURFACE service://fleet-master
 
 SKILL ./skills/openclaw-runbook.md
@@ -20,8 +22,6 @@ SKILL ./skills/openclaw-runbook.md
 PRIVILEGE worker root
 PRIVILEGE runtime claw-user
 
-RUN apt-get update && apt-get install -y bash ca-certificates cron curl git jq tini
-RUN npm install -g openclaw@2026.2.9
 COPY entrypoint.sh /claw/entrypoint.sh
 RUN chmod +x /claw/entrypoint.sh
 ENTRYPOINT ["/usr/bin/tini", "--", "/claw/entrypoint.sh"]

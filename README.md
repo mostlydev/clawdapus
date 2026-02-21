@@ -130,6 +130,8 @@ A Clawfile is an extended Dockerfile. Any valid Dockerfile is still valid.
 
 ```dockerfile
 FROM node:24-bookworm-slim
+RUN apt-get update && apt-get install -y bash ca-certificates cron curl git jq tini
+RUN npm install -g openclaw@2026.2.9
 
 CLAW_TYPE openclaw
 AGENT AGENTS.md
@@ -138,13 +140,11 @@ MODEL primary openrouter/anthropic/claude-sonnet-4
 CONFIGURE openclaw config set agents.defaults.heartbeat.every 30m
 INVOKE 0,30 * * * * heartbeat
 
-CONFIGURE openclaw config set channels.discord.enabled true
 SURFACE service://fleet-master
 
 SKILL ./skills/openclaw-runbook.md
 
 PRIVILEGE runtime claw-user
-RUN npm install -g openclaw@2026.2.9
 ```
 
 `claw build` transpiles directives into standard Dockerfile primitives (`LABEL`, generated helper scripts, and cron setup), then runs `docker build`.
