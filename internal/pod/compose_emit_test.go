@@ -190,6 +190,37 @@ func TestEmitComposeVolumeSurface(t *testing.T) {
 	}
 }
 
+func TestEmitComposeRejectsUnknownServiceSurfaceTarget(t *testing.T) {
+	p := &Pod{
+		Name: "missing-target-pod",
+		Services: map[string]*Service{
+			"researcher": {
+				Image: "ghcr.io/example/researcher:v1",
+				Claw: &ClawBlock{
+					Surfaces: []string{
+						"service://gateway",
+					},
+				},
+			},
+		},
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"researcher": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+		},
+	}
+
+	_, err := EmitCompose(p, results)
+	if err == nil {
+		t.Fatal("expected error for unknown service surface target")
+	}
+	if !strings.Contains(err.Error(), "targets unknown service") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEmitComposeMultiServiceSharedVolume(t *testing.T) {
 	p := &Pod{
 		Name: "research-pod",

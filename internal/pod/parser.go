@@ -3,6 +3,7 @@ package pod
 import (
 	"fmt"
 	"io"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,7 +23,7 @@ type rawService struct {
 	Image       string            `yaml:"image"`
 	XClaw       *rawClawBlock     `yaml:"x-claw"`
 	Environment map[string]string `yaml:"environment"`
-	Expose      []string          `yaml:"expose"`
+	Expose      []interface{}     `yaml:"expose"`
 }
 
 type rawClawBlock struct {
@@ -48,7 +49,10 @@ func Parse(r io.Reader) (*Pod, error) {
 	}
 
 	for name, svc := range raw.Services {
-		expose := svc.Expose
+		expose, err := parseExpose(svc.Expose)
+		if err != nil {
+			return nil, fmt.Errorf("service %q: parse expose: %w", name, err)
+		}
 		if expose == nil {
 			expose = make([]string, 0)
 		}
@@ -83,4 +87,29 @@ func Parse(r io.Reader) (*Pod, error) {
 	}
 
 	return pod, nil
+}
+
+func parseExpose(raw []interface{}) ([]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	out := make([]string, 0, len(raw))
+	for i, port := range raw {
+		switch v := port.(type) {
+		case string:
+			out = append(out, v)
+		case int:
+			out = append(out, strconv.Itoa(v))
+		case int64:
+			out = append(out, strconv.FormatInt(v, 10))
+		case uint:
+			out = append(out, strconv.FormatUint(uint64(v), 10))
+		case uint64:
+			out = append(out, strconv.FormatUint(v, 10))
+		default:
+			return nil, fmt.Errorf("entry %d: unsupported expose value type %T", i, port)
+		}
+	}
+	return out, nil
 }

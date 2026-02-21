@@ -62,3 +62,54 @@ func TestParsePodDefaultsEmptyExpose(t *testing.T) {
 		t.Errorf("expected 0 expose entries, got %d", len(researcher.Expose))
 	}
 }
+
+func TestParsePodAcceptsNumericExposeEntries(t *testing.T) {
+	const testPodWithNumericExposeYAML = `
+x-claw:
+  pod: expose-pod
+
+services:
+  api-server:
+    image: nginx:alpine
+    expose:
+      - 8080
+      - "9090"
+`
+
+	pod, err := Parse(strings.NewReader(testPodWithNumericExposeYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	api := pod.Services["api-server"]
+	if api == nil {
+		t.Fatal("expected api-server service")
+	}
+	if len(api.Expose) != 2 {
+		t.Fatalf("expected 2 expose entries, got %d", len(api.Expose))
+	}
+	if api.Expose[0] != "8080" {
+		t.Errorf("expected first expose port 8080, got %q", api.Expose[0])
+	}
+	if api.Expose[1] != "9090" {
+		t.Errorf("expected second expose port 9090, got %q", api.Expose[1])
+	}
+}
+
+func TestParsePodRejectsInvalidExposeEntryType(t *testing.T) {
+	const testPodWithInvalidExposeTypeYAML = `
+x-claw:
+  pod: expose-pod
+
+services:
+  api-server:
+    image: nginx:alpine
+    expose:
+      - [8080, 9090]
+`
+
+	_, err := Parse(strings.NewReader(testPodWithInvalidExposeTypeYAML))
+	if err == nil {
+		t.Fatal("expected parse error for invalid expose entry")
+	}
+}

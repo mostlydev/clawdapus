@@ -111,6 +111,16 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 					volumeMounts = append(volumeMounts, fmt.Sprintf("%s:%s:%s", hostPath, hostPath, accessMode))
 
 				case "service", "channel", "egress":
+					if surface.Scheme == "service" {
+						target := strings.TrimSpace(surface.Target)
+						if target == "" {
+							return "", fmt.Errorf("service %q: service surface %q has empty target", name, raw)
+						}
+						if _, ok := p.Services[target]; !ok {
+							return "", fmt.Errorf("service %q: service surface %q targets unknown service %q", name, raw, target)
+						}
+					}
+
 					if strings.TrimSpace(surface.AccessMode) != "" {
 						return "", fmt.Errorf("service %q: surface %q does not support access mode %q", name, raw, surface.AccessMode)
 					}
