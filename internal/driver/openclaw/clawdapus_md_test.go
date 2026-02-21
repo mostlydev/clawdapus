@@ -46,12 +46,13 @@ func TestGenerateClawdapusMD(t *testing.T) {
 	if !strings.Contains(md, "discord") {
 		t.Error("expected discord channel surface")
 	}
-	// Surface skill files are not generated yet — must not be advertised
-	if strings.Contains(md, "skills/surface-fleet-master.md") {
-		t.Error("service surface should not advertise skill file until surface skill generation is implemented")
+	// Service surface references skill file
+	if !strings.Contains(md, "skills/surface-fleet-master.md") {
+		t.Error("service surface should reference its companion skill file")
 	}
+	// Channel and volume surfaces do NOT get skill references
 	if strings.Contains(md, "skills/surface-discord.md") {
-		t.Error("channel surface should not advertise skill file until surface skill generation is implemented")
+		t.Error("channel surface should not have skill reference")
 	}
 	if strings.Contains(md, "skills/surface-research-cache.md") {
 		t.Error("volume surface should not have skill reference")
@@ -97,6 +98,42 @@ func TestGenerateClawdapusMDListsExplicitSkills(t *testing.T) {
 	}
 	if strings.Contains(md, "No skills available") {
 		t.Error("should not say no skills when explicit skills are present")
+	}
+}
+
+func TestGenerateClawdapusMDServiceSkillInSkillsSection(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "researcher",
+		ClawType:    "openclaw",
+		Surfaces: []driver.ResolvedSurface{
+			{Scheme: "service", Target: "api-server"},
+			{Scheme: "volume", Target: "data", AccessMode: "read-write"},
+		},
+		Skills: []driver.ResolvedSkill{
+			{Name: "custom-workflow.md", HostPath: "/tmp/skills/custom-workflow.md"},
+		},
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	// Service surface skill in skills section
+	if !strings.Contains(md, "skills/surface-api-server.md") {
+		t.Error("expected surface-api-server.md in skills section")
+	}
+	if !strings.Contains(md, "api-server service surface") {
+		t.Error("expected service surface description in skills section")
+	}
+	// Operator skill also present
+	if !strings.Contains(md, "skills/custom-workflow.md") {
+		t.Error("expected operator skill alongside surface skill")
+	}
+	// Volume surface should NOT appear in skills section
+	if strings.Contains(md, "surface-data.md") {
+		t.Error("volume surface should not generate skill reference")
+	}
+	// Should not say "no skills"
+	if strings.Contains(md, "No skills available") {
+		t.Error("should not say no skills when skills are present")
 	}
 }
 
