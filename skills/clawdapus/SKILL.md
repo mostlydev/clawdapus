@@ -48,35 +48,25 @@ A Clawfile is an extended Dockerfile. Standard Dockerfile directives pass throug
 | `CONFIGURE <cmd>` | **Runs at container startup**, NOT build time. Compiled into `/claw/configure.sh` entrypoint wrapper. For init-time mutations against base image defaults. | Build: generates script. Runtime: executes on boot. |
 | `INVOKE <cron> <cmd>` | System-level cron in `/etc/cron.d/claw`. Bot-unmodifiable. | Build: writes cron file. |
 | `TRACK <pkg-managers>` | Installs package manager wrappers for mutation tracking (apt, pip, npm). | Build: wrapper install. |
-| `SURFACE <scheme>://<target>` | Declares communication channels. See Surface Taxonomy below. | Build: label. Runtime: compose wiring or driver config. |
+| `SURFACE <scheme>://<target>` | Declares infrastructure connections (volumes, services). See Surface Taxonomy below. | Build: label. Runtime: compose wiring. |
 | `PRIVILEGE <mode> <user>` | Maps privilege modes (worker, runtime) to user specs. | Build: label. Runtime: Docker user/security. |
 
 ## Surface Taxonomy
 
-Surfaces split by WHO enforces them:
-
-**Pod-level (Clawdapus enforces via compose generation):**
+Surfaces strictly define infrastructure boundaries enforced by Clawdapus via compose generation.
 
 | Scheme | Enforcement |
 |--------|------------|
 | `volume://<name>` | Compose volume mount with `:ro`/`:rw` |
 | `host://<path>` | Compose bind mount with access mode |
 | `service://<name>` | Compose networking — pod-internal reachability |
-| `egress://<domain>` | Network policy — allow/deny outbound |
 
 For `service://<name>`, Clawdapus also mounts a service skill when available:
 
 - Primary source: `claw.skill.emit` label in the target service image (path inside image).
 - Fallback: generated `skills/surface-<name>.md` with hostname + discovered port hints.
 
-**Driver-mediated (runner-specific config injection):**
-
-| Scheme | Enforcement |
-|--------|------------|
-| `channel://<platform>` | Driver injects platform config (Discord, Slack, Telegram). Token comes from standard `environment:` block. |
-| `webhook://<name>` | Driver configures runner's HTTP endpoint. |
-
-If a driver doesn't support a declared surface scheme, **preflight fails** and the container doesn't start.
+> **Note on Application Integrations:** External services (like Discord, Slack, external APIs) are *not* Surfaces. They are configured natively by the runner via `CONFIGURE` directives and standard Docker `environment` variables.
 
 ## Skill Mounting Semantics
 
@@ -105,7 +95,6 @@ services:
     x-claw:                      # service-level
       agent: ./AGENTS.md         # host path, mounted :ro
       surfaces:
-        - "channel://discord"
         - "service://fleet-master"
     environment:                  # standard compose, NOT x-claw
       DISCORD_TOKEN: ${DISCORD_TOKEN}

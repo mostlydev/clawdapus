@@ -138,7 +138,7 @@ MODEL primary openrouter/anthropic/claude-sonnet-4
 CONFIGURE openclaw config set agents.defaults.heartbeat.every 30m
 INVOKE 0,30 * * * * heartbeat
 
-SURFACE channel://discord
+CONFIGURE openclaw config set channels.discord.enabled true
 SURFACE service://fleet-master
 
 SKILL ./skills/openclaw-runbook.md
