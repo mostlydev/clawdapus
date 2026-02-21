@@ -21,10 +21,6 @@ HANDLE discord
 CONFIGURE openclaw config set channels.discord.accounts [{"token":"${DISCORD_BOT_TOKEN}","applicationId":"${DISCORD_APP_ID}"}]
 CONFIGURE openclaw config set agents.defaults.bindings.discord.accountId ${DISCORD_APP_ID}
 
-# Alpaca credentials — passed via environment at pod startup
-CONFIGURE openclaw config set integrations.alpaca.apiKey ${ALPACA_API_KEY}
-CONFIGURE openclaw config set integrations.alpaca.secretKey ${ALPACA_SECRET_KEY}
-
 TRACK apt npm
 
 PRIVILEGE worker root

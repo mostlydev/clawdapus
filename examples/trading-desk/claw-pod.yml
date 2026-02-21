@@ -54,7 +54,9 @@ x-claw:
 #   POSTGRES_PASSWORD, SECRET_KEY_BASE
 #   TIVERTON_BOT_TOKEN, WESTIN_BOT_TOKEN, LOGAN_BOT_TOKEN
 #   GERRARD_BOT_TOKEN, DUNDAS_BOT_TOKEN, BOULTON_BOT_TOKEN, ALLEN_BOT_TOKEN
-#   ALPACA_API_KEY, ALPACA_SECRET_KEY
+#   TIVERTON_DISCORD_ID ... ALLEN_DISCORD_ID  (one per agent)
+#   DISCORD_GUILD_ID, DISCORD_TRADING_FLOOR_CHANNEL, DISCORD_INFRA_CHANNEL
+#   ALPACA_API_KEY, ALPACA_SECRET_KEY  (trading-api only)
 #   APEWISDOM_API_KEY  (Dundas and Boulton only)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -111,8 +113,6 @@ services:
     environment:
       DISCORD_BOT_TOKEN: "${TIVERTON_BOT_TOKEN}"
       DISCORD_APP_ID: "${TIVERTON_DISCORD_ID}"
-      ALPACA_API_KEY: "${ALPACA_API_KEY}"
-      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
 
   # ── Westin — Momentum / Tech Stocks ──────────────────────────────────────
 
@@ -140,8 +140,6 @@ services:
     environment:
       DISCORD_BOT_TOKEN: "${WESTIN_BOT_TOKEN}"
       DISCORD_APP_ID: "${WESTIN_DISCORD_ID}"
-      ALPACA_API_KEY: "${ALPACA_API_KEY}"
-      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
 
   # ── Logan — Value / Fundamentals ─────────────────────────────────────────
 
@@ -169,8 +167,6 @@ services:
     environment:
       DISCORD_BOT_TOKEN: "${LOGAN_BOT_TOKEN}"
       DISCORD_APP_ID: "${LOGAN_DISCORD_ID}"
-      ALPACA_API_KEY: "${ALPACA_API_KEY}"
-      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
 
   # ── Gerrard — Macro / Sector Rotation ────────────────────────────────────
 
@@ -198,8 +194,6 @@ services:
     environment:
       DISCORD_BOT_TOKEN: "${GERRARD_BOT_TOKEN}"
       DISCORD_APP_ID: "${GERRARD_DISCORD_ID}"
-      ALPACA_API_KEY: "${ALPACA_API_KEY}"
-      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
 
   # ── Dundas — Event Trader + News Dispatcher ───────────────────────────────
 
@@ -228,8 +222,6 @@ services:
     environment:
       DISCORD_BOT_TOKEN: "${DUNDAS_BOT_TOKEN}"
       DISCORD_APP_ID: "${DUNDAS_DISCORD_ID}"
-      ALPACA_API_KEY: "${ALPACA_API_KEY}"
-      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
       APEWISDOM_API_KEY: "${APEWISDOM_API_KEY}"
 
   # ── Boulton — Pump Trader, High-Risk / Crypto ────────────────────────────
@@ -258,8 +250,6 @@ services:
     environment:
       DISCORD_BOT_TOKEN: "${BOULTON_BOT_TOKEN}"
       DISCORD_APP_ID: "${BOULTON_DISCORD_ID}"
-      ALPACA_API_KEY: "${ALPACA_API_KEY}"
-      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
       APEWISDOM_API_KEY: "${APEWISDOM_API_KEY}"
 
   # ── Allen — Systems Monitor ───────────────────────────────────────────────

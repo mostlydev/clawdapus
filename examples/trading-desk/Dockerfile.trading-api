@@ -1,25 +1,20 @@
-# Trading API — not a claw, but self-describes via claw.skill.emit
+# Trading API — mock server for testing claw.skill.emit extraction
 #
 # LABEL claw.skill.emit causes clawdapus to extract trade.md from this image
 # at compose-up time and mount it into every claw that declares
-# surface: service://trading-api.  Agents get the authoritative API docs
+# surface: service://trading-api.  Agents get authoritative API docs
 # from the service itself — no static pod-level copy that can drift.
+#
+# In production replace this with your real Rails/Phoenix/FastAPI image.
 
-FROM ruby:3.3-slim
-
-RUN apt-get update && apt-get install -y \
-    build-essential libpq-dev postgresql-client nodejs \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.12-slim
 
 WORKDIR /app
-COPY Gemfile Gemfile.lock ./
-RUN bundle install
-COPY . .
 
-# The skill file lives inside the image.
-# clawdapus extracts it at compose-up time via docker cp (create + copy + rm).
-# Agents never fetch it at runtime — it's mounted read-only into /claw/skills/.
+COPY mock_server.py ./
+COPY skills/trade.md ./skills/trade.md
+
 LABEL claw.skill.emit=/app/skills/trade.md
 
 EXPOSE 4000
-CMD ["bin/rails", "server", "-b", "0.0.0.0", "-p", "4000"]
+CMD ["python", "mock_server.py"]
