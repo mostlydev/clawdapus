@@ -427,6 +427,7 @@ All directives translate to standard Dockerfile primitives at build time.
 | `TRACK` | `RUN claw-track-install apt pip npm` | Install package manager wrappers |
 | `ACT` | `RUN ...` (worker mode only) | Worker-mode setup commands |
 | `SURFACE` | `LABEL claw.surface.<n>=...` | Consumed surface declarations |
+| `SKILL` | `LABEL claw.skill.<n>=...` | Skill files to mount read-only into the runner's skill directory |
 | `PRIVILEGE` | `LABEL claw.privilege.<mode>=...` | Per-mode privilege config |
 
 Standard Dockerfile directives (`FROM`, `RUN`, `COPY`, `ENV`, `ENTRYPOINT`, etc.) pass through unchanged.
@@ -449,6 +450,7 @@ Standard Dockerfile directives (`FROM`, `RUN`, `COPY`, `ENV`, `ENTRYPOINT`, etc.
 | `TRACK` | yes | no |
 | `ACT` | yes | no |
 | `SURFACE` | yes (default declarations) | yes (additive) |
+| `SKILL` | yes (default skills) | yes (additive) |
 | `PRIVILEGE` | yes (default modes) | yes |
 
 ---
@@ -471,6 +473,9 @@ x-claw:
   persona: <registry-ref>            # override Clawfile default
   cllama: <stack-spec>               # override Clawfile default (omit for no cllama)
   count: <n>                         # scale to N identical containers
+  skills:                            # skill files mounted r/o into runner's skill dir
+    - ./skills/custom-workflow.md
+    - ./skills/team-conventions.md
   surfaces:                          # topology declarations
     # Mounts (access mode enforced by Docker):
     - volume://shared-cache: read-write
@@ -640,38 +645,59 @@ Volume surfaces are enforced at the compose generation level — Clawdapus write
 
 **Success criteria:** A claw-pod.yml with an OpenClaw service starts correctly with enforced model pin and read-only contract. Missing contract blocks startup. Failed driver preflight blocks startup. `claw ps` shows container status and driver enforcement state. Claws sharing a volume can read/write shared files according to their declared access mode; a Claw without declared access to a volume cannot mount it.
 
-### Phase 3 — Service Surfaces + Channel Bindings + Skill Maps + Multi-Driver
+### Phase 3 — Surface Manifests + Skills + Channel Bindings + Multi-Driver
 
-**Goal:** `claw skillmap` works. Multiple claw types and surface types supported.
+**Goal:** Surfaces generate two layers of context: a bootstrapped manifest (SURFACES.md) always visible to the agent, and per-surface skill files for complex surfaces. `claw skillmap` works. Multiple claw types and surface types supported.
 
-Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds service surfaces (pod-internal MCP/REST/gRPC endpoints) and driver-mediated surfaces (channel bindings like Discord, Slack).
+Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds surface context injection, service surfaces (pod-internal MCP/REST/gRPC endpoints), driver-mediated surfaces (channel bindings), and skill generation.
 
-**Service surfaces (pod-level):**
-1. Resolve `service://` declarations against expose blocks in the pod
-2. Wire compose networking so declared services are reachable
-3. Run the service discovery pipeline (steps 11-13) to collect capability descriptions
-4. Assemble per-Claw skill maps combining volume, service, and channel capabilities
-5. Write skill maps to read-only skill mount at `/claw/skillmap.json`
+**Slice 1 — Surface manifests + multi-claw example (volume surfaces):**
+1. Parse pod-level `surfaces` from `x-claw` into `ResolvedSurface` structs, wire into `ResolvedClaw`
+2. Driver generates `SURFACES.md` — the always-visible manifest describing what's available (name, type, access mode, mount path, connection details). For surfaces with companion skills, it points the agent to the skill file.
+3. Driver adds `bootstrap-extra-files` hook to runner config so SURFACES.md is injected into agent context on every session and heartbeat
+4. Multi-claw example: two OpenClaw services sharing a volume with different access modes
 
-**Channel bindings (driver-mediated):**
-6. Parse `channel://<platform>` surface declarations from `x-claw`
-7. Pass channel config to the driver for runner-specific injection
-8. Driver translates channel YAML to runner config ops (e.g. `openclaw config set channels.discord.*`)
-9. Driver references platform tokens from standard compose `environment:` by convention (Clawdapus does not manage credentials)
-10. Preflight validates driver supports the declared channel schemes
+**Slice 2 — Service surfaces + skill generation:**
+5. Resolve `service://` declarations against expose blocks in the pod
+6. Wire compose networking so declared services are reachable
+7. Driver generates skill files for service surfaces: `skills/surface-<name>.md` containing host, port, protocol, credential env vars, and usage documentation from service discovery
+8. Skills are mounted read-only into the container's skills directory — agents discover them through the runner's standard skill mechanism
+9. SURFACES.md references skill files: `"See skills/surface-<name>.md for usage"`
+10. Run the service discovery pipeline (steps 14-16) to populate skill content
+
+**Slice 3 — Channel bindings (driver-mediated):**
+11. Parse `channel://<platform>` surface declarations from `x-claw`
+12. Pass channel config to the driver for runner-specific injection
+13. Driver translates channel YAML to runner config ops (e.g. `openclaw config set channels.discord.*`)
+14. Driver generates skill files for channel surfaces describing platform capabilities and constraints
+15. Driver references platform tokens from standard compose `environment:` by convention (Clawdapus does not manage credentials)
+16. Preflight validates driver supports the declared channel schemes
 
 **Service discovery:**
-11. Query MCP services for tool listings via MCP protocol
-12. Query REST services for OpenAPI specs (if available)
-13. Fall back to static `describe` blocks for services that can't self-describe
-14. Skill map reflects what the service reports to the authenticated Claw
+17. Query MCP services for tool listings via MCP protocol
+18. Query REST services for OpenAPI specs (if available)
+19. Fall back to static `describe` blocks for services that can't self-describe
+20. Discovery results populate skill file content — the skill is the "manual" for the surface
 
 **Multi-driver:**
-15. Implement generic driver (env var conventions: `CONTRACT_PATH`, `MODEL_PRIMARY`, etc.)
-16. Implement Claude Code driver (settings.json + CLAUDE.md contract)
-17. Prove the driver abstraction works across at least 3 runner types
+21. Implement generic driver (env var conventions: `CONTRACT_PATH`, `MODEL_PRIMARY`, etc.)
+22. Implement Claude Code driver (settings.json + CLAUDE.md contract)
+23. Prove the driver abstraction works across at least 3 runner types
 
-**Success criteria:** `claw skillmap <claw>` shows correct capability inventory including volume, service, and channel surfaces. A `channel://discord` surface in a pod with an OpenClaw Claw results in correct Discord config injection. Mixed pods with different claw types start correctly, each with appropriate driver enforcement. A channel surface on a driver that doesn't support it fails preflight with a clear error.
+**CLAWDAPUS.md — single context injection point:**
+The driver generates a `CLAWDAPUS.md` file — the infrastructure layer's letter to the agent. Always bootstrapped into the agent's context. Contains identity (pod, service, type), surfaces (name, type, access, location), and a skills index (what skill files are available). This is the agent's map of its environment.
+
+**SKILL directive — explicit skill mounts:**
+A new `SKILL` directive in Clawfile and `skills:` in x-claw allows operators to mount skill files from the host into the runner's skill directory. The driver knows where skills go per runner type (OpenClaw: `skills/`, Claude Code: different). Surface-generated skills, discovery skills, and explicit SKILL directives all feed the same skill directory.
+
+**Two-layer context model:**
+- **CLAWDAPUS.md** (bootstrapped) = the map. Always in the agent's context. Lists everything: identity, surfaces, skill index.
+- **Skills** (`skills/` directory) = the manual. Detailed usage guides for complex surfaces and operator-provided skills. Agents look them up on demand through the runner's standard skill mechanism. Read-only mounted.
+- Volume surfaces are simple enough that CLAWDAPUS.md alone covers them.
+- Service surfaces get a companion skill with host, port, protocol, credential env vars, and discovered capabilities.
+- Channel surfaces get a companion skill describing platform capabilities, routing config, and constraints.
+
+**Success criteria:** Every Claw receives a `CLAWDAPUS.md` bootstrapped into its context with identity, surfaces, and skill index. SKILL directives and surface-generated skills are mounted into the runner's skill directory. `claw skillmap <claw>` shows correct capability inventory. A `channel://discord` surface results in correct config injection plus a generated skill. Mixed pods with different claw types start correctly. A channel surface on a driver that doesn't support it fails preflight with a clear error.
 
 ### Phase 4 — cllama Sidecar + Policy Pipeline
 
@@ -723,7 +749,7 @@ Volume surfaces (shared folders) are already wired in Phase 2. Phase 3 adds serv
 
 ## Open Questions
 
-1. **Skill mount format** — JSON with a runner-agnostic schema? MCP tool definition format? OpenAPI fragments? Leaning toward a simple JSON format at `/claw/skillmap.json` that each runner adapter knows how to read. The skill map is assembled from multiple discovery protocols (MCP tool listings, OpenAPI specs, static describe blocks) and unified into one format.
+1. **Skill mount format** — **Resolved.** Two-layer model: `CLAWDAPUS.md` (bootstrapped into agent context) serves as the always-visible index of identity, surfaces, and skills. Individual skill files live in the runner's `skills/` directory as markdown. Skills come from three sources: explicit `SKILL` directives (operator-provided), surface-generated skills (from service/channel surfaces), and discovery-populated skills (from MCP/OpenAPI/describe). The driver knows where skills go per runner type.
 
 2. **Persona registry** — OCI artifacts via `oras` is the leading option. Need to define the artifact structure (manifest, memory, knowledge, style fingerprint as separate layers? or single tarball?).
 

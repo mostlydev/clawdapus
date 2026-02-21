@@ -205,6 +205,8 @@ The operator picks the weight class that fits the problem. Lightweight runners a
 
 **SURFACE** — Declares what this Claw connects to. Volumes, queues, chat platforms, APIs, MCP services. Clawdapus resolves service references against expose blocks in the pod and assembles the skill map. Access modes are enforced only on mounts (volumes, host paths) where Docker has authority. For services, channels, and APIs, the Claw authenticates with standard credentials — Clawdapus declares topology, not permissions.
 
+**SKILL** — Mounts skill files from the host into the runner's skill directory, read-only. Skills are the manual for how to use capabilities — operator-provided guides, surface-generated usage docs, or discovery-populated API references. The driver knows where skills go per runner type. All skills are indexed in `CLAWDAPUS.md`.
+
 ### A Complete Clawfile
 
 ```dockerfile
@@ -249,6 +251,10 @@ SURFACE volume://shared-cache       read-write
 SURFACE channel://discord
 SURFACE service://company-crm
 SURFACE service://fleet-master
+
+# Operator-provided skills (mounted read-only into runner's skill dir)
+SKILL skills/crypto-feeds.md
+SKILL skills/analysis-toolkit.md
 
 # Privilege modes
 PRIVILEGE worker    root
@@ -503,9 +509,48 @@ services:
       CRM_INSTANCE_URL: ${CRM_INSTANCE_URL}
 ```
 
-### Surfaces, Skill Maps, and Skill Mounts
+### CLAWDAPUS.md, Skills, and Skill Maps
 
-Services describe themselves. Claws discover what's available. At pod startup, Clawdapus queries each declared service surface for its self-description — MCP servers via tool listing, REST APIs via OpenAPI specs, or static `describe` blocks for services that can't self-describe at runtime. The responses reflect what the Claw's credentials allow. Clawdapus assembles the results into a skill map per Claw.
+Every Claw receives a `CLAWDAPUS.md` — the infrastructure layer's letter to the agent. This is a single generated file, always injected into the agent's context, containing everything the agent needs to know about its environment: identity (pod, service, type), surfaces (name, type, access mode, connection details), and a skill index (what skill files are available and what they describe).
+
+`CLAWDAPUS.md` is the map — always visible, always top of mind. Skill files are the manual — detailed usage guides for complex surfaces and operator-provided capabilities, stored in the runner's `skills/` directory and looked up on demand.
+
+Skills come from three sources:
+1. **Explicit SKILL directives** — operator-provided skill files from the host, mounted read-only
+2. **Surface-generated skills** — the driver generates skill files for service/channel surfaces describing connection details, protocol, and constraints
+3. **Discovery-populated skills** — at pod startup, Clawdapus queries service surfaces for self-description (MCP tool listings, OpenAPI specs, static describe blocks) and populates skill content from the results
+
+The driver knows where skills go per runner type. All three sources feed the same skill directory. `CLAWDAPUS.md` indexes them all.
+
+```
+# /claw/CLAWDAPUS.md (always in agent context)
+
+# CLAWDAPUS.md
+
+## Identity
+- **Pod:** crypto-ops
+- **Service:** crypto-crusher-0
+- **Type:** openclaw
+
+## Surfaces
+### shared-cache (volume)
+- **Access:** read-write
+- **Mount path:** /mnt/shared-cache
+
+### market-scanner (service)
+- **Host:** market-scanner
+- **Port:** 8080
+- **Credentials:** `COINGECKO_KEY` (env)
+- **Skill:** `skills/surface-market-scanner.md`
+
+### discord (channel)
+- **Skill:** `skills/surface-discord.md`
+
+## Skills
+- `skills/surface-market-scanner.md` — Market Scanner API (discovered via OpenAPI)
+- `skills/surface-discord.md` — Discord channel constraints and routing
+- `skills/crypto-feeds.md` — Crypto data feed tools (operator-provided)
+```
 
 ```
 $ claw skillmap crypto-crusher-0
@@ -516,22 +561,27 @@ Available capabilities for crypto-crusher-0:
     get_price            Current and historical token price data
     get_whale_activity   Large wallet movements in last N hours
     get_market_sentiment Aggregated fear/greed and social volume
-    [discovered via OpenAPI]
+    [discovered via OpenAPI → skills/surface-market-scanner.md]
 
   FROM company-crm (service://company-crm, mcp):
     lookup_customer      Find customer by name, email, or account ID
     create_ticket        Open support ticket linked to a customer
     get_deal_status      Current pipeline stage and value for any deal
     ⚠ requires cllama: policy/customer-data-access, policy/pii-gate
+    [discovered via MCP → skills/surface-company-crm.md]
 
   FROM shared-cache (volume://shared-cache):
-    read-write mount
+    read-write mount at /mnt/shared-cache
 
   FROM discord (channel://discord):
     guild 1465489501551067136, DMs enabled
+    [skills/surface-discord.md]
+
+  OPERATOR SKILLS:
+    skills/crypto-feeds.md — Crypto data feed tools
 ```
 
-The skill map is delivered via a read-only skill mount. Add a service, the skill map grows. Remove a service, it shrinks. No code changes. No retraining.
+Add a service, the surface manifest and skill files update. Remove a service, they shrink. No code changes. No retraining.
 
 ---
 

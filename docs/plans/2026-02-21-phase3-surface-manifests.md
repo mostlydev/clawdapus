@@ -1,10 +1,18 @@
-# Phase 3 Slice: Surface Manifests + Multi-Claw Example
+# Phase 3 Slice: CLAWDAPUS.md Context Injection + Multi-Claw Example
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Two OpenClaw services in one pod, each with their own agent contract, sharing a volume with different access modes, and each receiving a generated SURFACES.md injected into their OpenClaw context via the `bootstrap-extra-files` hook.
+**Goal:** Two OpenClaw services in one pod, each with their own agent contract, sharing a volume with different access modes, and each receiving a generated `CLAWDAPUS.md` — a single bootstrapped context file describing the agent's infrastructure environment — injected into their context via the runner's context mechanism.
 
-**Architecture:** Parse pod-level `surfaces` from `x-claw` blocks into `ResolvedSurface` structs. Pass them to the OpenClaw driver during materialization. The driver generates a `SURFACES.md` markdown file describing available surfaces (name, type, access, mount path) and adds the `bootstrap-extra-files` hook to the OpenClaw config JSON so that OpenClaw automatically injects the surface descriptions into the agent's context on every session and heartbeat. The compose emitter already handles volume mounts with correct `:ro`/`:rw` modes.
+**Architecture:** Parse pod-level `surfaces` from `x-claw` blocks into `ResolvedSurface` structs. Pass them to the OpenClaw driver during materialization. The driver generates `CLAWDAPUS.md` — the infrastructure layer's letter to the agent. One file, one injection point, containing:
+
+- **Surfaces** — what's available: name, type, access mode, connection details (mount path, host, port, credential env vars). For complex surfaces, references to skill files.
+- **Skills index** — what skill files are available and what they describe.
+- **Identity** — pod name, service name, claw type.
+
+Skills live as separate files in `skills/` for detailed on-demand reference (later slices). CLAWDAPUS.md is the always-visible index. The driver knows how to inject it per runner type (OpenClaw: `bootstrap-extra-files` hook; other runners: their own context mechanism).
+
+The compose emitter already handles volume mounts with correct `:ro`/`:rw` modes.
 
 **Tech Stack:** Go 1.23, `encoding/json`, `gopkg.in/yaml.v3`, OpenClaw `bootstrap-extra-files` hook
 
@@ -14,7 +22,7 @@
 - `internal/driver/openclaw/config.go` — `GenerateConfig` and `setPath` helper
 - `cmd/claw/compose_up.go` — populates `ResolvedClaw` but doesn't set `Surfaces` yet
 - `internal/pod/compose_emit.go` — already parses volume surfaces from `x-claw` for compose mounts
-- OpenClaw source: `bootstrap-extra-files` hook reads `hooks.bootstrap-extra-files.paths` from config
+- OpenClaw source: `bootstrap-extra-files` hook reads `hooks.bootstrap-extra-files.paths` from config, used to inject `CLAWDAPUS.md`
 
 ---
 
@@ -26,53 +34,7 @@
 
 Currently `compose_up.go` builds `ResolvedClaw` but never sets `Surfaces`. The pod's `x-claw.surfaces` are parsed into `svc.Claw.Surfaces []string` (e.g., `"volume://research-cache read-write"`). We need to parse these into `[]driver.ResolvedSurface` and set them on `rc`.
 
-**Step 1: Write a helper to parse surface strings**
-
-Create `internal/pod/surface.go`:
-
-```go
-package pod
-
-import (
-	"net/url"
-	"strings"
-
-	"github.com/mostlydev/clawdapus/internal/driver"
-)
-
-// ParseSurface parses a raw surface string like "volume://research-cache read-only"
-// into a ResolvedSurface.
-func ParseSurface(raw string) (driver.ResolvedSurface, error) {
-	parts := strings.Fields(raw)
-	if len(parts) == 0 {
-		return driver.ResolvedSurface{}, fmt.Errorf("empty surface declaration")
-	}
-
-	parsed, err := url.Parse(parts[0])
-	if err != nil {
-		return driver.ResolvedSurface{}, fmt.Errorf("invalid surface URI %q: %w", parts[0], err)
-	}
-
-	scheme := parsed.Scheme
-	target := parsed.Host
-	if target == "" {
-		target = parsed.Opaque
-	}
-
-	accessMode := ""
-	if len(parts) > 1 {
-		accessMode = parts[1]
-	}
-
-	return driver.ResolvedSurface{
-		Scheme:     scheme,
-		Target:     target,
-		AccessMode: accessMode,
-	}, nil
-}
-```
-
-**Step 2: Write the failing test**
+**Step 1: Write the failing test**
 
 Create `internal/pod/surface_test.go`:
 
@@ -136,21 +98,68 @@ func TestParseSurfaceOpaqueURI(t *testing.T) {
 }
 ```
 
-**Step 3: Run tests to verify they fail**
+**Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/pod/ -run TestParseSurface -v`
 Expected: FAIL — `ParseSurface` not defined yet.
 
-**Step 4: Implement ParseSurface**
+**Step 3: Implement ParseSurface**
 
-Write `internal/pod/surface.go` with the code from Step 1.
+Create `internal/pod/surface.go`:
 
-**Step 5: Run tests to verify they pass**
+```go
+package pod
+
+import (
+	"fmt"
+	"net/url"
+	"strings"
+
+	"github.com/mostlydev/clawdapus/internal/driver"
+)
+
+// ParseSurface parses a raw surface string like "volume://research-cache read-only"
+// into a ResolvedSurface.
+func ParseSurface(raw string) (driver.ResolvedSurface, error) {
+	parts := strings.Fields(raw)
+	if len(parts) == 0 {
+		return driver.ResolvedSurface{}, fmt.Errorf("empty surface declaration")
+	}
+
+	parsed, err := url.Parse(parts[0])
+	if err != nil {
+		return driver.ResolvedSurface{}, fmt.Errorf("invalid surface URI %q: %w", parts[0], err)
+	}
+
+	scheme := parsed.Scheme
+	target := parsed.Host
+	if target == "" {
+		target = parsed.Opaque
+	}
+
+	if scheme == "" || target == "" {
+		return driver.ResolvedSurface{}, fmt.Errorf("surface URI %q must have scheme and target", parts[0])
+	}
+
+	accessMode := ""
+	if len(parts) > 1 {
+		accessMode = parts[1]
+	}
+
+	return driver.ResolvedSurface{
+		Scheme:     scheme,
+		Target:     target,
+		AccessMode: accessMode,
+	}, nil
+}
+```
+
+**Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/pod/ -run TestParseSurface -v`
 Expected: PASS
 
-**Step 6: Wire into compose_up.go**
+**Step 5: Wire into compose_up.go**
 
 Modify `cmd/claw/compose_up.go` in the `ResolvedClaw` construction block (around line 88). After setting `Environment`, add:
 
@@ -170,12 +179,12 @@ Modify `cmd/claw/compose_up.go` in the `ResolvedClaw` construction block (around
 
 And set `Surfaces: surfaces` on the `rc` struct.
 
-**Step 7: Verify build**
+**Step 6: Verify build**
 
 Run: `go build -o bin/claw ./cmd/claw`
 Expected: compiles without errors.
 
-**Step 8: Commit**
+**Step 7: Commit**
 
 ```bash
 git add internal/pod/surface.go internal/pod/surface_test.go cmd/claw/compose_up.go
@@ -184,18 +193,18 @@ git commit -m "feat: parse pod surfaces into ResolvedSurface, wire into compose_
 
 ---
 
-## Task 2: Generate SURFACES.md in OpenClaw driver
+## Task 2: Generate CLAWDAPUS.md in OpenClaw driver
 
 **Files:**
-- Create: `internal/driver/openclaw/surfaces.go`
-- Create: `internal/driver/openclaw/surfaces_test.go`
+- Create: `internal/driver/openclaw/clawdapus_md.go`
+- Create: `internal/driver/openclaw/clawdapus_md_test.go`
 - Modify: `internal/driver/openclaw/driver.go:33-71` (Materialize method)
 
-The driver receives `ResolvedClaw.Surfaces` and generates a markdown file describing each surface. This file will be mounted into the OpenClaw workspace and injected into the agent's context via the `bootstrap-extra-files` hook.
+The driver receives `ResolvedClaw` (including `Surfaces`, `ServiceName`, pod name) and generates `CLAWDAPUS.md` — the infrastructure layer's context file for the agent. This is mounted read-only and injected into the agent's context via the `bootstrap-extra-files` hook.
 
 **Step 1: Write the failing test**
 
-Create `internal/driver/openclaw/surfaces_test.go`:
+Create `internal/driver/openclaw/clawdapus_md_test.go`:
 
 ```go
 package openclaw
@@ -207,17 +216,33 @@ import (
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
-func TestGenerateSurfacesMarkdown(t *testing.T) {
-	surfaces := []driver.ResolvedSurface{
-		{Scheme: "volume", Target: "research-cache", AccessMode: "read-write"},
-		{Scheme: "channel", Target: "discord", AccessMode: ""},
+func TestGenerateClawdapusMD(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "researcher",
+		ClawType:    "openclaw",
+		Surfaces: []driver.ResolvedSurface{
+			{Scheme: "volume", Target: "research-cache", AccessMode: "read-write"},
+			{Scheme: "channel", Target: "discord", AccessMode: ""},
+			{Scheme: "service", Target: "fleet-master", AccessMode: ""},
+		},
 	}
 
-	md := GenerateSurfacesMarkdown(surfaces)
+	md := GenerateClawdapusMD(rc, "research-pod")
 
-	if !strings.Contains(md, "# Available Surfaces") {
-		t.Error("expected header")
+	if !strings.Contains(md, "# CLAWDAPUS.md") {
+		t.Error("expected CLAWDAPUS.md header")
 	}
+	// Identity section
+	if !strings.Contains(md, "research-pod") {
+		t.Error("expected pod name")
+	}
+	if !strings.Contains(md, "researcher") {
+		t.Error("expected service name")
+	}
+	if !strings.Contains(md, "openclaw") {
+		t.Error("expected claw type")
+	}
+	// Surfaces
 	if !strings.Contains(md, "research-cache") {
 		t.Error("expected research-cache surface")
 	}
@@ -230,21 +255,48 @@ func TestGenerateSurfacesMarkdown(t *testing.T) {
 	if !strings.Contains(md, "discord") {
 		t.Error("expected discord channel surface")
 	}
+	// Service and channel surfaces reference skills
+	if !strings.Contains(md, "skills/surface-fleet-master.md") {
+		t.Error("expected skill reference for service surface")
+	}
+	if !strings.Contains(md, "skills/surface-discord.md") {
+		t.Error("expected skill reference for channel surface")
+	}
+	// Volume surfaces should NOT reference skills
+	if strings.Contains(md, "skills/surface-research-cache.md") {
+		t.Error("volume surface should not have skill reference")
+	}
 }
 
-func TestGenerateSurfacesMarkdownEmpty(t *testing.T) {
-	md := GenerateSurfacesMarkdown(nil)
+func TestGenerateClawdapusMDNoSurfaces(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "worker",
+		ClawType:    "openclaw",
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	if !strings.Contains(md, "# CLAWDAPUS.md") {
+		t.Error("expected header")
+	}
 	if !strings.Contains(md, "No surfaces") {
-		t.Error("expected 'No surfaces' message for empty list")
+		t.Error("expected 'No surfaces' message")
+	}
+	if !strings.Contains(md, "worker") {
+		t.Error("expected service name in identity")
 	}
 }
 
-func TestGenerateSurfacesMarkdownVolumeReadOnly(t *testing.T) {
-	surfaces := []driver.ResolvedSurface{
-		{Scheme: "volume", Target: "shared-data", AccessMode: "read-only"},
+func TestGenerateClawdapusMDVolumeReadOnly(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "analyst",
+		ClawType:    "openclaw",
+		Surfaces: []driver.ResolvedSurface{
+			{Scheme: "volume", Target: "shared-data", AccessMode: "read-only"},
+		},
 	}
 
-	md := GenerateSurfacesMarkdown(surfaces)
+	md := GenerateClawdapusMD(rc, "research-pod")
 
 	if !strings.Contains(md, "read-only") {
 		t.Error("expected read-only access mode")
@@ -257,12 +309,12 @@ func TestGenerateSurfacesMarkdownVolumeReadOnly(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `go test ./internal/driver/openclaw/ -run TestGenerateSurfaces -v`
-Expected: FAIL — `GenerateSurfacesMarkdown` not defined.
+Run: `go test ./internal/driver/openclaw/ -run TestGenerateClawdapusMD -v`
+Expected: FAIL — `GenerateClawdapusMD` not defined.
 
-**Step 3: Implement GenerateSurfacesMarkdown**
+**Step 3: Implement GenerateClawdapusMD**
 
-Create `internal/driver/openclaw/surfaces.go`:
+Create `internal/driver/openclaw/clawdapus_md.go`:
 
 ```go
 package openclaw
@@ -274,29 +326,59 @@ import (
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
-// GenerateSurfacesMarkdown builds a markdown description of available surfaces.
-// This is mounted read-only and injected into the agent's context via
-// OpenClaw's bootstrap-extra-files hook.
-func GenerateSurfacesMarkdown(surfaces []driver.ResolvedSurface) string {
-	if len(surfaces) == 0 {
-		return "# Available Surfaces\n\nNo surfaces declared for this service.\n"
+// GenerateClawdapusMD builds the CLAWDAPUS.md context file — the infrastructure
+// layer's letter to the agent. Contains identity, surfaces, and skill index.
+// Injected into the agent's context via bootstrap-extra-files hook.
+func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
+	var b strings.Builder
+
+	b.WriteString("# CLAWDAPUS.md\n\n")
+	b.WriteString("This file is generated by Clawdapus. It describes your infrastructure environment.\n\n")
+
+	// Identity
+	b.WriteString("## Identity\n\n")
+	b.WriteString(fmt.Sprintf("- **Pod:** %s\n", podName))
+	b.WriteString(fmt.Sprintf("- **Service:** %s\n", rc.ServiceName))
+	b.WriteString(fmt.Sprintf("- **Type:** %s\n", rc.ClawType))
+	b.WriteString("\n")
+
+	// Surfaces
+	b.WriteString("## Surfaces\n\n")
+	if len(rc.Surfaces) == 0 {
+		b.WriteString("No surfaces declared for this service.\n\n")
+	} else {
+		for _, s := range rc.Surfaces {
+			b.WriteString(fmt.Sprintf("### %s (%s)\n", s.Target, s.Scheme))
+			if s.AccessMode != "" {
+				b.WriteString(fmt.Sprintf("- **Access:** %s\n", s.AccessMode))
+			}
+			switch s.Scheme {
+			case "volume":
+				b.WriteString(fmt.Sprintf("- **Mount path:** /mnt/%s\n", s.Target))
+			case "service":
+				b.WriteString(fmt.Sprintf("- **Host:** %s\n", s.Target))
+				b.WriteString(fmt.Sprintf("- **Skill:** `skills/surface-%s.md`\n", s.Target))
+			case "channel":
+				b.WriteString(fmt.Sprintf("- **Skill:** `skills/surface-%s.md`\n", s.Target))
+			}
+			b.WriteString("\n")
+		}
 	}
 
-	var b strings.Builder
-	b.WriteString("# Available Surfaces\n\n")
-
-	for _, s := range surfaces {
-		b.WriteString(fmt.Sprintf("## %s (%s)\n", s.Target, s.Scheme))
-
-		if s.AccessMode != "" {
-			b.WriteString(fmt.Sprintf("- **Access:** %s\n", s.AccessMode))
+	// Skills index (placeholder for future slices — SKILL directive + surface-generated skills)
+	b.WriteString("## Skills\n\n")
+	var skills []string
+	for _, s := range rc.Surfaces {
+		if s.Scheme == "service" || s.Scheme == "channel" {
+			skills = append(skills, fmt.Sprintf("- `skills/surface-%s.md` — %s %s surface", s.Target, s.Target, s.Scheme))
 		}
-
-		if s.Scheme == "volume" {
-			b.WriteString(fmt.Sprintf("- **Mount path:** /mnt/%s\n", s.Target))
+	}
+	if len(skills) == 0 {
+		b.WriteString("No skills available.\n")
+	} else {
+		for _, sk := range skills {
+			b.WriteString(sk + "\n")
 		}
-
-		b.WriteString("\n")
 	}
 
 	return b.String()
@@ -310,24 +392,24 @@ Expected: PASS
 
 **Step 5: Wire into Materialize**
 
-Modify `internal/driver/openclaw/driver.go` Materialize method. After writing `openclaw.json` and before building the return struct:
+Modify `internal/driver/openclaw/driver.go` Materialize method. After writing `openclaw.json` and before building the return struct, always generate CLAWDAPUS.md (it contains identity even without surfaces):
 
 ```go
-	// Generate SURFACES.md if surfaces are declared
-	if len(rc.Surfaces) > 0 {
-		surfacesMd := GenerateSurfacesMarkdown(rc.Surfaces)
-		surfacesPath := filepath.Join(opts.RuntimeDir, "SURFACES.md")
-		if err := os.WriteFile(surfacesPath, []byte(surfacesMd), 0644); err != nil {
-			return nil, fmt.Errorf("openclaw driver: failed to write SURFACES.md: %w", err)
-		}
-
-		mounts = append(mounts, driver.Mount{
-			HostPath:      surfacesPath,
-			ContainerPath: "/claw/SURFACES.md",
-			ReadOnly:      true,
-		})
+	// Generate CLAWDAPUS.md — infrastructure context for the agent
+	clawdapusMd := GenerateClawdapusMD(rc, rc.ServiceName) // TODO: pass pod name when available
+	clawdapusPath := filepath.Join(opts.RuntimeDir, "CLAWDAPUS.md")
+	if err := os.WriteFile(clawdapusPath, []byte(clawdapusMd), 0644); err != nil {
+		return nil, fmt.Errorf("openclaw driver: failed to write CLAWDAPUS.md: %w", err)
 	}
+
+	mounts = append(mounts, driver.Mount{
+		HostPath:      clawdapusPath,
+		ContainerPath: "/claw/CLAWDAPUS.md",
+		ReadOnly:      true,
+	})
 ```
+
+> **Note on mount path vs hook path:** The file is mounted at `/claw/CLAWDAPUS.md`. The hook config uses the relative path `CLAWDAPUS.md`. This works because AGENTS.md is already mounted at `/claw/AGENTS.md` and loaded by OpenClaw's workspace bootstrap from the same `/claw` directory. The `bootstrap-extra-files` hook resolves paths relative to the workspace dir, which is `/claw`.
 
 **Step 6: Run all tests**
 
@@ -337,8 +419,8 @@ Expected: PASS (existing tests unaffected — they don't set Surfaces)
 **Step 7: Commit**
 
 ```bash
-git add internal/driver/openclaw/surfaces.go internal/driver/openclaw/surfaces_test.go internal/driver/openclaw/driver.go
-git commit -m "feat: generate SURFACES.md in openclaw driver from resolved surfaces"
+git add internal/driver/openclaw/clawdapus_md.go internal/driver/openclaw/clawdapus_md_test.go internal/driver/openclaw/driver.go
+git commit -m "feat: generate CLAWDAPUS.md in openclaw driver with identity and surfaces"
 ```
 
 ---
@@ -349,20 +431,17 @@ git commit -m "feat: generate SURFACES.md in openclaw driver from resolved surfa
 - Modify: `internal/driver/openclaw/config.go:13-31` (GenerateConfig)
 - Modify: `internal/driver/openclaw/config_test.go`
 
-When surfaces are present, `GenerateConfig` must add the `hooks.bootstrap-extra-files` config so OpenClaw automatically injects SURFACES.md into the agent's context.
+`GenerateConfig` must always add the `hooks.bootstrap-extra-files` config so OpenClaw automatically injects CLAWDAPUS.md into the agent's context. This is always enabled (CLAWDAPUS.md contains identity info even without surfaces).
 
 **Step 1: Write the failing test**
 
 Add to `internal/driver/openclaw/config_test.go`:
 
 ```go
-func TestGenerateConfigAddsSurfaceHookWhenSurfacesPresent(t *testing.T) {
+func TestGenerateConfigAlwaysAddsBootstrapHook(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:     map[string]string{"primary": "test/model"},
 		Configures: []string{},
-		Surfaces: []driver.ResolvedSurface{
-			{Scheme: "volume", Target: "cache", AccessMode: "read-write"},
-		},
 	}
 
 	data, err := GenerateConfig(rc)
@@ -388,37 +467,17 @@ func TestGenerateConfigAddsSurfaceHookWhenSurfacesPresent(t *testing.T) {
 	}
 	paths, ok := bef["paths"].([]interface{})
 	if !ok || len(paths) == 0 {
-		t.Fatal("expected paths array with SURFACES.md")
+		t.Fatal("expected paths array with CLAWDAPUS.md")
 	}
-	if paths[0] != "SURFACES.md" {
-		t.Errorf("expected paths[0]=SURFACES.md, got %v", paths[0])
-	}
-}
-
-func TestGenerateConfigNoHookWhenNoSurfaces(t *testing.T) {
-	rc := &driver.ResolvedClaw{
-		Models:     map[string]string{"primary": "test/model"},
-		Configures: []string{},
-		Surfaces:   nil,
-	}
-
-	data, err := GenerateConfig(rc)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var config map[string]interface{}
-	json.Unmarshal(data, &config)
-
-	if _, ok := config["hooks"]; ok {
-		t.Error("expected no hooks key when no surfaces declared")
+	if paths[0] != "CLAWDAPUS.md" {
+		t.Errorf("expected paths[0]=CLAWDAPUS.md, got %v", paths[0])
 	}
 }
 ```
 
 **Step 2: Run tests to verify they fail**
 
-Run: `go test ./internal/driver/openclaw/ -run TestGenerateConfig.*Surface -v`
+Run: `go test ./internal/driver/openclaw/ -run TestGenerateConfigAlwaysAddsBootstrapHook -v`
 Expected: FAIL
 
 **Step 3: Implement**
@@ -426,11 +485,9 @@ Expected: FAIL
 Modify `GenerateConfig` in `internal/driver/openclaw/config.go`. After the CONFIGURE loop and before `json.MarshalIndent`, add:
 
 ```go
-	// Add bootstrap-extra-files hook if surfaces are declared
-	if len(rc.Surfaces) > 0 {
-		setPath(config, "hooks.bootstrap-extra-files.enabled", true)
-		setPath(config, "hooks.bootstrap-extra-files.paths", []string{"SURFACES.md"})
-	}
+	// Always add bootstrap-extra-files hook for CLAWDAPUS.md injection
+	setPath(config, "hooks.bootstrap-extra-files.enabled", true)
+	setPath(config, "hooks.bootstrap-extra-files.paths", []string{"CLAWDAPUS.md"})
 ```
 
 **Step 4: Run tests**
@@ -442,7 +499,7 @@ Expected: ALL PASS
 
 ```bash
 git add internal/driver/openclaw/config.go internal/driver/openclaw/config_test.go
-git commit -m "feat: add bootstrap-extra-files hook to openclaw config when surfaces present"
+git commit -m "feat: always add bootstrap-extra-files hook for CLAWDAPUS.md injection"
 ```
 
 ---
@@ -489,7 +546,7 @@ You are a research agent. Your job is to gather and organize information.
 
 ## Workspace
 
-Check /claw/SURFACES.md for your available surfaces and their access modes.
+Check /claw/CLAWDAPUS.md for your available surfaces and their access modes.
 Write research output to the volume surface mounted at the path described there.
 
 ## Rules
@@ -510,7 +567,7 @@ You are an analyst agent. Your job is to read research data and produce insights
 
 ## Workspace
 
-Check /claw/SURFACES.md for your available surfaces and their access modes.
+Check /claw/CLAWDAPUS.md for your available surfaces and their access modes.
 Read research data from the volume surface mounted at the path described there.
 
 ## Rules
@@ -522,9 +579,14 @@ Read research data from the volume surface mounted at the path described there.
 
 **Step 4: Verify parse + emit works**
 
-Run:
+Prerequisite: the example image must exist. Build it first if not already built:
 ```bash
 go build -o bin/claw ./cmd/claw
+bin/claw build -t claw-openclaw-example examples/openclaw
+```
+
+Then launch:
+```bash
 bin/claw compose -f examples/multi-claw/claw-pod.yml up -d
 ```
 
@@ -534,7 +596,7 @@ Expected: Both services start. Check `examples/multi-claw/compose.generated.yml`
 - `research-cache:/mnt/research-cache:ro` on analyst
 - Top-level `volumes: { research-cache: }` declaration
 - Both on `claw-internal` network
-- Both have `SURFACES.md` mount in volumes list
+- Both have `CLAWDAPUS.md` mount in volumes list
 
 Then tear down:
 ```bash
@@ -605,9 +667,14 @@ func TestEmitComposeMultiServiceSharedVolume(t *testing.T) {
 		t.Error("expected analyst service")
 	}
 
-	// Shared volume declared once at top level
-	if strings.Count(out, "research-cache:") < 1 {
-		t.Error("expected research-cache volume declaration")
+	// Shared volume declared at top level — parse YAML to verify structure
+	var composed map[string]interface{}
+	if err := yaml.Unmarshal([]byte(out), &composed); err != nil {
+		t.Fatalf("generated compose is not valid YAML: %v", err)
+	}
+	volumes, _ := composed["volumes"].(map[string]interface{})
+	if _, ok := volumes["research-cache"]; !ok {
+		t.Error("expected research-cache in top-level volumes")
 	}
 
 	// Researcher gets rw, analyst gets ro
@@ -670,9 +737,21 @@ bin/claw compose -f examples/multi-claw/claw-pod.yml down
 
 Inspect `examples/multi-claw/compose.generated.yml` and verify:
 - Two services with correct volume access modes
-- SURFACES.md mount on both services
-- `bootstrap-extra-files` hook in both runtime configs
+- CLAWDAPUS.md mount on both services
 - `claw-internal` network with `internal: true`
+
+Inspect generated runtime configs to verify hook injection:
+```bash
+cat examples/multi-claw/.claw-runtime/researcher/openclaw.json | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['hooks']['bootstrap-extra-files']['paths'] == ['CLAWDAPUS.md'], 'hook missing'"
+cat examples/multi-claw/.claw-runtime/analyst/openclaw.json | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['hooks']['bootstrap-extra-files']['paths'] == ['CLAWDAPUS.md'], 'hook missing'"
+```
+
+Inspect generated CLAWDAPUS.md files:
+```bash
+cat examples/multi-claw/.claw-runtime/researcher/CLAWDAPUS.md
+cat examples/multi-claw/.claw-runtime/analyst/CLAWDAPUS.md
+```
+Both should contain `# CLAWDAPUS.md` with identity, surfaces (`research-cache`), and skills sections.
 
 **Step 4: Commit any remaining changes**
 
@@ -690,10 +769,10 @@ git commit -m "feat: phase 3 slice — surface manifests, multi-claw example"
 | `internal/pod/surface.go` | Create | ParseSurface helper |
 | `internal/pod/surface_test.go` | Create | Surface parsing tests |
 | `cmd/claw/compose_up.go` | Modify | Wire pod surfaces into ResolvedClaw |
-| `internal/driver/openclaw/surfaces.go` | Create | GenerateSurfacesMarkdown |
-| `internal/driver/openclaw/surfaces_test.go` | Create | Surface markdown tests |
-| `internal/driver/openclaw/driver.go` | Modify | Write SURFACES.md, add mount |
-| `internal/driver/openclaw/config.go` | Modify | Add bootstrap-extra-files hook |
+| `internal/driver/openclaw/clawdapus_md.go` | Create | GenerateClawdapusMD |
+| `internal/driver/openclaw/clawdapus_md_test.go` | Create | CLAWDAPUS.md generation tests |
+| `internal/driver/openclaw/driver.go` | Modify | Write CLAWDAPUS.md, add mount |
+| `internal/driver/openclaw/config.go` | Modify | Always add bootstrap-extra-files hook |
 | `internal/driver/openclaw/config_test.go` | Modify | Hook config tests |
 | `internal/pod/compose_emit_test.go` | Modify | Multi-service shared volume test |
 | `examples/multi-claw/claw-pod.yml` | Create | Two-service example pod |
@@ -707,6 +786,26 @@ git commit -m "feat: phase 3 slice — surface manifests, multi-claw example"
 - Multi-claw example starts with `claw compose -f examples/multi-claw/claw-pod.yml up -d`
 - Researcher has `research-cache:/mnt/research-cache:rw` mount
 - Analyst has `research-cache:/mnt/research-cache:ro` mount
-- Both services have `/claw/SURFACES.md:ro` mount
-- Both OpenClaw configs include `hooks.bootstrap-extra-files.paths: ["SURFACES.md"]`
+- Both services have `/claw/CLAWDAPUS.md:ro` mount
+- Both OpenClaw configs include `hooks.bootstrap-extra-files.paths: ["CLAWDAPUS.md"]`
+- Both CLAWDAPUS.md files contain identity, surfaces, and skills sections
 - Both services on `claw-internal` network
+
+---
+
+## Codex Review Disposition
+
+Review from Codex identified 10 items. Resolution:
+
+| # | Issue | Disposition |
+|---|-------|-------------|
+| 1 | TDD order wrong in Task 1 | **Fixed** — steps reordered: test first, then implement |
+| 2 | Missing `fmt` import | **Fixed** — added to ParseSurface snippet |
+| 3 | CLI syntax drift (`-f` stale) | **Rejected** — `-f` is a persistent flag on `compose` cmd, syntax is correct |
+| 4 | Mount vs hook path mismatch | **Clarified** — added note explaining `/claw` workspace resolution |
+| 5 | Parser lacks validation | **Partially fixed** — added scheme+target non-empty check. Enum validation is YAGNI. |
+| 6 | Invalid/unsafe targets | **Deferred** — volume names are Docker-controlled, not filesystem paths |
+| 7 | Example reproducibility gap | **Fixed** — added prerequisite build step in Task 4 |
+| 8 | Weak test assertions | **Fixed** — Task 5 now parses YAML structure instead of string counting |
+| 9 | Exit criteria stale command | **Rejected** — same as #3, `-f` syntax is correct |
+| 10 | No runtime config inspection | **Fixed** — added concrete JSON inspection steps in Task 6 |
