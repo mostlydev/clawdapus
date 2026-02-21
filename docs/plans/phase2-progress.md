@@ -74,21 +74,34 @@ All 15 tasks done (11 core + 4 hardening). Exit criteria met:
 ## Phase 3 Slice 2: Service-emitted Surface Skills
 
 **Plan:** `docs/plans/2026-02-21-phase3-surface-manifests.md` (addendum)
-**Status:** IN PROGRESS (design confirmed, implementation by Claude)
+**Status:** DONE
 
-| # | Task | Status | Owner | Notes |
-|---|------|--------|-------|-------|
-| 1 | Define service-emitted priority model | DONE | Human | Service emits via `claw.skill.emit`, operator override, fallback stub |
-| 2 | Document label and extraction behavior | DONE | Human | README + `SKILL` docs + plan addendum updated |
-| 3 | Implement image label extraction in compose-up | PENDING | Claude | Pull `claw.skill.emit` from service image during compose resolution |
-| 4 | Add service skill mount wiring | PENDING | Claude | Mount `skills/surface-<name>.md` per service consumer |
-| 5 | Add port discovery hints for fallback docs | PENDING | Claude | Use service compose metadata when available |
+| # | Task | Status | Commit | Notes |
+|---|------|--------|--------|-------|
+| 1 | Define service-emitted priority model | DONE | — | Service emits via `claw.skill.emit`, operator override, fallback stub |
+| 2 | Document label and extraction behavior | DONE | — | README + `SKILL` docs + plan addendum updated |
+| 3 | Add Ports to ResolvedSurface + GeneratedSkill type | DONE | `d559d62` | Ports field + GeneratedSkill type in driver/types.go |
+| 4 | Parse expose from pod services | DONE | `f40b568` | Expose []string, int coercion, tests |
+| 5 | Extract claw.skill.emit label in inspect | DONE | `1ef70ed` | SkillEmit field, ordered before claw.skill.N |
+| 6 | Service skill fallback generation | DONE | `c230882` | runtime.GenerateServiceSkillFallback + ExtractServiceSkill |
+| 7 | Enrich surfaces with ports | DONE | `697115e` | compose_up populates Ports from Service.Expose |
+| 8 | GenerateServiceSkill in openclaw driver | DONE | `8db451b` | Fallback markdown from ResolvedSurface |
+| 9 | Wire claw.skill.emit into compose_up | DONE | `275baca` | resolveSkillEmit extracts from image, writes to runtime dir |
+| 10 | Wire fallback skill generation into compose_up | DONE | `9eb48ef` | resolveServiceGeneratedSkills, precedence: generated < image/pod |
+| 11 | CLAWDAPUS.md references service skills | DONE | `0e876cd` | Skill ref in surfaces section + skills index |
+| 12 | Example pod with service surface | DONE | `f3fbde3` | nginx api-server with expose:80, researcher consumes |
+| 13 | Network wiring for service targets | DONE | `8b20100` | Non-claw service targets added to claw-internal |
+| 14 | Service target validation in compose_emit | DONE | `8dcdeef` | Fail-closed: unknown service surface target = error |
+| 15 | Final verification | DONE | — | go test, go build, go vet all clean |
 
-### Planned precedence model
+### Precedence model (implemented)
 
-- Service-emitted skill (`claw.skill.emit`) is the default for `surface-<name>.md`
-- Operator-provided explicit `surface-<name>.md` entries can override by basename (`SKILL`/`x-claw.skills`)
-- Generic fallback is generated only when no source skill exists
+- Service-emitted skill (`claw.skill.emit`) extracted from image at compose-up time
+- Operator-provided explicit `surface-<name>.md` entries override by basename (`SKILL`/`x-claw.skills`)
+- Generic fallback generated only when no source skill exists
+- `mergeResolvedSkills(generatedSkills, skills)` — generated is base, image/pod skills win
+
+**Completed:** 2026-02-20
 
 ## SKILL Directive
 
