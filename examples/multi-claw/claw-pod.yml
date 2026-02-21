@@ -6,6 +6,8 @@ services:
     image: claw-openclaw-example
     x-claw:
       agent: ./agents/RESEARCHER.md
+      skills:
+        - ./skills/research-methodology.md
       surfaces:
         - "volume://research-cache read-write"
 
