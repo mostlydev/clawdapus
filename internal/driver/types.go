@@ -32,6 +32,7 @@ type ResolvedSurface struct {
 
 type MaterializeOpts struct {
 	RuntimeDir string // host directory for generated artifacts
+	PodName    string // pod name for context injection (CLAWDAPUS.md)
 }
 
 // MaterializeResult describes what the compose generator must add to the service.

@@ -54,6 +54,23 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		},
 	}
 
+	// Generate CLAWDAPUS.md — infrastructure context for the agent
+	podName := opts.PodName
+	if podName == "" {
+		podName = rc.ServiceName
+	}
+	clawdapusMd := GenerateClawdapusMD(rc, podName)
+	clawdapusPath := filepath.Join(opts.RuntimeDir, "CLAWDAPUS.md")
+	if err := os.WriteFile(clawdapusPath, []byte(clawdapusMd), 0644); err != nil {
+		return nil, fmt.Errorf("openclaw driver: failed to write CLAWDAPUS.md: %w", err)
+	}
+
+	mounts = append(mounts, driver.Mount{
+		HostPath:      clawdapusPath,
+		ContainerPath: "/claw/CLAWDAPUS.md",
+		ReadOnly:      true,
+	})
+
 	return &driver.MaterializeResult{
 		Mounts:  mounts,
 		Tmpfs:   []string{"/tmp", "/run", "/app/data", "/root/.openclaw"},

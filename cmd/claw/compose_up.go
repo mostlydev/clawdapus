@@ -128,7 +128,7 @@ func runComposeUp(podFile string) error {
 			return fmt.Errorf("create service runtime dir: %w", err)
 		}
 
-		result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: svcRuntimeDir})
+		result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: svcRuntimeDir, PodName: p.Name})
 		if err != nil {
 			return fmt.Errorf("service %q: materialization failed: %w", name, err)
 		}
