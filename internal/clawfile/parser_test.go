@@ -130,6 +130,34 @@ func TestParseRejectsSurfaceAccessModeForChannel(t *testing.T) {
 	}
 }
 
+func TestParseExtractsSkills(t *testing.T) {
+	input := `FROM alpine
+CLAW_TYPE openclaw
+SKILL ./skills/custom-workflow.md
+SKILL ./skills/team-conventions.md
+`
+	result, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Config.Skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(result.Config.Skills))
+	}
+	if result.Config.Skills[0] != "./skills/custom-workflow.md" {
+		t.Errorf("expected first skill path, got %q", result.Config.Skills[0])
+	}
+	if result.Config.Skills[1] != "./skills/team-conventions.md" {
+		t.Errorf("expected second skill path, got %q", result.Config.Skills[1])
+	}
+}
+
+func TestParseRejectsEmptySkill(t *testing.T) {
+	_, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nSKILL\n"))
+	if err == nil {
+		t.Fatal("expected SKILL with no argument to fail")
+	}
+}
+
 func TestParseRejectsInvalidInvokeSchedule(t *testing.T) {
 	_, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nINVOKE 99 * * * * heartbeat\n"))
 	if err == nil {

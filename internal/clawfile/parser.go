@@ -21,6 +21,7 @@ var knownDirectives = map[string]bool{
 	"privilege": true,
 	"configure": true,
 	"track":     true,
+	"skill":     true,
 	"act":       true,
 }
 
@@ -103,6 +104,12 @@ func Parse(r io.Reader) (*ParseResult, error) {
 				return nil, fmt.Errorf("line %d: %w", node.StartLine, err)
 			}
 			config.Surfaces = append(config.Surfaces, surface)
+
+		case "skill":
+			if len(args) < 1 {
+				return nil, fmt.Errorf("line %d: SKILL requires a file path", node.StartLine)
+			}
+			config.Skills = append(config.Skills, args[0])
 
 		case "invoke":
 			if len(args) < 6 {
