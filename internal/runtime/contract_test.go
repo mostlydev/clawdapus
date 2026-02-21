@@ -1,0 +1,43 @@
+package runtime
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestResolveContractMissingFileErrors(t *testing.T) {
+	_, err := ResolveContract("/nonexistent/path", "AGENTS.md")
+	if err == nil {
+		t.Fatal("expected error for missing agent file")
+	}
+}
+
+func TestResolveContractExistingFileReturns(t *testing.T) {
+	dir := t.TempDir()
+	agentFile := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agentFile, []byte("# Contract"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mount, err := ResolveContract(dir, "AGENTS.md")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mount.HostPath != agentFile {
+		t.Errorf("expected host path %q, got %q", agentFile, mount.HostPath)
+	}
+	if mount.ContainerPath != "/claw/AGENTS.md" {
+		t.Errorf("expected container path /claw/AGENTS.md, got %q", mount.ContainerPath)
+	}
+	if !mount.ReadOnly {
+		t.Error("expected read-only mount")
+	}
+}
+
+func TestResolveContractEmptyFilenameErrors(t *testing.T) {
+	_, err := ResolveContract("/some/dir", "")
+	if err == nil {
+		t.Fatal("expected error for empty agent filename")
+	}
+}
