@@ -113,11 +113,12 @@ func runComposeUp(podFile string) error {
 			}
 		}
 
-		// Enrich service surfaces with port info from pod service definitions
+		// Enrich service surfaces with port info from pod service definitions.
+		// Merge expose: and ports: — both describe reachable container ports.
 		for i := range surfaces {
 			if surfaces[i].Scheme == "service" {
 				if targetSvc, ok := p.Services[surfaces[i].Target]; ok {
-					surfaces[i].Ports = targetSvc.Expose
+					surfaces[i].Ports = mergedPorts(targetSvc.Expose, targetSvc.Ports)
 				}
 			}
 		}
@@ -302,7 +303,11 @@ func resolveSkillEmit(serviceName, runtimeDir, imageRef, emitPath string) (*driv
 
 	content, err := extractServiceSkillFromImage(imageRef, emitPath)
 	if err != nil {
-		return nil, fmt.Errorf("extract %q from %q: %w", emitPath, imageRef, err)
+		// Extraction failure is non-fatal: warn and fall back to the generated stub skill.
+		// The pod can still start; the agent gets a generic skill rather than a custom one.
+		fmt.Printf("[claw] warning: service %q: could not extract emitted skill %q from %q: %v (using fallback)\n",
+			serviceName, emitPath, imageRef, err)
+		return nil, nil
 	}
 	if err := writeRuntimeFile(emitHostPath, content, 0644); err != nil {
 		return nil, fmt.Errorf("write emitted skill %q: %w", emitPath, err)
@@ -348,6 +353,25 @@ func resolveServiceGeneratedSkills(runtimeDir string, surfaces []driver.Resolved
 	}
 
 	return generated, nil
+}
+
+// mergedPorts combines expose and ports slices, deduplicating by value.
+func mergedPorts(expose, ports []string) []string {
+	seen := make(map[string]struct{}, len(expose)+len(ports))
+	out := make([]string, 0, len(expose)+len(ports))
+	for _, p := range expose {
+		if _, ok := seen[p]; !ok {
+			seen[p] = struct{}{}
+			out = append(out, p)
+		}
+	}
+	for _, p := range ports {
+		if _, ok := seen[p]; !ok {
+			seen[p] = struct{}{}
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func resolveHandleSkills(runtimeDir string, handles map[string]*driver.HandleInfo) ([]driver.ResolvedSkill, error) {

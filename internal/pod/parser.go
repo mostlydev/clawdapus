@@ -27,6 +27,7 @@ type rawService struct {
 	XClaw       *rawClawBlock     `yaml:"x-claw"`
 	Environment map[string]string `yaml:"environment"`
 	Expose      []interface{}     `yaml:"expose"`
+	Ports       []interface{}     `yaml:"ports"`
 }
 
 type rawClawBlock struct {
@@ -60,10 +61,18 @@ func Parse(r io.Reader) (*Pod, error) {
 		if expose == nil {
 			expose = make([]string, 0)
 		}
+		ports, err := parsePorts(svc.Ports)
+		if err != nil {
+			return nil, fmt.Errorf("service %q: parse ports: %w", name, err)
+		}
+		if ports == nil {
+			ports = make([]string, 0)
+		}
 		service := &Service{
 			Image:       svc.Image,
 			Environment: svc.Environment,
 			Expose:      expose,
+			Ports:       ports,
 		}
 		if svc.XClaw != nil {
 			count := svc.XClaw.Count
@@ -282,6 +291,66 @@ func parseChannelEntry(val interface{}) (driver.ChannelInfo, error) {
 	default:
 		return driver.ChannelInfo{}, fmt.Errorf("unsupported channel entry type %T", val)
 	}
+}
+
+// parsePorts extracts the container-side port from compose ports: entries.
+// Supports string form ("8080:80", "80", "127.0.0.1:8080:80/tcp"),
+// integer form, and map form ({target: 80, published: 8080}).
+// Only the container (target) port is returned — what other containers reach.
+func parsePorts(raw []interface{}) ([]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	out := make([]string, 0, len(raw))
+	for i, entry := range raw {
+		switch v := entry.(type) {
+		case string:
+			port := containerPortFromString(v)
+			if port != "" {
+				out = append(out, port)
+			}
+		case int:
+			out = append(out, strconv.Itoa(v))
+		case int64:
+			out = append(out, strconv.FormatInt(v, 10))
+		case uint64:
+			out = append(out, strconv.FormatUint(v, 10))
+		case map[string]interface{}:
+			// Map form: {target: <container-port>, published: <host-port>, ...}
+			if target, ok := v["target"]; ok {
+				switch tv := target.(type) {
+				case int:
+					out = append(out, strconv.Itoa(tv))
+				case int64:
+					out = append(out, strconv.FormatInt(tv, 10))
+				case uint64:
+					out = append(out, strconv.FormatUint(tv, 10))
+				case string:
+					if tv != "" {
+						out = append(out, tv)
+					}
+				}
+			}
+		default:
+			return nil, fmt.Errorf("entry %d: unsupported ports value type %T", i, entry)
+		}
+	}
+	return out, nil
+}
+
+// containerPortFromString extracts the container (target) port from a compose
+// ports string such as "8080:80", "80", "127.0.0.1:8080:80/tcp", or "80/tcp".
+// Returns the port number without protocol suffix.
+func containerPortFromString(s string) string {
+	// Strip trailing /tcp, /udp, etc.
+	if idx := strings.LastIndex(s, "/"); idx >= 0 {
+		s = s[:idx]
+	}
+	// Take the last colon-separated segment (container port)
+	if idx := strings.LastIndex(s, ":"); idx >= 0 {
+		s = s[idx+1:]
+	}
+	return strings.TrimSpace(s)
 }
 
 func parseExpose(raw []interface{}) ([]string, error) {

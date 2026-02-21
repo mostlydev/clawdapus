@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,56 @@ func TestResolveSkillEmitRejectsInvalidPath(t *testing.T) {
 	_, err := resolveSkillEmit("gateway", tmpDir, "claw/openclaw:latest", "/")
 	if err == nil {
 		t.Fatal("expected invalid emitted skill path error")
+	}
+}
+
+func TestResolveSkillEmitFallsBackOnExtractionError(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	prevExtractor := extractServiceSkillFromImage
+	extractServiceSkillFromImage = func(_, _ string) ([]byte, error) {
+		return nil, fmt.Errorf("image not found")
+	}
+	defer func() { extractServiceSkillFromImage = prevExtractor }()
+
+	// Should return nil, nil — pod startup continues with fallback skill
+	skill, err := resolveSkillEmit("gateway", tmpDir, "claw/openclaw:latest", "/app/SKILL.md")
+	if err != nil {
+		t.Fatalf("expected warn+fallback (nil error), got: %v", err)
+	}
+	if skill != nil {
+		t.Errorf("expected nil skill on extraction failure, got %+v", skill)
+	}
+}
+
+func TestMergedPortsDeduplication(t *testing.T) {
+	expose := []string{"80", "443"}
+	ports := []string{"443", "8080"}
+
+	merged := mergedPorts(expose, ports)
+	if len(merged) != 3 {
+		t.Fatalf("expected 3 merged ports, got %d: %v", len(merged), merged)
+	}
+	seen := map[string]bool{}
+	for _, p := range merged {
+		if seen[p] {
+			t.Errorf("duplicate port %q in merged result", p)
+		}
+		seen[p] = true
+	}
+}
+
+func TestMergedPortsExposeOnly(t *testing.T) {
+	merged := mergedPorts([]string{"80"}, nil)
+	if len(merged) != 1 || merged[0] != "80" {
+		t.Errorf("expected [80], got %v", merged)
+	}
+}
+
+func TestMergedPortsPortsOnly(t *testing.T) {
+	merged := mergedPorts(nil, []string{"443"})
+	if len(merged) != 1 || merged[0] != "443" {
+		t.Errorf("expected [443], got %v", merged)
 	}
 }
 

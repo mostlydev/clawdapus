@@ -15,7 +15,28 @@ INVOKE 0,30 * * * * heartbeat
 
 TRACK apt pip npm
 
-SURFACE channel://discord
+# HANDLE declares which platforms this claw is reachable on.
+# This enables the transport layer (channels.<platform>.enabled = true in openclaw.json)
+# and broadcasts CLAW_HANDLE_* env vars to sibling services so they can route messages
+# to this agent by ID.
+#
+# HANDLE alone is not sufficient for runtime routing. You also need:
+#   1. An account binding — which bot token/account to use on the channel.
+#   2. An agent binding  — which account this agent operates under.
+#
+# These are supplied via CONFIGURE (secrets injected at runtime via env vars):
+#
+#   CONFIGURE openclaw config set channels.discord.accounts \
+#     [{"token":"${DISCORD_BOT_TOKEN}","applicationId":"${DISCORD_APP_ID}"}]
+#   CONFIGURE openclaw config set agents.defaults.bindings.discord.accountId \
+#     ${DISCORD_APP_ID}
+#
+# The bot token and application ID are passed in at runtime via Docker secrets or
+# environment variables — never baked into the image.
+HANDLE discord
+CONFIGURE openclaw config set channels.discord.accounts [{"token":"${DISCORD_BOT_TOKEN}","applicationId":"${DISCORD_APP_ID}"}]
+CONFIGURE openclaw config set agents.defaults.bindings.discord.accountId ${DISCORD_APP_ID}
+
 SURFACE service://fleet-master
 
 SKILL ./skills/openclaw-runbook.md
