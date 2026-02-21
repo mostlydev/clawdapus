@@ -20,21 +20,34 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 	}
 
-	// Apply CONFIGURE directives (parse "openclaw config set <path> <value>")
-	for _, cmd := range rc.Configures {
-		path, value, err := parseConfigSetCommand(cmd)
-		if err != nil {
-			return nil, fmt.Errorf("config generation: %w", err)
-		}
-		if err := setPath(config, path, value); err != nil {
-			return nil, fmt.Errorf("config generation: %w", err)
-		}
-	}
-
-	// Apply HANDLE directives: enable each platform in channels config.
+	// Apply HANDLE directives first: they provide structural defaults per platform.
+	// CONFIGURE runs after so operator overrides always take precedence.
 	for platform := range rc.Handles {
 		switch platform {
-		case "discord", "slack", "telegram":
+		case "discord":
+			h := rc.Handles[platform]
+			if err := setPath(config, "channels.discord.enabled", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
+			}
+			if err := setPath(config, "channels.discord.token", "${DISCORD_BOT_TOKEN}"); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
+			}
+			if err := setPath(config, "channels.discord.groupPolicy", "allowlist"); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
+			}
+			if err := setPath(config, "channels.discord.dmPolicy", "allowlist"); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
+			}
+			if h != nil && len(h.Guilds) > 0 {
+				guilds := make(map[string]interface{})
+				for _, g := range h.Guilds {
+					guilds[g.ID] = map[string]interface{}{"requireMention": true}
+				}
+				if err := setPath(config, "channels.discord.guilds", guilds); err != nil {
+					return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
+				}
+			}
+		case "slack", "telegram":
 			if err := setPath(config, "channels."+platform+".enabled", true); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE %s: %w", platform, err)
 			}
@@ -42,6 +55,17 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			// Unknown platform — no native config path known; log and skip.
 			// The env var broadcast still fires regardless.
 			fmt.Printf("[claw] warning: openclaw driver has no config mapping for HANDLE platform %q; skipping channel enablement\n", platform)
+		}
+	}
+
+	// Apply CONFIGURE directives: operator overrides that take precedence over HANDLE defaults.
+	for _, cmd := range rc.Configures {
+		path, value, err := parseConfigSetCommand(cmd)
+		if err != nil {
+			return nil, fmt.Errorf("config generation: %w", err)
+		}
+		if err := setPath(config, path, value); err != nil {
+			return nil, fmt.Errorf("config generation: %w", err)
 		}
 	}
 

@@ -18,16 +18,6 @@ Hard limits enforced by Tiverton at compliance time.
 - Request for a forbidden ticker
 - Total portfolio exposure > 80%
 
-## Agent Wallets
-
-| Agent   | Wallet   | Notes              |
-|---------|----------|--------------------|
-| Westin  | $25,000  | Equity + ETF       |
-| Logan   | $25,000  | Equity             |
-| Gerrard | $25,000  | Equity + macro ETF |
-| Dundas  | $25,000  | Events             |
-| Boulton | $1,000   | High-risk only     |
-
 ## One-Agent-Per-Ticker Policy
 
 Only one agent may hold a ticker at a time.

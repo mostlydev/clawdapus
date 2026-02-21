@@ -2,24 +2,17 @@ FROM openclaw:latest
 
 CLAW_TYPE openclaw
 
-# Model defaults — each agent may override via MODEL in a subclass Clawfile
 MODEL primary openrouter/moonshotai/kimi-k2.5
 MODEL fallback openrouter/minimax/minimax-m2.5
 MODEL fallback anthropic/claude-sonnet-4-6
 
-# HANDLE declares Discord as the transport layer for all trading agents.
-#
-# Each agent container gets a distinct Discord application identity injected
-# at runtime via env vars (DISCORD_BOT_TOKEN, DISCORD_APP_ID).  Bot tokens
-# are never baked into the image.
-#
-# In a production deployment you would extend this Clawfile per agent to add
-# agent-specific INVOKE schedules (pre-market research, midday review, etc.).
-# For this example all agents share one image — differentiation comes from
-# the agent contract (x-claw.agent) and pod-level handles.
 HANDLE discord
-CONFIGURE openclaw config set channels.discord.accounts [{"token":"${DISCORD_BOT_TOKEN}","applicationId":"${DISCORD_APP_ID}"}]
-CONFIGURE openclaw config set agents.defaults.bindings.discord.accountId ${DISCORD_APP_ID}
+
+# Valid openclaw config keys
+CONFIGURE openclaw config set agents.defaults.heartbeat.every 15m
+
+# Add your Discord user ID so the bot accepts DMs and @mentions:
+# CONFIGURE openclaw config set channels.discord.allowFrom ["<your-discord-user-id>"]
 
 TRACK apt npm
 

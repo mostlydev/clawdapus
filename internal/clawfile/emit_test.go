@@ -34,14 +34,14 @@ func TestEmitProducesValidDockerfile(t *testing.T) {
 	if !strings.Contains(output, `LABEL claw.surface.1="service://fleet-master"`) {
 		t.Fatal("missing claw.surface.1 label")
 	}
-	if !strings.Contains(output, "/etc/cron.d/claw") {
-		t.Fatal("missing cron file generation")
+	if strings.Contains(output, "/etc/cron.d/claw") {
+		t.Fatal("INVOKE must not write to /etc/cron.d — it should be a label")
 	}
-	if !strings.Contains(output, "claw-user heartbeat") {
-		t.Fatal("expected INVOKE cron line to use PRIVILEGE runtime user")
+	if !strings.Contains(output, `claw.invoke.0=`) {
+		t.Fatal("missing claw.invoke.0 label for INVOKE directive")
 	}
 	if !strings.Contains(output, "heartbeat") {
-		t.Fatal("missing heartbeat invocation")
+		t.Fatal("missing heartbeat invocation payload in label")
 	}
 	if !strings.Contains(output, `LABEL claw.configure.0="openclaw config set agents.defaults.heartbeat.every 30m"`) {
 		t.Fatal("missing claw.configure.0 label")
@@ -61,8 +61,8 @@ func TestEmitProducesValidDockerfile(t *testing.T) {
 	if !strings.Contains(output, "WORKDIR /workspace") {
 		t.Fatal("missing passthrough WORKDIR instruction")
 	}
-	if strings.Index(output, "RUN apt-get update") > strings.Index(output, "/etc/cron.d/claw") {
-		t.Fatal("expected generated infra lines to be injected after user RUN instructions")
+	if strings.Index(output, "RUN apt-get update") > strings.Index(output, "claw.invoke.0=") {
+		t.Fatal("expected generated label lines to be injected after user RUN instructions")
 	}
 
 	for _, rawDirective := range []string{
@@ -179,11 +179,54 @@ RUN echo final
 	}
 
 	idxFinalRun := strings.LastIndex(output, "RUN echo final")
-	idxCron := strings.LastIndex(output, "/etc/cron.d/claw")
-	if idxFinalRun == -1 || idxCron == -1 {
-		t.Fatalf("expected both final RUN and cron generation in output:\n%s", output)
+	idxLabel := strings.LastIndex(output, "claw.invoke.0=")
+	if idxFinalRun == -1 || idxLabel == -1 {
+		t.Fatalf("expected both final RUN and invoke label in output:\n%s", output)
 	}
-	if idxCron < idxFinalRun {
-		t.Fatalf("expected generated infra lines after final stage instructions:\n%s", output)
+	if idxLabel < idxFinalRun {
+		t.Fatalf("expected generated label lines after final stage instructions:\n%s", output)
+	}
+	if strings.Contains(output, "/etc/cron.d/claw") {
+		t.Fatal("INVOKE must not write to /etc/cron.d — it should be a label")
+	}
+}
+
+func TestEmitInvokeAsLabels(t *testing.T) {
+	input := "FROM alpine\nCLAW_TYPE openclaw\nINVOKE 15 8 * * 1-5 Pre-market synthesis\n"
+	parsed, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := Emit(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Tab-encoded: schedule\tcommand — strconv.Quote renders the tab as \t
+	if !strings.Contains(output, `claw.invoke.0="15 8 * * 1-5\tPre-market synthesis"`) {
+		t.Errorf("expected claw.invoke.0 label with tab-encoded value, got:\n%s", output)
+	}
+	if strings.Contains(output, "/etc/cron.d") {
+		t.Error("INVOKE must not write to /etc/cron.d")
+	}
+}
+
+func TestEmitMultipleInvokeOrdering(t *testing.T) {
+	input := "FROM alpine\nCLAW_TYPE openclaw\nINVOKE 15 8 * * 1-5 Pre-market\nINVOKE */30 * * * * Heartbeat\n"
+	parsed, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := Emit(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, `claw.invoke.0="15 8 * * 1-5\tPre-market"`) {
+		t.Errorf("expected claw.invoke.0 for first INVOKE, got:\n%s", output)
+	}
+	if !strings.Contains(output, `claw.invoke.1="*/30 * * * *\tHeartbeat"`) {
+		t.Errorf("expected claw.invoke.1 for second INVOKE, got:\n%s", output)
+	}
+	if strings.Index(output, "claw.invoke.0=") > strings.Index(output, "claw.invoke.1=") {
+		t.Error("expected claw.invoke.0 before claw.invoke.1")
 	}
 }

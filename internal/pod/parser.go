@@ -30,6 +30,13 @@ type rawService struct {
 	Ports       []interface{}     `yaml:"ports"`
 }
 
+type rawInvokeEntry struct {
+	Schedule string `yaml:"schedule"`
+	Message  string `yaml:"message"`
+	Name     string `yaml:"name"`
+	To       string `yaml:"to"`
+}
+
 type rawClawBlock struct {
 	Agent    string                 `yaml:"agent"`
 	Persona  string                 `yaml:"persona"`
@@ -38,6 +45,7 @@ type rawClawBlock struct {
 	Handles  map[string]interface{} `yaml:"handles"`
 	Surfaces []string               `yaml:"surfaces"`
 	Skills   []string               `yaml:"skills"`
+	Invoke   []rawInvokeEntry       `yaml:"invoke"`
 }
 
 // Parse reads a claw-pod.yml from the given reader.
@@ -91,6 +99,18 @@ func Parse(r io.Reader) (*Pod, error) {
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse handles: %w", name, err)
 			}
+			invoke := make([]InvokeEntry, 0, len(svc.XClaw.Invoke))
+			for _, rawInv := range svc.XClaw.Invoke {
+				if rawInv.Schedule == "" || rawInv.Message == "" {
+					return nil, fmt.Errorf("service %q: invoke entry missing required field (schedule or message)", name)
+				}
+				invoke = append(invoke, InvokeEntry{
+					Schedule: rawInv.Schedule,
+					Message:  rawInv.Message,
+					Name:     rawInv.Name,
+					To:       rawInv.To,
+				})
+			}
 			service.Claw = &ClawBlock{
 				Agent:    svc.XClaw.Agent,
 				Persona:  svc.XClaw.Persona,
@@ -99,6 +119,7 @@ func Parse(r io.Reader) (*Pod, error) {
 				Handles:  handles,
 				Surfaces: surfaces,
 				Skills:   skills,
+				Invoke:   invoke,
 			}
 		}
 		pod.Services[name] = service

@@ -89,42 +89,22 @@ func buildLabelLines(config *ClawConfig) []string {
 		lines = append(lines, formatLabel(fmt.Sprintf("claw.configure.%d", i), configure))
 	}
 
-	return lines
-}
-
-func buildInfraLines(config *ClawConfig) []string {
-	lines := make([]string, 0)
-
-	if len(config.Invocations) > 0 {
-		lines = append(lines, "RUN mkdir -p /etc/cron.d")
-		cronLines := make([]string, 0, len(config.Invocations))
-		cronUser := "root"
-		if runtimeUser := strings.TrimSpace(config.Privileges["runtime"]); runtimeUser != "" {
-			cronUser = runtimeUser
-		}
-		for _, invocation := range config.Invocations {
-			cronLines = append(cronLines, fmt.Sprintf("%s %s %s", invocation.Schedule, cronUser, invocation.Command))
-		}
-		lines = append(lines, fmt.Sprintf("RUN printf '%%s\\n' %s > /etc/cron.d/claw && chmod 0644 /etc/cron.d/claw", quoteShellArgs(cronLines)))
+	for i, inv := range config.Invocations {
+		// Encode as "<schedule>\t<command>" — tab separates the two fields.
+		// Schedule is exactly 5 space-separated fields; command may contain spaces.
+		encoded := inv.Schedule + "\t" + inv.Command
+		lines = append(lines, formatLabel(fmt.Sprintf("claw.invoke.%d", i), encoded))
 	}
 
 	return lines
+}
+
+func buildInfraLines(_ *ClawConfig) []string {
+	return nil
 }
 
 func formatLabel(key string, value string) string {
 	return "LABEL " + key + "=" + strconv.Quote(value)
-}
-
-func quoteShellArgs(lines []string) string {
-	quoted := make([]string, 0, len(lines))
-	for _, line := range lines {
-		quoted = append(quoted, shellSingleQuote(line))
-	}
-	return strings.Join(quoted, " ")
-}
-
-func shellSingleQuote(in string) string {
-	return "'" + strings.ReplaceAll(in, "'", `'"'"'`) + "'"
 }
 
 func sortedMapKeys(in map[string]string) []string {

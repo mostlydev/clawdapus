@@ -2,62 +2,16 @@ x-claw:
   pod: trading-desk
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Trading Desk Pod
+# Trading Desk Pod (minimal: tiverton + westin)
 #
-# Seven isolated openclaw agents coordinating via Discord and a shared
-# research volume. Each agent runs its own openclaw instance in its own
-# container — previously all agents shared a single monolithic process.
-#
-# How volumes work in this pod format:
-#
-#   surface: "volume://clawd-shared read-write"
-#
-#   This declaration does two things in one:
-#     1. Declares the named volume at the top level of compose.generated.yml
-#     2. Mounts it into the container at /mnt/clawd-shared
-#
-#   The agent finds the volume at /mnt/clawd-shared — CLAWDAPUS.md confirms
-#   the exact path at runtime so the agent doesn't have to guess.
-#
-#   Note: top-level "volumes:" and per-service "volumes:" in the pod file are
-#   not parsed by clawdapus. Volume declaration and mounting flow entirely
-#   through the surface mechanism.
-#
-# Agent workspace persistence (open problem):
-#
-#   In the monolith, ~/clawd-{agent}/ was a persistent directory on the host.
-#   In this pod, each container's own filesystem is the workspace, but it
-#   evaporates on restart. Private named volumes (one per agent, not shared)
-#   are not yet expressible in the pod format — future work.
-#
-# Self-describing services:
-#   trading-api carries LABEL claw.skill.emit=/app/skills/trade.md
-#   clawdapus extracts it at compose-up time and mounts it read-only into
-#   every claw that declares surface: service://trading-api.
-#   No static trade.md lives in this pod — the API describes itself.
-#
-# Social topology (HANDLE → trading-api):
-#   Every agent declares HANDLE discord with its Discord ID.
-#   Clawdapus broadcasts all handles as env vars into every service in the pod,
-#   including non-claw services like trading-api:
-#
-#     CLAW_HANDLE_TIVERTON_DISCORD_ID=...
-#     CLAW_HANDLE_WESTIN_DISCORD_ID=...
-#     CLAW_HANDLE_TIVERTON_DISCORD_JSON={...}
-#     ... etc.
-#
-#   trading-api uses these to ping the right agent on Discord when human
-#   approval is required (e.g. a position exceeds the wallet limit).
-#   No hardcoding. No service discovery. Just env vars at startup.
+# Two isolated openclaw agents coordinating via Discord and a shared research
+# volume. Each agent runs its own openclaw instance in its own container.
 #
 # Required environment variables (.env or Docker secrets):
 #   POSTGRES_PASSWORD, SECRET_KEY_BASE
-#   TIVERTON_BOT_TOKEN, WESTIN_BOT_TOKEN, LOGAN_BOT_TOKEN
-#   GERRARD_BOT_TOKEN, DUNDAS_BOT_TOKEN, BOULTON_BOT_TOKEN, ALLEN_BOT_TOKEN
-#   TIVERTON_DISCORD_ID ... ALLEN_DISCORD_ID  (one per agent)
-#   DISCORD_GUILD_ID, DISCORD_TRADING_FLOOR_CHANNEL, DISCORD_INFRA_CHANNEL
-#   ALPACA_API_KEY, ALPACA_SECRET_KEY  (trading-api only)
-#   APEWISDOM_API_KEY  (Dundas and Boulton only)
+#   TIVERTON_BOT_TOKEN, WESTIN_BOT_TOKEN
+#   TIVERTON_DISCORD_ID, WESTIN_DISCORD_ID
+#   DISCORD_GUILD_ID, DISCORD_TRADING_FLOOR_CHANNEL
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -84,9 +38,10 @@ services:
     depends_on:
       - postgres
 
-  # ── Tiverton — Coordinator, Compliance, News Synthesis ───────────────────
+  # ── Tiverton — Coordinator, Compliance, News Synthesis ────────────────────
 
   tiverton:
+    image: trading-desk:latest
     build:
       context: .
       dockerfile: Clawfile
@@ -102,21 +57,28 @@ services:
               channels:
                 - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
                   name: trading-floor
-                - id: "${DISCORD_INFRA_CHANNEL}"
-                  name: infra
       surfaces:
         - "service://trading-api"
-        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
+        - "volume://clawd-shared read-write"
       skills:
         - ./policy/risk-limits.md
         - ./policy/approval-workflow.md
+      invoke:
+        - schedule: "15 8 * * 1-5"
+          name: "Pre-market synthesis"
+          message: "Pre-market synthesis. Write report to /mnt/clawd-shared/reports/morning/$(date +%Y-%m-%d)-tiverton.md and post summary to #trading-floor."
+          to: trading-floor
+        - schedule: "*/30 * * * *"
+          name: "Heartbeat"
+          message: "Post a brief status update to #trading-floor."
+          to: trading-floor
     environment:
       DISCORD_BOT_TOKEN: "${TIVERTON_BOT_TOKEN}"
-      DISCORD_APP_ID: "${TIVERTON_DISCORD_ID}"
 
   # ── Westin — Momentum / Tech Stocks ──────────────────────────────────────
 
   westin:
+    image: trading-desk:latest
     build:
       context: .
       dockerfile: Clawfile
@@ -134,149 +96,13 @@ services:
                   name: trading-floor
       surfaces:
         - "service://trading-api"
-        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
+        - "volume://clawd-shared read-write"
       skills:
         - ./policy/risk-limits.md
+      invoke:
+        - schedule: "0 * * * *"
+          name: "Momentum check"
+          message: "Scan momentum signals for top tech holdings. Post any high-conviction moves to #trading-floor."
+          to: trading-floor
     environment:
       DISCORD_BOT_TOKEN: "${WESTIN_BOT_TOKEN}"
-      DISCORD_APP_ID: "${WESTIN_DISCORD_ID}"
-
-  # ── Logan — Value / Fundamentals ─────────────────────────────────────────
-
-  logan:
-    build:
-      context: .
-      dockerfile: Clawfile
-    x-claw:
-      agent: ./agents/LOGAN.md
-      handles:
-        discord:
-          id: "${LOGAN_DISCORD_ID}"
-          username: "logan"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Trading Floor"
-              channels:
-                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-                  name: trading-floor
-      surfaces:
-        - "service://trading-api"
-        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
-      skills:
-        - ./policy/risk-limits.md
-    environment:
-      DISCORD_BOT_TOKEN: "${LOGAN_BOT_TOKEN}"
-      DISCORD_APP_ID: "${LOGAN_DISCORD_ID}"
-
-  # ── Gerrard — Macro / Sector Rotation ────────────────────────────────────
-
-  gerrard:
-    build:
-      context: .
-      dockerfile: Clawfile
-    x-claw:
-      agent: ./agents/GERRARD.md
-      handles:
-        discord:
-          id: "${GERRARD_DISCORD_ID}"
-          username: "gerrard"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Trading Floor"
-              channels:
-                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-                  name: trading-floor
-      surfaces:
-        - "service://trading-api"
-        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
-      skills:
-        - ./policy/risk-limits.md
-    environment:
-      DISCORD_BOT_TOKEN: "${GERRARD_BOT_TOKEN}"
-      DISCORD_APP_ID: "${GERRARD_DISCORD_ID}"
-
-  # ── Dundas — Event Trader + News Dispatcher ───────────────────────────────
-
-  dundas:
-    build:
-      context: .
-      dockerfile: Clawfile
-    x-claw:
-      agent: ./agents/DUNDAS.md
-      handles:
-        discord:
-          id: "${DUNDAS_DISCORD_ID}"
-          username: "dundas"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Trading Floor"
-              channels:
-                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-                  name: trading-floor
-      surfaces:
-        - "service://trading-api"
-        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
-      skills:
-        - ./skills/news-routing.md
-        - ./policy/risk-limits.md
-    environment:
-      DISCORD_BOT_TOKEN: "${DUNDAS_BOT_TOKEN}"
-      DISCORD_APP_ID: "${DUNDAS_DISCORD_ID}"
-      APEWISDOM_API_KEY: "${APEWISDOM_API_KEY}"
-
-  # ── Boulton — Pump Trader, High-Risk / Crypto ────────────────────────────
-
-  boulton:
-    build:
-      context: .
-      dockerfile: Clawfile
-    x-claw:
-      agent: ./agents/BOULTON.md
-      handles:
-        discord:
-          id: "${BOULTON_DISCORD_ID}"
-          username: "boulton"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Trading Floor"
-              channels:
-                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-                  name: trading-floor
-      surfaces:
-        - "service://trading-api"
-        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
-      skills:
-        - ./policy/risk-limits.md
-    environment:
-      DISCORD_BOT_TOKEN: "${BOULTON_BOT_TOKEN}"
-      DISCORD_APP_ID: "${BOULTON_DISCORD_ID}"
-      APEWISDOM_API_KEY: "${APEWISDOM_API_KEY}"
-
-  # ── Allen — Systems Monitor ───────────────────────────────────────────────
-
-  allen:
-    build:
-      context: .
-      dockerfile: Clawfile
-    x-claw:
-      agent: ./agents/ALLEN.md
-      handles:
-        discord:
-          id: "${ALLEN_DISCORD_ID}"
-          username: "allen"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Trading Floor"
-              channels:
-                - id: "${DISCORD_INFRA_CHANNEL}"
-                  name: infra
-                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-                  name: trading-floor
-      surfaces:
-        - "service://trading-api"
-        - "volume://clawd-shared read-only"   # mounted at /mnt/clawd-shared
-        # Other agents are not services — Allen monitors them via Discord presence
-        # and trading-api health endpoints, not by calling into their containers.
-    environment:
-      DISCORD_BOT_TOKEN: "${ALLEN_BOT_TOKEN}"
-      DISCORD_APP_ID: "${ALLEN_DISCORD_ID}"

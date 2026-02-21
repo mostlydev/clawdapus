@@ -9,6 +9,14 @@ type Driver interface {
 	HealthProbe(ref ContainerRef) (*Health, error)
 }
 
+// Invocation is a scheduled agent task resolved from image labels or pod x-claw.invoke.
+type Invocation struct {
+	Schedule string // 5-field cron expression (e.g., "15 8 * * 1-5")
+	Message  string // agent task payload (agentTurn message)
+	To       string // Discord channel ID for delivery (empty = openclaw uses last channel)
+	Name     string // human-readable job name (optional, derived from message if empty)
+}
+
 // ResolvedClaw combines image-level claw labels with pod-level x-claw overrides.
 type ResolvedClaw struct {
 	ServiceName   string
@@ -22,6 +30,7 @@ type ResolvedClaw struct {
 	Skills        []ResolvedSkill
 	Privileges    map[string]string
 	Configures    []string          // openclaw config set commands from labels
+	Invocations   []Invocation      // scheduled agent tasks from image labels + pod x-claw.invoke
 	Count         int               // from pod x-claw (default 1)
 	Environment   map[string]string // from pod environment block
 }

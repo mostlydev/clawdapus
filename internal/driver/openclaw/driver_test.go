@@ -77,22 +77,27 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Error("expected at least one tmpfs mount")
 	}
 
-	// Verify all required writable paths are declared as tmpfs
-	requiredTmpfs := map[string]bool{
-		"/tmp":              false,
-		"/run":              false,
-		"/app/data":         false,
-		"/root/.openclaw":   false,
+	// Verify env vars are set correctly
+	if result.Environment["OPENCLAW_CONFIG_PATH"] != "/app/config/openclaw.json" {
+		t.Errorf("expected OPENCLAW_CONFIG_PATH=/app/config/openclaw.json, got %q", result.Environment["OPENCLAW_CONFIG_PATH"])
 	}
+	if result.Environment["OPENCLAW_STATE_DIR"] != "/app/state" {
+		t.Errorf("expected OPENCLAW_STATE_DIR=/app/state, got %q", result.Environment["OPENCLAW_STATE_DIR"])
+	}
+
+	// Verify new state-dir tmpfs layout
+	tmpfsSet := make(map[string]bool, len(result.Tmpfs))
 	for _, p := range result.Tmpfs {
-		if _, ok := requiredTmpfs[p]; ok {
-			requiredTmpfs[p] = true
-		}
+		tmpfsSet[p] = true
 	}
-	for p, found := range requiredTmpfs {
-		if !found {
-			t.Errorf("missing required tmpfs mount %q — container will fail with read_only: true", p)
-		}
+	if !tmpfsSet["/app/state/logs"] {
+		t.Error("missing required tmpfs mount /app/state/logs")
+	}
+	if tmpfsSet["/root/.openclaw"] {
+		t.Error("unexpected tmpfs /root/.openclaw — should use /app/state now")
+	}
+	if tmpfsSet["/app/data"] {
+		t.Error("unexpected tmpfs /app/data — unused path should be removed")
 	}
 
 	if result.Restart != "on-failure" {

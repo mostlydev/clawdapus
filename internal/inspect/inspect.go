@@ -10,18 +10,25 @@ import (
 	"github.com/docker/docker/client"
 )
 
+// InspectInvocation is an invocation entry parsed from a claw.invoke.N image label.
+type InspectInvocation struct {
+	Schedule string
+	Command  string
+}
+
 type ClawInfo struct {
-	ClawType   string
-	Agent      string
-	Models     map[string]string
-	Cllama     string
-	Persona    string
-	Handles    []string
-	Surfaces   []string
-	Skills     []string
-	Privileges map[string]string
-	Configures []string
-	SkillEmit  string // claw.skill.emit label: path to skill file inside image
+	ClawType    string
+	Agent       string
+	Models      map[string]string
+	Cllama      string
+	Persona     string
+	Handles     []string
+	Surfaces    []string
+	Skills      []string
+	Privileges  map[string]string
+	Configures  []string
+	Invocations []InspectInvocation
+	SkillEmit   string // claw.skill.emit label: path to skill file inside image
 }
 
 func ParseLabels(labels map[string]string) *ClawInfo {
@@ -44,6 +51,7 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 	surfaces := make([]indexedEntry, 0)
 	skills := make([]indexedEntry, 0)
 	configures := make([]indexedEntry, 0)
+	invokeEntries := make([]indexedEntry, 0)
 
 	for key, value := range labels {
 		if !strings.HasPrefix(key, "claw.") {
@@ -105,6 +113,17 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 				Key:   key,
 				Value: value,
 			})
+		case strings.HasPrefix(key, "claw.invoke."):
+			index := maxInt()
+			suffix := strings.TrimPrefix(key, "claw.invoke.")
+			if parsed, err := strconv.Atoi(suffix); err == nil {
+				index = parsed
+			}
+			invokeEntries = append(invokeEntries, indexedEntry{
+				Index: index,
+				Key:   key,
+				Value: value,
+			})
 		}
 	}
 
@@ -142,6 +161,22 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 
 	for _, configure := range configures {
 		info.Configures = append(info.Configures, configure.Value)
+	}
+
+	sort.Slice(invokeEntries, func(i, j int) bool {
+		if invokeEntries[i].Index == invokeEntries[j].Index {
+			return invokeEntries[i].Key < invokeEntries[j].Key
+		}
+		return invokeEntries[i].Index < invokeEntries[j].Index
+	})
+	for _, e := range invokeEntries {
+		tab := strings.IndexByte(e.Value, '\t')
+		if tab > 0 {
+			info.Invocations = append(info.Invocations, InspectInvocation{
+				Schedule: e.Value[:tab],
+				Command:  e.Value[tab+1:],
+			})
+		}
 	}
 
 	return info

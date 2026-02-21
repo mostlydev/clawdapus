@@ -264,6 +264,99 @@ func TestGenerateConfigHandleUnknownPlatformNoError(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigDiscordFullConfig(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {
+				ID:       "123456789",
+				Username: "tiverton",
+				Guilds: []driver.GuildInfo{
+					{
+						ID:   "999888777",
+						Name: "Trading Floor",
+						Channels: []driver.ChannelInfo{
+							{ID: "111222333", Name: "trading-floor"},
+						},
+					},
+				},
+			},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	channels := config["channels"].(map[string]interface{})
+	discord := channels["discord"].(map[string]interface{})
+
+	if discord["enabled"] != true {
+		t.Errorf("expected channels.discord.enabled=true, got %v", discord["enabled"])
+	}
+	if discord["token"] != "${DISCORD_BOT_TOKEN}" {
+		t.Errorf("expected channels.discord.token=${DISCORD_BOT_TOKEN}, got %v", discord["token"])
+	}
+	if discord["groupPolicy"] != "allowlist" {
+		t.Errorf("expected channels.discord.groupPolicy=allowlist, got %v", discord["groupPolicy"])
+	}
+	if discord["dmPolicy"] != "allowlist" {
+		t.Errorf("expected channels.discord.dmPolicy=allowlist, got %v", discord["dmPolicy"])
+	}
+
+	guilds, ok := discord["guilds"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected channels.discord.guilds to be a map, got %T", discord["guilds"])
+	}
+	guild, ok := guilds["999888777"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected guilds[999888777] to be a map, got %T", guilds["999888777"])
+	}
+	if guild["requireMention"] != true {
+		t.Errorf("expected guilds[999888777].requireMention=true, got %v", guild["requireMention"])
+	}
+}
+
+func TestGenerateConfigDiscordNoGuilds(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {
+				ID:       "123456789",
+				Username: "tiverton",
+				Guilds:   nil,
+			},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	channels := config["channels"].(map[string]interface{})
+	discord := channels["discord"].(map[string]interface{})
+
+	if _, hasGuilds := discord["guilds"]; hasGuilds {
+		t.Error("expected no guilds key when Guilds slice is empty")
+	}
+	// Other discord fields should still be set
+	if discord["token"] != "${DISCORD_BOT_TOKEN}" {
+		t.Errorf("expected token to be set even with no guilds, got %v", discord["token"])
+	}
+}
+
 func TestGenerateConfigHandleNilMeansNoChannels(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:     make(map[string]string),

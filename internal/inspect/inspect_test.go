@@ -183,3 +183,27 @@ func TestParseLabelsIgnoresNonClawLabels(t *testing.T) {
 		t.Fatalf("expected empty claw type, got %q", info.ClawType)
 	}
 }
+
+func TestParseLabelsInvocations(t *testing.T) {
+	raw := map[string]string{
+		"claw.invoke.0": "15 8 * * 1-5\tPre-market synthesis",
+		"claw.invoke.1": "*/5 * * * *\tNews poll",
+	}
+	info := ParseLabels(raw)
+
+	if len(info.Invocations) != 2 {
+		t.Fatalf("expected 2 invocations, got %d", len(info.Invocations))
+	}
+	if info.Invocations[0].Schedule != "15 8 * * 1-5" {
+		t.Errorf("expected invocations[0].Schedule=%q, got %q", "15 8 * * 1-5", info.Invocations[0].Schedule)
+	}
+	if info.Invocations[0].Command != "Pre-market synthesis" {
+		t.Errorf("expected invocations[0].Command=%q, got %q", "Pre-market synthesis", info.Invocations[0].Command)
+	}
+	if info.Invocations[1].Schedule != "*/5 * * * *" {
+		t.Errorf("expected invocations[1].Schedule=%q, got %q", "*/5 * * * *", info.Invocations[1].Schedule)
+	}
+	if info.Invocations[1].Command != "News poll" {
+		t.Errorf("expected invocations[1].Command=%q, got %q", "News poll", info.Invocations[1].Command)
+	}
+}

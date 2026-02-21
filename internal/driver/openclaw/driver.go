@@ -56,6 +56,29 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		},
 	}
 
+	// Generate jobs.json if there are scheduled invocations.
+	// Mounted read-write: openclaw updates job state (nextRunAtMs, lastRunAtMs, etc.)
+	// on every timer tick. Read-only would produce EROFS failures in the scheduler.
+	if len(rc.Invocations) > 0 {
+		jobsData, err := GenerateJobsJSON(rc)
+		if err != nil {
+			return nil, fmt.Errorf("openclaw driver: generate jobs.json: %w", err)
+		}
+		jobsDir := filepath.Join(opts.RuntimeDir, "state", "cron")
+		if err := os.MkdirAll(jobsDir, 0700); err != nil {
+			return nil, fmt.Errorf("openclaw driver: create jobs dir: %w", err)
+		}
+		jobsPath := filepath.Join(jobsDir, "jobs.json")
+		if err := os.WriteFile(jobsPath, jobsData, 0644); err != nil {
+			return nil, fmt.Errorf("openclaw driver: write jobs.json: %w", err)
+		}
+		mounts = append(mounts, driver.Mount{
+			HostPath:      jobsPath,
+			ContainerPath: "/app/state/cron/jobs.json",
+			ReadOnly:      false, // openclaw writes job state (nextRunAtMs, lastRunAtMs) on every tick
+		})
+	}
+
 	// Generate CLAWDAPUS.md — infrastructure context for the agent
 	podName := opts.PodName
 	if podName == "" {
@@ -74,8 +97,16 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	})
 
 	return &driver.MaterializeResult{
-		Mounts:   mounts,
-		Tmpfs:    []string{"/tmp", "/run", "/app/data", "/root/.openclaw"},
+		Mounts: mounts,
+		Tmpfs: []string{
+			"/tmp",
+			"/run",
+			"/app/state/cron/runs",
+			"/app/state/logs",
+			"/app/state/memory",
+			"/app/state/agents",
+			"/app/state/delivery-queue",
+		},
 		ReadOnly: true,
 		Restart:  "on-failure",
 		SkillDir: "/claw/skills",
@@ -86,7 +117,9 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			Retries:  3,
 		},
 		Environment: map[string]string{
-			"CLAW_MANAGED": "true",
+			"CLAW_MANAGED":         "true",
+			"OPENCLAW_CONFIG_PATH": "/app/config/openclaw.json",
+			"OPENCLAW_STATE_DIR":   "/app/state",
 		},
 	}, nil
 }

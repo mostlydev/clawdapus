@@ -182,6 +182,30 @@ func runComposeUp(podFile string) error {
 			Skills:        skills,
 		}
 
+		// Merge image-level invocations (from Clawfile INVOKE labels via inspect)
+		for _, imgInv := range info.Invocations {
+			rc.Invocations = append(rc.Invocations, driver.Invocation{
+				Schedule: imgInv.Schedule,
+				Message:  imgInv.Command,
+			})
+		}
+
+		// Merge pod-level invocations (x-claw.invoke), resolving channel name → ID
+		for _, podInv := range svc.Claw.Invoke {
+			inv := driver.Invocation{
+				Schedule: podInv.Schedule,
+				Message:  podInv.Message,
+				Name:     podInv.Name,
+			}
+			if podInv.To != "" {
+				inv.To = resolveChannelID(svc.Claw.Handles, podInv.To)
+				if inv.To == "" {
+					fmt.Printf("[claw] warning: service %q: invoke channel %q not found in handles; delivery will use last channel\n", name, podInv.To)
+				}
+			}
+			rc.Invocations = append(rc.Invocations, inv)
+		}
+
 		d, err := driver.Lookup(rc.ClawType)
 		if err != nil {
 			return fmt.Errorf("service %q: %w", name, err)
@@ -433,6 +457,24 @@ func shortContainerIDForPostApply(id string) string {
 		return id
 	}
 	return id[:12]
+}
+
+// resolveChannelID looks up a channel by name in the discord handle's guild topology.
+// Returns the channel ID if found, empty string otherwise.
+// Searches all guilds in the discord handle.
+func resolveChannelID(handles map[string]*driver.HandleInfo, channelName string) string {
+	h, ok := handles["discord"]
+	if !ok || h == nil {
+		return ""
+	}
+	for _, g := range h.Guilds {
+		for _, ch := range g.Channels {
+			if ch.Name == channelName {
+				return ch.ID
+			}
+		}
+	}
+	return ""
 }
 
 func init() {

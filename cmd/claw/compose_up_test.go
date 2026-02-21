@@ -177,3 +177,65 @@ func TestResolveServiceGeneratedSkills(t *testing.T) {
 		t.Fatalf("expected generated skill for db, got %v", []string{skills[0].Name, skills[1].Name})
 	}
 }
+
+func TestResolveChannelIDFound(t *testing.T) {
+	handles := map[string]*driver.HandleInfo{
+		"discord": {
+			ID:       "123456789",
+			Username: "tiverton",
+			Guilds: []driver.GuildInfo{
+				{
+					ID:   "999888777",
+					Name: "Trading Floor",
+					Channels: []driver.ChannelInfo{
+						{ID: "111222333", Name: "trading-floor"},
+						{ID: "444555666", Name: "infra"},
+					},
+				},
+			},
+		},
+	}
+
+	if id := resolveChannelID(handles, "trading-floor"); id != "111222333" {
+		t.Errorf("expected trading-floor ID=111222333, got %q", id)
+	}
+	if id := resolveChannelID(handles, "infra"); id != "444555666" {
+		t.Errorf("expected infra ID=444555666, got %q", id)
+	}
+}
+
+func TestResolveChannelIDNotFound(t *testing.T) {
+	handles := map[string]*driver.HandleInfo{
+		"discord": {
+			ID: "123456789",
+			Guilds: []driver.GuildInfo{
+				{ID: "999", Channels: []driver.ChannelInfo{{ID: "111", Name: "general"}}},
+			},
+		},
+	}
+	if id := resolveChannelID(handles, "nonexistent"); id != "" {
+		t.Errorf("expected empty string for unknown channel, got %q", id)
+	}
+}
+
+func TestResolveChannelIDNoDiscord(t *testing.T) {
+	handles := map[string]*driver.HandleInfo{}
+	if id := resolveChannelID(handles, "trading-floor"); id != "" {
+		t.Errorf("expected empty string with no discord handle, got %q", id)
+	}
+}
+
+func TestResolveChannelIDMultipleGuilds(t *testing.T) {
+	handles := map[string]*driver.HandleInfo{
+		"discord": {
+			ID: "123456789",
+			Guilds: []driver.GuildInfo{
+				{ID: "aaa", Channels: []driver.ChannelInfo{{ID: "111", Name: "general"}}},
+				{ID: "bbb", Channels: []driver.ChannelInfo{{ID: "222", Name: "trading-floor"}}},
+			},
+		},
+	}
+	if id := resolveChannelID(handles, "trading-floor"); id != "222" {
+		t.Errorf("expected trading-floor ID=222 from second guild, got %q", id)
+	}
+}

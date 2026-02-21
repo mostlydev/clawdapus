@@ -17,6 +17,14 @@ type Service struct {
 	Ports       []string // container-side ports from compose ports: (host:container or plain container)
 }
 
+// InvokeEntry is a scheduled agent task declared in the pod x-claw.invoke block.
+type InvokeEntry struct {
+	Schedule string // 5-field cron expression
+	Message  string // agent task payload
+	Name     string // optional human-readable job name
+	To       string // channel name (resolved to channel ID from handles at compose-up time)
+}
+
 // ClawBlock represents the x-claw extension on a service.
 type ClawBlock struct {
 	Agent    string
@@ -26,4 +34,5 @@ type ClawBlock struct {
 	Handles  map[string]*driver.HandleInfo // platform → contact card
 	Surfaces []string
 	Skills   []string
+	Invoke   []InvokeEntry
 }
