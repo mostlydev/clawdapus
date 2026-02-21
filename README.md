@@ -36,6 +36,28 @@ The OpenClaw reference example is in `examples/openclaw/`.
 
 ---
 
+## OpenClaw Image for Testing
+
+Use `alpine/openclaw` and pin a concrete version tag for deterministic tests. Avoid `:latest` in CI.
+
+```yaml
+version: "3.8"
+services:
+  openclaw:
+    image: alpine/openclaw:2026.2.19
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./skills:/app/skills
+    env_file:
+      - .env
+    restart: unless-stopped
+```
+
+---
+
 ## Current Design Inputs
 
 | Document | Purpose |
@@ -77,9 +99,11 @@ RUN npm install -g openclaw@2026.2.9
 
 1. Runtime driver framework (`CLAW_TYPE` -> enforcement strategy)
 2. OpenClaw driver with Go-native JSON5 config mutation (no repeated `openclaw config set` shellouts)
-3. Contract existence + read-only mount enforcement for `AGENT`
-4. `claw-pod.yml` parsing and `compose.generated.yml` emission
-5. `claw up/down/ps/logs` lifecycle commands with deterministic policy-layer behavior
+3. Contract existence + read-only mount enforcement for `AGENT` (fail-closed preflight)
+4. `claw-pod.yml` parsing with `count` scaling and stable ordinal identities
+5. Compose generation for volume surfaces and network restriction enforcement
+6. Fail-closed post-apply verification before reporting successful `claw up`
+7. `docker-claw up/down/ps/logs` pod lifecycle commands (optional `docker claw` plugin mode) with deterministic policy-layer behavior
 
 ---
 
