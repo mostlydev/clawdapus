@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"gopkg.in/yaml.v3"
 )
 
 func TestEmitComposeBasicService(t *testing.T) {
@@ -186,6 +187,113 @@ func TestEmitComposeVolumeSurface(t *testing.T) {
 	// Volume mount on the service
 	if !strings.Contains(out, "shared-cache:/mnt/shared-cache:rw") {
 		t.Error("expected volume mount shared-cache:/mnt/shared-cache:rw in output")
+	}
+}
+
+func TestEmitComposeMultiServiceSharedVolume(t *testing.T) {
+	p := &Pod{
+		Name: "research-pod",
+		Services: map[string]*Service{
+			"researcher": {
+				Image: "claw-openclaw-example",
+				Claw: &ClawBlock{
+					Surfaces: []string{
+						"volume://research-cache read-write",
+					},
+				},
+			},
+			"analyst": {
+				Image: "claw-openclaw-example",
+				Claw: &ClawBlock{
+					Surfaces: []string{
+						"volume://research-cache read-only",
+					},
+				},
+			},
+		},
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"researcher": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+		},
+		"analyst": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+		},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	// Parse YAML to verify structure
+	var cf struct {
+		Services map[string]struct {
+			Volumes  []string `yaml:"volumes"`
+			Networks []string `yaml:"networks"`
+		} `yaml:"services"`
+		Volumes  map[string]interface{} `yaml:"volumes"`
+		Networks map[string]struct {
+			Internal bool `yaml:"internal"`
+		} `yaml:"networks"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
+		t.Fatalf("failed to parse compose output: %v", err)
+	}
+
+	// Top-level volumes declares research-cache
+	if _, ok := cf.Volumes["research-cache"]; !ok {
+		t.Error("expected research-cache in top-level volumes")
+	}
+
+	// Researcher gets rw mount
+	researcher, ok := cf.Services["researcher"]
+	if !ok {
+		t.Fatal("expected researcher service in output")
+	}
+	foundRW := false
+	for _, v := range researcher.Volumes {
+		if v == "research-cache:/mnt/research-cache:rw" {
+			foundRW = true
+		}
+	}
+	if !foundRW {
+		t.Errorf("expected researcher volume mount research-cache:/mnt/research-cache:rw, got %v", researcher.Volumes)
+	}
+
+	// Analyst gets ro mount
+	analyst, ok := cf.Services["analyst"]
+	if !ok {
+		t.Fatal("expected analyst service in output")
+	}
+	foundRO := false
+	for _, v := range analyst.Volumes {
+		if v == "research-cache:/mnt/research-cache:ro" {
+			foundRO = true
+		}
+	}
+	if !foundRO {
+		t.Errorf("expected analyst volume mount research-cache:/mnt/research-cache:ro, got %v", analyst.Volumes)
+	}
+
+	// Both services on claw-internal network
+	if len(researcher.Networks) == 0 || researcher.Networks[0] != "claw-internal" {
+		t.Errorf("expected researcher on claw-internal network, got %v", researcher.Networks)
+	}
+	if len(analyst.Networks) == 0 || analyst.Networks[0] != "claw-internal" {
+		t.Errorf("expected analyst on claw-internal network, got %v", analyst.Networks)
+	}
+
+	// claw-internal network is internal
+	net, ok := cf.Networks["claw-internal"]
+	if !ok {
+		t.Fatal("expected claw-internal network in output")
+	}
+	if !net.Internal {
+		t.Error("expected claw-internal network to be internal: true")
 	}
 }
 
