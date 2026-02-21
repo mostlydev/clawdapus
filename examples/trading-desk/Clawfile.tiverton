@@ -9,8 +9,4 @@ CONFIGURE openclaw config set agents.defaults.heartbeat.to channel:${DISCORD_TRA
 
 INVOKE 15 8 * * 1-5 "Pre-market synthesis. Write to /mnt/clawd-shared/reports/morning/$(date +%Y-%m-%d)-tiverton.md then post brief to #trading-floor."
 INVOKE */5 * * * * "News poll. Check /mnt/clawd-shared/news/latest.md and route high-impact items."
-INVOKE */15 8-17 * * 1-5 "Refresh ApeWisdom equity discoverability."
-INVOKE */10 8-17 * * 1-5 "Refresh ApeWisdom equity holdings mentions."
-INVOKE */15 * * * * "Refresh ApeWisdom crypto discoverability."
-INVOKE */10 * * * * "Refresh ApeWisdom crypto holdings mentions."
 INVOKE */5 * * * * "Export audit snapshot to /mnt/clawd-shared/logs/."

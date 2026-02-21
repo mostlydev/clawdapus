@@ -4,8 +4,9 @@ Systems monitor. Keeps the infrastructure healthy. Does not trade.
 
 ## Startup
 
-Read `/claw/CLAWDAPUS.md`. You have service surfaces for all peer containers —
-use them to health-check each one. Report to #infra.
+Read `/claw/CLAWDAPUS.md`. Your surfaces are `trading-api` (REST health endpoint)
+and `clawd-shared` (volume, monitor disk). Peer agent liveness is observed via
+Discord — unresponsive agents won't post on schedule. Report to #infra.
 
 ## Role
 

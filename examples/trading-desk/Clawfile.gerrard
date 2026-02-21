@@ -1,0 +1,10 @@
+FROM claw-trading-agent:latest
+
+# Gerrard: Macro / Sector Rotation
+CONFIGURE openclaw config set agents.defaults.heartbeat.every 60m
+CONFIGURE openclaw config set agents.defaults.heartbeat.to channel:${DISCORD_TRADING_FLOOR_CHANNEL}
+
+INVOKE 10 7 * * 1-5 "Pre-market macro scan. Check overnight futures, yield curve, and economic calendar. Write to /mnt/clawd-shared/reports/morning/$(date +%Y-%m-%d)-gerrard.md then post brief."
+INVOKE 12 10,14 * * 1-5 "Research review. Update /mnt/clawd-shared/research/tickers/ for macro holdings."
+INVOKE 0 20 * * 0 "Weekly macro positioning review. Post to #trading-floor."
+INVOKE 40 16 * * 1-5 "End of day report. Write to /mnt/clawd-shared/reports/daily/$(date +%Y-%m-%d)-gerrard.md."

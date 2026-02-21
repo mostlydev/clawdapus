@@ -15,9 +15,9 @@ Phase 2 — Compliance (Tiverton, mechanical):
 ## Agent Responsibility
 
 After receiving advisory feedback, the agent decides:
-- "I want to proceed" → compliance check runs, then done
+- "I want to proceed" → compliance check runs, then trading-api executes the order
 - "I'll pass" → PASSED state, no further action needed
 
 Do not re-litigate advisory feedback.  One response, then move on.
-The Leviathan `Next:` line drives the workflow — follow it.
+The `Next:` line in trading-api responses drives the workflow — follow it.
 All trade actions are API calls.  See the trading-api surface skill for endpoints.

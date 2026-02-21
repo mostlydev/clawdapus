@@ -8,7 +8,7 @@ Hard limits enforced by Tiverton at compliance time.
 |--------------------|----------------------------------------|
 | Position size      | ≤ 25% of agent wallet (15% for URGENT) |
 | Open positions     | < 5 concurrent                         |
-| Forbidden tickers  | See forbidden-tickers.md               |
+| Forbidden tickers  | See `forbidden-tickers.md` (operator-maintained) |
 | Cash required      | Wallet must have sufficient funds       |
 
 ## Escalate to Human

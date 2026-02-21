@@ -36,6 +36,20 @@ x-claw:
 #   every claw that declares surface: service://trading-api.
 #   No static trade.md lives in this pod — the API describes itself.
 #
+# Social topology (HANDLE → trading-api):
+#   Every agent declares HANDLE discord with its Discord ID.
+#   Clawdapus broadcasts all handles as env vars into every service in the pod,
+#   including non-claw services like trading-api:
+#
+#     CLAW_HANDLE_TIVERTON_DISCORD_ID=...
+#     CLAW_HANDLE_WESTIN_DISCORD_ID=...
+#     CLAW_HANDLE_TIVERTON_DISCORD_JSON={...}
+#     ... etc.
+#
+#   trading-api uses these to ping the right agent on Discord when human
+#   approval is required (e.g. a position exceeds the wallet limit).
+#   No hardcoding. No service discovery. Just env vars at startup.
+#
 # Required environment variables (.env or Docker secrets):
 #   POSTGRES_PASSWORD, SECRET_KEY_BASE
 #   TIVERTON_BOT_TOKEN, WESTIN_BOT_TOKEN, LOGAN_BOT_TOKEN
