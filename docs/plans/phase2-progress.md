@@ -71,6 +71,28 @@ All 15 tasks done (11 core + 4 hardening). Exit criteria met:
 
 ---
 
+## SKILL Directive
+
+**Plan:** `docs/plans/2026-02-20-skill-directive-plan.md`
+**Started:** 2026-02-20
+
+| # | Task | Status | Commit | Notes |
+|---|------|--------|--------|-------|
+| 1 | SKILL in Clawfile parser | DONE | `39ca009` | Parse + validation |
+| 2 | SKILL label emission | DONE | `49f5a16` | claw.skill.N labels |
+| 3 | SKILL in image inspect | DONE | — | claw.skill.* extraction |
+| 4 | Skills in pod parser | DONE | — | skills: in x-claw |
+| 5 | Driver types | DONE | `689c77e` | ResolvedSkill, SkillDir |
+| 6 | OpenClaw SkillDir + CLAWDAPUS.md | DONE | `38e435a` | /claw/skills, skill index |
+| 7 | Skill resolution helper | DONE | — | Path traversal, dedup |
+| 8 | Wire into compose_up | DONE | `cd2a4eb` | Merge + mount |
+| 9 | Example | DONE | `2e95c6a` | research-methodology.md |
+| 10 | Final verification | DONE | — | All tests pass |
+
+**Completed:** 2026-02-20
+
+---
+
 ## Key Decisions Made During Execution
 
 - CONFIGURE directives now emitted as `claw.configure.N` labels (Task 1)
