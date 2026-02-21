@@ -46,14 +46,13 @@ func TestGenerateClawdapusMD(t *testing.T) {
 	if !strings.Contains(md, "discord") {
 		t.Error("expected discord channel surface")
 	}
-	// Service and channel surfaces reference skills
-	if !strings.Contains(md, "skills/surface-fleet-master.md") {
-		t.Error("expected skill reference for service surface")
+	// Surface skill files are not generated yet — must not be advertised
+	if strings.Contains(md, "skills/surface-fleet-master.md") {
+		t.Error("service surface should not advertise skill file until surface skill generation is implemented")
 	}
-	if !strings.Contains(md, "skills/surface-discord.md") {
-		t.Error("expected skill reference for channel surface")
+	if strings.Contains(md, "skills/surface-discord.md") {
+		t.Error("channel surface should not advertise skill file until surface skill generation is implemented")
 	}
-	// Volume surfaces should NOT reference skills
 	if strings.Contains(md, "skills/surface-research-cache.md") {
 		t.Error("volume surface should not have skill reference")
 	}

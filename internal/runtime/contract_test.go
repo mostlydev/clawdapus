@@ -24,8 +24,12 @@ func TestResolveContractExistingFileReturns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if mount.HostPath != agentFile {
-		t.Errorf("expected host path %q, got %q", agentFile, mount.HostPath)
+	realAgentFile, err := filepath.EvalSymlinks(agentFile)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if mount.HostPath != realAgentFile {
+		t.Errorf("expected host path %q, got %q", realAgentFile, mount.HostPath)
 	}
 	if mount.ContainerPath != "/claw/AGENTS.md" {
 		t.Errorf("expected container path /claw/AGENTS.md, got %q", mount.ContainerPath)

@@ -25,6 +25,10 @@ func ResolveContract(baseDir string, agentFilename string) (*ContractMount, erro
 	if err != nil {
 		return nil, fmt.Errorf("contract enforcement: cannot resolve base dir %q: %w", baseDir, err)
 	}
+	realBase, err := filepath.EvalSymlinks(absBase)
+	if err != nil {
+		return nil, fmt.Errorf("contract enforcement: cannot resolve real base dir %q: %w", baseDir, err)
+	}
 
 	// Prevent path traversal: resolved path must stay within baseDir.
 	hostPath, err := filepath.Abs(filepath.Join(baseDir, agentFilename))
@@ -34,12 +38,26 @@ func ResolveContract(baseDir string, agentFilename string) (*ContractMount, erro
 	if !strings.HasPrefix(hostPath, absBase+string(filepath.Separator)) && hostPath != absBase {
 		return nil, fmt.Errorf("contract enforcement: agent path %q escapes base directory %q", agentFilename, baseDir)
 	}
-	if _, err := os.Stat(hostPath); err != nil {
+
+	info, err := os.Stat(hostPath)
+	if err != nil {
 		return nil, fmt.Errorf("contract enforcement: agent file %q not found: %w (no contract, no start)", hostPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("contract enforcement: agent path %q is not a regular file", agentFilename)
+	}
+
+	// Resolve symlinks and re-check scope against the real base directory.
+	realHostPath, err := filepath.EvalSymlinks(hostPath)
+	if err != nil {
+		return nil, fmt.Errorf("contract enforcement: cannot resolve real path for %q: %w", agentFilename, err)
+	}
+	if !strings.HasPrefix(realHostPath, realBase+string(filepath.Separator)) && realHostPath != realBase {
+		return nil, fmt.Errorf("contract enforcement: agent path %q escapes base directory %q", agentFilename, baseDir)
 	}
 
 	return &ContractMount{
-		HostPath:      hostPath,
+		HostPath:      realHostPath,
 		ContainerPath: filepath.Join("/claw", agentFilename),
 		ReadOnly:      true,
 	}, nil
