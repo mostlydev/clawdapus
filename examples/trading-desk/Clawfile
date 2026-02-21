@@ -1,25 +1,11 @@
-FROM node:24-bookworm-slim
-
-RUN apt-get update && apt-get install -y \
-    bash ca-certificates cron curl git jq tini \
-    python3 python3-pip ruby-full \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN npm install -g openclaw@2026.2.9
+FROM openclaw:latest
 
 CLAW_TYPE openclaw
 
-# AGENT is overridden per-agent image (see Clawfile.tiverton etc.)
-# The base image ships no default agent — subimages must declare one.
-AGENT AGENTS.md
-
-# Model defaults — each agent image may override with MODEL primary
+# Model defaults — each agent may override via MODEL in a subclass Clawfile
 MODEL primary openrouter/moonshotai/kimi-k2.5
 MODEL fallback openrouter/minimax/minimax-m2.5
 MODEL fallback anthropic/claude-sonnet-4-6
-
-# Heartbeat base config — specific schedule and target set per agent image
-CONFIGURE openclaw config set agents.defaults.heartbeat.target discord
 
 # HANDLE declares Discord as the transport layer for all trading agents.
 #
@@ -27,17 +13,10 @@ CONFIGURE openclaw config set agents.defaults.heartbeat.target discord
 # at runtime via env vars (DISCORD_BOT_TOKEN, DISCORD_APP_ID).  Bot tokens
 # are never baked into the image.
 #
-# In the monolithic setup, all agents shared a single bot token and a single
-# openclaw process.  In this pod, each agent is a fully isolated openclaw
-# instance — it owns its own bot account, its own cron daemon, and its own
-# workspace filesystem.  Discord is the coordination layer: agents still
-# mention each other by ID across container boundaries, exactly as before.
-#
-# What changes:
-#   - No shared openclaw config to accidentally corrupt
-#   - Cron schedules live in each agent's Clawfile, not a shared jobs.json
-#   - Workspace memory (positions.md, strategy.md) is container-local
-#   - Policy and research files are on the shared volume (volume://clawd-shared)
+# In a production deployment you would extend this Clawfile per agent to add
+# agent-specific INVOKE schedules (pre-market research, midday review, etc.).
+# For this example all agents share one image — differentiation comes from
+# the agent contract (x-claw.agent) and pod-level handles.
 HANDLE discord
 CONFIGURE openclaw config set channels.discord.accounts [{"token":"${DISCORD_BOT_TOKEN}","applicationId":"${DISCORD_APP_ID}"}]
 CONFIGURE openclaw config set agents.defaults.bindings.discord.accountId ${DISCORD_APP_ID}
@@ -50,7 +29,3 @@ TRACK apt npm
 
 PRIVILEGE worker root
 PRIVILEGE runtime claw-user
-
-COPY entrypoint.sh /claw/entrypoint.sh
-RUN chmod +x /claw/entrypoint.sh
-ENTRYPOINT ["/usr/bin/tini", "--", "/claw/entrypoint.sh"]

@@ -1,8 +1,0 @@
-FROM claw-trading-agent:latest
-
-# Allen: Systems Monitor — reports to #infra, does not trade.
-CONFIGURE openclaw config set agents.defaults.heartbeat.every 30m
-CONFIGURE openclaw config set agents.defaults.heartbeat.to channel:${DISCORD_INFRA_CHANNEL}
-
-INVOKE */30 7-19 * * * "System monitor heartbeat. Check all service containers, API health, disk, error logs. Report to #infra."
-INVOKE */10 * * * * "Consistency check. Alert #infra on anomalies."

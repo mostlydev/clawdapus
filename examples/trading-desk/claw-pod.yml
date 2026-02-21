@@ -87,7 +87,7 @@ services:
   tiverton:
     build:
       context: .
-      dockerfile: Clawfile.tiverton
+      dockerfile: Clawfile
     x-claw:
       agent: ./agents/TIVERTON.md
       handles:
@@ -119,7 +119,7 @@ services:
   westin:
     build:
       context: .
-      dockerfile: Clawfile.westin
+      dockerfile: Clawfile
     x-claw:
       agent: ./agents/WESTIN.md
       handles:
@@ -148,7 +148,7 @@ services:
   logan:
     build:
       context: .
-      dockerfile: Clawfile.logan
+      dockerfile: Clawfile
     x-claw:
       agent: ./agents/LOGAN.md
       handles:
@@ -177,7 +177,7 @@ services:
   gerrard:
     build:
       context: .
-      dockerfile: Clawfile.gerrard
+      dockerfile: Clawfile
     x-claw:
       agent: ./agents/GERRARD.md
       handles:
@@ -206,7 +206,7 @@ services:
   dundas:
     build:
       context: .
-      dockerfile: Clawfile.dundas
+      dockerfile: Clawfile
     x-claw:
       agent: ./agents/DUNDAS.md
       handles:
@@ -237,7 +237,7 @@ services:
   boulton:
     build:
       context: .
-      dockerfile: Clawfile.boulton
+      dockerfile: Clawfile
     x-claw:
       agent: ./agents/BOULTON.md
       handles:
@@ -267,7 +267,7 @@ services:
   allen:
     build:
       context: .
-      dockerfile: Clawfile.allen
+      dockerfile: Clawfile
     x-claw:
       agent: ./agents/ALLEN.md
       handles:
