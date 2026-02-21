@@ -31,11 +31,10 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 	}
 
-	// Always add bootstrap-extra-files hook for CLAWDAPUS.md injection
-	if err := setPath(config, "hooks.bootstrap-extra-files.enabled", true); err != nil {
-		return nil, fmt.Errorf("config generation: %w", err)
-	}
-	if err := setPath(config, "hooks.bootstrap-extra-files.paths", []string{"CLAWDAPUS.md"}); err != nil {
+	// Always enable bootstrap-extra-files hook and ensure CLAWDAPUS.md is in paths.
+	// Force enabled=true (CLAWDAPUS.md injection is required for clawdapus to function).
+	// Merge paths: preserve any user-added paths from CONFIGURE directives.
+	if err := ensureBootstrapHook(config); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
 
@@ -63,6 +62,82 @@ func parseConfigSetCommand(cmd string) (string, interface{}, error) {
 	}
 
 	return path, value, nil
+}
+
+// ensureBootstrapHook forces the bootstrap-extra-files hook to be enabled and
+// ensures "CLAWDAPUS.md" is in its paths list, merging with any user-configured paths.
+func ensureBootstrapHook(config map[string]interface{}) error {
+	// Navigate to hooks.bootstrap-extra-files, creating intermediate maps as needed.
+	hookPath := "hooks.bootstrap-extra-files"
+	hookObj, err := getOrCreatePath(config, hookPath)
+	if err != nil {
+		return err
+	}
+
+	// Force enabled=true — CLAWDAPUS.md injection is non-negotiable.
+	hookObj["enabled"] = true
+
+	// Merge "CLAWDAPUS.md" into existing paths (dedupe).
+	const required = "CLAWDAPUS.md"
+	existing := extractStringSlice(hookObj["paths"])
+	found := false
+	for _, p := range existing {
+		if p == required {
+			found = true
+			break
+		}
+	}
+	if !found {
+		existing = append(existing, required)
+	}
+	hookObj["paths"] = existing
+
+	return nil
+}
+
+// getOrCreatePath navigates a dotted path in config, creating intermediate maps,
+// and returns the final map node.
+func getOrCreatePath(obj map[string]interface{}, path string) (map[string]interface{}, error) {
+	parts := strings.Split(path, ".")
+	current := obj
+	for _, part := range parts {
+		nextRaw, exists := current[part]
+		if !exists {
+			next := make(map[string]interface{})
+			current[part] = next
+			current = next
+			continue
+		}
+		next, ok := nextRaw.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("path conflict at %q: expected object, found %T", part, nextRaw)
+		}
+		current = next
+	}
+	return current, nil
+}
+
+// extractStringSlice converts an interface{} (expected to be []interface{} of strings
+// from prior JSON/setPath operations) into a []string. Returns nil for non-slice values.
+func extractStringSlice(v interface{}) []string {
+	if v == nil {
+		return nil
+	}
+	// Direct []string (from our own setPath calls)
+	if ss, ok := v.([]string); ok {
+		return ss
+	}
+	// []interface{} (from JSON unmarshal or mixed operations)
+	if arr, ok := v.([]interface{}); ok {
+		out := make([]string, 0, len(arr))
+		for _, item := range arr {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // setPath sets a nested value in a map using a dotted path.
