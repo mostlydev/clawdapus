@@ -88,6 +88,18 @@ func runComposeUp(podFile string) error {
 			agentHostPath = contract.HostPath
 		}
 
+		// Parse pod-level surfaces into ResolvedSurface structs
+		var surfaces []driver.ResolvedSurface
+		if svc.Claw != nil {
+			for _, raw := range svc.Claw.Surfaces {
+				s, err := pod.ParseSurface(raw)
+				if err != nil {
+					return fmt.Errorf("service %q: %w", name, err)
+				}
+				surfaces = append(surfaces, s)
+			}
+		}
+
 		rc := &driver.ResolvedClaw{
 			ServiceName:   name,
 			ImageRef:      svc.Image,
@@ -99,6 +111,7 @@ func runComposeUp(podFile string) error {
 			Privileges:    info.Privileges,
 			Count:         svc.Claw.Count,
 			Environment:   svc.Environment,
+			Surfaces:      surfaces,
 		}
 
 		d, err := driver.Lookup(rc.ClawType)
