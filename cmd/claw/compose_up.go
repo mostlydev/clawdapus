@@ -10,13 +10,18 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
-	_ "github.com/mostlydev/clawdapus/internal/driver/openclaw" // register driver
+	_ "github.com/mostlydev/clawdapus/internal/driver/openclaw"
 	"github.com/mostlydev/clawdapus/internal/inspect"
 	"github.com/mostlydev/clawdapus/internal/pod"
 	"github.com/mostlydev/clawdapus/internal/runtime"
 )
 
 var composeUpDetach bool
+
+var (
+	extractServiceSkillFromImage = runtime.ExtractServiceSkill
+	writeRuntimeFile             = os.WriteFile
+)
 
 var composeUpCmd = &cobra.Command{
 	Use:   "up [pod-file]",
@@ -117,10 +122,24 @@ func runComposeUp(podFile string) error {
 			}
 		}
 
+		svcRuntimeDir := filepath.Join(runtimeDir, name)
+		if err := os.MkdirAll(svcRuntimeDir, 0700); err != nil {
+			return fmt.Errorf("service %q: create service runtime dir: %w", name, err)
+		}
+
 		// Merge skills: image-level (from labels) + pod-level (from x-claw)
 		imageSkills, err := runtime.ResolveSkills(podDir, info.Skills)
 		if err != nil {
 			return fmt.Errorf("service %q: %w", name, err)
+		}
+		if info.SkillEmit != "" {
+			emitSkill, err := resolveSkillEmit(name, svcRuntimeDir, svc.Image, info.SkillEmit)
+			if err != nil {
+				return fmt.Errorf("service %q: resolve emitted skill: %w", name, err)
+			}
+			if emitSkill != nil {
+				imageSkills = append(imageSkills, *emitSkill)
+			}
 		}
 		podSkills := make([]driver.ResolvedSkill, 0)
 		if svc.Claw != nil {
@@ -153,11 +172,6 @@ func runComposeUp(podFile string) error {
 
 		if err := d.Validate(rc); err != nil {
 			return fmt.Errorf("service %q: validation failed: %w", name, err)
-		}
-
-		svcRuntimeDir := filepath.Join(runtimeDir, name)
-		if err := os.MkdirAll(svcRuntimeDir, 0700); err != nil {
-			return fmt.Errorf("create service runtime dir: %w", err)
 		}
 
 		result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: svcRuntimeDir, PodName: p.Name})
@@ -253,6 +267,35 @@ func mergeResolvedSkills(imageSkills, podSkills []driver.ResolvedSkill) []driver
 	}
 
 	return merged
+}
+
+func resolveSkillEmit(serviceName, runtimeDir, imageRef, emitPath string) (*driver.ResolvedSkill, error) {
+	if emitPath == "" {
+		return nil, nil
+	}
+
+	name := filepath.Base(emitPath)
+	if name == "." || name == "/" || strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("service %q: emitted skill path %q has invalid filename", serviceName, emitPath)
+	}
+
+	emitHostPath := filepath.Join(runtimeDir, "skills", name)
+	if err := os.MkdirAll(filepath.Dir(emitHostPath), 0700); err != nil {
+		return nil, fmt.Errorf("service %q: create emitted-skill dir: %w", serviceName, err)
+	}
+
+	content, err := extractServiceSkillFromImage(imageRef, emitPath)
+	if err != nil {
+		return nil, fmt.Errorf("extract %q from %q: %w", emitPath, imageRef, err)
+	}
+	if err := writeRuntimeFile(emitHostPath, content, 0644); err != nil {
+		return nil, fmt.Errorf("write emitted skill %q: %w", emitPath, err)
+	}
+
+	return &driver.ResolvedSkill{
+		Name:     name,
+		HostPath: emitHostPath,
+	}, nil
 }
 
 func resolveContainerIDs(composePath, serviceName string) ([]string, error) {
