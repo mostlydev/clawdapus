@@ -1,0 +1,17 @@
+x-claw:
+  pod: research-pod
+
+services:
+  researcher:
+    image: claw-openclaw-example
+    x-claw:
+      agent: ./agents/RESEARCHER.md
+      surfaces:
+        - "volume://research-cache read-write"
+
+  analyst:
+    image: claw-openclaw-example
+    x-claw:
+      agent: ./agents/ANALYST.md
+      surfaces:
+        - "volume://research-cache read-only"
