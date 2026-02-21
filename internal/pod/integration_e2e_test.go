@@ -18,9 +18,39 @@ import (
 	_ "github.com/mostlydev/clawdapus/internal/driver/openclaw"
 	"github.com/mostlydev/clawdapus/internal/inspect"
 	"github.com/mostlydev/clawdapus/internal/runtime"
+	"gopkg.in/yaml.v3"
 )
 
 const stubImage = "claw-integration-test"
+
+const phase3MultiClawPodYAML = `x-claw:
+  pod: research-pod
+
+services:
+  researcher:
+    image: claw-integration-test
+    x-claw:
+      agent: ./agents/RESEARCHER.md
+      surfaces:
+        - "volume://research-cache read-write"
+
+  analyst:
+    image: claw-integration-test
+    x-claw:
+      agent: ./agents/ANALYST.md
+      surfaces:
+        - "volume://research-cache read-only"
+`
+
+const phase3ResearcherAgent = `# Researcher Agent Contract
+
+You are a researcher agent. Your job is to gather and organize information.
+`
+
+const phase3AnalystAgent = `# Analyst Agent Contract
+
+You are an analyst agent. Your job is to read research data and produce insights.
+`
 
 func requireDocker(t *testing.T) {
 	t.Helper()
@@ -65,6 +95,135 @@ func copyFixture(t *testing.T, workDir string) {
 			t.Fatalf("write fixture %s: %v", name, err)
 		}
 	}
+}
+
+func writePhase3MultiClawFixture(t *testing.T, workDir string) {
+	t.Helper()
+
+	files := map[string]string{
+		"claw-pod.yml":         phase3MultiClawPodYAML,
+		"agents/RESEARCHER.md": phase3ResearcherAgent,
+		"agents/ANALYST.md":    phase3AnalystAgent,
+	}
+
+	if err := os.MkdirAll(filepath.Join(workDir, "agents"), 0755); err != nil {
+		t.Fatalf("create agents dir: %v", err)
+	}
+
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(workDir, name), []byte(body), 0644); err != nil {
+			t.Fatalf("write fixture %s: %v", name, err)
+		}
+	}
+}
+
+func parsePhase3Materialization(t *testing.T, podFile string) (map[string]*driver.MaterializeResult, *Pod, []byte, func()) {
+	t.Helper()
+
+	podDir := filepath.Dir(podFile)
+
+	f, err := os.Open(podFile)
+	if err != nil {
+		t.Fatalf("open pod file: %v", err)
+	}
+	pod, err := Parse(f)
+	f.Close()
+	if err != nil {
+		t.Fatalf("parse pod file: %v", err)
+	}
+
+	info, err := inspect.Inspect(stubImage)
+	if err != nil {
+		t.Fatalf("inspect image: %v", err)
+	}
+
+	d, err := driver.Lookup(info.ClawType)
+	if err != nil {
+		t.Fatalf("lookup driver: %v", err)
+	}
+
+	results := make(map[string]*driver.MaterializeResult, len(pod.Services))
+
+	for name, svc := range pod.Services {
+		if svc.Claw == nil {
+			t.Fatalf("expected claw-managed service %q in phase 3 fixture", name)
+		}
+
+		contract, err := runtime.ResolveContract(podDir, svc.Claw.Agent)
+		if err != nil {
+			t.Fatalf("resolve contract for %s: %v", name, err)
+		}
+
+		var surfaces []driver.ResolvedSurface
+		for _, raw := range svc.Claw.Surfaces {
+			s, err := ParseSurface(raw)
+			if err != nil {
+				t.Fatalf("parse surface %q for %q: %v", raw, name, err)
+			}
+			surfaces = append(surfaces, s)
+		}
+
+		rc := &driver.ResolvedClaw{
+			ServiceName:   name,
+			ImageRef:      svc.Image,
+			ClawType:      info.ClawType,
+			Agent:         filepath.Base(svc.Claw.Agent),
+			AgentHostPath: contract.HostPath,
+			Models:        info.Models,
+			Configures:    info.Configures,
+			Privileges:    info.Privileges,
+			Count:         svc.Claw.Count,
+			Environment:   svc.Environment,
+			Surfaces:      surfaces,
+		}
+
+		if err := d.Validate(rc); err != nil {
+			t.Fatalf("validate %s: %v", name, err)
+		}
+
+		svcRuntimeDir := filepath.Join(podDir, ".claw-runtime", name)
+		if err := os.MkdirAll(svcRuntimeDir, 0700); err != nil {
+			t.Fatalf("create runtime dir %s: %v", name, err)
+		}
+
+		result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: svcRuntimeDir, PodName: pod.Name})
+		if err != nil {
+			t.Fatalf("materialize %s: %v", name, err)
+		}
+		results[name] = result
+
+		clawdapusPath := filepath.Join(svcRuntimeDir, "CLAWDAPUS.md")
+		clawdapus, err := os.ReadFile(clawdapusPath)
+		if err != nil {
+			t.Fatalf("read CLAWDAPUS for %s: %v", name, err)
+		}
+		if !strings.Contains(string(clawdapus), "# CLAWDAPUS.md") {
+			t.Fatalf("missing CLAWDAPUS header for %s", name)
+		}
+		if !strings.Contains(string(clawdapus), "- **Pod:** research-pod") {
+			t.Fatalf("missing pod identity for %s", name)
+		}
+		if !strings.Contains(string(clawdapus), "- **Service:** "+name) {
+			t.Fatalf("missing service identity for %s", name)
+		}
+		if !strings.Contains(string(clawdapus), "research-cache") {
+			t.Fatalf("missing research-cache surface for %s", name)
+		}
+		if strings.Contains(string(clawdapus), "## Skills") {
+			// no-op, confirm generated format exists
+		}
+	}
+
+	compose, err := EmitCompose(pod, results)
+	if err != nil {
+		t.Fatalf("emit compose: %v", err)
+	}
+
+	cleanup := func() {
+		_ = os.RemoveAll(filepath.Join(podDir, ".claw-runtime"))
+	}
+
+	return results, pod, []byte(compose), cleanup
 }
 
 func TestE2EBuildAndInspect(t *testing.T) {
@@ -399,6 +558,211 @@ func TestE2EHealthProbe(t *testing.T) {
 	if !strings.Contains(h.Detail, "healthy") {
 		t.Errorf("expected Detail to contain 'healthy', got %q", h.Detail)
 	}
+}
+
+func TestE2EPhase3MultiClawContextAndHooks(t *testing.T) {
+	requireDocker(t)
+	buildStubImage(t)
+
+	workDir := t.TempDir()
+	writePhase3MultiClawFixture(t, workDir)
+	podFile := filepath.Join(workDir, "claw-pod.yml")
+
+	results, p, composeData, cleanup := parsePhase3Materialization(t, podFile)
+	defer cleanup()
+
+	var cf struct {
+		Services map[string]struct {
+			Volumes  []string `yaml:"volumes"`
+			Networks []string `yaml:"networks"`
+		} `yaml:"services"`
+		Volumes  map[string]interface{} `yaml:"volumes"`
+		Networks map[string]struct {
+			Internal bool `yaml:"internal"`
+		} `yaml:"networks"`
+	}
+	if err := yaml.Unmarshal(composeData, &cf); err != nil {
+		t.Fatalf("parse compose output: %v", err)
+	}
+
+	if _, ok := cf.Volumes["research-cache"]; !ok {
+		t.Fatal("expected top-level research-cache volume declaration")
+	}
+
+	researcher, ok := cf.Services["researcher"]
+	if !ok {
+		t.Fatal("expected researcher service in compose output")
+	}
+	foundResearcherRW := false
+	for _, v := range researcher.Volumes {
+		if v == "research-cache:/mnt/research-cache:rw" {
+			foundResearcherRW = true
+		}
+	}
+	if !foundResearcherRW {
+		t.Fatalf("expected researcher rw volume mount, got %v", researcher.Volumes)
+	}
+
+	analyst, ok := cf.Services["analyst"]
+	if !ok {
+		t.Fatal("expected analyst service in compose output")
+	}
+	foundAnalystRO := false
+	for _, v := range analyst.Volumes {
+		if v == "research-cache:/mnt/research-cache:ro" {
+			foundAnalystRO = true
+		}
+	}
+	if !foundAnalystRO {
+		t.Fatalf("expected analyst ro volume mount, got %v", analyst.Volumes)
+	}
+
+	for _, name := range []string{"researcher", "analyst"} {
+		service, ok := cf.Services[name]
+		if !ok || len(service.Networks) == 0 || service.Networks[0] != "claw-internal" {
+			t.Fatalf("expected %s on claw-internal network, got %v", name, service.Networks)
+		}
+	}
+	if net, ok := cf.Networks["claw-internal"]; !ok || !net.Internal {
+		t.Fatal("expected claw-internal network internal=true")
+	}
+
+	if _, ok := results["researcher"]; !ok {
+		t.Fatal("expected materialize result for researcher")
+	}
+	if _, ok := results["analyst"]; !ok {
+		t.Fatal("expected materialize result for analyst")
+	}
+
+	for _, svc := range []string{"researcher", "analyst"} {
+		cfgPath := filepath.Join(workDir, ".claw-runtime", svc, "openclaw.json")
+		cfgData, err := os.ReadFile(cfgPath)
+		if err != nil {
+			t.Fatalf("read openclaw config for %s: %v", svc, err)
+		}
+		var cfg map[string]interface{}
+		if err := json.Unmarshal(cfgData, &cfg); err != nil {
+			t.Fatalf("unmarshal openclaw config for %s: %v", svc, err)
+		}
+		hooks, ok := cfg["hooks"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected hooks for %s", svc)
+		}
+		bef, ok := hooks["bootstrap-extra-files"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected bootstrap-extra-files for %s", svc)
+		}
+		paths, ok := bef["paths"].([]interface{})
+		if !ok || len(paths) == 0 {
+			t.Fatalf("expected bootstrap-extra-files.paths for %s", svc)
+		}
+		if paths[0] != "CLAWDAPUS.md" {
+			t.Fatalf("expected CLAWDAPUS.md in bootstrap paths for %s, got %v", svc, paths)
+		}
+	}
+
+	mdPath := filepath.Join(workDir, ".claw-runtime", "researcher", "CLAWDAPUS.md")
+	md := mustReadFile(t, mdPath)
+	if !strings.Contains(string(md), "read-write") {
+		t.Fatal("expected researcher CLAWDAPUS.md to include read-write access")
+	}
+	md = mustReadFile(t, filepath.Join(workDir, ".claw-runtime", "analyst", "CLAWDAPUS.md"))
+	if !strings.Contains(string(md), "read-only") {
+		t.Fatal("expected analyst CLAWDAPUS.md to include read-only access")
+	}
+
+	if !strings.Contains(p.Name, "research-pod") {
+		t.Fatalf("expected parsed pod name research-pod, got %q", p.Name)
+	}
+}
+
+func TestE2EPhase3MultiClawComposeLifecycle(t *testing.T) {
+	requireDocker(t)
+	buildStubImage(t)
+
+	workDir := t.TempDir()
+	writePhase3MultiClawFixture(t, workDir)
+	podFile := filepath.Join(workDir, "claw-pod.yml")
+	_, p, composeData, cleanup := parsePhase3Materialization(t, podFile)
+	defer cleanup()
+
+	composePath := filepath.Join(workDir, "compose.generated.yml")
+	if err := os.WriteFile(composePath, composeData, 0644); err != nil {
+		t.Fatalf("write compose file: %v", err)
+	}
+
+	// Fail-closed defaults apply to both Claw services.
+	out := string(composeData)
+	if !strings.Contains(out, "restart: on-failure") {
+		t.Fatal("expected on-failure restart policy for all claw services")
+	}
+	if !strings.Contains(out, "read_only: true") {
+		t.Fatal("expected read_only: true for all claw services")
+	}
+
+	upCmd := exec.Command("docker", "compose", "-f", composePath, "up", "-d")
+	upCmd.Stdout = os.Stderr
+	upCmd.Stderr = os.Stderr
+	if err := upCmd.Run(); err != nil {
+		t.Fatalf("docker compose up: %v", err)
+	}
+
+	t.Cleanup(func() {
+		downCmd := exec.Command("docker", "compose", "-f", composePath, "down", "--timeout", "5")
+		downCmd.Stdout = os.Stderr
+		downCmd.Stderr = os.Stderr
+		downCmd.Run()
+	})
+
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Fatalf("docker client: %v", err)
+	}
+	defer cli.Close()
+
+	for _, svc := range []string{"researcher", "analyst"} {
+		containerID := resolveContainerIDForTest(t, composePath, svc)
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			cinfo, err := cli.ContainerInspect(context.Background(), containerID)
+			if err == nil && cinfo.State != nil && cinfo.State.Running {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("container %s did not become running", containerID)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		clawdapus, err := os.ReadFile(filepath.Join(workDir, ".claw-runtime", svc, "CLAWDAPUS.md"))
+		if err != nil {
+			t.Fatalf("read clawdapus for %s: %v", svc, err)
+		}
+		if !strings.Contains(string(clawdapus), "- **Service:** "+svc) {
+			t.Fatalf("CLAWDAPUS.md missing service %s identity", svc)
+		}
+		if !strings.Contains(string(clawdapus), "- **Pod:** research-pod") {
+			t.Fatalf("CLAWDAPUS.md missing pod identity for %s", svc)
+		}
+		if svc == "researcher" && !strings.Contains(string(clawdapus), "read-write") {
+			t.Fatalf("expected researcher read-write surface in CLAWDAPUS.md")
+		}
+		if svc == "analyst" && !strings.Contains(string(clawdapus), "read-only") {
+			t.Fatalf("expected analyst read-only surface in CLAWDAPUS.md")
+		}
+	}
+	if p == nil || p.Name != "research-pod" {
+		t.Fatalf("expected parsed pod name research-pod, got %+v", p)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file %s: %v", path, err)
+	}
+	return data
 }
 
 func resolveContainerIDForTest(t *testing.T, composePath, service string) string {
