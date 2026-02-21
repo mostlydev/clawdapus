@@ -21,6 +21,10 @@
 | 10 | Health probe (stderr separation) | DONE | `fe18c80` | Scans for first `{` in stdout, ignores stderr noise |
 | 11 | Example claw-pod.yml + integration smoke | DONE | `72102a1` | Example pod + integration test behind build tag |
 | 12 | E2E Docker integration | DONE | — | Stub fixture, PostApply wiring, Docker SDK verify, 3 e2e tests |
+| 13 | HealthProbe wired (docker exec) | DONE | — | Real `openclaw health --json` exec inside container, ParseHealthJSON reuse |
+| 14 | `claw compose health` CLI | DONE | — | Iterates containers, inspects claw.type label, calls driver HealthProbe |
+| 15 | Pod-internal network isolation | DONE | — | `claw-internal` network with `internal: true`, claw services only |
+| 16 | E2E HealthProbe + network tests | DONE | — | TestE2EHealthProbe, network assertions in lifecycle test |
 
 ## How to Resume
 
@@ -32,15 +36,18 @@ If context is lost, read these files in order:
 
 Then pick up at the first PENDING task and dispatch a subagent per the plan.
 
-## Phase 2 Complete
+## Phase 2 Hardening Complete
 
-All 11 tasks done. Exit criteria met:
+All 15 tasks done (11 core + 4 hardening). Exit criteria met:
 - `go test ./...` — all packages pass
 - `go build -o bin/claw ./cmd/claw` — binary compiles
 - `read_only: true` + `tmpfs` + bounded restart in all generated compose output
 - Fail-closed: missing agent file → hard error, nil driver result → safe defaults
 - Path traversal guard on contract resolution
 - Deterministic compose output (sorted service names, stable ordinals)
+- HealthProbe wired: real docker exec of `openclaw health --json` with ParseHealthJSON
+- `claw compose health` CLI: table output of service health via driver probes
+- Network isolation: `claw-internal` network with `internal: true` for all claw services
 
 **Completed:** 2026-02-20
 

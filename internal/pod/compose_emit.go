@@ -26,6 +26,7 @@ type composeService struct {
 	Restart     string              `yaml:"restart,omitempty"`
 	Healthcheck *composeHealthcheck `yaml:"healthcheck,omitempty"`
 	Labels      map[string]string   `yaml:"labels,omitempty"`
+	Networks    []string            `yaml:"networks,omitempty"`
 }
 
 type composeHealthcheck struct {
@@ -43,6 +44,9 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 		Volumes:  make(map[string]interface{}),
 	}
 
+	// Track whether any claw service exists to conditionally add network
+	hasClaw := false
+
 	// Sort service names for deterministic output
 	serviceNames := sortedServiceNames(p.Services)
 
@@ -55,6 +59,11 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 				ReadOnly: true,
 				Restart:  "on-failure",
 			}
+		}
+
+		isClaw := svc.Claw != nil
+		if isClaw {
+			hasClaw = true
 		}
 
 		count := 1
@@ -108,6 +117,10 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 				cs.Labels["claw.ordinal"] = fmt.Sprintf("%d", ordinal)
 			}
 
+			if isClaw {
+				cs.Networks = []string{"claw-internal"}
+			}
+
 			// Tmpfs
 			if len(result.Tmpfs) > 0 {
 				cs.Tmpfs = make([]string, len(result.Tmpfs))
@@ -157,6 +170,15 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 	// Remove empty volumes map
 	if len(cf.Volumes) == 0 {
 		cf.Volumes = nil
+	}
+
+	// Add claw-internal network if any claw services exist
+	if hasClaw {
+		cf.Networks = map[string]interface{}{
+			"claw-internal": map[string]interface{}{
+				"internal": true,
+			},
+		}
 	}
 
 	data, err := yaml.Marshal(cf)

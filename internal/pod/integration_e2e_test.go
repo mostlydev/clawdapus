@@ -166,6 +166,12 @@ func TestE2EComposeLifecycle(t *testing.T) {
 	if !strings.Contains(output, "claw.pod: integration-test") {
 		t.Error("compose output missing claw.pod label")
 	}
+	if !strings.Contains(output, "claw-internal") {
+		t.Error("compose output missing claw-internal network")
+	}
+	if !strings.Contains(output, "internal: true") {
+		t.Error("compose output missing internal: true for claw-internal network")
+	}
 
 	// Docker compose up -d
 	upCmd := exec.Command("docker", "compose", "-f", composePath, "up", "-d")
@@ -299,6 +305,99 @@ func TestE2EPostApplyVerifiesRunning(t *testing.T) {
 	// PostApply should fail on stopped container
 	if err := d.PostApply(rc, driver.PostApplyOpts{ContainerID: containerID}); err == nil {
 		t.Fatal("PostApply on stopped container should fail")
+	}
+}
+
+func TestE2EHealthProbe(t *testing.T) {
+	requireDocker(t)
+	buildStubImage(t)
+
+	workDir := t.TempDir()
+	copyFixture(t, workDir)
+
+	// Minimal setup: parse, inspect, materialize, emit, up
+	podFile := filepath.Join(workDir, "claw-pod.yml")
+	f, _ := os.Open(podFile)
+	p, _ := Parse(f)
+	f.Close()
+
+	info, _ := inspect.Inspect(stubImage)
+	contract, _ := runtime.ResolveContract(workDir, info.Agent)
+	d, _ := driver.Lookup(info.ClawType)
+
+	rc := &driver.ResolvedClaw{
+		ServiceName:   "gateway",
+		ImageRef:      stubImage,
+		ClawType:      info.ClawType,
+		Agent:         info.Agent,
+		AgentHostPath: contract.HostPath,
+		Models:        info.Models,
+		Configures:    info.Configures,
+		Privileges:    info.Privileges,
+		Count:         1,
+	}
+
+	runtimeDir := filepath.Join(workDir, ".claw-runtime", "gateway")
+	os.MkdirAll(runtimeDir, 0755)
+	result, _ := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir})
+
+	results := map[string]*driver.MaterializeResult{"gateway": result}
+	output, _ := EmitCompose(p, results)
+	composePath := filepath.Join(workDir, "compose.generated.yml")
+	os.WriteFile(composePath, []byte(output), 0644)
+
+	// Verify network isolation in compose output
+	if !strings.Contains(output, "claw-internal") {
+		t.Error("compose output missing claw-internal network")
+	}
+	if !strings.Contains(output, "internal: true") {
+		t.Error("compose output missing internal: true for claw-internal network")
+	}
+
+	upCmd := exec.Command("docker", "compose", "-f", composePath, "up", "-d")
+	upCmd.Stdout = os.Stderr
+	upCmd.Stderr = os.Stderr
+	if err := upCmd.Run(); err != nil {
+		t.Fatalf("docker compose up: %v", err)
+	}
+
+	t.Cleanup(func() {
+		downCmd := exec.Command("docker", "compose", "-f", composePath, "down", "--timeout", "5")
+		downCmd.Stdout = os.Stderr
+		downCmd.Stderr = os.Stderr
+		downCmd.Run()
+	})
+
+	containerID := resolveContainerIDForTest(t, composePath, "gateway")
+
+	// Wait for running
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		cli, _ := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+		cinfo, err := cli.ContainerInspect(context.Background(), containerID)
+		cli.Close()
+		if err == nil && cinfo.State.Running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("container did not start within 15s")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// HealthProbe should succeed on running container
+	h, err := d.HealthProbe(driver.ContainerRef{
+		ContainerID: containerID,
+		ServiceName: "gateway",
+	})
+	if err != nil {
+		t.Fatalf("HealthProbe returned error: %v", err)
+	}
+	if !h.OK {
+		t.Errorf("expected HealthProbe OK=true, got false (detail: %s)", h.Detail)
+	}
+	if !strings.Contains(h.Detail, "healthy") {
+		t.Errorf("expected Detail to contain 'healthy', got %q", h.Detail)
 	}
 }
 

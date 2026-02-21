@@ -77,6 +77,24 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Error("expected at least one tmpfs mount")
 	}
 
+	// Verify all required writable paths are declared as tmpfs
+	requiredTmpfs := map[string]bool{
+		"/tmp":              false,
+		"/run":              false,
+		"/app/data":         false,
+		"/root/.openclaw":   false,
+	}
+	for _, p := range result.Tmpfs {
+		if _, ok := requiredTmpfs[p]; ok {
+			requiredTmpfs[p] = true
+		}
+	}
+	for p, found := range requiredTmpfs {
+		if !found {
+			t.Errorf("missing required tmpfs mount %q — container will fail with read_only: true", p)
+		}
+	}
+
 	if result.Restart != "on-failure" {
 		t.Errorf("expected restart=on-failure, got %q", result.Restart)
 	}
