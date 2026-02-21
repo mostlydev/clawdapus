@@ -102,3 +102,48 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Errorf("expected restart=on-failure, got %q", result.Restart)
 	}
 }
+
+func TestMaterializeJobsDirMountedNotFile(t *testing.T) {
+	dir := t.TempDir()
+	agentFile := filepath.Join(dir, "AGENTS.md")
+	os.WriteFile(agentFile, []byte("# Contract"), 0644)
+
+	d := &Driver{}
+	rc := &driver.ResolvedClaw{
+		ClawType:      "openclaw",
+		Agent:         "AGENTS.md",
+		AgentHostPath: agentFile,
+		Models:        make(map[string]string),
+		Configures:    make([]string, 0),
+		ServiceName:   "testsvc",
+		Invocations: []driver.Invocation{
+			{Schedule: "15 8 * * 1-5", Message: "Morning synthesis"},
+		},
+	}
+	result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: dir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// jobs.json must exist in the state/cron/ directory on the host
+	jobsPath := filepath.Join(dir, "state", "cron", "jobs.json")
+	if _, err := os.Stat(jobsPath); err != nil {
+		t.Fatalf("jobs.json not written at state/cron/jobs.json: %v", err)
+	}
+
+	// The mount target must be the cron/ DIRECTORY, not the jobs.json file.
+	// Mounting the file causes EBUSY when openclaw does atomic rename next to it.
+	var jobsMount *driver.Mount
+	for i := range result.Mounts {
+		if result.Mounts[i].ContainerPath == "/app/state/cron" {
+			jobsMount = &result.Mounts[i]
+			break
+		}
+	}
+	if jobsMount == nil {
+		t.Fatal("expected a mount at /app/state/cron (directory), not /app/state/cron/jobs.json")
+	}
+	if jobsMount.ReadOnly {
+		t.Error("jobs cron dir must be read-write so openclaw can update job state")
+	}
+}

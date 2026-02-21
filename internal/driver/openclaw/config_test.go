@@ -181,6 +181,41 @@ func TestGenerateConfigRejectsUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigDiscordPreEnablesPlugin(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {ID: "123456789"},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	plugins, ok := config["plugins"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected plugins key in config")
+	}
+	entries, ok := plugins["entries"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected plugins.entries in config")
+	}
+	discord, ok := entries["discord"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected plugins.entries.discord in config")
+	}
+	if discord["enabled"] != true {
+		t.Errorf("expected plugins.entries.discord.enabled=true, got %v", discord["enabled"])
+	}
+}
+
 func TestGenerateConfigHandleEnablesDiscord(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:     make(map[string]string),

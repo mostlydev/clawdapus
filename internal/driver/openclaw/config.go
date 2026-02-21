@@ -66,6 +66,11 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 					return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 				}
 			}
+			// Pre-enable the discord plugin so the gateway's auto-doctor finds nothing to add.
+			// Without this, gateway startup overwrites our config (changedPaths=1) to add this entry.
+			if err := setPath(config, "plugins.entries.discord.enabled", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
+			}
 		case "slack", "telegram":
 			if err := setPath(config, "channels."+platform+".enabled", true); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE %s: %w", platform, err)

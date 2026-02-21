@@ -195,7 +195,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 2 — Driver framework + pod runtime + OpenClaw + volume surfaces | Done |
 | Phase 3 — Surface manifests, service skills, CLAWDAPUS.md | Done |
 | Phase 3.5 — HANDLE directive + social topology projection | Done |
-| Phase 3 — Channel surface bindings | In progress |
+| Phase 3.6 — Channel surface bindings | In progress |
 | Phase 4 — cllama sidecar + policy pipeline | Planned |
 | Phase 5 — Drift scoring + fleet governance | Planned |
 | Phase 6 — Recipe promotion + worker mode | Planned |

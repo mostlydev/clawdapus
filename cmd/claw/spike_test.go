@@ -189,7 +189,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	// ── Verify compose.generated.yml ────────────────────────────────────────
 
 	composeSrc := spikeReadFile(t, generatedPath)
-	for _, want := range []string{"jobs.json", "/app/state/cron/jobs.json", "/app/config"} {
+	for _, want := range []string{"/app/state/cron", "/app/config"} {
 		if !strings.Contains(composeSrc, want) {
 			t.Errorf("compose.generated.yml: expected to contain %q", want)
 		}

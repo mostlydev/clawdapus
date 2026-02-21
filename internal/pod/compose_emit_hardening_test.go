@@ -120,10 +120,11 @@ func TestEmitComposeClawInternalNetwork(t *testing.T) {
 	if !strings.Contains(out, "claw-internal") {
 		t.Fatal("expected claw-internal network in output")
 	}
-	if !strings.Contains(out, "internal: true") {
-		t.Fatal("expected internal: true for claw-internal network")
+	// claw-internal is intentionally NOT internal: true — agents need internet access for LLMs, Discord, etc.
+	if strings.Contains(out, "internal: true") {
+		t.Fatal("claw-internal must not set internal: true — agents need internet access")
 	}
-	// Service should be on the internal network
+	// Service should be on the claw-internal network
 	if !strings.Contains(out, "networks:") {
 		t.Fatal("expected networks section in output")
 	}

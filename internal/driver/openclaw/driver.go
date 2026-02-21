@@ -84,9 +84,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			return nil, fmt.Errorf("openclaw driver: write jobs.json: %w", err)
 		}
 		mounts = append(mounts, driver.Mount{
-			HostPath:      jobsPath,
-			ContainerPath: "/app/state/cron/jobs.json",
-			ReadOnly:      false, // openclaw writes job state (nextRunAtMs, lastRunAtMs) on every tick
+			// Bind-mount the directory (not the file) so openclaw can rename temp files
+			// alongside jobs.json during atomic save operations (same pattern as openclaw.json).
+			HostPath:      jobsDir,
+			ContainerPath: "/app/state/cron",
+			ReadOnly:      false,
 		})
 	}
 

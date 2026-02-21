@@ -235,12 +235,13 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 		cf.Volumes = nil
 	}
 
-	// Add claw-internal network if any claw services exist
+	// Add claw-internal network if any claw services exist.
+	// Not internal: claw agents need internet access for LLM APIs, Discord, Slack, etc.
+	// Service isolation is still achieved — only explicitly-attached containers can
+	// communicate on this network.
 	if hasClaw {
 		cf.Networks = map[string]interface{}{
-			"claw-internal": map[string]interface{}{
-				"internal": true,
-			},
+			"claw-internal": map[string]interface{}{},
 		}
 	}
 

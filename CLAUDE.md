@@ -47,7 +47,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 | Phase 3 Slice 1 — CLAWDAPUS.md + multi-claw | DONE |
 | Phase 3 Slice 2 — Service surface skills | DONE |
 | Phase 3.5 — HANDLE directive + social topology | DONE |
-| Phase 3 Slice 3 — Channel surface bindings | PENDING |
+| Phase 3 Slice 3 — INVOKE scheduling + Discord config wiring | DONE |
 | Phase 4 — cllama sidecar | NOT STARTED |
 | Phase 5 — Drift scoring | NOT STARTED |
 | Phase 6 — Recipe promotion | NOT STARTED |
@@ -65,6 +65,10 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - OpenClaw config is JSON5; driver uses JSON5-aware patcher, never raw jq or standard JSON marshaling
 - OpenClaw `openclaw health --json` emits noise to stderr; driver uses stdout-only parsing, scans for first `{`
 - OpenClaw schema validates config keys against Zod schema; driver must only inject known-valid keys
+- `claw-internal` Docker network is NOT `internal: true` — agents need egress for LLM APIs, Discord, Slack, etc.; isolation is at config/mount level, not network level
+- Config dir (`/app/config`) and cron dir (`/app/state/cron`) are bind-mounted as directories, not files — openclaw performs atomic writes by renaming temp files alongside the target; file-only mounts cause EBUSY
+- `plugins.entries.discord.enabled: true` is pre-seeded in generated config when HANDLE discord is declared — prevents gateway startup doctor from overwriting the config
+- INVOKE directive bakes scheduled tasks as image labels (`claw.invoke.N`); driver generates `jobs.json` mounted at `/app/state/cron/`; openclaw cron scheduler picks it up automatically
 
 ## Conventions
 

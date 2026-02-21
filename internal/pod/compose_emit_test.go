@@ -318,13 +318,9 @@ func TestEmitComposeMultiServiceSharedVolume(t *testing.T) {
 		t.Errorf("expected analyst on claw-internal network, got %v", analyst.Networks)
 	}
 
-	// claw-internal network is internal
-	net, ok := cf.Networks["claw-internal"]
-	if !ok {
+	// claw-internal network must exist (internet access is allowed — agents need LLMs, Discord, etc.)
+	if _, ok := cf.Networks["claw-internal"]; !ok {
 		t.Fatal("expected claw-internal network in output")
-	}
-	if !net.Internal {
-		t.Error("expected claw-internal network to be internal: true")
 	}
 }
 
