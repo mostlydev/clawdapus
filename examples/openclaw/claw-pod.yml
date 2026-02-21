@@ -6,6 +6,8 @@ services:
     image: claw-openclaw-example
     x-claw:
       agent: ./AGENTS.md
+      skills:
+        - ./skills/surface-fleet-master.md
       surfaces:
         - "channel://discord"
         - "service://fleet-master"

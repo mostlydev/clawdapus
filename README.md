@@ -219,7 +219,7 @@ You can opt into pure operator documentation by providing `skills/surface-<name>
 ### Known examples
 
 - `examples/openclaw/Clawfile` includes `SKILL ./skills/openclaw-runbook.md`
-- Pod-level `x-claw.skills` entries continue to be supported in `claw-pod.yml`
+- `examples/openclaw/claw-pod.yml` now includes a `x-claw.skills` operator override for a service skill: `./skills/surface-fleet-master.md`
 
 ---
 
