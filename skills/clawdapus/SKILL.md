@@ -64,6 +64,11 @@ Surfaces split by WHO enforces them:
 | `service://<name>` | Compose networking — pod-internal reachability |
 | `egress://<domain>` | Network policy — allow/deny outbound |
 
+For `service://<name>`, Clawdapus also mounts a service skill when available:
+
+- Primary source: `claw.skill.emit` label in the target service image (path inside image).
+- Fallback: generated `skills/surface-<name>.md` with hostname + discovered port hints.
+
 **Driver-mediated (runner-specific config injection):**
 
 | Scheme | Enforcement |
@@ -81,6 +86,10 @@ If a driver doesn't support a declared surface scheme, **preflight fails** and t
   - pod-level same-basename entry replaces image-level entry
   - duplicate basenames across either layer fail validation before startup
 - Each file is bound individually into the runner's skill directory, read-only, so runner-owned skill files remain writable.
+- `service://` targets can contribute one auto-mounted skill path: `skills/surface-<name>.md`.
+- If a service image includes `claw.skill.emit`, that extracted skill is used for `surface-<name>.md`.
+- If no emitted file is available, Clawdapus writes a minimal fallback stub so the target is discoverable from CLAWDAPUS and the skills index.
+- Operator-provided `surface-<name>.md` entries replace service-emitted content for the same path when present.
 
 ## claw-pod.yml
 

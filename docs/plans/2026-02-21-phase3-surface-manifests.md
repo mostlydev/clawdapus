@@ -14,6 +14,21 @@ Skills live as separate files in `skills/` for detailed on-demand reference (lat
 
 The compose emitter already handles volume mounts with correct `:ro`/`:rw` modes.
 
+### Addendum (Service-emitted surface skills — updated direction)
+
+Scope for this slice now also includes service self-description:
+
+- Service containers may declare a label `claw.skill.emit` pointing to a markdown skill file inside the service image.
+- On `service://<name>` resolution, Clawdapus attempts to extract that file during compose-up.
+- If present, it is mounted for the consumer as `skills/surface-<name>.md`.
+- If absent, Clawdapus emits a fallback skill with known hostname/ports so the claw still has a documented entry point.
+- Precedence remains operator override friendly:
+  1) extracted service skill for `surface-<name>.md` (default),
+  2) operator `SKILL`/`x-claw.skills` for the same `surface-<name>.md` basename,
+  3) generated fallback skill.
+
+This avoids baking service-specific API docs into Clawdapus while still keeping all service access documented and discoverable.
+
 **Tech Stack:** Go 1.23, `encoding/json`, `gopkg.in/yaml.v3`, OpenClaw `bootstrap-extra-files` hook
 
 **Key reference files:**

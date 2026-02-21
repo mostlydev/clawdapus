@@ -71,6 +71,25 @@ All 15 tasks done (11 core + 4 hardening). Exit criteria met:
 
 ---
 
+## Phase 3 Slice 2: Service-emitted Surface Skills
+
+**Plan:** `docs/plans/2026-02-21-phase3-surface-manifests.md` (addendum)
+**Status:** IN PROGRESS (design confirmed, implementation by Claude)
+
+| # | Task | Status | Owner | Notes |
+|---|------|--------|-------|-------|
+| 1 | Define service-emitted priority model | DONE | Human | Service emits via `claw.skill.emit`, operator override, fallback stub |
+| 2 | Document label and extraction behavior | DONE | Human | README + `SKILL` docs + plan addendum updated |
+| 3 | Implement image label extraction in compose-up | PENDING | Claude | Pull `claw.skill.emit` from service image during compose resolution |
+| 4 | Add service skill mount wiring | PENDING | Claude | Mount `skills/surface-<name>.md` per service consumer |
+| 5 | Add port discovery hints for fallback docs | PENDING | Claude | Use service compose metadata when available |
+
+### Planned precedence model
+
+- Service-emitted skill (`claw.skill.emit`) is the default for `surface-<name>.md`
+- Operator-provided explicit `surface-<name>.md` entries can override by basename (`SKILL`/`x-claw.skills`)
+- Generic fallback is generated only when no source skill exists
+
 ## SKILL Directive
 
 **Plan:** `docs/plans/2026-02-20-skill-directive-plan.md`
