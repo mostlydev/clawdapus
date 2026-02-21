@@ -48,17 +48,25 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 
 	// Skills index
 	b.WriteString("## Skills\n\n")
-	var skills []string
+	var skillEntries []string
+
+	// Surface-generated skills
 	for _, s := range rc.Surfaces {
 		if s.Scheme == "service" || s.Scheme == "channel" {
-			skills = append(skills, fmt.Sprintf("- `skills/surface-%s.md` — %s %s surface", s.Target, s.Target, s.Scheme))
+			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/surface-%s.md` — %s %s surface", s.Target, s.Target, s.Scheme))
 		}
 	}
-	if len(skills) == 0 {
+
+	// Explicit operator skills
+	for _, sk := range rc.Skills {
+		skillEntries = append(skillEntries, fmt.Sprintf("- `skills/%s` — operator-provided skill", sk.Name))
+	}
+
+	if len(skillEntries) == 0 {
 		b.WriteString("No skills available.\n")
 	} else {
-		for _, sk := range skills {
-			b.WriteString(sk + "\n")
+		for _, entry := range skillEntries {
+			b.WriteString(entry + "\n")
 		}
 	}
 

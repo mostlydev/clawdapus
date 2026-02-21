@@ -78,6 +78,29 @@ func TestGenerateClawdapusMDNoSurfaces(t *testing.T) {
 	}
 }
 
+func TestGenerateClawdapusMDListsExplicitSkills(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "worker",
+		ClawType:    "openclaw",
+		Skills: []driver.ResolvedSkill{
+			{Name: "custom-workflow.md", HostPath: "/tmp/skills/custom-workflow.md"},
+			{Name: "team-conventions.md", HostPath: "/tmp/skills/team-conventions.md"},
+		},
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	if !strings.Contains(md, "skills/custom-workflow.md") {
+		t.Error("expected custom-workflow.md in skills section")
+	}
+	if !strings.Contains(md, "skills/team-conventions.md") {
+		t.Error("expected team-conventions.md in skills section")
+	}
+	if strings.Contains(md, "No skills available") {
+		t.Error("should not say no skills when explicit skills are present")
+	}
+}
+
 func TestGenerateClawdapusMDVolumeReadOnly(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		ServiceName: "analyst",

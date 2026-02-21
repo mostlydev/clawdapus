@@ -74,10 +74,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	})
 
 	return &driver.MaterializeResult{
-		Mounts:  mounts,
-		Tmpfs:   []string{"/tmp", "/run", "/app/data", "/root/.openclaw"},
+		Mounts:   mounts,
+		Tmpfs:    []string{"/tmp", "/run", "/app/data", "/root/.openclaw"},
 		ReadOnly: true,
 		Restart:  "on-failure",
+		SkillDir: "/claw/skills",
 		Healthcheck: &driver.Healthcheck{
 			Test:     []string{"CMD", "openclaw", "health", "--json"},
 			Interval: "30s",
