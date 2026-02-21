@@ -10,15 +10,20 @@ import (
 )
 
 // ResolveSkills validates that all skill files exist, checks for path traversal,
-// detects duplicate basenames, and returns resolved skills. Fail-closed.
+// enforces regular files, detects duplicate basenames, and returns resolved
+// skills. Fail-closed.
 func ResolveSkills(baseDir string, paths []string) ([]driver.ResolvedSkill, error) {
 	if len(paths) == 0 {
-		return nil, nil
+		return []driver.ResolvedSkill{}, nil
 	}
 
 	absBase, err := filepath.Abs(baseDir)
 	if err != nil {
 		return nil, fmt.Errorf("skill resolution: cannot resolve base dir %q: %w", baseDir, err)
+	}
+	realBase, err := filepath.EvalSymlinks(absBase)
+	if err != nil {
+		return nil, fmt.Errorf("skill resolution: cannot resolve real base dir %q: %w", baseDir, err)
 	}
 
 	seen := make(map[string]string) // basename -> original path (for error messages)
@@ -36,8 +41,21 @@ func ResolveSkills(baseDir string, paths []string) ([]driver.ResolvedSkill, erro
 		}
 
 		// File existence check
-		if _, err := os.Stat(hostPath); err != nil {
+		info, err := os.Stat(hostPath)
+		if err != nil {
 			return nil, fmt.Errorf("skill resolution: file %q not found: %w", hostPath, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("skill resolution: %q is not a regular file", p)
+		}
+
+		// Resolve symlinks and re-check scope against the base directory.
+		realHostPath, err := filepath.EvalSymlinks(hostPath)
+		if err != nil {
+			return nil, fmt.Errorf("skill resolution: cannot resolve real path for %q: %w", p, err)
+		}
+		if !strings.HasPrefix(realHostPath, realBase+string(filepath.Separator)) && realHostPath != realBase {
+			return nil, fmt.Errorf("skill resolution: path %q escapes base directory %q", p, baseDir)
 		}
 
 		// Duplicate basename check
@@ -49,7 +67,7 @@ func ResolveSkills(baseDir string, paths []string) ([]driver.ResolvedSkill, erro
 
 		skills = append(skills, driver.ResolvedSkill{
 			Name:     name,
-			HostPath: hostPath,
+			HostPath: realHostPath,
 		})
 	}
 

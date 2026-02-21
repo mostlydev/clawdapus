@@ -69,11 +69,59 @@ func TestResolveSkillsRejectsDuplicateBasenames(t *testing.T) {
 	}
 }
 
+func TestResolveSkillsRejectsDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	skillDir := filepath.Join(tmpDir, "skills")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(skillDir, "not-a-file"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ResolveSkills(tmpDir, []string{"./skills/not-a-file"})
+	if err == nil {
+		t.Fatal("expected error for skill path that is a directory")
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("expected directory error, got: %v", err)
+	}
+}
+
+func TestResolveSkillsRejectsSymlinkOutsideBase(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside-skill.md")
+	if err := os.WriteFile(outside, []byte("# outside"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	linkPath := filepath.Join(tmpDir, "skills", "escaped.md")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	_, err := ResolveSkills(tmpDir, []string{"./skills/escaped.md"})
+	if err == nil {
+		t.Fatal("expected error for symlink that escapes base directory")
+	}
+	if !strings.Contains(err.Error(), "escapes base directory") {
+		t.Fatalf("expected escapes error, got: %v", err)
+	}
+}
+
 func TestResolveSkillsEmptyList(t *testing.T) {
 	tmpDir := t.TempDir()
 	skills, err := ResolveSkills(tmpDir, []string{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if skills == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
 	}
 	if len(skills) != 0 {
 		t.Errorf("expected 0 skills, got %d", len(skills))

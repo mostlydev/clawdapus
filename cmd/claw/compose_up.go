@@ -109,15 +109,18 @@ func runComposeUp(podFile string) error {
 		}
 
 		// Merge skills: image-level (from labels) + pod-level (from x-claw)
-		var skillPaths []string
-		skillPaths = append(skillPaths, info.Skills...)
-		if svc.Claw != nil {
-			skillPaths = append(skillPaths, svc.Claw.Skills...)
-		}
-		skills, err := runtime.ResolveSkills(podDir, skillPaths)
+		imageSkills, err := runtime.ResolveSkills(podDir, info.Skills)
 		if err != nil {
 			return fmt.Errorf("service %q: %w", name, err)
 		}
+		podSkills := make([]driver.ResolvedSkill, 0)
+		if svc.Claw != nil {
+			podSkills, err = runtime.ResolveSkills(podDir, svc.Claw.Skills)
+			if err != nil {
+				return fmt.Errorf("service %q: %w", name, err)
+			}
+		}
+		skills := mergeResolvedSkills(imageSkills, podSkills)
 
 		rc := &driver.ResolvedClaw{
 			ServiceName:   name,
@@ -220,6 +223,27 @@ func runComposeUp(podFile string) error {
 
 	fmt.Println("[claw] pod is up")
 	return nil
+}
+
+func mergeResolvedSkills(imageSkills, podSkills []driver.ResolvedSkill) []driver.ResolvedSkill {
+	merged := make([]driver.ResolvedSkill, 0, len(imageSkills)+len(podSkills))
+	byName := make(map[string]int, len(imageSkills))
+
+	for _, skill := range imageSkills {
+		byName[skill.Name] = len(merged)
+		merged = append(merged, skill)
+	}
+
+	for _, skill := range podSkills {
+		if idx, ok := byName[skill.Name]; ok {
+			merged[idx] = skill
+			continue
+		}
+		byName[skill.Name] = len(merged)
+		merged = append(merged, skill)
+	}
+
+	return merged
 }
 
 func resolveContainerIDs(composePath, serviceName string) ([]string, error) {
