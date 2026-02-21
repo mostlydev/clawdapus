@@ -31,9 +31,15 @@ type ResolvedSkill struct {
 }
 
 type ResolvedSurface struct {
-	Scheme     string // channel, service, volume, host, egress
-	Target     string // discord, fleet-master, shared-cache, etc.
-	AccessMode string // read-only, read-write (for volume/host surfaces)
+	Scheme     string   // channel, service, volume, host, egress
+	Target     string   // discord, fleet-master, shared-cache, etc.
+	AccessMode string   // read-only, read-write (for volume/host surfaces)
+	Ports      []string // exposed ports from service definition (service surfaces only)
+}
+
+type GeneratedSkill struct {
+	Name    string // filename (e.g., "surface-fleet-master.md")
+	Content []byte // skill file content
 }
 
 type MaterializeOpts struct {
