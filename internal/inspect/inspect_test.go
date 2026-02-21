@@ -13,6 +13,8 @@ func TestParseLabelsExtractsClawLabels(t *testing.T) {
 		"claw.privilege.runtime": "claw-user",
 		"claw.configure.0":       "openclaw config set agents.defaults.heartbeat.every 30m",
 		"claw.configure.1":       "openclaw config set agents.defaults.heartbeat.target none",
+		"claw.skill.0":          "./skills/custom-workflow.md",
+		"claw.skill.1":          "./skills/team-conventions.md",
 		"maintainer":             "someone",
 	}
 
@@ -41,6 +43,15 @@ func TestParseLabelsExtractsClawLabels(t *testing.T) {
 	}
 	if info.Configures[1] != "openclaw config set agents.defaults.heartbeat.target none" {
 		t.Fatalf("expected configure[1] to be heartbeat.target, got %q", info.Configures[1])
+	}
+	if len(info.Skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(info.Skills))
+	}
+	if info.Skills[0] != "./skills/custom-workflow.md" {
+		t.Fatalf("expected skill[0] to be custom-workflow, got %q", info.Skills[0])
+	}
+	if info.Skills[1] != "./skills/team-conventions.md" {
+		t.Fatalf("expected skill[1] to be team-conventions, got %q", info.Skills[1])
 	}
 	if info.Privileges["worker"] != "root" {
 		t.Fatalf("expected worker privilege root, got %q", info.Privileges["worker"])
