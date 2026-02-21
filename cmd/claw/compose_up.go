@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -48,6 +49,8 @@ func runComposeUp(podFile string) error {
 	}
 
 	results := make(map[string]*driver.MaterializeResult)
+	drivers := make(map[string]driver.Driver)
+	resolvedClaws := make(map[string]*driver.ResolvedClaw)
 
 	for name, svc := range p.Services {
 		if svc.Claw == nil {
@@ -115,6 +118,8 @@ func runComposeUp(podFile string) error {
 		}
 
 		results[name] = result
+		drivers[name] = d
+		resolvedClaws[name] = rc
 		fmt.Printf("[claw] %s: validated and materialized (%s driver)\n", name, rc.ClawType)
 	}
 
@@ -141,8 +146,36 @@ func runComposeUp(podFile string) error {
 		return fmt.Errorf("docker compose up failed: %w", err)
 	}
 
+	// PostApply: verify containers are running (only in detach mode)
+	if composeUpDetach {
+		for name, d := range drivers {
+			rc := resolvedClaws[name]
+			containerID, err := resolveContainerID(generatedPath, name)
+			if err != nil {
+				return fmt.Errorf("service %q: failed to resolve container ID: %w", name, err)
+			}
+			if err := d.PostApply(rc, driver.PostApplyOpts{ContainerID: containerID}); err != nil {
+				return fmt.Errorf("service %q: post-apply verification failed: %w", name, err)
+			}
+			fmt.Printf("[claw] %s: post-apply verified\n", name)
+		}
+	}
+
 	fmt.Println("[claw] pod is up")
 	return nil
+}
+
+func resolveContainerID(composePath, serviceName string) (string, error) {
+	cmd := exec.Command("docker", "compose", "-f", composePath, "ps", "-q", serviceName)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("docker compose ps: %w", err)
+	}
+	id := strings.TrimSpace(string(out))
+	if id == "" {
+		return "", fmt.Errorf("no container found for service %q", serviceName)
+	}
+	return id, nil
 }
 
 func init() {

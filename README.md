@@ -47,44 +47,45 @@ The commands below were run successfully in this repo on 2026-02-21.
 Prerequisites:
 
 - Docker daemon running (`docker`, `docker buildx`, `docker compose`)
-- Go toolchain (for building `claw` from source)
+- Go toolchain (for installing `claw` from source)
 
-**1. Build the CLI binary**
+**1. Install `claw` from the current checkout**
 
 ```bash
-go build -o bin/claw ./cmd/claw
+go install ./cmd/claw
 ```
 
 **2. Build the example OpenClaw image**
 
 ```bash
-cd examples/openclaw
-../../bin/claw build -t claw-openclaw-example .
+claw build -t claw-openclaw-example examples/openclaw
 ```
 
 **3. Inspect emitted Claw metadata labels**
 
 ```bash
-../../bin/claw inspect claw-openclaw-example
+claw inspect claw-openclaw-example
 ```
 
 **4. Launch the example pod (detached)**
 
 ```bash
-../../bin/claw compose up -d claw-pod.yml
+claw compose up -d examples/openclaw/claw-pod.yml
 ```
 
 **5. Check status, then tear down**
 
 ```bash
-../../bin/claw compose ps
-../../bin/claw compose logs gateway
-../../bin/claw compose down
+cd examples/openclaw
+claw compose ps
+claw compose logs gateway
+claw compose down
 ```
 
 Notes:
 
-- Run `compose up/ps/logs/down` from the same directory as `compose.generated.yml` (for this example: `examples/openclaw/`).
+- `claw compose up ...` writes `compose.generated.yml` next to the pod file.
+- `claw compose ps/logs/down` currently read `./compose.generated.yml`, so run those from `examples/openclaw/` for this example.
 - `AGENTS.md` already exists in `examples/openclaw/`; edit it to change agent behavior contract.
 
 ---

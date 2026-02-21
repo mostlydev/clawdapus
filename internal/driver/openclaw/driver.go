@@ -1,10 +1,12 @@
 package openclaw
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/docker/docker/client"
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
@@ -69,6 +71,22 @@ func (d *Driver) PostApply(rc *driver.ResolvedClaw, opts driver.PostApplyOpts) e
 	if opts.ContainerID == "" {
 		return fmt.Errorf("openclaw driver: post-apply check failed: no container ID")
 	}
+
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return fmt.Errorf("openclaw driver: post-apply failed to create docker client: %w", err)
+	}
+	defer cli.Close()
+
+	info, err := cli.ContainerInspect(context.Background(), opts.ContainerID)
+	if err != nil {
+		return fmt.Errorf("openclaw driver: post-apply container inspect failed: %w", err)
+	}
+
+	if !info.State.Running {
+		return fmt.Errorf("openclaw driver: post-apply check failed: container %s is not running (status: %s)", opts.ContainerID[:12], info.State.Status)
+	}
+
 	return nil
 }
 

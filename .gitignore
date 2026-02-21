@@ -33,3 +33,9 @@ err.txt
 out.txt
 .DS_Store
 packages/
+
+# Clawdapus specific
+*.generated.yml
+.claw-runtime/
+testdata/
+*-notes.md
