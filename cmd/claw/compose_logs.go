@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
@@ -15,11 +13,9 @@ var composeLogsCmd = &cobra.Command{
 	Use:   "logs [service]",
 	Short: "Stream logs from a Claw pod",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		podDir := "."
-		generatedPath := filepath.Join(podDir, "compose.generated.yml")
-
-		if _, err := os.Stat(generatedPath); err != nil {
-			return fmt.Errorf("no compose.generated.yml found (run 'claw compose up' first)")
+		generatedPath, err := resolveComposeGeneratedPath()
+		if err != nil {
+			return err
 		}
 
 		composeArgs := []string{"compose", "-f", generatedPath, "logs"}

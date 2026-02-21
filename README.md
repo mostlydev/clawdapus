@@ -70,22 +70,21 @@ claw inspect claw-openclaw-example
 **4. Launch the example pod (detached)**
 
 ```bash
-claw compose up -d examples/openclaw/claw-pod.yml
+claw compose -f examples/openclaw/claw-pod.yml up -d
 ```
 
 **5. Check status, then tear down**
 
 ```bash
-cd examples/openclaw
-claw compose ps
-claw compose logs gateway
-claw compose down
+claw compose -f examples/openclaw/claw-pod.yml ps
+claw compose -f examples/openclaw/claw-pod.yml logs gateway
+claw compose -f examples/openclaw/claw-pod.yml down
 ```
 
 Notes:
 
-- `claw compose up ...` writes `compose.generated.yml` next to the pod file.
-- `claw compose ps/logs/down` currently read `./compose.generated.yml`, so run those from `examples/openclaw/` for this example.
+- `-f` mirrors `docker compose -f` — it locates `compose.generated.yml` next to the pod file.
+- `claw compose up` writes `compose.generated.yml` next to the pod file.
 - `AGENTS.md` already exists in `examples/openclaw/`; edit it to change agent behavior contract.
 
 ---

@@ -19,12 +19,15 @@ import (
 var composeUpDetach bool
 
 var composeUpCmd = &cobra.Command{
-	Use:   "up",
+	Use:   "up [pod-file]",
 	Short: "Launch a Claw pod from claw-pod.yml",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		podFile := "claw-pod.yml"
-		if len(args) > 0 {
+		podFile := composePodFile
+		if podFile == "" && len(args) > 0 {
 			podFile = args[0]
+		}
+		if podFile == "" {
+			podFile = "claw-pod.yml"
 		}
 		return runComposeUp(podFile)
 	},
