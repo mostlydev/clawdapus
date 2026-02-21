@@ -53,6 +53,24 @@ All 15 tasks done (11 core + 4 hardening). Exit criteria met:
 
 ---
 
+## Phase 3 Slice 1: CLAWDAPUS.md Context Injection
+
+**Plan:** `docs/plans/2026-02-21-phase3-surface-manifests.md`
+**Started:** 2026-02-21
+
+| # | Task | Status | Commit | Notes |
+|---|------|--------|--------|-------|
+| 1 | ParseSurface helper + wire into compose_up | DONE | `227c5fe` | Parses `scheme://target access-mode` into ResolvedSurface |
+| 2 | GenerateClawdapusMD in openclaw driver | DONE | `e9395dd` | Identity + surfaces + skills sections, wired into Materialize |
+| 3 | Bootstrap-extra-files hook always-on | DONE | `2f5fcbd` | Config always includes CLAWDAPUS.md in bootstrap paths |
+| 4 | Multi-claw example | DONE | `315076c` | researcher (rw) + analyst (ro) sharing volume://research-cache |
+| 5 | Multi-service compose emit test | DONE | `d5a4482` | YAML-parsed assertions for shared volume, access modes, network |
+| 6 | Final verification | DONE | — | All tests pass, binary builds |
+
+**Completed:** 2026-02-21
+
+---
+
 ## Key Decisions Made During Execution
 
 - CONFIGURE directives now emitted as `claw.configure.N` labels (Task 1)
