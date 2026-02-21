@@ -203,7 +203,9 @@ The operator picks the weight class that fits the problem. Lightweight runners a
 
 **ACT** — Worker-mode directives. Install packages, import knowledge, configure the runtime. Snapshot when done.
 
-**SURFACE** — Declares what this Claw connects to within the infrastructure (volumes, MCP services). Clawdapus resolves service references against expose blocks in the pod and assembles the skill map. Access modes are enforced only on mounts (volumes, host paths) where Docker has authority. For services and APIs, the Claw authenticates with standard credentials (e.g. env vars). External application integrations (like Discord or Slack) are handled natively by the runner via `CONFIGURE` and standard Docker `environment` blocks, not as `SURFACE` directives.
+**HANDLE** — Declares the agent's public identity on a communication platform (e.g., `HANDLE discord`). Drivers translate this into runner-native configuration (like OpenClaw's channel settings), making it trivial to connect agents to platforms without learning the runner's underlying config JSON structure. At the pod level, handles are also broadcast to other services as environment variables so APIs know who the agents are.
+
+**SURFACE** — Declares what this Claw connects to within the infrastructure (volumes, MCP services). Clawdapus resolves service references against expose blocks in the pod and assembles the skill map. Access modes are enforced only on mounts (volumes, host paths) where Docker has authority. For services and APIs, the Claw authenticates with standard credentials (e.g. env vars).
 
 **SKILL** — Mounts skill files from the host into the runner's skill directory, read-only. Skills are the manual for how to use capabilities — operator-provided guides, surface-generated usage docs, or discovery-populated API references. The driver knows where skills go per runner type. All skills are indexed in `CLAWDAPUS.md`.
 
@@ -240,12 +242,14 @@ ACT openclaw skill install crypto-feeds
 CONFIGURE jq '.features.quote_tweets = true' /etc/claw/config.json | sponge /etc/claw/config.json
 CONFIGURE jq '.rate_limits.posts_per_hour = 3' /etc/claw/config.json | sponge /etc/claw/config.json
 CONFIGURE claw-module enable scraper-v2
-CONFIGURE openclaw config set channels.discord.enabled true
 
 # Invocation schedule
 INVOKE 0 9 * * *     tweet-cycle
 INVOKE 0,30 * * * *  engagement-sweep
 INVOKE 0 */4 * * *   drift-check
+
+# Public Identities
+HANDLE discord
 
 # Communication surfaces
 SURFACE volume://shared-cache       read-write

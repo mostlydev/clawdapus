@@ -48,6 +48,7 @@ A Clawfile is an extended Dockerfile. Standard Dockerfile directives pass throug
 | `CONFIGURE <cmd>` | **Runs at container startup**, NOT build time. Compiled into `/claw/configure.sh` entrypoint wrapper. For init-time mutations against base image defaults. | Build: generates script. Runtime: executes on boot. |
 | `INVOKE <cron> <cmd>` | System-level cron in `/etc/cron.d/claw`. Bot-unmodifiable. | Build: writes cron file. |
 | `TRACK <pkg-managers>` | Installs package manager wrappers for mutation tracking (apt, pip, npm). | Build: wrapper install. |
+| `HANDLE <platform>` | Declares social identity (e.g., `discord`, `slack`). Driver configures runner natively. Emitter broadcasts ID to pod. | Build: label. Runtime: driver config + pod env vars. |
 | `SURFACE <scheme>://<target>` | Declares infrastructure connections (volumes, services). See Surface Taxonomy below. | Build: label. Runtime: compose wiring. |
 | `PRIVILEGE <mode> <user>` | Maps privilege modes (worker, runtime) to user specs. | Build: label. Runtime: Docker user/security. |
 

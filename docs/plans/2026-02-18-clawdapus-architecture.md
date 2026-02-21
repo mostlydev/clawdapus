@@ -185,6 +185,7 @@ Drivers translate Clawfile directives into these abstract operations:
 | `unset` | `path` | Remove a config branch |
 | `mount_ro` | `host_path`, `container_path` | Read-only bind mount |
 | `env` | `name`, `value` | Set environment variable |
+| `handle` | `platform`, `id` | Configure runner-native platform integration |
 | `cron_upsert` | `schedule`, `command` | Create/update a system cron entry |
 | `healthcheck` | `command` | Set container healthcheck |
 | `wake` | `command` | Invocation trigger |
@@ -210,6 +211,8 @@ Each driver provides:
 | Config path | `env OPENCLAW_CONFIG_PATH` + `mount_ro` openclaw.json |
 | Healthcheck | `healthcheck` via `openclaw health --json` (stdout only — see caveat below) |
 | Heartbeat | `set agents.defaults.heartbeat.every` via Go-native JSON5 patch + system cron override |
+| `HANDLE discord` | `set channels.discord.enabled true` via Go-native JSON5 patch (token from standard env) |
+| `HANDLE slack` | `set channels.slack.enabled true` via Go-native JSON5 patch (token from standard env) |
 
 **Config injection strategy:** The OpenClaw driver does NOT shell out to `openclaw config set`. The `openclaw` CLI is verbose (splash banners, doctor checks, `.bak` file creation, Node.js cold-start penalty per invocation) and shelling out N times for N config operations is prohibitively slow and noisy. Instead, the driver uses a Go JSON5 library to: (1) read the base `openclaw.json`, (2) apply all required `set` operations in-memory, (3) write the finalized config to the host, and (4) `mount_ro` it into the container. This aligns with the "write config on host, mount read-only" strategy.
 
@@ -619,6 +622,18 @@ A new `SKILL` directive in Clawfile and `skills:` in x-claw allows operators to 
 - Service surfaces get a companion skill with host, port, protocol, credential env vars, and discovered capabilities.
 
 **Success criteria:** Every Claw receives a `CLAWDAPUS.md` bootstrapped into its context with identity, surfaces, and skill index. SKILL directives and surface-generated skills are mounted into the runner's skill directory. `claw skillmap <claw>` shows correct capability inventory. Mixed pods with different claw types start correctly.
+
+### Phase 3.5 — Social Topology Projection (Leviathan Pattern)
+
+**Goal:** Allow non-claw services (like a Rails API) to know the public chat identities of agents in the pod, so they can emit targeted events (e.g., `@mention` a specific agent on Discord to approve a trade). Also, make it trivial to enable these channels without learning the runner's internal JSON config.
+
+1. Add `HANDLE` directive to Clawfile (e.g., `HANDLE discord`)
+2. Driver translates `HANDLE` into runner-native configuration (e.g., OpenClaw driver writes `channels.discord.enabled = true` in JSON5).
+3. Add `handles:` map to `claw-pod.yml` `x-claw` block to declare the specific User IDs (e.g., `discord: "123942942"`)
+4. Pod emitter aggregates all `handles` across the pod and generates global environment variables (e.g., `CLAW_HANDLE_<SERVICE>_DISCORD=123942942`) and injects them into **every** service in the pod.
+5. Driver writes the `HANDLE` IDs into `CLAWDAPUS.md` so the agent knows its own public identity.
+
+**Success criteria:** A Rails app in the pod can read `CLAW_HANDLE_TIVERTON_DISCORD` to dynamically construct a Discord mention. The OpenClaw driver automatically enables Discord based solely on the `HANDLE` directive, abstracting the `openclaw.json` schema.
 
 ### Phase 4 — cllama Sidecar + Policy Pipeline
 
