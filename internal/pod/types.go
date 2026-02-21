@@ -11,6 +11,7 @@ type Service struct {
 	Image       string
 	Claw        *ClawBlock
 	Environment map[string]string
+	Expose      []string // ports exposed to other containers (from compose expose:)
 }
 
 // ClawBlock represents the x-claw extension on a service.

@@ -22,6 +22,7 @@ type rawService struct {
 	Image       string            `yaml:"image"`
 	XClaw       *rawClawBlock     `yaml:"x-claw"`
 	Environment map[string]string `yaml:"environment"`
+	Expose      []string          `yaml:"expose"`
 }
 
 type rawClawBlock struct {
@@ -47,9 +48,14 @@ func Parse(r io.Reader) (*Pod, error) {
 	}
 
 	for name, svc := range raw.Services {
+		expose := svc.Expose
+		if expose == nil {
+			expose = make([]string, 0)
+		}
 		service := &Service{
 			Image:       svc.Image,
 			Environment: svc.Environment,
+			Expose:      expose,
 		}
 		if svc.XClaw != nil {
 			count := svc.XClaw.Count
