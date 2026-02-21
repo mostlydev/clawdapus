@@ -108,6 +108,17 @@ func runComposeUp(podFile string) error {
 			}
 		}
 
+		// Merge skills: image-level (from labels) + pod-level (from x-claw)
+		var skillPaths []string
+		skillPaths = append(skillPaths, info.Skills...)
+		if svc.Claw != nil {
+			skillPaths = append(skillPaths, svc.Claw.Skills...)
+		}
+		skills, err := runtime.ResolveSkills(podDir, skillPaths)
+		if err != nil {
+			return fmt.Errorf("service %q: %w", name, err)
+		}
+
 		rc := &driver.ResolvedClaw{
 			ServiceName:   name,
 			ImageRef:      svc.Image,
@@ -120,6 +131,7 @@ func runComposeUp(podFile string) error {
 			Count:         svc.Claw.Count,
 			Environment:   svc.Environment,
 			Surfaces:      surfaces,
+			Skills:        skills,
 		}
 
 		d, err := driver.Lookup(rc.ClawType)
@@ -139,6 +151,17 @@ func runComposeUp(podFile string) error {
 		result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: svcRuntimeDir, PodName: p.Name})
 		if err != nil {
 			return fmt.Errorf("service %q: materialization failed: %w", name, err)
+		}
+
+		// Mount individual skill files into the driver's skill directory
+		if result.SkillDir != "" && len(rc.Skills) > 0 {
+			for _, sk := range rc.Skills {
+				result.Mounts = append(result.Mounts, driver.Mount{
+					HostPath:      sk.HostPath,
+					ContainerPath: filepath.Join(result.SkillDir, sk.Name),
+					ReadOnly:      true,
+				})
+			}
 		}
 
 		results[name] = result
