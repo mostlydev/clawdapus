@@ -20,6 +20,10 @@ Implemented commands:
 claw doctor               # Check Docker CLI, buildx, compose
 claw build [path]         # Clawfile -> Dockerfile.generated -> docker build
 claw inspect <image>      # Show parsed claw.* labels from image metadata
+claw compose up [pod]     # Launch pod from claw-pod.yml
+claw compose down         # Stop and remove pod
+claw compose ps           # Show pod status
+claw compose logs [svc]   # Stream pod logs
 ```
 
 Recent verification:
