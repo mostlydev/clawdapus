@@ -12,7 +12,7 @@ var composePodFile string
 
 var composeCmd = &cobra.Command{
 	Use:   "compose",
-	Short: "Pod lifecycle commands (up, down, ps, logs)",
+	Short: "Pod lifecycle commands (up, down, ps, logs, health)",
 }
 
 func resolveComposeGeneratedPath() (string, error) {

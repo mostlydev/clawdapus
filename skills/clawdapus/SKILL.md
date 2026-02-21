@@ -44,6 +44,7 @@ A Clawfile is an extended Dockerfile. Standard Dockerfile directives pass throug
 | `CLAW_TYPE <type>` | Selects runtime driver (e.g. `openclaw`). Not just a label — determines HOW enforcement happens. | Build: label. Runtime: driver selection. |
 | `AGENT <file>` | Behavioral contract. **Must exist on host** or startup fails (fail-closed). Mounted read-only. | Build: label. Runtime: `:ro` bind mount. |
 | `MODEL <slot> <provider/model>` | Named model slot. Multiple allowed (primary, fallback). | Build: label. Runtime: driver injects into runner config. |
+| `SKILL <file>` | Mounts reference markdown into the runner skill directory. | Build: label. Runtime: host path validation + read-only file mount. |
 | `CONFIGURE <cmd>` | **Runs at container startup**, NOT build time. Compiled into `/claw/configure.sh` entrypoint wrapper. For init-time mutations against base image defaults. | Build: generates script. Runtime: executes on boot. |
 | `INVOKE <cron> <cmd>` | System-level cron in `/etc/cron.d/claw`. Bot-unmodifiable. | Build: writes cron file. |
 | `TRACK <pkg-managers>` | Installs package manager wrappers for mutation tracking (apt, pip, npm). | Build: wrapper install. |
@@ -71,6 +72,15 @@ Surfaces split by WHO enforces them:
 | `webhook://<name>` | Driver configures runner's HTTP endpoint. |
 
 If a driver doesn't support a declared surface scheme, **preflight fails** and the container doesn't start.
+
+## Skill Mounting Semantics
+
+- `SKILL` directives in Clawfile become `claw.skill.N` labels on the image.
+- `x-claw.skills` in `claw-pod.yml` merges with image skills during compose-up.
+- Image-level skills and pod-level skills are merged by basename:
+  - pod-level same-basename entry replaces image-level entry
+  - duplicate basenames across either layer fail validation before startup
+- Each file is bound individually into the runner's skill directory, read-only, so runner-owned skill files remain writable.
 
 ## claw-pod.yml
 

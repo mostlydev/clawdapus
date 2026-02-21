@@ -24,6 +24,7 @@ claw compose up [pod]     # Launch pod from claw-pod.yml
 claw compose down         # Stop and remove pod
 claw compose ps           # Show pod status
 claw compose logs [svc]   # Stream pod logs
+claw compose health       # Probe container health
 ```
 
 Recent verification:
@@ -156,7 +157,7 @@ RUN npm install -g openclaw@2026.2.9
 4. `claw-pod.yml` parsing with `count` scaling and stable ordinal identities
 5. Compose generation for volume surfaces and network restriction enforcement
 6. Fail-closed post-apply verification before reporting successful `claw up`
-7. `claw compose up/down/ps/logs` pod lifecycle commands with deterministic policy-layer behavior
+7. `claw compose up/down/ps/logs/health` pod lifecycle commands with deterministic policy-layer behavior
 
 ---
 
@@ -171,6 +172,26 @@ cp -r skills/clawdapus ~/.claude/skills/
 ```
 
 The skill triggers automatically when agents encounter Clawfile directives or `claw` commands.
+
+### SKILL Directive + Runtime Skills
+
+The `SKILL` directive (Clawfile) and `x-claw.skills` list (`claw-pod.yml`) let operators mount markdown files into the runner's skill directory as read-only references.
+
+```dockerfile
+SKILL ./skills/research-methods.md
+SKILL ./skills/incident-playbook.md
+```
+
+```yaml
+x-claw:
+  skills:
+    - ./skills/research-methods.md
+```
+
+- Image-level `SKILL` files are mounted first.
+- Pod-level `skills` entries override image-level files with the same basename.
+- Duplicate basenames across either layer are rejected as a hard validation error.
+- Mounted files are available at the runtime skill path declared by the driver (`/claw/skills` for OpenClaw).
 
 ---
 

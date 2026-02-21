@@ -12,6 +12,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 
 - **Clawfile** → extended Dockerfile. `claw build` transpiles to standard Dockerfile, calls `docker build`. Output is OCI image.
 - **CLAW_TYPE** → selects a runtime **driver** that knows how to enforce directives for a specific runner. Not just a label.
+- **SKILL / x-claw.skills** → explicit skill files from image labels + pod manifests are resolved and mounted read-only into runner skill directories (`SkillDir`) at runtime.
 - **Driver framework** → abstract enforcement ops (set, unset, mount_ro, env, cron_upsert, healthcheck, wake). Each driver translates Clawfile directives into runner-specific config injection. Fail-closed: preflight + post-apply verification.
 - **claw-pod.yml** → extended docker-compose. `claw up` parses `x-claw` blocks, runs driver enforcement, optionally injects cllama sidecars, emits clean `compose.generated.yml`, calls `docker compose`.
 - **cllama sidecar** → optional bidirectional LLM proxy per Claw. Intercepts prompts outbound and responses inbound. Runner never knows. Only injected when `CLLAMA` directive is present.
