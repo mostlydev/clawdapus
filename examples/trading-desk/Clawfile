@@ -3,7 +3,6 @@ FROM openclaw:latest
 CLAW_TYPE openclaw
 
 MODEL primary openrouter/moonshotai/kimi-k2.5
-MODEL fallback openrouter/minimax/minimax-m2.5
 MODEL fallback anthropic/claude-sonnet-4-6
 
 HANDLE discord

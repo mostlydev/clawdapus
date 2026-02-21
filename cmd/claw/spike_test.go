@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mostlydev/clawdapus/internal/build"
 )
 
 // TestSpikeComposeUp is a full end-to-end integration test for the trading-desk
@@ -49,8 +51,15 @@ func TestSpikeComposeUp(t *testing.T) {
 	}
 
 	// Build images before running compose up.
+	// openclaw:latest is the base runtime image; build it from the local
+	// Dockerfile.openclaw-base if it isn't already present.
+	if !spikeImageExists("openclaw:latest") {
+		spikeBuildImage(t, dir, "openclaw:latest", "Dockerfile.openclaw-base")
+	}
 	spikeBuildImage(t, dir, "trading-desk:latest", "Clawfile")
-	spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
+	if !spikeImageExists("trading-api:latest") {
+		spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
+	}
 
 	// Write a pre-expanded spike pod YAML so Go YAML parser sees real IDs.
 	rawPod := spikeReadFile(t, filepath.Join(dir, "claw-pod.yml"))
@@ -243,9 +252,27 @@ func spikeReadFile(t *testing.T, path string) string {
 	return string(data)
 }
 
+// spikeBuildImage builds a Docker image. If dockerfile is a Clawfile it
+// transpiles it first via the build package; otherwise it calls docker build
+// directly (regular Dockerfile).
 func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 	t.Helper()
 	t.Logf("building %s from %s...", tag, dockerfile)
+
+	clawfilePath := filepath.Join(contextDir, dockerfile)
+
+	if filepath.Base(dockerfile) == "Clawfile" {
+		// Transpile Clawfile → Dockerfile.generated, then docker build
+		generatedPath, err := build.Generate(clawfilePath)
+		if err != nil {
+			t.Fatalf("claw build generate %s: %v", clawfilePath, err)
+		}
+		if err := build.BuildFromGenerated(generatedPath, tag); err != nil {
+			t.Fatalf("claw build %s: %v", tag, err)
+		}
+		return
+	}
+
 	cmd := exec.Command("docker", "build", "-t", tag, "-f", dockerfile, ".")
 	cmd.Dir = contextDir
 	out, err := cmd.CombinedOutput()
@@ -267,6 +294,11 @@ func spikeWaitRunning(t *testing.T, containerName string, timeout time.Duration)
 	// Get container logs to help diagnose failures
 	logs, _ := exec.Command("docker", "logs", "--tail", "20", containerName).CombinedOutput()
 	t.Fatalf("container %q not running after %v\nlogs:\n%s", containerName, timeout, logs)
+}
+
+func spikeImageExists(tag string) bool {
+	out, err := exec.Command("docker", "image", "inspect", "--format", "{{.Id}}", tag).Output()
+	return err == nil && len(strings.TrimSpace(string(out))) > 0
 }
 
 func spikeMapKeys(m map[string]interface{}) []string {

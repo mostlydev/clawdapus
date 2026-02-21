@@ -1,0 +1,24 @@
+# Base image for openclaw agents.
+# Builds the openclaw:latest image from the npm package.
+#
+# Usage:
+#   docker build -t openclaw:latest -f Dockerfile.openclaw-base .
+#
+# The Clawfile uses FROM openclaw:latest — build this first if you don't
+# already have the image locally.
+
+FROM node:22-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash ca-certificates cron curl git jq tini \
+    build-essential python3 make g++ cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-prompt --no-onboard --method npm
+
+RUN mkdir -p /claw
+
+COPY entrypoint.sh /claw/entrypoint.sh
+RUN chmod +x /claw/entrypoint.sh
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/claw/entrypoint.sh"]
