@@ -1,0 +1,25 @@
+# Trading API — not a claw, but self-describes via claw.skill.emit
+#
+# LABEL claw.skill.emit causes clawdapus to extract trade.md from this image
+# at compose-up time and mount it into every claw that declares
+# surface: service://trading-api.  Agents get the authoritative API docs
+# from the service itself — no static pod-level copy that can drift.
+
+FROM ruby:3.3-slim
+
+RUN apt-get update && apt-get install -y \
+    build-essential libpq-dev postgresql-client nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY Gemfile Gemfile.lock ./
+RUN bundle install
+COPY . .
+
+# The skill file lives inside the image.
+# clawdapus extracts it at compose-up time via docker cp (create + copy + rm).
+# Agents never fetch it at runtime — it's mounted read-only into /claw/skills/.
+LABEL claw.skill.emit=/app/skills/trade.md
+
+EXPOSE 4000
+CMD ["bin/rails", "server", "-b", "0.0.0.0", "-p", "4000"]

@@ -1,0 +1,10 @@
+FROM claw-trading-agent:latest
+
+# Westin: Momentum / Tech Stocks
+CONFIGURE openclaw config set agents.defaults.heartbeat.every 15m
+CONFIGURE openclaw config set agents.defaults.heartbeat.to channel:${DISCORD_TRADING_FLOOR_CHANNEL}
+
+INVOKE 0 7 * * 1-5 "Pre-market research. Write to /mnt/clawd-shared/reports/morning/$(date +%Y-%m-%d)-westin.md then post brief to #trading-floor."
+INVOKE 2 10,14 * * 1-5 "Research review. Update /mnt/clawd-shared/research/tickers/ for holdings and watchlist."
+INVOKE 0 12 * * 1-5 "Midday review. Check positions, update stops, post status."
+INVOKE 30 16 * * 1-5 "End of day report. Write to /mnt/clawd-shared/reports/daily/$(date +%Y-%m-%d)-westin.md."

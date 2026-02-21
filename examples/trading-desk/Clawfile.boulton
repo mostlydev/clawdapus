@@ -1,0 +1,10 @@
+FROM claw-trading-agent:latest
+
+# Boulton: Pump Trader — High-Risk / Crypto
+# Operates nearly 24/7. Small wallet. No shared risk with other traders.
+CONFIGURE openclaw config set agents.defaults.heartbeat.every 5m
+CONFIGURE openclaw config set agents.defaults.heartbeat.to channel:${DISCORD_TRADING_FLOOR_CHANNEL}
+
+INVOKE */5 4-19 * * 1-5 "Heartbeat. Scan sentiment, check positions, act if warranted."
+INVOKE 0,30 20-23,0-3 * * 1-5 "Crypto heartbeat. Check momentum, manage open crypto positions."
+INVOKE 0 */2 * * 0,6 "Weekend crypto discovery. Scan sentiment, lightweight."

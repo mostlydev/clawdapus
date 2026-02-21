@@ -1,0 +1,268 @@
+x-claw:
+  pod: trading-desk
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trading Desk Pod
+#
+# Seven isolated openclaw agents coordinating via Discord and a shared
+# research volume. Each agent runs its own openclaw instance in its own
+# container — previously all agents shared a single monolithic process.
+#
+# How volumes work in this pod format:
+#
+#   surface: "volume://clawd-shared read-write"
+#
+#   This declaration does two things in one:
+#     1. Declares the named volume at the top level of compose.generated.yml
+#     2. Mounts it into the container at /mnt/clawd-shared
+#
+#   The agent finds the volume at /mnt/clawd-shared — CLAWDAPUS.md confirms
+#   the exact path at runtime so the agent doesn't have to guess.
+#
+#   Note: top-level "volumes:" and per-service "volumes:" in the pod file are
+#   not parsed by clawdapus. Volume declaration and mounting flow entirely
+#   through the surface mechanism.
+#
+# Agent workspace persistence (open problem):
+#
+#   In the monolith, ~/clawd-{agent}/ was a persistent directory on the host.
+#   In this pod, each container's own filesystem is the workspace, but it
+#   evaporates on restart. Private named volumes (one per agent, not shared)
+#   are not yet expressible in the pod format — future work.
+#
+# Self-describing services:
+#   trading-api carries LABEL claw.skill.emit=/app/skills/trade.md
+#   clawdapus extracts it at compose-up time and mounts it read-only into
+#   every claw that declares surface: service://trading-api.
+#   No static trade.md lives in this pod — the API describes itself.
+#
+# Required environment variables (.env or Docker secrets):
+#   POSTGRES_PASSWORD, SECRET_KEY_BASE
+#   TIVERTON_BOT_TOKEN, WESTIN_BOT_TOKEN, LOGAN_BOT_TOKEN
+#   GERRARD_BOT_TOKEN, DUNDAS_BOT_TOKEN, BOULTON_BOT_TOKEN, ALLEN_BOT_TOKEN
+#   ALPACA_API_KEY, ALPACA_SECRET_KEY
+#   APEWISDOM_API_KEY  (Dundas and Boulton only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Infrastructure (non-claw) ──────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_DB: trading_api_development
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+
+  trading-api:
+    image: trading-api:latest
+    expose:
+      - "4000"
+    environment:
+      RAILS_ENV: development
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/trading_api_development"
+      SECRET_KEY_BASE: "${SECRET_KEY_BASE}"
+    depends_on:
+      - postgres
+
+  # ── Tiverton — Coordinator, Compliance, News Synthesis ───────────────────
+
+  tiverton:
+    image: claw-trading-tiverton:latest
+    x-claw:
+      agent: ./agents/TIVERTON.md
+      handles:
+        discord:
+          id: "${TIVERTON_DISCORD_ID}"
+          username: "tiverton"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Trading Floor"
+              channels:
+                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+                  name: trading-floor
+                - id: "${DISCORD_INFRA_CHANNEL}"
+                  name: infra
+      surfaces:
+        - "service://trading-api"
+        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
+      skills:
+        - ./policy/risk-limits.md
+        - ./policy/approval-workflow.md
+    environment:
+      DISCORD_BOT_TOKEN: "${TIVERTON_BOT_TOKEN}"
+      DISCORD_APP_ID: "${TIVERTON_DISCORD_ID}"
+      ALPACA_API_KEY: "${ALPACA_API_KEY}"
+      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
+
+  # ── Westin — Momentum / Tech Stocks ──────────────────────────────────────
+
+  westin:
+    image: claw-trading-westin:latest
+    x-claw:
+      agent: ./agents/WESTIN.md
+      handles:
+        discord:
+          id: "${WESTIN_DISCORD_ID}"
+          username: "westin"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Trading Floor"
+              channels:
+                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
+      skills:
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: "${WESTIN_BOT_TOKEN}"
+      DISCORD_APP_ID: "${WESTIN_DISCORD_ID}"
+      ALPACA_API_KEY: "${ALPACA_API_KEY}"
+      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
+
+  # ── Logan — Value / Fundamentals ─────────────────────────────────────────
+
+  logan:
+    image: claw-trading-logan:latest
+    x-claw:
+      agent: ./agents/LOGAN.md
+      handles:
+        discord:
+          id: "${LOGAN_DISCORD_ID}"
+          username: "logan"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Trading Floor"
+              channels:
+                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
+      skills:
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: "${LOGAN_BOT_TOKEN}"
+      DISCORD_APP_ID: "${LOGAN_DISCORD_ID}"
+      ALPACA_API_KEY: "${ALPACA_API_KEY}"
+      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
+
+  # ── Gerrard — Macro / Sector Rotation ────────────────────────────────────
+
+  gerrard:
+    image: claw-trading-gerrard:latest
+    x-claw:
+      agent: ./agents/GERRARD.md
+      handles:
+        discord:
+          id: "${GERRARD_DISCORD_ID}"
+          username: "gerrard"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Trading Floor"
+              channels:
+                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
+      skills:
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: "${GERRARD_BOT_TOKEN}"
+      DISCORD_APP_ID: "${GERRARD_DISCORD_ID}"
+      ALPACA_API_KEY: "${ALPACA_API_KEY}"
+      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
+
+  # ── Dundas — Event Trader + News Dispatcher ───────────────────────────────
+
+  dundas:
+    image: claw-trading-dundas:latest
+    x-claw:
+      agent: ./agents/DUNDAS.md
+      handles:
+        discord:
+          id: "${DUNDAS_DISCORD_ID}"
+          username: "dundas"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Trading Floor"
+              channels:
+                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
+      skills:
+        - ./skills/news-routing.md
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: "${DUNDAS_BOT_TOKEN}"
+      DISCORD_APP_ID: "${DUNDAS_DISCORD_ID}"
+      ALPACA_API_KEY: "${ALPACA_API_KEY}"
+      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
+      APEWISDOM_API_KEY: "${APEWISDOM_API_KEY}"
+
+  # ── Boulton — Pump Trader, High-Risk / Crypto ────────────────────────────
+
+  boulton:
+    image: claw-trading-boulton:latest
+    x-claw:
+      agent: ./agents/BOULTON.md
+      handles:
+        discord:
+          id: "${BOULTON_DISCORD_ID}"
+          username: "boulton"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Trading Floor"
+              channels:
+                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://clawd-shared read-write"  # mounted at /mnt/clawd-shared
+      skills:
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: "${BOULTON_BOT_TOKEN}"
+      DISCORD_APP_ID: "${BOULTON_DISCORD_ID}"
+      ALPACA_API_KEY: "${ALPACA_API_KEY}"
+      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
+      APEWISDOM_API_KEY: "${APEWISDOM_API_KEY}"
+
+  # ── Allen — Systems Monitor ───────────────────────────────────────────────
+
+  allen:
+    image: claw-trading-allen:latest
+    x-claw:
+      agent: ./agents/ALLEN.md
+      handles:
+        discord:
+          id: "${ALLEN_DISCORD_ID}"
+          username: "allen"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Trading Floor"
+              channels:
+                - id: "${DISCORD_INFRA_CHANNEL}"
+                  name: infra
+                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "service://tiverton"
+        - "service://westin"
+        - "service://logan"
+        - "service://gerrard"
+        - "service://dundas"
+        - "service://boulton"
+        - "volume://clawd-shared read-only"   # mounted at /mnt/clawd-shared
+    environment:
+      DISCORD_BOT_TOKEN: "${ALLEN_BOT_TOKEN}"
+      DISCORD_APP_ID: "${ALLEN_DISCORD_ID}"
