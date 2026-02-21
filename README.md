@@ -141,6 +141,8 @@ INVOKE 0,30 * * * * heartbeat
 SURFACE channel://discord
 SURFACE service://fleet-master
 
+SKILL ./skills/openclaw-runbook.md
+
 PRIVILEGE runtime claw-user
 RUN npm install -g openclaw@2026.2.9
 ```
