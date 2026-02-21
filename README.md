@@ -160,6 +160,20 @@ RUN npm install -g openclaw@2026.2.9
 
 ---
 
+## AI Agent Skill
+
+A portable skill file for AI coding agents (Claude Code, etc.) is available at [`skills/clawdapus/SKILL.md`](./skills/clawdapus/SKILL.md). It teaches agents how to use the `claw` CLI, understand Clawfile directives, and work with `claw-pod.yml`.
+
+**Install for Claude Code:**
+
+```bash
+cp -r skills/clawdapus ~/.claude/skills/
+```
+
+The skill triggers automatically when agents encounter Clawfile directives or `claw` commands.
+
+---
+
 ## Contributing
 
 Start with [`MANIFESTO.md`](./MANIFESTO.md), then read the architecture and spike plan documents.
