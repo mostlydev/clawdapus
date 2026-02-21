@@ -30,6 +30,7 @@ type rawClawBlock struct {
 	Cllama   string   `yaml:"cllama"`
 	Count    int      `yaml:"count"`
 	Surfaces []string `yaml:"surfaces"`
+	Skills   []string `yaml:"skills"`
 }
 
 // Parse reads a claw-pod.yml from the given reader.
@@ -59,12 +60,17 @@ func Parse(r io.Reader) (*Pod, error) {
 			if surfaces == nil {
 				surfaces = make([]string, 0)
 			}
+			skills := svc.XClaw.Skills
+			if skills == nil {
+				skills = make([]string, 0)
+			}
 			service.Claw = &ClawBlock{
 				Agent:    svc.XClaw.Agent,
 				Persona:  svc.XClaw.Persona,
 				Cllama:   svc.XClaw.Cllama,
 				Count:    count,
 				Surfaces: surfaces,
+				Skills:   skills,
 			}
 		}
 		pod.Services[name] = service

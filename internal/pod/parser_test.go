@@ -29,6 +29,51 @@ services:
         - "volume://shared-cache read-write"
 `
 
+const testPodWithSkillsYAML = `
+x-claw:
+  pod: skill-pod
+
+services:
+  worker:
+    image: claw-openclaw-example
+    x-claw:
+      agent: ./AGENTS.md
+      skills:
+        - ./skills/custom-workflow.md
+        - ./skills/team-conventions.md
+`
+
+func TestParsePodExtractsSkills(t *testing.T) {
+	pod, err := Parse(strings.NewReader(testPodWithSkillsYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	worker := pod.Services["worker"]
+	if worker == nil {
+		t.Fatal("expected worker service")
+	}
+	if len(worker.Claw.Skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(worker.Claw.Skills))
+	}
+	if worker.Claw.Skills[0] != "./skills/custom-workflow.md" {
+		t.Errorf("expected first skill, got %q", worker.Claw.Skills[0])
+	}
+}
+
+func TestParsePodDefaultsEmptySkills(t *testing.T) {
+	pod, err := Parse(strings.NewReader(testPodYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	coord := pod.Services["coordinator"]
+	if coord.Claw.Skills == nil {
+		t.Error("expected non-nil skills slice (empty, not nil)")
+	}
+	if len(coord.Claw.Skills) != 0 {
+		t.Errorf("expected 0 skills, got %d", len(coord.Claw.Skills))
+	}
+}
+
 func TestParsePodExtractsPodName(t *testing.T) {
 	pod, err := Parse(strings.NewReader(testPodYAML))
 	if err != nil {

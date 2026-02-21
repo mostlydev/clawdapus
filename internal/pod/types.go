@@ -20,4 +20,5 @@ type ClawBlock struct {
 	Cllama   string
 	Count    int
 	Surfaces []string
+	Skills   []string
 }
