@@ -61,6 +61,27 @@ func TestParseLabelsExtractsClawLabels(t *testing.T) {
 	}
 }
 
+func TestParseLabelsExtractsSkillEmit(t *testing.T) {
+	raw := map[string]string{
+		"claw.type":       "openclaw",
+		"claw.skill.emit": "/app/SKILL.md",
+		"claw.skill.0":    "./skills/custom-workflow.md",
+	}
+
+	info := ParseLabels(raw)
+
+	if info.SkillEmit != "/app/SKILL.md" {
+		t.Fatalf("expected SkillEmit=/app/SKILL.md, got %q", info.SkillEmit)
+	}
+	// skill.emit should not appear in the Skills slice
+	if len(info.Skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d: %v", len(info.Skills), info.Skills)
+	}
+	if info.Skills[0] != "./skills/custom-workflow.md" {
+		t.Fatalf("expected skill[0] to be custom-workflow, got %q", info.Skills[0])
+	}
+}
+
 func TestParseLabelsIgnoresNonClawLabels(t *testing.T) {
 	raw := map[string]string{
 		"org.opencontainers.image.title": "something",

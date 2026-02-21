@@ -20,6 +20,7 @@ type ClawInfo struct {
 	Skills     []string
 	Privileges map[string]string
 	Configures []string
+	SkillEmit  string // claw.skill.emit label: path to skill file inside image
 }
 
 func ParseLabels(labels map[string]string) *ClawInfo {
@@ -72,6 +73,8 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 				Key:   key,
 				Value: value,
 			})
+		case key == "claw.skill.emit":
+			info.SkillEmit = value
 		case strings.HasPrefix(key, "claw.skill."):
 			index := maxInt()
 			suffix := strings.TrimPrefix(key, "claw.skill.")
