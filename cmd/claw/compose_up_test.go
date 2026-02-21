@@ -92,3 +92,37 @@ func TestResolveSkillEmitRejectsInvalidPath(t *testing.T) {
 		t.Fatal("expected invalid emitted skill path error")
 	}
 }
+
+func TestResolveServiceGeneratedSkills(t *testing.T) {
+	tmpDir := t.TempDir()
+	surfaces := []driver.ResolvedSurface{
+		{
+			Scheme: "service",
+			Target: "api-server",
+			Ports:  []string{"8080"},
+		},
+		{
+			Scheme: "service",
+			Target: "db",
+		},
+		{
+			Scheme: "channel",
+			Target: "discord",
+		},
+	}
+
+	skills, err := resolveServiceGeneratedSkills(tmpDir, surfaces)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(skills) != 2 {
+		t.Fatalf("expected 2 generated skills, got %d", len(skills))
+	}
+
+	if skills[0].Name != "surface-api-server.md" && skills[1].Name != "surface-api-server.md" {
+		t.Fatalf("expected generated skill for api-server, got %v", []string{skills[0].Name, skills[1].Name})
+	}
+	if skills[0].Name != "surface-db.md" && skills[1].Name != "surface-db.md" {
+		t.Fatalf("expected generated skill for db, got %v", []string{skills[0].Name, skills[1].Name})
+	}
+}

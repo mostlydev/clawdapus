@@ -141,6 +141,10 @@ func runComposeUp(podFile string) error {
 				imageSkills = append(imageSkills, *emitSkill)
 			}
 		}
+		generatedSkills, err := resolveServiceGeneratedSkills(svcRuntimeDir, surfaces)
+		if err != nil {
+			return fmt.Errorf("service %q: resolve generated service skills: %w", name, err)
+		}
 		podSkills := make([]driver.ResolvedSkill, 0)
 		if svc.Claw != nil {
 			podSkills, err = runtime.ResolveSkills(podDir, svc.Claw.Skills)
@@ -149,6 +153,10 @@ func runComposeUp(podFile string) error {
 			}
 		}
 		skills := mergeResolvedSkills(imageSkills, podSkills)
+		if len(generatedSkills) > 0 {
+			// Pod and image skills override generated defaults.
+			skills = mergeResolvedSkills(generatedSkills, skills)
+		}
 
 		rc := &driver.ResolvedClaw{
 			ServiceName:   name,
@@ -296,6 +304,42 @@ func resolveSkillEmit(serviceName, runtimeDir, imageRef, emitPath string) (*driv
 		Name:     name,
 		HostPath: emitHostPath,
 	}, nil
+}
+
+func resolveServiceGeneratedSkills(runtimeDir string, surfaces []driver.ResolvedSurface) ([]driver.ResolvedSkill, error) {
+	surfaceSkillsDir := filepath.Join(runtimeDir, "skills")
+	generated := make([]driver.ResolvedSkill, 0)
+	seen := make(map[string]struct{}, len(surfaces))
+
+	for _, surface := range surfaces {
+		if surface.Scheme != "service" {
+			continue
+		}
+
+		name := fmt.Sprintf("surface-%s.md", strings.TrimSpace(strings.ReplaceAll(surface.Target, "/", "-")))
+		if name == "surface-.md" {
+			return nil, fmt.Errorf("invalid service target for generated skill: %q", surface.Target)
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+
+		skillPath := filepath.Join(surfaceSkillsDir, name)
+		if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
+			return nil, fmt.Errorf("create generated skill dir: %w", err)
+		}
+		content := runtime.GenerateServiceSkillFallback(surface.Target, surface.Ports)
+		if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
+			return nil, fmt.Errorf("write generated service skill %q: %w", name, err)
+		}
+		generated = append(generated, driver.ResolvedSkill{
+			Name:     name,
+			HostPath: skillPath,
+		})
+	}
+
+	return generated, nil
 }
 
 func resolveContainerIDs(composePath, serviceName string) ([]string, error) {
