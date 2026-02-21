@@ -2,6 +2,11 @@ x-claw:
   pod: research-pod
 
 services:
+  api-server:
+    image: nginx:alpine
+    expose:
+      - "80"
+
   researcher:
     image: claw-openclaw-example
     x-claw:
@@ -10,6 +15,7 @@ services:
         - ./skills/research-methodology.md
       surfaces:
         - "volume://research-cache read-write"
+        - "service://api-server"
 
   analyst:
     image: claw-openclaw-example
