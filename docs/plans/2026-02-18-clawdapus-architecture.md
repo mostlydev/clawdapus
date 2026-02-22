@@ -145,13 +145,15 @@ cllama is not just an output filter — it is a context-aware, bidirectional pro
 
 Because the agent lacks the credentials to call providers directly, all successful inference *must* pass through the proxy. This "Credential Starvation" guarantees interception even if a malicious prompt tricks the agent into ignoring its configured base URL, while still allowing the agent to natively reach the internet for chat platforms and web tools.
 
-**Transport: sidecar per Claw (when enabled).**
-- Each Claw with a `CLLAMA` directive gets a `cllama-sidecar` container, injected by `claw up`
-- Sidecar exposes an OpenAI-compatible API endpoint on a private network
-- Runner's LLM base URL is rewritten to point at the sidecar (via ENV injection)
-- Sidecar applies the policy pipeline: identity → contract validation → intervention
-- Sidecar holds real API keys — runner never sees provider keys
-- Sidecar also intercepts tool calls and enforces `require_cllama` constraints
+**Transport: Shared Pod Proxy (default).**
+- Each pod with a `CLLAMA` directive gets a single `cllama-proxy` container, injected by `claw up`
+- Proxy serves all Claws in the pod, reducing resource overhead.
+- Identity is established via unique per-agent **Bearer Tokens** (`Authorization: Bearer <id>:<secret>`).
+- Proxy resolves agent-specific context (contract, policy, identity) from a **Shared Context Mount** (`/claw/context/<agent-id>/`).
+- Proxy exposes an OpenAI-compatible API endpoint on a private pod-internal network.
+- Runner's LLM base URL is rewritten to point at the shared proxy.
+- Proxy applies the policy pipeline: identity resolution → contract validation → intervention.
+- Proxy holds real API keys and enforces pod-wide or per-agent compute budgets.
 
 **Dual modes:**
 - **Proxy mode (default):** HTTP sidecar. Works with any runner that makes HTTP calls to an LLM endpoint. No runner integration needed.

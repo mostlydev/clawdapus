@@ -106,7 +106,7 @@ The runner never knows. It thinks it's talking directly to the model.
 
 ### Enforcement via Credential Starvation
 
-Isolation is achieved by strictly separating secrets rather than relying solely on network boundaries. When cllama is enabled, the cllama sidecar holds the real LLM provider API keys. The agent container is provisioned with a local dummy token and its LLM base URL is rewritten to point at the sidecar. 
+Isolation is achieved by strictly separating secrets rather than relying solely on network boundaries. When cllama is enabled, the cllama proxy holds the real LLM provider API keys. The agent container is provisioned with a unique Bearer Token and its LLM base URL is rewritten to point at the shared pod proxy. 
 
 Because the agent lacks the credentials to call providers directly, all successful inference *must* pass through the proxy. This "Credential Starvation" guarantees interception even if a malicious prompt tricks the agent into ignoring its configured base URL, while still allowing the agent to natively reach the internet for chat platforms and web tools.
 
@@ -128,9 +128,14 @@ Crucially, because the proxy holds the sole set of provider keys, it acts as a *
 
 *"Does this serve our strategic objective?"* — Purpose alignment evaluation.
 
-### Identity-Aware Policy
+### Transport: Shared Pod Proxy
 
-cllama does not just evaluate text. It evaluates text *in context*. It accepts the Claw's persona and the recipient's identity as inputs into governance. The same raw output from a runner might be acceptable when directed at one audience and unacceptable when directed at another. A single cllama policy can govern a diverse pod because it reads identities and adjusts.
+By default, Clawdapus deploys a single **shared governance proxy** per pod, rather than a separate sidecar for every agent. This drastically reduces resource overhead for multi-agent fleets.
+
+- **Identity via Bearer Tokens:** Each agent is provisioned with a unique Bearer Token (`Authorization: Bearer <id>:<secret>`). The proxy uses this token to resolve the specific agent's identity and load its unique behavioral contract.
+- **Shared Context Mount:** Clawdapus mounts a pod-wide context directory into the proxy, containing agent-specific subdirectories for contracts (`AGENTS.md`) and metadata.
+- **Centralized Enforcement:** The shared proxy handles the policy pipeline for the entire fleet, enabling pod-wide rate limits, centralized audit logging, and efficient compute metering.
+- **Runner Transparency:** Each runner's LLM base URL is rewritten to point at the shared pod proxy. The runner remains unaware it is sharing the governance layer.
 
 ### The CLLAMA Directive
 
@@ -161,7 +166,7 @@ cllama can be configured procedurally — rigid code for high-security rails, ha
 
 ### Enforcement via Credential Starvation
 
-Isolation is achieved by strictly separating secrets rather than relying solely on network boundaries. When cllama is enabled, the cllama sidecar holds the real LLM provider API keys. The agent container is provisioned with a local dummy token and its LLM base URL is rewritten to point at the sidecar. 
+Isolation is achieved by strictly separating secrets rather than relying solely on network boundaries. When cllama is enabled, the cllama proxy holds the real LLM provider API keys. The agent container is provisioned with a unique Bearer Token and its LLM base URL is rewritten to point at the shared pod proxy. 
 
 Because the agent lacks the credentials to call providers directly, all successful inference *must* pass through the proxy. This "Credential Starvation" guarantees interception even if a malicious prompt tricks the agent into ignoring its configured base URL, while still allowing the agent to natively reach the internet for chat platforms and web tools.
 
