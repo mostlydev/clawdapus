@@ -53,11 +53,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 		if svc.Claw == nil {
 			continue
 		}
-		for _, raw := range svc.Claw.Surfaces {
-			surface, err := ParseSurface(raw)
-			if err != nil {
-				continue // validated later in main loop
-			}
+		for _, surface := range svc.Claw.Surfaces {
 			if surface.Scheme == "service" {
 				serviceSurfaceTargets[strings.TrimSpace(surface.Target)] = struct{}{}
 			}
@@ -99,11 +95,8 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 		// Collect volume surfaces for this service
 		var volumeMounts []string
 		if svc.Claw != nil {
-			for _, raw := range svc.Claw.Surfaces {
-				surface, err := ParseSurface(raw)
-				if err != nil {
-					return "", fmt.Errorf("service %q: %w", name, err)
-				}
+			for _, surface := range svc.Claw.Surfaces {
+				surfaceURI := surface.Scheme + "://" + surface.Target
 
 				switch surface.Scheme {
 				case "volume":
@@ -113,7 +106,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 					}
 					volName := strings.TrimSpace(surface.Target)
 					if volName == "" {
-						return "", fmt.Errorf("service %q: volume surface %q is missing target", name, raw)
+						return "", fmt.Errorf("service %q: volume surface %q is missing target", name, surfaceURI)
 					}
 					cf.Volumes[volName] = nil // top-level volume declaration
 					volumeMounts = append(volumeMounts, fmt.Sprintf("%s:/mnt/%s:%s", volName, volName, accessMode))
@@ -125,10 +118,10 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 					}
 					hostPath := strings.TrimSpace(surface.Target)
 					if hostPath == "" {
-						return "", fmt.Errorf("service %q: host surface %q is missing path", name, raw)
+						return "", fmt.Errorf("service %q: host surface %q is missing path", name, surfaceURI)
 					}
 					if !strings.HasPrefix(hostPath, "/") {
-						return "", fmt.Errorf("service %q: host surface %q must use an absolute host path", name, raw)
+						return "", fmt.Errorf("service %q: host surface %q must use an absolute host path", name, surfaceURI)
 					}
 					volumeMounts = append(volumeMounts, fmt.Sprintf("%s:%s:%s", hostPath, hostPath, accessMode))
 
@@ -136,20 +129,20 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 					if surface.Scheme == "service" {
 						target := strings.TrimSpace(surface.Target)
 						if target == "" {
-							return "", fmt.Errorf("service %q: service surface %q has empty target", name, raw)
+							return "", fmt.Errorf("service %q: service surface %q has empty target", name, surfaceURI)
 						}
 						if _, ok := p.Services[target]; !ok {
-							return "", fmt.Errorf("service %q: service surface %q targets unknown service %q", name, raw, target)
+							return "", fmt.Errorf("service %q: service surface %q targets unknown service %q", name, surfaceURI, target)
 						}
 					}
 
 					if strings.TrimSpace(surface.AccessMode) != "" {
-						return "", fmt.Errorf("service %q: surface %q does not support access mode %q", name, raw, surface.AccessMode)
+						return "", fmt.Errorf("service %q: surface %q does not support access mode %q", name, surfaceURI, surface.AccessMode)
 					}
 					// Topology only; no compose mounts.
 
 				default:
-					return "", fmt.Errorf("service %q: unsupported surface scheme %q in %q", name, surface.Scheme, raw)
+					return "", fmt.Errorf("service %q: unsupported surface scheme %q in %q", name, surface.Scheme, surfaceURI)
 				}
 			}
 		}

@@ -38,7 +38,7 @@ func TestEmitComposeHostSurfaceReadOnly(t *testing.T) {
 			"worker": {
 				Image: "ghcr.io/example/worker:v1",
 				Claw: &ClawBlock{
-					Surfaces: []string{"host:///data/workspace read-only"},
+					Surfaces: []driver.ResolvedSurface{{Scheme: "host", Target: "/data/workspace", AccessMode: "read-only"}},
 				},
 			},
 		},
@@ -68,7 +68,7 @@ func TestEmitComposeVolumeSurfaceReadOnly(t *testing.T) {
 			"worker": {
 				Image: "ghcr.io/example/worker:v1",
 				Claw: &ClawBlock{
-					Surfaces: []string{"volume://shared-cache read-only"},
+					Surfaces: []driver.ResolvedSurface{{Scheme: "volume", Target: "shared-cache", AccessMode: "read-only"}},
 				},
 			},
 		},
@@ -221,7 +221,7 @@ func TestEmitComposeVolumeSurfaceOpaqueURI(t *testing.T) {
 			"worker": {
 				Image: "ghcr.io/example/worker:v1",
 				Claw: &ClawBlock{
-					Surfaces: []string{"volume:shared-cache read-write"},
+					Surfaces: []driver.ResolvedSurface{{Scheme: "volume", Target: "shared-cache", AccessMode: "read-write"}},
 				},
 			},
 		},
@@ -251,7 +251,7 @@ func TestEmitComposeRejectsInvalidSurfaceAccessMode(t *testing.T) {
 			"worker": {
 				Image: "ghcr.io/example/worker:v1",
 				Claw: &ClawBlock{
-					Surfaces: []string{"volume://shared-cache read-only-ish"},
+					Surfaces: []driver.ResolvedSurface{{Scheme: "volume", Target: "shared-cache", AccessMode: "read-only-ish"}},
 				},
 			},
 		},

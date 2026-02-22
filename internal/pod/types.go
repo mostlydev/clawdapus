@@ -32,7 +32,7 @@ type ClawBlock struct {
 	Cllama   string
 	Count    int
 	Handles  map[string]*driver.HandleInfo // platform → contact card
-	Surfaces []string
+	Surfaces []driver.ResolvedSurface
 	Skills   []string
 	Invoke   []InvokeEntry
 }

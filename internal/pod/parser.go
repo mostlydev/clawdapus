@@ -43,7 +43,7 @@ type rawClawBlock struct {
 	Cllama   string                 `yaml:"cllama"`
 	Count    int                    `yaml:"count"`
 	Handles  map[string]interface{} `yaml:"handles"`
-	Surfaces []string               `yaml:"surfaces"`
+	Surfaces []interface{}          `yaml:"surfaces"`
 	Skills   []string               `yaml:"skills"`
 	Invoke   []rawInvokeEntry       `yaml:"invoke"`
 }
@@ -87,9 +87,24 @@ func Parse(r io.Reader) (*Pod, error) {
 			if count < 1 {
 				count = 1
 			}
-			surfaces := svc.XClaw.Surfaces
-			if surfaces == nil {
-				surfaces = make([]string, 0)
+			parsedSurfaces := make([]driver.ResolvedSurface, 0, len(svc.XClaw.Surfaces))
+			for _, rawSurf := range svc.XClaw.Surfaces {
+				switch v := rawSurf.(type) {
+				case string:
+					s, err := ParseSurface(v)
+					if err != nil {
+						return nil, fmt.Errorf("service %q: surface %q: %w", name, v, err)
+					}
+					parsedSurfaces = append(parsedSurfaces, s)
+				case map[string]interface{}:
+					s, err := parseChannelSurfaceMap(v)
+					if err != nil {
+						return nil, fmt.Errorf("service %q: map-form surface: %w", name, err)
+					}
+					parsedSurfaces = append(parsedSurfaces, s)
+				default:
+					return nil, fmt.Errorf("service %q: unsupported surface entry type %T", name, rawSurf)
+				}
 			}
 			skills := svc.XClaw.Skills
 			if skills == nil {
@@ -117,7 +132,7 @@ func Parse(r io.Reader) (*Pod, error) {
 				Cllama:   svc.XClaw.Cllama,
 				Count:    count,
 				Handles:  handles,
-				Surfaces: surfaces,
+				Surfaces: parsedSurfaces,
 				Skills:   skills,
 				Invoke:   invoke,
 			}

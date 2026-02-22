@@ -156,8 +156,8 @@ func TestEmitComposeVolumeSurface(t *testing.T) {
 			"processor": {
 				Image: "ghcr.io/example/proc:v1",
 				Claw: &ClawBlock{
-					Surfaces: []string{
-						"volume://shared-cache read-write",
+					Surfaces: []driver.ResolvedSurface{
+						{Scheme: "volume", Target: "shared-cache", AccessMode: "read-write"},
 					},
 				},
 			},
@@ -197,8 +197,8 @@ func TestEmitComposeRejectsUnknownServiceSurfaceTarget(t *testing.T) {
 			"researcher": {
 				Image: "ghcr.io/example/researcher:v1",
 				Claw: &ClawBlock{
-					Surfaces: []string{
-						"service://gateway",
+					Surfaces: []driver.ResolvedSurface{
+						{Scheme: "service", Target: "gateway"},
 					},
 				},
 			},
@@ -228,16 +228,16 @@ func TestEmitComposeMultiServiceSharedVolume(t *testing.T) {
 			"researcher": {
 				Image: "claw-openclaw-example",
 				Claw: &ClawBlock{
-					Surfaces: []string{
-						"volume://research-cache read-write",
+					Surfaces: []driver.ResolvedSurface{
+						{Scheme: "volume", Target: "research-cache", AccessMode: "read-write"},
 					},
 				},
 			},
 			"analyst": {
 				Image: "claw-openclaw-example",
 				Claw: &ClawBlock{
-					Surfaces: []string{
-						"volume://research-cache read-only",
+					Surfaces: []driver.ResolvedSurface{
+						{Scheme: "volume", Target: "research-cache", AccessMode: "read-only"},
 					},
 				},
 			},

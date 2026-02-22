@@ -110,16 +110,10 @@ func runComposeUp(podFile string) error {
 			agentHostPath = contract.HostPath
 		}
 
-		// Parse pod-level surfaces into ResolvedSurface structs
+		// Surfaces are already parsed by pod.Parse() — use them directly.
 		var surfaces []driver.ResolvedSurface
 		if svc.Claw != nil {
-			for _, raw := range svc.Claw.Surfaces {
-				s, err := pod.ParseSurface(raw)
-				if err != nil {
-					return fmt.Errorf("service %q: %w", name, err)
-				}
-				surfaces = append(surfaces, s)
-			}
+			surfaces = svc.Claw.Surfaces
 		}
 
 		// Enrich service surfaces with port info from pod service definitions.

@@ -18,8 +18,8 @@ func TestEmitComposeServiceSurfaceTargetGetsNetwork(t *testing.T) {
 			"researcher": {
 				Image: "claw-openclaw-example",
 				Claw: &ClawBlock{
-					Surfaces: []string{
-						"service://api-server",
+					Surfaces: []driver.ResolvedSurface{
+						{Scheme: "service", Target: "api-server"},
 					},
 				},
 			},
@@ -80,8 +80,8 @@ func TestEmitComposeNonTargetServiceNotOnNetwork(t *testing.T) {
 			"researcher": {
 				Image: "claw-openclaw-example",
 				Claw: &ClawBlock{
-					Surfaces: []string{
-						"service://api-server",
+					Surfaces: []driver.ResolvedSurface{
+						{Scheme: "service", Target: "api-server"},
 					},
 				},
 			},
