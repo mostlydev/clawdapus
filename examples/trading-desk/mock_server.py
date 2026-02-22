@@ -1,10 +1,20 @@
 """
 Mock trading-api server for local development and claw.skill.emit testing.
 
+On startup, posts a status message to Discord via webhook, mentioning the
+sibling agent bots by their Discord IDs (injected via CLAW_HANDLE_* env vars).
+This proves:
+  1. Non-claw services receive CLAW_HANDLE_* vars from the pod topology.
+  2. The webhook wiring works end-to-end.
+  3. Agent mention IDs are available for cross-service coordination.
+
 Replace with your real application in production.
 """
 
 import json
+import os
+import urllib.error
+import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime, timezone
@@ -12,6 +22,52 @@ from datetime import datetime, timezone
 PORT = 4000
 
 TRADES = {}  # in-memory store
+
+# Injected by claw-pod.yml + computeHandleEnvs — read once at startup.
+_DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_API_WEBHOOK", "")
+_DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+# CLAW_HANDLE_* vars are broadcast to all pod services, including non-claw ones.
+# Format: CLAW_HANDLE_<SERVICE_UPPER>_DISCORD_ID
+_TIVERTON_DISCORD_ID = os.environ.get("CLAW_HANDLE_TIVERTON_DISCORD_ID", "")
+_WESTIN_DISCORD_ID = os.environ.get("CLAW_HANDLE_WESTIN_DISCORD_ID", "")
+
+
+def _post_webhook(content: str) -> None:
+    """Post a message to Discord via the configured webhook URL."""
+    if not _DISCORD_WEBHOOK:
+        print(f"[trading-api] no webhook configured — would have posted: {content}")
+        return
+    data = json.dumps({"content": content}).encode()
+    req = urllib.request.Request(
+        _DISCORD_WEBHOOK,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)",
+        },
+    )
+    print(f"[trading-api] webhook url prefix: {_DISCORD_WEBHOOK[:60]}...")
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        print(f"[trading-api] posted to Discord: {content}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        print(f"[trading-api] Discord post failed: HTTP {e.code} — {body}")
+    except Exception as e:
+        print(f"[trading-api] Discord post failed: {e}")
+
+
+def announce_startup():
+    """Post a startup message mentioning all known agent bots."""
+    mentions = " ".join(
+        f"<@{id}>" for id in [_TIVERTON_DISCORD_ID, _WESTIN_DISCORD_ID] if id
+    )
+    parts = ["trading-api online"]
+    if mentions:
+        parts.append(mentions)
+    parts.append(f"DATABASE_URL: {'ok' if _DATABASE_URL else 'missing'}")
+    _post_webhook(" | ".join(parts))
 
 
 def ok(data):
@@ -51,6 +107,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             status, data = ok({"status": "ok", "time": datetime.now(timezone.utc).isoformat()})
+        elif self.path == "/env":
+            # Report which key env vars are present — safe for logs (no values exposed)
+            status, data = ok({
+                "DISCORD_TRADING_API_WEBHOOK": bool(_DISCORD_WEBHOOK),
+                "CLAW_HANDLE_TIVERTON_DISCORD_ID": bool(_TIVERTON_DISCORD_ID),
+                "CLAW_HANDLE_WESTIN_DISCORD_ID": bool(_WESTIN_DISCORD_ID),
+                "DATABASE_URL": bool(_DATABASE_URL),
+            })
+        elif self.path == "/ping":
+            # On-demand: post a mention message to Discord for debugging.
+            announce_startup()
+            status, data = ok({"pong": True})
         elif self.path == "/trades":
             status, data = ok(list(TRADES.values()))
         elif self.path.startswith("/trades/"):
@@ -116,6 +184,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    announce_startup()
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"[trading-api] mock server listening on :{PORT}")
     server.serve_forever()

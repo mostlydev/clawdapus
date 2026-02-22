@@ -3,6 +3,8 @@ package openclaw
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -57,15 +59,69 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			if err := setPath(config, "channels.discord.dmPolicy", "allowlist"); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 			}
+			// allowBots: unconditional — peer agents must be able to mention each other.
+			if err := setPath(config, "channels.discord.allowBots", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
+			}
+
+			// Collect all discord bot IDs: own + peers, sorted for determinism.
+			allBotIDs := discordBotIDs(rc)
+
+			// Derive mention patterns from own handle: text name + Discord native mention.
+			var mentionPatterns []string
+			if h != nil {
+				username := h.Username
+				if username == "" {
+					username = rc.ServiceName
+				}
+				if username != "" {
+					mentionPatterns = append(mentionPatterns, fmt.Sprintf(`(?i)\b@?%s\b`, regexp.QuoteMeta(username)))
+				}
+				if h.ID != "" {
+					mentionPatterns = append(mentionPatterns, fmt.Sprintf(`<@!?%s>`, h.ID))
+				}
+			}
+
+			// agents.list: single entry for this container's agent.
+			agentName := rc.ServiceName
+			if h != nil && h.Username != "" {
+				agentName = strings.ToUpper(h.Username[:1]) + h.Username[1:]
+			}
+			agentEntry := map[string]interface{}{"id": "main", "name": agentName}
+			if len(mentionPatterns) > 0 {
+				agentEntry["groupChat"] = map[string]interface{}{
+					"mentionPatterns": stringsToIface(mentionPatterns),
+				}
+			}
+			if err := setPath(config, "agents.list", []interface{}{agentEntry}); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: agents.list: %w", err)
+			}
+
+			// Guild entries: requireMention + users allowlist + per-channel allow entries.
 			if h != nil && len(h.Guilds) > 0 {
 				guilds := make(map[string]interface{})
 				for _, g := range h.Guilds {
-					guilds[g.ID] = map[string]interface{}{"requireMention": true}
+					guildEntry := map[string]interface{}{"requireMention": true}
+					if len(allBotIDs) > 0 {
+						guildEntry["users"] = stringsToIface(allBotIDs)
+					}
+					if len(g.Channels) > 0 {
+						channels := make(map[string]interface{})
+						for _, ch := range g.Channels {
+							channels[ch.ID] = map[string]interface{}{
+								"allow":          true,
+								"requireMention": true,
+							}
+						}
+						guildEntry["channels"] = channels
+					}
+					guilds[g.ID] = guildEntry
 				}
 				if err := setPath(config, "channels.discord.guilds", guilds); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 				}
 			}
+
 			// Pre-enable the discord plugin so the gateway's auto-doctor finds nothing to add.
 			// Without this, gateway startup overwrites our config (changedPaths=1) to add this entry.
 			if err := setPath(config, "plugins.entries.discord.enabled", true); err != nil {
@@ -117,6 +173,35 @@ func parseConfigSetCommand(cmd string) (string, interface{}, error) {
 	}
 
 	return path, value, nil
+}
+
+// discordBotIDs collects all Discord bot IDs from own handle and peer handles,
+// sorted for deterministic output.
+func discordBotIDs(rc *driver.ResolvedClaw) []string {
+	seen := make(map[string]struct{})
+	if h := rc.Handles["discord"]; h != nil && h.ID != "" {
+		seen[h.ID] = struct{}{}
+	}
+	for _, peerHandles := range rc.PeerHandles {
+		if ph, ok := peerHandles["discord"]; ok && ph != nil && ph.ID != "" {
+			seen[ph.ID] = struct{}{}
+		}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// stringsToIface converts []string to []interface{} for JSON marshaling.
+func stringsToIface(ss []string) []interface{} {
+	out := make([]interface{}, len(ss))
+	for i, s := range ss {
+		out[i] = s
+	}
+	return out
 }
 
 // getOrCreatePath navigates a dotted path in config, creating intermediate maps,

@@ -61,9 +61,7 @@ func TestSpikeComposeUp(t *testing.T) {
 		spikeBuildImage(t, dir, "openclaw:latest", "Dockerfile.openclaw-base")
 	}
 	spikeBuildImage(t, dir, "trading-desk:latest", "Clawfile")
-	if !spikeImageExists("trading-api:latest") {
-		spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
-	}
+	spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
 
 	// Write a pre-expanded spike pod YAML so Go YAML parser sees real IDs.
 	rawPod := spikeReadFile(t, filepath.Join(dir, "claw-pod.yml"))
@@ -98,7 +96,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// teardown runs the compose down and dumps logs.
 	teardown := func() {
-		for _, svc := range []string{"tiverton", "westin"} {
+		for _, svc := range []string{"tiverton", "westin", "trading-api"} {
 			name := fmt.Sprintf("trading-desk-%s-1", svc)
 			out, _ := exec.Command("docker", "logs", "--tail", "100", name).CombinedOutput()
 			t.Logf("=== %s logs ===\n%s", name, string(out))
@@ -243,6 +241,20 @@ func TestSpikeComposeUp(t *testing.T) {
 	healthOut, _ := exec.Command("docker", "exec", containerName, "openclaw", "health", "--json").Output()
 	t.Logf("openclaw health --json: %s", strings.TrimSpace(string(healthOut)))
 
+	// Wait for trading-api to be running so its startup announcement has fired.
+	spikeWaitRunning(t, spikeContainerName("trading-api"), 30*time.Second)
+	// Show what env vars trading-api actually received (no values — just key presence + webhook prefix).
+	if envOut, err := exec.Command("docker", "exec", spikeContainerName("trading-api"),
+		"python3", "-c",
+		`import os; w=os.environ.get("DISCORD_TRADING_API_WEBHOOK",""); t=os.environ.get("CLAW_HANDLE_TIVERTON_DISCORD_ID",""); we=os.environ.get("CLAW_HANDLE_WESTIN_DISCORD_ID",""); print("WEBHOOK[:60]="+repr(w[:60]),"TIVERTON_ID="+repr(t),"WESTIN_ID="+repr(we))`,
+	).CombinedOutput(); err == nil {
+		t.Logf("trading-api env: %s", strings.TrimSpace(string(envOut)))
+	}
+	// Dump trading-api logs now so we can see startup output regardless of test outcome.
+	if apiLogs, err := exec.Command("docker", "logs", "--tail", "50", spikeContainerName("trading-api")).CombinedOutput(); err == nil {
+		t.Logf("=== trading-api early logs ===\n%s", string(apiLogs))
+	}
+
 	// Wait for the Docker healthcheck to report "healthy" before polling Discord.
 	// This means openclaw gateway + Discord connection are ready.
 	spikeWaitHealthy(t, containerName, 60*time.Second)
@@ -252,6 +264,20 @@ func TestSpikeComposeUp(t *testing.T) {
 	// Poll the Discord channel until both messages appear (or timeout).
 	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "tiverton online", 10*time.Second)
 	spikeVerifyDiscordGreeting(t, env["WESTIN_BOT_TOKEN"], channelID, "westin online", 10*time.Second)
+
+	// trading-api posts its own startup message to Discord via webhook — this
+	// proves non-claw services receive env vars (DISCORD_TRADING_API_WEBHOOK).
+	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "trading-api online", 15*time.Second)
+
+	// The startup message must contain Discord mentions for both agents.
+	// CLAW_HANDLE_* vars are broadcast to all pod services by claw, so trading-api
+	// picks up the agent IDs and includes <@ID> mentions in its webhook message.
+	if tivertonID := env["TIVERTON_DISCORD_ID"]; tivertonID != "" {
+		spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "<@"+tivertonID+">", 5*time.Second)
+	}
+	if westinID := env["WESTIN_DISCORD_ID"]; westinID != "" {
+		spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "<@"+westinID+">", 5*time.Second)
+	}
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

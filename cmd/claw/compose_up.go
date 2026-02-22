@@ -68,6 +68,15 @@ func runComposeUp(podFile string) error {
 	drivers := make(map[string]driver.Driver)
 	resolvedClaws := make(map[string]*driver.ResolvedClaw)
 
+	// Pre-collect all pod handles so each service can reference its peers.
+	// This is a cheap pass over the already-parsed pod YAML — no image inspection needed.
+	podHandles := make(map[string]map[string]*driver.HandleInfo) // service → platform → HandleInfo
+	for name, svc := range p.Services {
+		if svc.Claw != nil && len(svc.Claw.Handles) > 0 {
+			podHandles[name] = svc.Claw.Handles
+		}
+	}
+
 	for name, svc := range p.Services {
 		if svc.Claw == nil {
 			continue
@@ -166,6 +175,14 @@ func runComposeUp(podFile string) error {
 			skills = mergeResolvedSkills(generatedSkills, skills)
 		}
 
+		// Build peer handles: all other claw services' handles, keyed by service name.
+		peerHandles := make(map[string]map[string]*driver.HandleInfo)
+		for peerName, peerH := range podHandles {
+			if peerName != name {
+				peerHandles[peerName] = peerH
+			}
+		}
+
 		rc := &driver.ResolvedClaw{
 			ServiceName:   name,
 			ImageRef:      svc.Image,
@@ -174,6 +191,7 @@ func runComposeUp(podFile string) error {
 			AgentHostPath: agentHostPath,
 			Models:        info.Models,
 			Handles:       svc.Claw.Handles,
+			PeerHandles:   peerHandles,
 			Configures:    info.Configures,
 			Privileges:    info.Privileges,
 			Count:         svc.Claw.Count,

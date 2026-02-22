@@ -446,6 +446,188 @@ func TestGenerateConfigDiscordNoGuilds(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigDiscordAllowBots(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles:    map[string]*driver.HandleInfo{"discord": {ID: "111"}},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	discord := config["channels"].(map[string]interface{})["discord"].(map[string]interface{})
+	if discord["allowBots"] != true {
+		t.Errorf("expected channels.discord.allowBots=true, got %v", discord["allowBots"])
+	}
+}
+
+func TestGenerateConfigDiscordMentionPatterns(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:      make(map[string]string),
+		Configures:  []string{},
+		ServiceName: "tiverton",
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {ID: "123456789", Username: "tiverton"},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	agents := config["agents"].(map[string]interface{})
+	list, ok := agents["list"].([]interface{})
+	if !ok || len(list) == 0 {
+		t.Fatal("expected agents.list with at least one entry")
+	}
+	entry := list[0].(map[string]interface{})
+	if entry["id"] != "main" {
+		t.Errorf("expected agents.list[0].id=main, got %v", entry["id"])
+	}
+	if entry["name"] != "Tiverton" {
+		t.Errorf("expected agents.list[0].name=Tiverton, got %v", entry["name"])
+	}
+	gc, ok := entry["groupChat"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected agents.list[0].groupChat")
+	}
+	patterns, ok := gc["mentionPatterns"].([]interface{})
+	if !ok || len(patterns) == 0 {
+		t.Fatal("expected mentionPatterns to be a non-empty array")
+	}
+	// Must contain the text pattern and the Discord native mention pattern
+	patternStrs := make([]string, len(patterns))
+	for i, p := range patterns {
+		patternStrs[i] = p.(string)
+	}
+	hasText, hasMention := false, false
+	for _, p := range patternStrs {
+		if p == `(?i)\b@?tiverton\b` {
+			hasText = true
+		}
+		if p == `<@!?123456789>` {
+			hasMention = true
+		}
+	}
+	if !hasText {
+		t.Errorf("expected text mention pattern, got %v", patternStrs)
+	}
+	if !hasMention {
+		t.Errorf("expected Discord native mention pattern, got %v", patternStrs)
+	}
+}
+
+func TestGenerateConfigDiscordGuildUsersAndChannels(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {
+				ID:       "AAA",
+				Username: "tiverton",
+				Guilds: []driver.GuildInfo{{
+					ID: "GUILD1",
+					Channels: []driver.ChannelInfo{
+						{ID: "CHAN1", Name: "trading-floor"},
+					},
+				}},
+			},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	discord := config["channels"].(map[string]interface{})["discord"].(map[string]interface{})
+	guild := discord["guilds"].(map[string]interface{})["GUILD1"].(map[string]interface{})
+
+	// Own ID in users list
+	users, ok := guild["users"].([]interface{})
+	if !ok {
+		t.Fatal("expected guild.users to be an array")
+	}
+	found := false
+	for _, u := range users {
+		if u.(string) == "AAA" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected own ID %q in guild users, got %v", "AAA", users)
+	}
+
+	// Per-channel entries
+	channels, ok := guild["channels"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected guild.channels to be a map")
+	}
+	ch, ok := channels["CHAN1"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected channels.CHAN1 entry")
+	}
+	if ch["allow"] != true {
+		t.Error("expected channel.allow=true")
+	}
+	if ch["requireMention"] != true {
+		t.Error("expected channel.requireMention=true")
+	}
+}
+
+func TestGenerateConfigDiscordPeerHandlesInUsers(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {
+				ID: "OWN",
+				Guilds: []driver.GuildInfo{{ID: "G1"}},
+			},
+		},
+		PeerHandles: map[string]map[string]*driver.HandleInfo{
+			"westin": {"discord": {ID: "PEER1"}},
+			"logan":  {"discord": {ID: "PEER2"}},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	discord := config["channels"].(map[string]interface{})["discord"].(map[string]interface{})
+	guild := discord["guilds"].(map[string]interface{})["G1"].(map[string]interface{})
+	users, ok := guild["users"].([]interface{})
+	if !ok {
+		t.Fatal("expected guild.users array")
+	}
+	got := make(map[string]bool)
+	for _, u := range users {
+		got[u.(string)] = true
+	}
+	for _, expected := range []string{"OWN", "PEER1", "PEER2"} {
+		if !got[expected] {
+			t.Errorf("expected ID %q in guild users, got %v", expected, users)
+		}
+	}
+}
+
 func TestGenerateConfigHandleNilMeansNoChannels(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:     make(map[string]string),

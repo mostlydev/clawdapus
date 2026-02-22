@@ -26,6 +26,7 @@ type ResolvedClaw struct {
 	AgentHostPath string            // resolved host path for bind mount
 	Models        map[string]string // slot -> provider/model
 	Handles       map[string]*HandleInfo // platform -> contact card (from x-claw handles block)
+	PeerHandles   map[string]map[string]*HandleInfo // service name -> platform -> HandleInfo for sibling services
 	Surfaces      []ResolvedSurface
 	Skills        []ResolvedSkill
 	Privileges    map[string]string
