@@ -149,6 +149,14 @@ func runComposeUp(podFile string) error {
 		if err != nil {
 			return fmt.Errorf("service %q: resolve generated service skills: %w", name, err)
 		}
+		// Add channel surface skills (surface-discord.md etc.)
+		channelSkills, err := resolveChannelGeneratedSkills(svcRuntimeDir, surfaces)
+		if err != nil {
+			return fmt.Errorf("service %q: resolve generated channel skills: %w", name, err)
+		}
+		if len(channelSkills) > 0 {
+			generatedSkills = mergeResolvedSkills(generatedSkills, channelSkills)
+		}
 		handleSkills, err := resolveHandleSkills(svcRuntimeDir, svc.Claw.Handles)
 		if err != nil {
 			return fmt.Errorf("service %q: resolve handle skills: %w", name, err)
@@ -388,6 +396,39 @@ func resolveServiceGeneratedSkills(runtimeDir string, surfaces []driver.Resolved
 		})
 	}
 
+	return generated, nil
+}
+
+// resolveChannelGeneratedSkills generates surface-<platform>.md skill files for
+// each channel surface and returns them as ResolvedSkills.
+func resolveChannelGeneratedSkills(runtimeDir string, surfaces []driver.ResolvedSurface) ([]driver.ResolvedSkill, error) {
+	surfaceSkillsDir := filepath.Join(runtimeDir, "skills")
+	generated := make([]driver.ResolvedSkill, 0)
+	seen := make(map[string]struct{})
+
+	for _, surface := range surfaces {
+		if surface.Scheme != "channel" {
+			continue
+		}
+		name := fmt.Sprintf("surface-%s.md", strings.TrimSpace(surface.Target))
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+
+		skillPath := filepath.Join(surfaceSkillsDir, name)
+		if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
+			return nil, fmt.Errorf("create channel skill dir: %w", err)
+		}
+		content := openclaw.GenerateChannelSkill(surface)
+		if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
+			return nil, fmt.Errorf("write channel skill %q: %w", name, err)
+		}
+		generated = append(generated, driver.ResolvedSkill{
+			Name:     name,
+			HostPath: skillPath,
+		})
+	}
 	return generated, nil
 }
 
