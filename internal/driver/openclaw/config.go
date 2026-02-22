@@ -149,6 +149,21 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 	}
 
+	// Apply SURFACE channel directives — refine routing config set by HANDLE.
+	// SURFACE runs after HANDLE so it takes precedence where keys overlap.
+	for _, surface := range rc.Surfaces {
+		if surface.Scheme != "channel" || surface.ChannelConfig == nil {
+			continue
+		}
+		switch surface.Target {
+		case "discord":
+			if err := applyDiscordChannelSurface(config, surface.ChannelConfig); err != nil {
+				return nil, fmt.Errorf("config generation: SURFACE channel://discord: %w", err)
+			}
+		// Other platforms: silently skip (unsupported = no config, not an error here)
+		}
+	}
+
 	return json.MarshalIndent(config, "", "  ")
 }
 
@@ -202,6 +217,40 @@ func stringsToIface(ss []string) []interface{} {
 		out[i] = s
 	}
 	return out
+}
+
+// applyDiscordChannelSurface applies ChannelConfig to the openclaw config map
+// for the discord channel. Runs after HANDLE so it can refine/override routing.
+func applyDiscordChannelSurface(config map[string]interface{}, cc *driver.ChannelConfig) error {
+	if cc.DM.Policy != "" {
+		if err := setPath(config, "channels.discord.dmPolicy", cc.DM.Policy); err != nil {
+			return err
+		}
+	}
+	if len(cc.DM.AllowFrom) > 0 {
+		if err := setPath(config, "channels.discord.allowFrom", stringsToIface(cc.DM.AllowFrom)); err != nil {
+			return err
+		}
+	}
+	for guildID, guildCfg := range cc.Guilds {
+		base := fmt.Sprintf("channels.discord.guilds.%s", guildID)
+		if guildCfg.Policy != "" {
+			if err := setPath(config, base+".policy", guildCfg.Policy); err != nil {
+				return err
+			}
+		}
+		if guildCfg.RequireMention {
+			if err := setPath(config, base+".requireMention", true); err != nil {
+				return err
+			}
+		}
+		if len(guildCfg.Users) > 0 {
+			if err := setPath(config, base+".users", stringsToIface(guildCfg.Users)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // getOrCreatePath navigates a dotted path in config, creating intermediate maps,
