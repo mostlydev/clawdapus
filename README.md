@@ -79,17 +79,17 @@ SKILL skills/crypto-feeds.md
 │  Persona (identity workspace)                   │
 │  Memory · history · style · knowledge           │
 ├─────────────────────────────────────────────────┤
-│  cllama (optional judgment proxy)               │
+│  cllama (optional governance proxy)             │
 │  Intercepts prompts outbound + responses inbound│
 │  Runner never knows it's there                  │
 └─────────────────────────────────────────────────┘
 ```
 
-The contract lives on the host. Even a root-compromised runner cannot rewrite its own mission. Swap runners without touching identity. Add or remove the judgment layer without rebuilding anything.
+The contract lives on the host. Even a root-compromised runner cannot rewrite its own mission. Swap runners without touching identity. Add or remove the governance proxy without rebuilding anything.
 
 ---
 
-## cllama: The Judgment Proxy
+## cllama: The Governance Proxy
 
 When a reasoning model tries to govern itself, the guardrails are part of the same cognitive process they're trying to constrain. `cllama` is a **separate process, running a separate model**, sitting between the runner and the LLM provider.
 

@@ -18,11 +18,11 @@ This is infrastructure-layer containment for cognitive workloads. Clawdapus does
 
 But containment is only half the picture. We are past inference. We are designing the structure of brains.
 
-Cognition is no longer a single call to a single model. It is distributed — placed into multiple components with roles that are deliberately in tension with one another. A runner optimizes for capability. A judgment proxy optimizes for restraint. A contract holds purpose fixed while the workspace evolves. These are not arbitrary divisions. They mirror biological architecture: systems that compete, check, and modulate each other so that the whole organism behaves better than any single part would alone. Fleets of hippocampuses and fleets of cortexes, each specializing, each constraining the others.
+Cognition is no longer a single call to a single model. It is distributed — placed into multiple components with roles that are deliberately in tension with one another. A runner optimizes for capability. A governance proxy optimizes for restraint and cost control. A contract holds purpose fixed while the workspace evolves. These are not arbitrary divisions. They mirror biological architecture: systems that compete, check, and modulate each other so that the whole organism behaves better than any single part would alone. Fleets of hippocampuses and fleets of cortexes, each specializing, each constraining the others.
 
 An artificial brain built this way is a cyborg. Part thinking, part API. Part reasoning model, part database query, part cron job, part message queue. The form is open-ended — there is no single right topology for a cognitive system, just as there is no single right topology for a biological one. But we need a language to describe how the parts relate to one another, what each part is, and then the tools to test and construct them. That is what Clawdapus provides: opinionated cognitive architecture. Not opinions about how agents should think — opinions about how they should be structured, deployed, governed, and composed into systems that are greater than their parts.
 
-Rails did not tell you how to write business logic. It told you where your models go, where your routes go, where your migrations go. Convention over configuration. Clawdapus does the same for agents: where your contract goes, where your config goes, where your surfaces connect, how your state persists, how your judgment layer attaches. Without this structure, models make messes. They corrupt their own configs, overwrite their instructions, hallucinate permissions, lose track of state. Every team running agents hits the same wall — the model is capable but structurally undisciplined. Clawdapus is the discipline.
+Rails did not tell you how to write business logic. It told you where your models go, where your routes go, where your migrations go. Convention over configuration. Clawdapus does the same for agents: where your contract goes, where your config goes, where your surfaces connect, how your state persists, how your governance proxy attaches. Without this structure, models make messes. They corrupt their own configs, overwrite their instructions, hallucinate permissions, lose track of state. Every team running agents hits the same wall — the model is capable but structurally undisciplined. Clawdapus is the discipline.
 
 Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you. Different trust model. Different stack.
 
@@ -34,7 +34,7 @@ Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* yo
 
 ## II. The Anatomy of a Claw
 
-A running Claw bifurcates cognition into two independent layers: internal execution and external judgment.
+A running Claw bifurcates cognition into two independent layers: internal execution and external governance.
 
 **The Runner (Internal Execution)** — An agent runtime installed in the base image. Runners span a wide weight range, from full agent operating systems to minimal loops — and Clawdapus wraps them all identically. OpenClaw is the heaviest: a Gateway-centric agent system built on the Pi Agent Core SDK, with a multi-channel messaging gateway, a skill system, built-in tools for shell, browser, file system, and canvas, and a model resolver with multi-provider failover. Nanobot is the lightweight end: ~4,000 lines of Python running the same fundamental agent loop — input, context, LLM, tools, repeat — with its own skill system, persistent memory, and multi-provider support. NanoClaw wraps Claude Code as its runtime inside container-isolated workspaces. Claude Code itself is a single-execution runner. A custom Python script is a runner. The weight class doesn't matter. Every runner implements the same pattern: receive input, assemble context, call a model, execute tools, persist state. The runner handles the *how* of any given task.
 
@@ -42,9 +42,9 @@ A running Claw bifurcates cognition into two independent layers: internal execut
 
 **The Persona (The History)** — A mutable workspace of identity, memory, knowledge, style, and accumulated interaction history. This is the *who* — who the Claw has become over time. Personas are downloadable, versionable, forkable OCI artifacts. They grow during operation and can be snapshotted and promoted.
 
-**cllama (The Judgment Proxy)** — A bidirectional LLM proxy that sits between the runner and its model. Outbound: it intercepts prompts before they reach the LLM — gating what the runner is allowed to ask. Inbound: it intercepts responses before they reach the runner — adjusting, rewriting, or dropping output that violates policy. The runner thinks it's talking directly to the LLM. It never sees cllama's evaluation. cllama handles the *should* — should this prompt be sent, should this response be delivered, should this tool call proceed. The two cognitive layers are independent: the runner optimizes for capability, cllama optimizes for judgment.
+**cllama (The Governance Proxy)** — A bidirectional LLM proxy that sits between the runner and its model. Outbound: it intercepts prompts before they reach the LLM — gating what the runner is allowed to ask. Inbound: it intercepts responses before they reach the runner — adjusting, rewriting, or dropping output that violates policy. The runner thinks it's talking directly to the LLM. It never sees cllama's evaluation. cllama handles the *should* — should this prompt be sent, should this response be delivered, should this tool call proceed, can we afford this compute. The two cognitive layers are independent: the runner optimizes for capability, cllama optimizes for governance and cost efficiency.
 
-The runner, contract, and persona are the mandatory anatomy of every Claw. cllama is an optional judgment layer that can be attached when a deployment needs bidirectional LLM interception. These layers are independently versioned, independently deployable, and independently auditable. Swap the runner without touching the persona. Swap the persona without touching the contract. Add or replace the judgment layer without changing the rest.
+The runner, contract, and persona are the mandatory anatomy of every Claw. cllama is an optional governance proxy that can be attached when a deployment needs bidirectional LLM interception. These layers are independently versioned, independently deployable, and independently auditable. Swap the runner without touching the persona. Swap the persona without touching the contract. Add or replace the governance proxy without changing the rest.
 
 ---
 
@@ -72,7 +72,7 @@ Bots within a pod communicate through shared surfaces — volumes, chat channels
 
 ### Principle 6: Claws Are Users
 
-A Claw is a user of the services it consumes, not a privileged process. It authenticates with standard credentials — environment variables, Docker secrets, mounted files — and those credentials determine what it can do. Clawdapus does not enforce access control where it has no authority. It controls what it owns: container mounts, network topology, and the judgment layer. Everything else is between the Claw and the service.
+A Claw is a user of the services it consumes, not a privileged process. It authenticates with standard credentials — environment variables, Docker secrets, mounted files — and those credentials determine what it can do. Clawdapus does not enforce access control where it has no authority. It controls what it owns: container mounts, network topology, and the governance proxy. Everything else is between the Claw and the service.
 
 ### Principle 7: Compute Is a Privilege
 
@@ -80,13 +80,13 @@ Every cognitive cycle is an authorized expenditure of resources. The Claw runs w
 
 ### Principle 8: Think Twice, Act Once
 
-A reasoning model cannot be its own judge. Prompt-level guardrails are part of the same cognitive process they are trying to constrain. cllama separates execution from judgment — a second model, in a separate process, evaluating output against policy before it reaches the world. The runner optimizes for capability. cllama optimizes for restraint. Claws can run without cllama when the risk profile doesn't warrant it. When it's enabled, nothing leaves the Claw without being judged independently.
+A reasoning model cannot be its own judge. Prompt-level guardrails are part of the same cognitive process they are trying to constrain. cllama separates execution from governance — a second model, in a separate process, evaluating output against policy before it reaches the world. The runner optimizes for capability. cllama optimizes for restraint. Claws can run without cllama when the risk profile doesn't warrant it. When it's enabled, nothing leaves the Claw without being evaluated independently.
 
 ---
 
-## IV. cllama: The Judgment Proxy
+## IV. cllama: The Standardized Sidecar (Governance Proxy)
 
-cllama is an enhancement layer, not a prerequisite for Claw operation. Claws can run without it. When enabled, it adds bidirectional LLM interception and policy judgment as a separate cognitive layer.
+cllama is an enhancement layer, not a prerequisite for Claw operation. Claws can run without it. When enabled, it adds bidirectional LLM interception and policy enforcement as a separate cognitive layer.
 
 ### The Problem
 
@@ -130,7 +130,7 @@ Crucially, because the proxy holds the sole set of provider keys, it acts as a *
 
 ### Identity-Aware Policy
 
-cllama does not just evaluate text. It evaluates text *in context*. It accepts the Claw's persona and the recipient's identity as inputs into judgment. The same raw output from a runner might be acceptable when directed at one audience and unacceptable when directed at another. A single cllama policy can govern a diverse pod because it reads identities and adjusts.
+cllama does not just evaluate text. It evaluates text *in context*. It accepts the Claw's persona and the recipient's identity as inputs into governance. The same raw output from a runner might be acceptable when directed at one audience and unacceptable when directed at another. A single cllama policy can govern a diverse pod because it reads identities and adjusts.
 
 ### The CLLAMA Directive
 
@@ -141,7 +141,7 @@ CLLAMA cllama-org-policy/xai/grok-4.1-fast \
   purpose/engagement-farming
 ```
 
-The first segment — `cllama-org-policy/xai/grok-4.1-fast` — identifies the base judgment layer: organizational namespace, provider, model. Different Claws in the same pod can run different judgment stacks. High-volume Claws use fast cheap judgment. Sensitive Claws use careful expensive judgment.
+The first segment — `cllama-org-policy/xai/grok-4.1-fast` — identifies the base governance proxy: organizational namespace, provider, model. Different Claws in the same pod can run different policy stacks. High-volume Claws use fast cheap governance. Sensitive Claws use careful expensive governance.
 
 The modules that follow are layered on top:
 
@@ -177,7 +177,7 @@ Any valid Dockerfile is a valid Clawfile.
 
 A Clawfile compiles down to a standard Dockerfile. `claw build` is a preprocessor — it reads the Clawfile, translates extended directives into standard Dockerfile primitives, and calls `docker build` on the result. The output is a standard OCI container image. No custom build engine.
 
-Extended directives compile to LABELs (metadata the runtime interprets), ENV vars (configuration the container reads), RUN commands (filesystem setup), and conventional file paths (cron entries, package manager wrappers, skill mount points). CLLAMA becomes a set of labels declaring the default judgment stack. AGENT becomes a label declaring the expected bind mount path. INVOKE becomes cron entries written into the image. TRACK becomes wrapper scripts around package managers. SURFACE becomes topology metadata labels.
+Extended directives compile to LABELs (metadata the runtime interprets), ENV vars (configuration the container reads), RUN commands (filesystem setup), and conventional file paths (cron entries, package manager wrappers, skill mount points). CLLAMA becomes a set of labels declaring the default policy stack. AGENT becomes a label declaring the expected bind mount path. INVOKE becomes cron entries written into the image. TRACK becomes wrapper scripts around package managers. SURFACE becomes topology metadata labels.
 
 This means Clawdapus inherits the entire Docker ecosystem: registries, layer caching, multi-stage builds, BuildKit, CI/CD pipelines, and every tool that understands OCI images. A compiled Clawfile is just a Dockerfile. A built Claw is just a Docker image. Anyone can inspect the compiled output, debug with standard tools, or eject from Clawdapus entirely and still have a working container.
 
@@ -207,7 +207,7 @@ The operator picks the weight class that fits the problem. Lightweight runners a
 
 **CONFIGURE** — Shell commands that run at container init, mutating base defaults into this Claw's setup. Tools like jq/sed, JSON5-aware patchers, or runner-native config CLIs may be used depending on claw type. `claw-module enable/disable` handles schema-aware cascading changes where available.
 
-**CLLAMA** — Optional default judgment proxy configuration. Declares the namespaced policy stack, provider, and model for the sidecar. cllama is a context-aware sidecar standard (see ADR-008): any OpenAI-compatible proxy image can act as the judgment layer by consuming the identity and contract context Clawdapus injects at startup.
+**CLLAMA** — Optional default governance proxy configuration. Declares the namespaced policy stack, provider, and model for the sidecar. cllama is a context-aware sidecar standard (see ADR-008): any OpenAI-compatible proxy image can act as the governance layer by consuming the identity and contract context Clawdapus injects at startup.
 
 **INVOKE** — Invocation schedules. For simple runners and lightweight runners like Nanobot that use external cron, INVOKE entries trigger execution directly. For runners like OpenClaw that have their own internal scheduling, INVOKE manages the container lifecycle on a macro schedule while the runner handles micro-scheduling internally.
 
@@ -245,7 +245,7 @@ MODEL primary gpt-4o
 MODEL summarizer llama-3.2-3b
 MODEL embeddings nomic-embed-text
 
-# cllama: the judgment proxy
+# cllama: the governance proxy
 CLLAMA cllama-org-policy/xai/grok-4.1-fast \
   tone/sardonic-but-informed \
   obfuscation/humanize-v2 \
@@ -306,7 +306,7 @@ PERSONA registry.claw.io/personas/market-pulse:v1
 # Models
 MODEL primary anthropic/claude-sonnet-4-5
 
-# cllama: judgment still applies regardless of runner weight
+# cllama: governance still applies regardless of runner weight
 CLLAMA cllama-org-policy/anthropic/haiku \
   purpose/market-research-only \
   tone/factual-neutral
@@ -351,7 +351,7 @@ If the container is fully compromised — root access, total workspace control �
 
 A persona is a complete, portable, forkable workspace package that encapsulates everything a bot needs to be someone. Not a name and a system prompt — a full identity with memory, context, interaction history, stylistic fingerprint, knowledge base, and behavioral patterns.
 
-Personas are the content layer. The Clawfile is the infrastructure layer. The behavioral contract is the governance layer. cllama is the judgment layer. Independent and composable.
+Personas are the content layer. The Clawfile is the infrastructure layer. The behavioral contract is the governance layer. cllama is the policy and routing layer. Independent and composable.
 
 A persona contains an identity manifest (name, handles, bio, platform profiles), a memory store (interaction history, relationship graph), a knowledge base (domain documents, embeddings), a style fingerprint (vocabulary, sentence patterns, punctuation habits), behavioral patterns (timing, engagement preferences, topic affinities), and workspace state (scripts, tools, cached data accumulated during operation).
 
@@ -365,11 +365,11 @@ The behavioral contract controls purpose — bind-mounted, read-only, operator-w
 
 The persona controls identity — writable workspace, grows over time, snapshotable and forkable.
 
-cllama controls judgment — versioned, identity-aware, swapped at invocation.
+cllama controls governance — versioned, identity-aware, swapped at invocation.
 
 The Clawfile controls infrastructure — base image, runner, models, schedule, privileges, surfaces.
 
-The bot can grow its persona. It cannot change its purpose. It cannot override the operator's judgment. It cannot alter its own infrastructure.
+The bot can grow its persona. It cannot change its purpose. It cannot override the operator's policies. It cannot alter its own infrastructure.
 
 ---
 
@@ -411,7 +411,7 @@ $ claw up poly-piper --image openclaw:poly-piper-v2 --count 4
 
 Just as the Clawfile extends the Dockerfile, `claw-pod.yml` extends docker-compose. Any valid compose file is a valid claw-pod.yml. Extended keys live under an `x-claw` namespace, which Docker already ignores. Existing tooling works unchanged.
 
-The Clawfile bakes defaults into the image. The claw-pod.yml overrides per-deployment. Same image, different judgment. Same image, different schedule. Same image, different surfaces — all without rebuilding.
+The Clawfile bakes defaults into the image. The claw-pod.yml overrides per-deployment. Same image, different policies. Same image, different schedule. Same image, different surfaces — all without rebuilding.
 
 ### Mixed Clusters
 
@@ -656,9 +656,9 @@ Low drift: continue normally. Moderate drift: restrict capabilities. High drift:
 
 **Runner compatibility** — Clawdapus wraps all runners identically, from full agent operating systems to single-execution tools to custom scripts. Adoption is incremental — take an existing bot, containerize it in a Clawfile, add a behavioral contract, and you have a managed Claw.
 
-**cllama module ecosystem** — The standard defines the module interface but doesn't restrict what modules do. Organizations maintain their own judgment stacks under their own policy namespace.
+**cllama module ecosystem** — The standard defines the module interface but doesn't restrict what modules do. Organizations maintain their own policy stacks under their own policy namespace.
 
-**Persona marketplace** — Personas are publishable, shareable, forkable artifacts. Download someone else's identity and knowledge. Attach your own purpose. Wrap it in your own judgment. Deploy on your own infrastructure.
+**Persona marketplace** — Personas are publishable, shareable, forkable artifacts. Download someone else's identity and knowledge. Attach your own purpose. Wrap it in your own governance. Deploy on your own infrastructure.
 
 ---
 
@@ -680,7 +680,7 @@ Low drift: continue normally. Moderate drift: restrict capabilities. High drift:
 
 **Why do services declare cllama requirements?** Because the service knows its own risk profile. The Claw's cllama governs what the bot says. The service's required cllama governs what the bot does — to the service's data, through the service's API.
 
-**Why are lightweight runners first-class?** Because governance is not proportional to complexity. A 4,000-line agent with brokerage access needs the same purpose contract and judgment proxy as a 430,000-line agent OS.
+**Why are lightweight runners first-class?** Because governance is not proportional to complexity. A 4,000-line agent with brokerage access needs the same purpose contract and governance proxy as a 430,000-line agent OS.
 
 ---
 

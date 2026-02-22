@@ -445,7 +445,7 @@ All directives translate to standard Dockerfile primitives at build time.
 | `CLAW_TYPE` | `LABEL claw.type=...` | Declares runner type; selects runtime driver |
 | `AGENT` | `LABEL claw.agent.file=...` | Contract filename convention |
 | `MODEL` | `LABEL claw.model.<slot>=...` | Named model slot bindings |
-| `CLLAMA` | `LABEL claw.cllama.default=...` | Judgment stack (optional; omit for config-injection-only enforcement) |
+| `CLLAMA` | `LABEL claw.cllama.default=...` | Policy stack (optional; omit for config-injection-only enforcement) |
 | `PERSONA` | `LABEL claw.persona.default=...` | Default persona ref (fetched and mounted at runtime, not baked) |
 | `CONFIGURE` | Entrypoint wrapper script (`/claw/configure.sh`) | Shell mutations run at container init before the runner starts |
 | `INVOKE` | `RUN echo "..." >> /etc/cron.d/claw` | Cron schedule entries |
