@@ -10,16 +10,19 @@ cllama is a bidirectional LLM proxy — it intercepts both outbound prompts (run
 
 ## Decision
 
-**Primary mode: HTTP sidecar proxy (built first).**
+**Primary mode: Shared Pod-Level Proxy (Updated 2026-02-21).**
 
-Each Claw gets a `<name>-cllama` sidecar container injected into the generated compose file by `claw up`. The sidecar:
+*Note: Initially, the architecture specified a "sidecar per Claw" model. This was updated to a shared pod-level proxy to reduce resource overhead and enable centralized compute budgeting across the fleet.*
 
-- Exposes an OpenAI-compatible API endpoint on a pod-internal network
-- Receives the runner's LLM calls (runner's `*_API_BASE` env vars are rewritten to point at the sidecar)
-- Holds the real LLM provider API keys (runner never sees them)
-- Applies the cllama pipeline bidirectionally (purpose → policy → tone → obfuscation)
-- Logs all requests and responses for drift scoring and audit
-- Enforces `require_cllama` policy modules on tool calls routed to services
+Each pod with a `CLLAMA` directive gets a single `cllama-proxy` container injected into the generated compose file by `claw up`. The proxy:
+
+- Exposes an OpenAI-compatible API endpoint on a pod-internal network.
+- Resolves multi-agent identity via unique per-agent **Bearer Tokens**.
+- Receives the runner's LLM calls (runner's `*_API_BASE` env vars are rewritten to point at the shared proxy).
+- Dynamically loads the specific agent's behavioral contract from a shared context mount (`/claw/context/<agent-id>/`).
+- Holds the real LLM provider API keys (runners never see them, relying on "Credential Starvation").
+- Applies the governance pipeline bidirectionally (decoration, tool scoping, drift scoring).
+- Enforces pod-wide rate limits and compute budgets.
 
 **Secondary mode: adapter (documented, not built yet).**
 
@@ -30,16 +33,17 @@ Adapter mode will be designed and built when a concrete runner requires it.
 ## Consequences
 
 **Positive:**
-- Works with any runner that makes HTTP calls to an LLM endpoint — no runner integration needed
-- Key isolation is free — runner never holds provider API keys
-- Logging and audit are centralized at the sidecar
-- Sidecar failure = LLM calls fail = fail-closed (runner can't bypass to direct provider)
+- Works with any runner that makes HTTP calls to an LLM endpoint — no runner integration needed.
+- Key isolation is free — runner never holds provider API keys (Credential Starvation).
+- Logging and audit are centralized at the pod proxy.
+- Proxy failure = LLM calls fail = fail-closed (runner can't bypass to direct provider).
+- **Resource Efficiency:** One proxy per pod instead of one per agent.
+- **Compute Control:** Enables pod-wide rate limiting and centralized budget enforcement.
 
 **Negative:**
-- One extra container per Claw (resource overhead)
-- Latency added to every LLM call (proxy hop)
-- Runners using local/embedded models are not covered until adapter mode is built
-- Streaming responses require the sidecar to handle SSE correctly
+- Latency added to every LLM call (proxy hop).
+- Runners using local/embedded models are not covered until adapter mode is built.
+- Streaming responses require the proxy to handle SSE correctly.
 
 **Risks:**
 - If a runner uses a non-standard LLM API format (not OpenAI-compatible), the sidecar needs format adapters
