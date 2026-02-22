@@ -214,7 +214,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 3.6 — INVOKE scheduling + Discord config wiring | Done |
 | Phase 3.7 — Social topology: mentionPatterns, allowBots, peer handle users | Done |
 | Phase 3.8 — Channel surface bindings | Planned |
-| Phase 4 — Shared governance proxy + policy pipeline | Planned |
+| Phase 4 — Shared governance proxy integration + credential starvation | Planned |
 | Phase 5 — Drift scoring + fleet governance | Planned |
 | Phase 6 — Recipe promotion + worker mode | Planned |
 

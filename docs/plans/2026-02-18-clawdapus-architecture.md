@@ -733,31 +733,40 @@ A new `SKILL` directive in Clawfile and `skills:` in x-claw allows operators to 
 
 **Success criteria:** A Rails app in the pod can read `CLAW_HANDLE_TIVERTON_DISCORD` to dynamically construct a Discord mention. The OpenClaw driver automatically enables Discord based solely on the `HANDLE` directive, abstracting the `openclaw.json` schema.
 
-### Phase 4 — cllama Sidecar + Policy Pipeline
+### Phase 4 — Shared Governance Proxy Integration
 
-**Goal:** Optional bidirectional LLM interception for Claws that need it.
+**Goal:** Integrate the optional `cllama` governance proxy to achieve bidirectional LLM interception and compute metering via Credential Starvation.
 
 **Invariants promoted to MUST:**
-- No cllama decision on egress → deny (when cllama is enabled)
-- Missing required policy module → deny service call (when `require_cllama` is declared)
+- No cllama decision on egress → deny (when proxy is enabled).
+- The agent container must never hold real LLM provider API keys.
 
-**Pass-through sidecar:**
-1. Build a minimal cllama sidecar image (Go binary, OpenAI-compatible API proxy)
-2. For each Claw with a `CLLAMA` directive, inject a `<name>-cllama` sidecar into generated compose
-3. Rewrite runner's LLM base URL env vars to point at sidecar
-4. Sidecar holds real provider API keys; runner never sees them
-5. Pass-through mode: transparent proxy + request/response logging
+**Slice 1: The Base Passthrough Reference (External/Standalone)**
+1. Build the `cllama-passthrough` reference image (Go binary, OpenAI-compatible API proxy).
+2. Implement the API contract: listen on `0.0.0.0:8080/v1/chat/completions`.
+3. Implement Identity Resolution: parse the Bearer Token to identify the calling agent.
+4. Implement Context Loading: read the agent's `/claw/context/<agent-id>/AGENTS.md` and metadata.
+5. Implement Transparent Forwarding: strip the dummy token, attach the real `PROVIDER_API_KEY`, forward to upstream, return response.
+6. Implement Structured Logging: emit `request` and `response` JSON logs to stdout.
 
-**Policy pipeline:**
-6. Purpose evaluation — does this prompt/response serve the operator's goal?
-7. Policy enforcement — hard rails (financial advice, PII, legal exposure)
-8. Tone shaping — voice consistency on responses
-9. Obfuscation — timing jitter, vocabulary rotation on outputs
-10. cllama can engage in its own conversation with the LLM to rework non-compliant responses
-11. Tool call interception — gate dangerous tool invocations
-12. Enforce `require_cllama` — sidecar checks policy modules before routing tool calls to services. This is a pre-call policy gate, not a replacement for service authentication; credentials still determine what the Claw can do, cllama determines whether it should
+**Slice 2: Clawdapus Infrastructure Wiring**
+7. Detect if a `CLLAMA` directive exists in *any* of the pod's agents during `claw up`.
+8. If present, automatically inject the shared `cllama-proxy` container into the generated compose file.
+9. Generate the shared context directory (`/var/run/clawdapus/context/`) on the host.
+10. Populate the directory with agent-specific subdirectories containing their compiled `AGENTS.md` and `metadata.json`.
+11. Bind-mount the shared context directory into the proxy container at `/claw/context`.
 
-**Success criteria:** Claws without `CLLAMA` run normally with config-injection-only enforcement. Claws with `CLLAMA` route LLM traffic through sidecar. `claw audit` shows intervention history. Pipeline stages are independently configurable. `require_cllama` blocks tool calls without the right policy.
+**Slice 3: Driver LLM Rewiring (Credential Starvation)**
+12. Update the drivers (e.g., OpenClaw) to recognize when a proxy is active in the pod.
+13. Overwrite the runner's LLM configuration to use the proxy's internal address (`http://cllama-proxy:8080/v1`).
+14. Inject the generated dummy Bearer token (`Bearer <agent-id>-secret`) into the runner's credentials config, ensuring real keys are starved.
+
+**Slice 4: Policy Pipeline (Future Evolution)**
+15. Implement `require_cllama` — proxy checks active policy modules before routing tool calls.
+16. Implement prompt decoration and response amendment logic.
+
+**Success criteria:** An OpenClaw agent in a pod with `CLLAMA` enabled successfully completes a task using a remote model. The agent's config shows only a dummy token. The proxy logs show the intercepted request and response.
+
 
 ### Phase 5 — Drift Scoring + Fleet Governance
 
