@@ -49,6 +49,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 | Phase 3.5 — HANDLE directive + social topology | DONE |
 | Phase 3 Slice 3 — INVOKE scheduling + Discord config wiring | DONE |
 | Phase 3 Slice 4 — Social topology: mentionPatterns, allowBots, peer handle users | DONE |
+| Phase 3 Slice 5 — Channel surface bindings: ChannelConfig, applyDiscordChannelSurface, surface-discord.md | DONE |
 | Phase 4 — cllama sidecar | NOT STARTED |
 | Phase 5 — Drift scoring | NOT STARTED |
 | Phase 6 — Recipe promotion | NOT STARTED |
@@ -74,6 +75,10 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - `mentionPatterns` auto-derived from each claw's discord handle: text `(?i)\b@?<username>\b` + native `<@!?<id>>`; injected into `agents.list[0].groupChat.mentionPatterns` in openclaw config
 - `PeerHandles` on `ResolvedClaw` — pre-pass in `compose_up.go` collects all pod handles; each claw's guild `users[]` allowlist includes own ID + all peer Discord bot IDs (sorted); enables inter-agent mentions
 - Webhook `User-Agent` must be `DiscordBot (url, version)` — bare `Python-urllib` is blocked by Cloudflare with error code 1010 (ASN ban); applies to any non-browser HTTP client posting to Discord webhook endpoints
+- **HANDLE vs SURFACE channel**: HANDLE = identity (bot ID, guild membership, mentionPatterns, peer bots, allowBots). SURFACE channel = routing ACL (dmPolicy, allowFrom, guild policy). Both coexist; SURFACE runs after HANDLE in `GenerateConfig` so routing config takes precedence over HANDLE defaults
+- **Map-form channel surfaces**: `channel://discord: {dm: {...}}` in pod YAML carries `ChannelConfig` parsed at the pod layer (`pod.Parse()`). String-form `"channel://discord"` yields nil `ChannelConfig` (simple enable). `ClawBlock.Surfaces` is `[]driver.ResolvedSurface`, not `[]string`
+- **`applyDiscordChannelSurface`** in `config.go` writes `dmPolicy`, `allowFrom`, and per-guild policy into the openclaw config map after the HANDLE loop. Unknown platforms are silently skipped (no error)
+- **Channel surface skills**: `GenerateChannelSkill` produces `surface-discord.md` (etc.); `resolveChannelGeneratedSkills` in compose_up.go writes and mounts it alongside service surface skills. CLAWDAPUS.md Surfaces section and Skills index both reference it
 
 ## Conventions
 
