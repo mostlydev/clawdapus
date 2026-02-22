@@ -761,14 +761,15 @@ A new `SKILL` directive in Clawfile and `skills:` in x-claw allows operators to 
 
 ### Phase 5 — Drift Scoring + Fleet Governance
 
-**Goal:** `claw ps` shows drift scores. Master Claw operates.
+**Goal:** `claw ps` shows drift scores. Master Claw operates as an autonomous governor.
 
-1. Independent drift scoring process
-2. When cllama is present: score from sidecar logs (LLM-level)
-3. When cllama is absent: score from config-level checks and output sampling
-4. Drift thresholds → capability restriction → quarantine escalation
-5. Master Claw contract and lifecycle management
-6. `claw audit` shows full intervention + drift history
+1. Independent drift scoring process driven by proxy telemetry.
+2. When cllama is present: score directly from proxy structured logs (LLM-level).
+3. When cllama is absent: score from config-level checks and output sampling.
+4. Drift thresholds → capability restriction → quarantine escalation.
+5. **Master Claw Deployment:** Deploy the "Top Octopus" as a standard agent whose sole purpose is reading proxy logs (cost, drift, interventions) and making executive administrative decisions (shifting budgets, quarantining agents).
+6. **Hub-and-Spoke Model:** Prove the ability for a single Master Claw to ingest telemetry from multiple `cllama` proxies across different pods/zones to autonomously manage a neural fleet.
+7. `claw audit` shows full intervention + drift history.
 
 ### Phase 6 — Recipe Promotion + Worker Mode
 

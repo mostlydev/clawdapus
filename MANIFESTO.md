@@ -615,9 +615,17 @@ Add a service, the surface manifest and skill files update. Remove a service, th
 
 ---
 
-## X. The Master Claw
+## X. The Master Claw and the Fleet Hierarchy
 
-The master claw is a Claw. A container with an agent runner, a behavioral contract, and a cllama layer, same as any other. Its contract defines administrative behavior — what to monitor, what drift thresholds to enforce, when to escalate.
+The Master Claw is the "Top Octopus"—an autonomous AI governor managing a fleet of subordinate agents. It runs as a standard Claw container (with an agent runner, a behavioral contract, and a policy layer) but its specific purpose is administrative oversight.
+
+**The Governance Proxy is its Sensory Organ:**
+The `cllama` shared pod proxy is the programmatic choke point that enforces hard rules (rate limits, budgets, basic PII blocking). Crucially, the proxy emits structured logs detailing cost, prompt interventions, and drift scores. The proxy does not "think" about fleet management; it is a passive sensor and firewall.
+
+**The Master Claw is the Brain:**
+The Master Claw reads the telemetry emitted by the proxy. If a proxy reports that `crypto-crusher-2` has a drift score of 0.31 (e.g., attempting to give financial advice), the Master Claw reads that log and makes an executive decision: *"I am going to execute a command to quarantine `crypto-crusher-2` and alert the human operator."*
+
+In large enterprise deployments, this naturally forms a **Hub-and-Spoke Governance Model**. You can deploy multiple pods across different infrastructure zones. Each pod has its own `cllama` proxy acting as a local firewall. Sitting above them all is a Master Claw, continuously ingesting telemetry from all those proxies, dynamically shifting budgets, promoting recipes, demoting drifting agents, and managing the entire neural fleet autonomously.
 
 It can manage Claw lifecycle. Push configuration overrides. Promote recipes. Demote or quarantine Claws based on drift.
 
