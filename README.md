@@ -114,7 +114,9 @@ CLAW_HANDLE_CRYPTO_CRUSHER_DISCORD_ID=123456789
 CLAW_HANDLE_CRYPTO_CRUSHER_DISCORD_GUILDS=111222333
 ```
 
-`HANDLE discord` in a Clawfile declares the agent's platform identity. Clawdapus broadcasts every agent's handles as env vars into every service in the pod. A Rails API that needs to ping a bot knows its Discord ID without hardcoding anything.
+`HANDLE discord` in a Clawfile declares the agent's platform identity. Clawdapus broadcasts every agent's handles as env vars into every service in the pod — including non-claw services. A trading API that needs to mention a bot in a webhook message knows its Discord ID without hardcoding anything.
+
+The driver also wires each agent's openclaw config automatically: `allowBots: true` (enables bot-to-bot messaging), `mentionPatterns` derived from the handle username and ID (so agents can route incoming messages correctly), and a guild `users[]` allowlist that includes every peer bot in the pod.
 
 ---
 
@@ -195,7 +197,9 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 2 — Driver framework + pod runtime + OpenClaw + volume surfaces | Done |
 | Phase 3 — Surface manifests, service skills, CLAWDAPUS.md | Done |
 | Phase 3.5 — HANDLE directive + social topology projection | Done |
-| Phase 3.6 — Channel surface bindings | In progress |
+| Phase 3.6 — INVOKE scheduling + Discord config wiring | Done |
+| Phase 3.7 — Social topology: mentionPatterns, allowBots, peer handle users | Done |
+| Phase 3.8 — Channel surface bindings | Planned |
 | Phase 4 — cllama sidecar + policy pipeline | Planned |
 | Phase 5 — Drift scoring + fleet governance | Planned |
 | Phase 6 — Recipe promotion + worker mode | Planned |
@@ -208,7 +212,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 |---------|---------------|
 | [`examples/openclaw/`](./examples/openclaw/) | Single OpenClaw agent with Discord handle, skill emit, and service surface |
 | [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
-| [`examples/trading-desk/`](./examples/trading-desk/) | Seven isolated agents — coordinator, four traders, pump trader, systems monitor — coordinating via Discord and a shared research volume. Self-describing API service via `claw.skill.emit`. |
+| [`examples/trading-desk/`](./examples/trading-desk/) | Two isolated agents (tiverton + westin) coordinating via Discord and a shared research volume, with a mock trading API that posts webhook mentions using peer bot IDs injected via `CLAW_HANDLE_*`. Self-describing API surface via `claw.skill.emit`. |
 
 ---
 
@@ -234,6 +238,7 @@ claw compose -f examples/openclaw/claw-pod.yml down
 - [`docs/plans/2026-02-18-clawdapus-architecture.md`](./docs/plans/2026-02-18-clawdapus-architecture.md) — implementation plan
 - [`docs/decisions/001-cllama-transport.md`](./docs/decisions/001-cllama-transport.md) — ADR: cllama as sidecar HTTP proxy
 - [`docs/decisions/002-runtime-authority.md`](./docs/decisions/002-runtime-authority.md) — ADR: compose-only lifecycle authority
+- [`docs/UPDATING.md`](./docs/UPDATING.md) — checklist of everything to update when implementation changes
 
 ## AI Agent Guidance
 
