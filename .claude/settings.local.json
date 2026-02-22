@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /Users/wojtek/dev/ai/clawdapus/examples/trading-desk && go test -tags spike -v -run TestSpikeComposeUp /Users/wojtek/dev/ai/clawdapus/cmd/claw/... -timeout 300s 2>&1)",
+      "Bash(tail:*)"
+    ]
+  }
+}

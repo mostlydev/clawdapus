@@ -1,4 +1,4 @@
-# Clawdapus
+# ![Clawdapus Logo](docs/art/clawdapus.png)
 
 **Infrastructure-layer governance for AI agent containers.**
 

@@ -133,21 +133,23 @@ What Clawdapus does not enforce at all:
 
 cllama is an **enhancement layer**, not a prerequisite. A Claw can run with config-injection-only enforcement. cllama adds deeper LLM-level governance when needed.
 
-### 6. cllama as Optional Bidirectional LLM Proxy
+### 6. cllama: The Standardized Sidecar Standard
 
-cllama is not just an output filter — it is a bidirectional proxy that sits between the runner and the LLM provider. **It is optional.** A Claw without a `CLLAMA` directive runs with config-injection-only enforcement.
+cllama is not just an output filter — it is a context-aware, bidirectional proxy that sits between the runner and the LLM provider. **It is optional.** A Claw without a `CLLAMA` directive runs with config-injection-only enforcement.
 
-**Outbound (runner → LLM):** Intercepts prompts before they reach the LLM. Prevents the model from seeing content that violates policy. Gates what the runner is allowed to *ask* — role gating, thought gating, tool-use gating.
+**Standardized Interface:** cllama is a mini-standard. Any OpenAI-compatible proxy image that can consume Clawdapus context (identity, contract, rights) can act as a sidecar. Clawdapus injects this context (identity, ordinal, and the compiled `/claw/AGENTS.md` contract) directly into the sidecar at startup.
 
-**Inbound (LLM → runner):** Intercepts model responses before they reach the runner. Adjusts, rewrites, or drops responses that violate policy, drift from purpose, or fail tone requirements. Can engage in its own conversation with the LLM to arrive at a compliant response before passing it to the runner's stream of thought.
+**Intelligent Authorization & Compute Metering:** Because it is context-aware, cllama acts as an intelligent governance enforcement point. It evaluates outbound prompts and inbound responses against the agent's specific `enforce` rules. It can drop tools, decorate prompts with guardrails, or amend responses to prevent drift. Crucially, because the proxy holds the sole set of provider keys, it acts as a **hard budget enforcer**. It can seamlessly rewrite a requested model to a cheaper alternative, ensuring untrusted agents cannot run up excessive compute costs. Tools like [ClawRouter](https://github.com/BlockRunAI/ClawRouter) can be integrated as instances of this proxy standard to handle automated model routing and compute metering.
 
-**The runner never knows.** It thinks it's talking directly to the LLM. cllama is transparent — same API shape in, same API shape out.
+**Enforcement via Credential Starvation:** Isolation is achieved by strictly separating secrets. The real LLM provider API keys are provided *only* to the cllama sidecar. The agent container is provisioned with a local dummy token and its LLM base URL is rewritten to point at the sidecar. 
+
+Because the agent lacks the credentials to call providers directly, all successful inference *must* pass through the proxy. This "Credential Starvation" guarantees interception even if a malicious prompt tricks the agent into ignoring its configured base URL, while still allowing the agent to natively reach the internet for chat platforms and web tools.
 
 **Transport: sidecar per Claw (when enabled).**
 - Each Claw with a `CLLAMA` directive gets a `cllama-sidecar` container, injected by `claw up`
 - Sidecar exposes an OpenAI-compatible API endpoint on a private network
 - Runner's LLM base URL is rewritten to point at the sidecar (via ENV injection)
-- Sidecar applies the cllama pipeline: purpose → policy → tone → obfuscation
+- Sidecar applies the policy pipeline: identity → contract validation → intervention
 - Sidecar holds real API keys — runner never sees provider keys
 - Sidecar also intercepts tool calls and enforces `require_cllama` constraints
 

@@ -96,9 +96,25 @@ The traditional answer is to put guardrails inside the prompt. But prompt-level 
 
 ### The Solution
 
-Think twice, act once. cllama is a bidirectional LLM proxy — a separate process, running its own model, with its own policy configuration, under the operator's exclusive control. It sits between the runner and the LLM provider, intercepting both directions. Outbound: it evaluates prompts before the LLM sees them — preventing the model from being asked things that violate policy. Inbound: it evaluates responses before the runner sees them — adjusting, rewriting, or dropping output that drifts from purpose. When a response fails policy, cllama can engage in its own conversation with the LLM to arrive at a compliant response before passing it to the runner's stream of thought. The runner never knows. It thinks it's talking directly to the model.
+Think twice, act once. ### cllama: The Standardized Sidecar
 
-While the runner handles the logic of a task, cllama answers the institutional questions:
+cllama is a context-aware, bidirectional proxy — a separate process, running its own model, with its own policy configuration, under the operator's exclusive control. It is an open standard: any OpenAI-compatible proxy image that can consume Clawdapus context (identity, contract, rights) can act as a sidecar.
+
+It sits between the runner and the LLM provider, intercepting both directions. Outbound: it evaluates prompts before the LLM sees them — preventing the model from being asked things that violate policy. Inbound: it evaluates responses before the runner sees them — adjusting, rewriting, or dropping output that drifts from purpose. When a response fails policy, cllama can engage in its own conversation with the LLM to arrive at a compliant response before passing it to the runner's stream of thought. 
+
+The runner never knows. It thinks it's talking directly to the model.
+
+### Enforcement via Credential Starvation
+
+Isolation is achieved by strictly separating secrets rather than relying solely on network boundaries. When cllama is enabled, the cllama sidecar holds the real LLM provider API keys. The agent container is provisioned with a local dummy token and its LLM base URL is rewritten to point at the sidecar. 
+
+Because the agent lacks the credentials to call providers directly, all successful inference *must* pass through the proxy. This "Credential Starvation" guarantees interception even if a malicious prompt tricks the agent into ignoring its configured base URL, while still allowing the agent to natively reach the internet for chat platforms and web tools.
+
+### Intelligent Authorization & Compute Metering
+
+Because cllama is context-aware, it acts as a dynamic governance enforcement point. Clawdapus injects the agent's identity (`CLAW_ID`), ordinal, and compiled behavioral contract (`/claw/AGENTS.md`) directly into the sidecar at startup. The proxy uses this to understand the agent's specific `enforce` rules and available tools, allowing it to drop tool calls or decorate prompts with guardrails tailored to that exact instance.
+
+Crucially, because the proxy holds the sole set of provider keys, it acts as a **hard budget enforcer**. Even if an agent's internal reasoning decides it needs `gpt-4o` for a complex task and attempts to configure its runner to use it, the proxy can intercept that request and seamlessly rewrite it to `claude-3-haiku` (or whatever the operator has budgeted for that agent). The agent never knows its compute was metered down. Tools like [ClawRouter](https://github.com/BlockRunAI/ClawRouter) can be bundled as instances of a `cllama` proxy to automatically handle this transparent model routing, provider fallback, and compute metering across the fleet.
 
 *"Can we say this here?"* — Platform-appropriate content gating.
 
@@ -143,9 +159,11 @@ Pipeline: raw cognition → purpose → policy → tone → obfuscation → worl
 
 cllama can be configured procedurally — rigid code for high-security rails, hard policy gates, financial thresholds — or conversationally — natural language for nuanced tone management, brand philosophy, relationship guidelines. This allows an organization to update its corporate communication philosophy by updating a cllama module, instantly realigning an entire fleet without touching a single behavioral contract.
 
-### API Keys
+### Enforcement via Credential Starvation
 
-When cllama is enabled, the cllama sidecar holds the real LLM provider API keys. The runner's LLM base URL is rewritten to point at the sidecar — the runner never sees real provider keys. Platform API keys for external services are exported as environment variables per standard Docker practice.
+Isolation is achieved by strictly separating secrets rather than relying solely on network boundaries. When cllama is enabled, the cllama sidecar holds the real LLM provider API keys. The agent container is provisioned with a local dummy token and its LLM base URL is rewritten to point at the sidecar. 
+
+Because the agent lacks the credentials to call providers directly, all successful inference *must* pass through the proxy. This "Credential Starvation" guarantees interception even if a malicious prompt tricks the agent into ignoring its configured base URL, while still allowing the agent to natively reach the internet for chat platforms and web tools.
 
 ---
 
@@ -189,7 +207,7 @@ The operator picks the weight class that fits the problem. Lightweight runners a
 
 **CONFIGURE** — Shell commands that run at container init, mutating base defaults into this Claw's setup. Tools like jq/sed, JSON5-aware patchers, or runner-native config CLIs may be used depending on claw type. `claw-module enable/disable` handles schema-aware cascading changes where available.
 
-**CLLAMA** — Optional default judgment proxy configuration. Namespaced policy prefix, provider, model, then module declarations. Overridable per-deployment in claw-pod.yml, same as CMD is overridable by compose's command.
+**CLLAMA** — Optional default judgment proxy configuration. Declares the namespaced policy stack, provider, and model for the sidecar. cllama is a context-aware sidecar standard (see ADR-008): any OpenAI-compatible proxy image can act as the judgment layer by consuming the identity and contract context Clawdapus injects at startup.
 
 **INVOKE** — Invocation schedules. For simple runners and lightweight runners like Nanobot that use external cron, INVOKE entries trigger execution directly. For runners like OpenClaw that have their own internal scheduling, INVOKE manages the container lifecycle on a macro schedule while the runner handles micro-scheduling internally.
 
@@ -208,6 +226,8 @@ The operator picks the weight class that fits the problem. Lightweight runners a
 **SURFACE** — Declares what this Claw connects to. Volumes, queues, chat platforms, APIs, MCP services. Clawdapus resolves service references against expose blocks in the pod and assembles the skill map. Access modes are enforced only on mounts (volumes, host paths) where Docker has authority. For services, channels, and APIs, the Claw authenticates with standard credentials — Clawdapus declares topology, not permissions.
 
 **SKILL** — Mounts skill files from the host into the runner's skill directory, read-only. Skills are the manual for how to use capabilities — operator-provided guides, surface-generated usage docs, or discovery-populated API references. The driver knows where skills go per runner type. All skills are indexed in `CLAWDAPUS.md`.
+
+**INCLUDE** — An optional, additive mechanism in the pod manifest to modularize agent context. Operators can include additional files with semantic modes (`enforce`, `guide`, `reference`). `enforce` and `guide` contents are deterministically inlined into the canonical `/claw/AGENTS.md` with source markers, while `reference` files are mounted purely as skills. This allows for modular, reusable governance (e.g. shared risk-limits.md) while maintaining the simplicity of the single-file default.
 
 ### A Complete Clawfile
 
