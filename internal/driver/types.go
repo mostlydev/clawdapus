@@ -62,11 +62,33 @@ type ResolvedSkill struct {
 	HostPath string // resolved absolute host path
 }
 
+// ChannelGuildConfig is the routing config for one guild in a channel surface.
+type ChannelGuildConfig struct {
+	Policy         string   // "allowlist", "denylist", or "" (inherit platform default)
+	Users          []string // user IDs for the policy list
+	RequireMention bool
+}
+
+// ChannelDMConfig is the DM routing config for a channel surface.
+type ChannelDMConfig struct {
+	Enabled   bool
+	Policy    string   // "allowlist", "denylist", or ""
+	AllowFrom []string // user IDs allowed to DM the bot
+}
+
+// ChannelConfig is the full routing config declared in a map-form channel surface.
+// Non-nil only when the pod declares map form (channel://discord: {...}).
+type ChannelConfig struct {
+	Guilds map[string]ChannelGuildConfig // guild ID → routing config
+	DM     ChannelDMConfig
+}
+
 type ResolvedSurface struct {
-	Scheme     string   // channel, service, volume, host, egress
-	Target     string   // discord, fleet-master, shared-cache, etc.
-	AccessMode string   // read-only, read-write (for volume/host surfaces)
-	Ports      []string // exposed ports from service definition (service surfaces only)
+	Scheme        string         // channel, service, volume, host, egress
+	Target        string         // discord, fleet-master, shared-cache, etc.
+	AccessMode    string         // read-only, read-write (for volume/host surfaces)
+	Ports         []string       // exposed ports from service definition (service surfaces only)
+	ChannelConfig *ChannelConfig // non-nil only for map-form channel surfaces
 }
 
 type GeneratedSkill struct {
