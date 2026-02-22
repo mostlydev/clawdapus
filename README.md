@@ -193,9 +193,9 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 1. **Purpose is sacred** — contract is bind-mounted read-only; survives full container compromise
 2. **The workspace is alive** — bots install and adapt; mutations are tracked and promotable
 3. **Configuration is code** — every deviation from defaults is diffable
-4. **Drift is quantifiable** — independent audit, not self-report
-5. **Surfaces are declared** — topology for operators; capability discovery for bots
-6. **Claws are users** — standard credentials; the service's own auth governs access
+4. **Drift is an open metric** — independent audit via the governance proxy, not self-report
+5. **Surfaces are declared** — topology for operators; capability discovery for bots. The proxy enforces cognitive boundaries.
+6. **Claws are users** — standard credentials; the proxy governs intent, the service's own auth governs execution
 7. **Compute is a privilege** — operator assigns models and schedules; proxy enforces budgets and rate limits; bot doesn't choose
 8. **Think twice, act once** — a reasoning model cannot be its own judge
 
@@ -214,7 +214,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 3.6 — INVOKE scheduling + Discord config wiring | Done |
 | Phase 3.7 — Social topology: mentionPatterns, allowBots, peer handle users | Done |
 | Phase 3.8 — Channel surface bindings | Planned |
-| Phase 4 — cllama sidecar + policy pipeline | Planned |
+| Phase 4 — Shared governance proxy + policy pipeline | Planned |
 | Phase 5 — Drift scoring + fleet governance | Planned |
 | Phase 6 — Recipe promotion + worker mode | Planned |
 
