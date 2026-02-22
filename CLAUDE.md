@@ -38,7 +38,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - `internal/runtime/` — Docker SDK wrapper (read-only only)
 - `cmd/claw/compose_up.go` — main orchestration for `claw compose up`
 
-## Implementation Status (as of 2026-02-21)
+## Implementation Status (as of 2026-02-22)
 
 | Phase | Status |
 |-------|--------|
@@ -48,6 +48,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 | Phase 3 Slice 2 — Service surface skills | DONE |
 | Phase 3.5 — HANDLE directive + social topology | DONE |
 | Phase 3 Slice 3 — INVOKE scheduling + Discord config wiring | DONE |
+| Phase 3 Slice 4 — Social topology: mentionPatterns, allowBots, peer handle users | DONE |
 | Phase 4 — cllama sidecar | NOT STARTED |
 | Phase 5 — Drift scoring | NOT STARTED |
 | Phase 6 — Recipe promotion | NOT STARTED |
@@ -69,6 +70,10 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - Config dir (`/app/config`) and cron dir (`/app/state/cron`) are bind-mounted as directories, not files — openclaw performs atomic writes by renaming temp files alongside the target; file-only mounts cause EBUSY
 - `plugins.entries.discord.enabled: true` is pre-seeded in generated config when HANDLE discord is declared — prevents gateway startup doctor from overwriting the config
 - INVOKE directive bakes scheduled tasks as image labels (`claw.invoke.N`); driver generates `jobs.json` mounted at `/app/state/cron/`; openclaw cron scheduler picks it up automatically
+- `allowBots: true` is unconditional on `channels.discord` — bot-to-bot messaging requires it; no config knob
+- `mentionPatterns` auto-derived from each claw's discord handle: text `(?i)\b@?<username>\b` + native `<@!?<id>>`; injected into `agents.list[0].groupChat.mentionPatterns` in openclaw config
+- `PeerHandles` on `ResolvedClaw` — pre-pass in `compose_up.go` collects all pod handles; each claw's guild `users[]` allowlist includes own ID + all peer Discord bot IDs (sorted); enables inter-agent mentions
+- Webhook `User-Agent` must be `DiscordBot (url, version)` — bare `Python-urllib` is blocked by Cloudflare with error code 1010 (ASN ban); applies to any non-browser HTTP client posting to Discord webhook endpoints
 
 ## Conventions
 

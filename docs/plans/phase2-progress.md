@@ -161,6 +161,35 @@ All 15 tasks done (11 core + 4 hardening). Exit criteria met:
 
 ---
 
+## Phase 3 Slice 4: Social Topology — mentionPatterns, allowBots, Peer Handles
+
+**Status:** DONE
+**Commit:** `f110daa`
+
+| # | Task | Status | Notes |
+|---|------|--------|-------|
+| 1 | Add `PeerHandles` to `ResolvedClaw` | DONE | `driver/types.go`: `map[string]map[string]*HandleInfo` |
+| 2 | Pre-pass in `compose_up.go` to collect pod handles | DONE | Cheap first pass; injects `PeerHandles` before `Materialize` |
+| 3 | `allowBots: true` unconditional on `channels.discord` | DONE | Enables bot-to-bot messaging; no config knob |
+| 4 | `agents.list` generation with `mentionPatterns` | DONE | Text `(?i)\b@?<username>\b` + native `<@!?<id>>`; matches real openclaw schema |
+| 5 | Guild `users[]` = own ID + all peer Discord IDs (sorted) | DONE | `discordBotIDs(rc)` helper; enables inter-agent mentions |
+| 6 | Per-channel `{allow, requireMention}` entries | DONE | Each declared channel gets explicit allow entry |
+| 7 | 4 new config tests | DONE | allowBots, mentionPatterns, guild users, peer handle aggregation |
+| 8 | trading-api webhook mention proof | DONE | Webhook posts `<@TIVERTON_ID> <@WESTIN_ID>`; `User-Agent: DiscordBot` required (Cloudflare error 1010) |
+| 9 | Spike test: verify mentions in Discord channel | DONE | `spikeVerifyDiscordGreeting` checks both agent IDs appear |
+
+### Design decisions
+
+- `PeerHandles` collected in cheap pre-pass over already-parsed pod YAML — no image inspection needed
+- `allowBots` is unconditional; a bot that can't hear other bots is useless in a pod
+- `mentionPatterns` order: text username first (human-readable), then Discord native `<@!?id>` (client-rendered)
+- Webhook `User-Agent` must be `DiscordBot (url, version)` — bare `Python-urllib` triggers Cloudflare 1010
+- `CLAW_HANDLE_*` env vars already broadcast to ALL services (including non-claw); no extra wiring needed for webhook mentions
+
+**Completed:** 2026-02-22
+
+---
+
 ## Phase 3 Slice 3: Channel Surface Bindings
 
 **Plan:** `docs/plans/2026-02-21-phase3-slice3-channel-surfaces.md`
