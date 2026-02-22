@@ -277,7 +277,6 @@ INVOKE 0 */4 * * *   drift-check
 HANDLE discord
 
 # Communication surfaces
-SURFACE channel://discord
 SURFACE volume://shared-cache       read-write
 SURFACE service://company-crm
 SURFACE service://fleet-master
@@ -431,19 +430,10 @@ x-claw:
 
 networks:
   internal:
-    x-claw:
-      visibility: pod-only
   public-egress:
-    x-claw:
-      visibility: egress-only
 
 volumes:
   shared-cache:
-    x-claw:
-      access:
-        - crypto-crusher-*: read-write
-        - market-scanner: read-write
-        - dashboard: read-only
 
 services:
 
@@ -454,8 +444,6 @@ services:
     x-claw:
       agent: ./agents/master-agents.md
       cllama: cllama-org-policy/anthropic/claude-sonnet-4-5 policy/operator-safety
-      describe:
-        role: "Fleet orchestration and drift management"
     networks:
       - internal
 
@@ -468,19 +456,14 @@ services:
       persona: registry.claw.io/personas/crypto-crusher:v2
       cllama: cllama-org-policy/xai/grok-4.1-fast tone/sardonic obfuscation/humanize-v2
       count: 3
+      handles:
+        discord:
+          id: "1465489501551067136"
+          username: "crusher"
       surfaces:
-        - volume://shared-cache: read-write
-        - channel://discord:
-            guilds:
-              "1465489501551067136":
-                require_mention: true
-            dm: { enabled: true }
-        - service://market-scanner
-        - service://company-crm
-      describe:
-        role: "Original crypto market commentary"
-        outputs: ["tweets", "threads", "discord posts"]
-        inputs: ["market data", "timeline context"]
+        - "volume://shared-cache read-write"
+        - "service://market-scanner"
+        - "service://company-crm"
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       CRM_API_KEY: ${CRM_API_KEY}
@@ -494,26 +477,11 @@ services:
   # Plain Docker container — not a Claw, but a full pod member.
   market-scanner:
     image: custom/market-scanner:latest
-    x-claw:
-      expose:
-        protocol: rest
-        port: 8080
-        discover: auto
-      surfaces:
-        - volume://shared-cache: read-write
-      describe:
-        role: "Aggregates crypto market data from CoinGecko and on-chain sources"
-        outputs: ["JSON snapshots to shared-cache", "REST API on :8080"]
-        capabilities:
-          - name: "get_price"
-            description: "Current and historical price data for any supported token"
-            endpoint: "http://market-scanner:8080/api/price"
-          - name: "get_whale_activity"
-            description: "Large wallet movements in the last N hours"
-            endpoint: "http://market-scanner:8080/api/whales"
-          - name: "get_market_sentiment"
-            description: "Aggregated fear/greed index and social volume"
-            endpoint: "http://market-scanner:8080/api/sentiment"
+    expose:
+      - "8080"
+    labels:
+      # Emit its own surface skill as per ADR-004
+      - "claw.skill.emit=/skills/market-scanner.md"
     networks:
       - internal
       - public-egress
@@ -523,15 +491,10 @@ services:
   # MCP service container
   company-crm:
     image: custom/crm-mcp-bridge:latest
-    x-claw:
-      expose:
-        protocol: mcp
-        port: 3100
-      require_cllama:
-        - policy/customer-data-access
-        - policy/pii-gate
-      describe:
-        role: "Company CRM with customer and deal data"
+    expose:
+      - "3100"
+    labels:
+      - "claw.skill.emit=/skills/crm-mcp.md"
     networks:
       - internal
     environment:
@@ -602,10 +565,6 @@ Available capabilities for crypto-crusher-0:
 
   FROM shared-cache (volume://shared-cache):
     read-write mount at /mnt/shared-cache
-
-  FROM discord (channel://discord):
-    guild 1465489501551067136, DMs enabled
-    [skills/surface-discord.md]
 
   OPERATOR SKILLS:
     skills/crypto-feeds.md — Crypto data feed tools

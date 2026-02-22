@@ -54,7 +54,6 @@ INVOKE 0,30 * * * *  engagement-sweep
 
 HANDLE discord
 
-SURFACE channel://discord
 SURFACE volume://shared-cache       read-write
 SURFACE service://market-scanner
 
