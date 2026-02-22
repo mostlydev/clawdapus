@@ -95,6 +95,7 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 
 - **Outbound:** intercepts prompts. Gates what the runner is allowed to ask.
 - **Inbound:** intercepts responses. Rewrites or drops output that violates policy.
+- **Cost Containment:** enforces hard budgets by transparently downgrading requested models and rate-limiting expensive agents.
 
 The runner thinks it's talking directly to the LLM. It never sees `cllama`.
 
