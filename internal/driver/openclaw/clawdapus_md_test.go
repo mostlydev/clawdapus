@@ -50,10 +50,14 @@ func TestGenerateClawdapusMD(t *testing.T) {
 	if !strings.Contains(md, "skills/surface-fleet-master.md") {
 		t.Error("service surface should reference its companion skill file")
 	}
-	// Channel and volume surfaces do NOT get skill references
-	if strings.Contains(md, "skills/surface-discord.md") {
-		t.Error("channel surface should not have skill reference")
+	// Channel surface should describe token and reference its skill file
+	if !strings.Contains(md, "DISCORD_BOT_TOKEN") {
+		t.Error("expected token env var hint for channel surface")
 	}
+	if !strings.Contains(md, "skills/surface-discord.md") {
+		t.Error("expected channel skill in Skills index")
+	}
+	// Volume surfaces do NOT get skill references
 	if strings.Contains(md, "skills/surface-research-cache.md") {
 		t.Error("volume surface should not have skill reference")
 	}

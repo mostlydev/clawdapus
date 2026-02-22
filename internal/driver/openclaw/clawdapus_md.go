@@ -41,6 +41,10 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 				b.WriteString(fmt.Sprintf("- **Host:** %s\n", s.Target))
 				b.WriteString(fmt.Sprintf("- **Skill:** `skills/surface-%s.md`\n", s.Target))
 			case "channel":
+				if tokenVar := platformTokenVar(s.Target); tokenVar != "" {
+					b.WriteString(fmt.Sprintf("- **Token:** `%s` (env)\n", tokenVar))
+				}
+				b.WriteString(fmt.Sprintf("- **Skill:** `skills/surface-%s.md`\n", s.Target))
 			}
 			b.WriteString("\n")
 		}
@@ -102,10 +106,13 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		}
 	}
 
-	// Surface-generated skills (service surfaces)
+	// Surface-generated skills (service and channel surfaces)
 	for _, s := range rc.Surfaces {
-		if s.Scheme == "service" {
+		switch s.Scheme {
+		case "service":
 			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/surface-%s.md` — %s service surface", s.Target, s.Target))
+		case "channel":
+			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/surface-%s.md` — %s channel surface", s.Target, s.Target))
 		}
 	}
 
