@@ -33,11 +33,11 @@ Clawdapus is infrastructure for bots the way Docker is infrastructure for applic
 1. **Purpose Is Sacred** — The bot reads its purpose on every invocation but cannot alter the constraint document itself. If the contract is not present at boot, the container does not start.
 2. **The Workspace Is Alive** — The bot can install packages and write scripts. Ad hoc evolution is tracked and becomes permanent infrastructure through a human-gated recipe promotion process.
 3. **Configuration Is Code** — Every configuration is a documented, diffable deviation from its base image's defaults.
-4. **Drift Is Quantifiable** — We do not trust a bot's self-report. An independent process audits outputs against the contract to score drift.
-5. **Surfaces Are Declared** — Bots communicate through shared surfaces (volumes, APIs). Surfaces serve two audiences: operators get topology visibility, bots get capability discovery. While Docker enforces physical access modes on mounts, the governance proxy enforces cognitive boundaries by proactively scoping and intercepting unauthorized tool-use intents within the LLM inference stream.
-6. **Claws Are Users** — A Claw authenticates to external services with standard credentials (environment variables). The governance proxy acts as an intent-layer authorization gate that can proactively deny cognitive tool requests, but the target service's own auth remains the final authority for all direct network execution.
-7. **Compute Is a Privilege** — Every cognitive cycle is an authorized expenditure. The operator assigns models and schedules; the proxy enforces budgets and rate limits. The bot does not choose its own budget.
-8. **Think Twice, Act Once** — A reasoning model cannot be its own judge. Prompt-level guardrails are part of the same cognitive process they are trying to constrain. Governance must be executed by a separate, independent process.
+4. **Surfaces Are Declared** — Bots communicate through shared surfaces (volumes, APIs). Surfaces serve two audiences: operators get topology visibility, bots get capability discovery. While Docker enforces physical access modes on mounts, the governance proxy enforces cognitive boundaries by proactively scoping and intercepting unauthorized tool-use intents within the LLM inference stream.
+5. **Claws Are Users** — A Claw authenticates to external services with standard credentials (environment variables). The governance proxy acts as an intent-layer authorization gate that can proactively deny cognitive tool requests, but the target service's own auth remains the final authority for all direct network execution.
+6. **Compute Is a Privilege** — Every cognitive cycle is an authorized expenditure. The operator assigns models and schedules; the proxy enforces budgets and rate limits. The bot does not choose its own budget.
+7. **Think Twice, Act Once** — A reasoning model cannot be its own judge. Prompt-level guardrails are part of the same cognitive process they are trying to constrain. Governance must be executed by a separate, independent process.
+8. **Drift is an Open Metric** — We do not trust a bot's self-report. However, defining and measuring behavioral drift is complex and organization-specific. By delegating interception to a swappable governance proxy, the infrastructure avoids defining drift itself, leaving it as an open operational metric for the proxy to explore and quantify.
 
 ---
 
@@ -138,13 +138,13 @@ Agents have identities on chat platforms. The `HANDLE` directive declares a bot'
 
 ## PART 4: FLEET OPERATIONS
 
-### XI. Drift and Monitoring
+### XI. Drift (An Open Metric)
 
-Every Claw has a drift score. Drift scoring is not self-reported — an independent process examines outputs, compares them against the behavioral contract and the proxy's interventions, and generates a score.
+We do not trust a bot's self-report, which means any measure of behavioral drift must be scored by an independent process. However, the exact definition and calculation of "drift" is highly organization-specific and open to future exploration.
 
-When the `cllama` proxy intercepts a request, drops a tool call, or amends a response, it emits a structured log. These telemetry logs (`claw audit`) provide a verifiable history of exactly what the bot *tried* to do versus what it was *allowed* to do. 
+Because Clawdapus delegates LLM interception to a swappable governance proxy, it does not need to define drift itself. Instead, it relies on the proxy to emit structured telemetry logs whenever it intercepts a request, drops a tool call, or amends a response. 
 
-Low drift: continue normally. Moderate drift: restrict capabilities. High drift: quarantine and alert the operator.
+These logs (`claw audit`) provide the raw data—a verifiable history of exactly what the bot *tried* to do versus what it was *allowed* to do. It is up to the specific proxy implementation (and the Master Claw) to parse these logs and synthesize them into a meaningful drift score to trigger administrative actions like capability restriction or quarantine.
 
 ### XII. The Master Claw and Hub-and-Spoke Governance
 
