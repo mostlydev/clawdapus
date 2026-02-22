@@ -239,6 +239,7 @@ claw compose -f examples/openclaw/claw-pod.yml down
 - [`docs/decisions/001-cllama-transport.md`](./docs/decisions/001-cllama-transport.md) — ADR: cllama as sidecar HTTP proxy
 - [`docs/decisions/002-runtime-authority.md`](./docs/decisions/002-runtime-authority.md) — ADR: compose-only lifecycle authority
 - [`docs/UPDATING.md`](./docs/UPDATING.md) — checklist of everything to update when implementation changes
+- [`TESTING.md`](./TESTING.md) — unit, E2E, and spike test runbook
 
 ## AI Agent Guidance
 
