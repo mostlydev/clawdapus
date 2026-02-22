@@ -149,6 +149,23 @@ func TestSpikeComposeUp(t *testing.T) {
 		t.Errorf("openclaw.json: expected guild %q in guilds map, keys=%v", guildID, spikeMapKeys(guilds))
 	}
 
+	// Channel surface routing config: allowFrom should contain operator ID if set.
+	// This proves the map-form channel surface is parsed and applied to openclaw.json.
+	if operatorID := env["OPERATOR_DISCORD_ID"]; operatorID != "" {
+		allowFrom, _ := discord["allowFrom"].([]interface{})
+		found := false
+		for _, id := range allowFrom {
+			if s, ok := id.(string); ok && s == operatorID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("openclaw.json: expected channels.discord.allowFrom to contain operator ID %q, got %v",
+				operatorID, allowFrom)
+		}
+	}
+
 	// ── Verify tiverton's jobs.json ──────────────────────────────────────────
 
 	jobsPath := filepath.Join(runtimeDir, "tiverton", "state", "cron", "jobs.json")
@@ -222,6 +239,12 @@ func TestSpikeComposeUp(t *testing.T) {
 		t.Error("skills directory is empty — expected at least one skill file")
 	} else {
 		t.Logf("skills: %s", strings.TrimSpace(string(out3)))
+		// Channel surface skill should be present (generated from map-form SURFACE channel://discord)
+		if strings.Contains(string(out3), "surface-discord.md") {
+			t.Logf("surface-discord.md confirmed in skills")
+		} else {
+			t.Errorf("expected surface-discord.md in /claw/skills/, got: %s", strings.TrimSpace(string(out3)))
+		}
 	}
 
 	// AGENTS.md must be readable at the workspace root

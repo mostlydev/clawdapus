@@ -64,6 +64,12 @@ services:
       surfaces:
         - "service://trading-api"
         - "volume://clawd-shared read-write"
+        - channel://discord:
+            dm:
+              enabled: true
+              policy: allowlist
+              allow_from:
+                - "${OPERATOR_DISCORD_ID}"
       skills:
         - ./policy/risk-limits.md
         - ./policy/approval-workflow.md
