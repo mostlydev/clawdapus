@@ -1,0 +1,11 @@
+FROM nanoclaw-orchestrator:latest
+
+CLAW_TYPE nanoclaw
+
+MODEL primary anthropic/claude-sonnet-4-6
+
+HANDLE discord
+
+PRIVILEGE docker-socket true
+
+TRACK apt npm
