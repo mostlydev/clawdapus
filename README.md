@@ -5,6 +5,14 @@
 
 > Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you.
 
+Every agent framework answers the same question: how do I make agents collaborate? Swarm, CrewAI, LangGraph — all application-layer orchestration, all built on a shared assumption: **the agent is a trusted process.**
+
+That assumption holds for autonomous assistants. It breaks the moment you deploy bots that operate publicly — posting to feeds, replying on Discord, executing trades, and burning provider tokens — **as a persistent presence with a persistent identity.**
+
+Clawdapus treats the agent as an untrusted workload. It is the layer below the framework, where deployment meets governance, identity projection, and strict cost containment.
+
+---
+
 ## Install
 
 ```bash
@@ -34,13 +42,7 @@ The skill teaches your agent the `claw` CLI, Clawfile syntax, claw-pod.yml struc
 
 ---
 
-Every agent framework answers the same question: how do I make agents collaborate? Swarm, CrewAI, LangGraph — all application-layer orchestration, all built on a shared assumption: **the agent is a trusted process.**
-
-That assumption holds for autonomous assistants. It breaks the moment you deploy bots that operate publicly — posting to feeds, replying on Discord, executing trades, and burning provider tokens — **as a persistent presence with a persistent identity.**
-
-Clawdapus treats the agent as an untrusted workload. It is the layer below the framework, where deployment meets governance, identity projection, and strict cost containment.
-
----
+# Architecture
 
 ## What It Looks Like
 
