@@ -881,6 +881,49 @@ func TestGenerateConfigMultiPlatformMentionPatterns(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigTelegramPeerHandles(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "bot-a",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"telegram": {ID: "111", Username: "bota"},
+		},
+		PeerHandles: map[string]map[string]*driver.HandleInfo{
+			"bot-b": {
+				"telegram": {ID: "222", Username: "botb"},
+			},
+		},
+	}
+
+	config, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify mention patterns include peer patterns
+	agentsList, _ := getPath(config, "agents.list")
+	agents := agentsList.([]interface{})
+	agent := agents[0].(map[string]interface{})
+	gc, ok := agent["groupChat"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected groupChat to exist")
+	}
+	patterns := gc["mentionPatterns"].([]interface{})
+	if len(patterns) == 0 {
+		t.Fatal("expected mention patterns for telegram handle")
+	}
+	// Verify own bot's text pattern is present
+	hasOwnPattern := false
+	for _, p := range patterns {
+		if p == `(?i)\b@?bota\b` {
+			hasOwnPattern = true
+		}
+	}
+	if !hasOwnPattern {
+		t.Errorf("expected own mention pattern (?i)\\b@?bota\\b in %v", patterns)
+	}
+}
+
 func TestGenerateConfigHandleNilMeansNoChannels(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:     make(map[string]string),

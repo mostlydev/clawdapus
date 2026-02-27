@@ -282,15 +282,15 @@ func parseConfigSetCommand(cmd string) (string, interface{}, error) {
 	return path, value, nil
 }
 
-// discordBotIDs collects all Discord bot IDs from own handle and peer handles,
-// sorted for deterministic output.
-func discordBotIDs(rc *driver.ResolvedClaw) []string {
+// platformBotIDs collects all bot IDs for a given platform from own handle and
+// peer handles, sorted for deterministic output.
+func platformBotIDs(rc *driver.ResolvedClaw, platform string) []string {
 	seen := make(map[string]struct{})
-	if h := rc.Handles["discord"]; h != nil && h.ID != "" {
+	if h := rc.Handles[platform]; h != nil && h.ID != "" {
 		seen[h.ID] = struct{}{}
 	}
 	for _, peerHandles := range rc.PeerHandles {
-		if ph, ok := peerHandles["discord"]; ok && ph != nil && ph.ID != "" {
+		if ph, ok := peerHandles[platform]; ok && ph != nil && ph.ID != "" {
 			seen[ph.ID] = struct{}{}
 		}
 	}
@@ -300,6 +300,12 @@ func discordBotIDs(rc *driver.ResolvedClaw) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// discordBotIDs collects all Discord bot IDs from own handle and peer handles,
+// sorted for deterministic output.
+func discordBotIDs(rc *driver.ResolvedClaw) []string {
+	return platformBotIDs(rc, "discord")
 }
 
 // stringsToIface converts []string to []interface{} for JSON marshaling.
