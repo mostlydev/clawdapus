@@ -5,6 +5,19 @@
 
 > Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you.
 
+## Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/install.sh | sh
+claw doctor
+```
+
+Or build from source:
+
+```bash
+go build -o bin/claw ./cmd/claw
+```
+
 ## Install AI Skill
 
 Give your coding agent (Claude Code, Cursor, etc.) full operational knowledge of Clawdapus:
