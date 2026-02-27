@@ -14,44 +14,56 @@ Clawdapus treats the agent as an untrusted workload. It is the layer below the f
 
 ---
 
-## Quickstart: The Five Minute Pod
+## What It Looks Like
 
-Learn by doing. Build and deploy a governed agent in 30 seconds. No Discord tokens or databases required.
+**The Image (`Clawfile`)** — an extended Dockerfile.
 
-```bash
-# 1. Install the CLI
-go build -o bin/claw ./cmd/claw
-
-# 2. Build the agent image (translates Clawfile -> Dockerfile -> OCI Image)
-# (Assumes openclaw:latest base image is available)
-./bin/claw build -t my-agent:latest examples/hello-world
-
-# 3. Deploy the fleet (translates claw-pod.yml -> docker-compose.yml -> runs it)
-export ANTHROPIC_API_KEY="sk-ant-..."
-./bin/claw compose up examples/hello-world/claw-pod.yml
-```
-
-### The Code Behind the Quickstart
-
-**The Image (`Clawfile`)**
 ```dockerfile
 FROM openclaw:latest
+
 CLAW_TYPE openclaw
-AGENT AGENTS.md
-# No handles, no complex surfaces. Just a bot.
+AGENT AGENTS.md                   # behavioral contract — bind-mounted read-only
+
+MODEL primary openrouter/anthropic/claude-sonnet-4
+MODEL fallback anthropic/claude-haiku-3-5
+
+CLLAMA passthrough                # governance proxy — credential starvation + cost tracking
+
+HANDLE discord                    # platform identity — mention patterns, peer discovery
+INVOKE 15 8 * * 1-5  pre-market   # scheduled invocation — cron, managed by operator
+
+SURFACE service://trading-api     # declared capabilities — auto-discovered, skill-mapped
+SURFACE volume://shared-research read-write
+
+SKILL policy/risk-limits.md       # operator policy — mounted read-only into runner
 ```
 
-**The Deployment (`claw-pod.yml`)**
+**The Deployment (`claw-pod.yml`)** — an extended docker-compose.
+
 ```yaml
 services:
-  my-bot:
-    image: my-agent:latest
+  tiverton:
+    image: trading-desk:latest
     x-claw:
-      agent: ./AGENTS.md
+      agent: ./agents/TIVERTON.md
       cllama: passthrough
-      # The proxy gets the real key. The agent only gets a dummy token.
       cllama-env:
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
         ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      handles:
+        discord:
+          id: "${TIVERTON_DISCORD_ID}"
+          username: "tiverton"
+      surfaces:
+        - "service://trading-api"
+        - "volume://shared-research read-write"
+```
+
+`claw build` transpiles the Clawfile to a standard Dockerfile. `claw compose up` parses the pod YAML, runs driver enforcement, generates per-agent configs, wires the cllama proxy, and calls `docker compose`. The output is standard OCI images and a standard compose file. Eject from Clawdapus anytime — you still have working Docker artifacts.
+
+```bash
+go build -o bin/claw ./cmd/claw
+./bin/claw compose up examples/trading-desk/claw-pod.yml
 ```
 
 ---
@@ -62,7 +74,7 @@ services:
 |---------|---------------|
 | [`examples/openclaw/`](./examples/openclaw/) | Single OpenClaw agent with Discord handle, skill emit, and service surface |
 | [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
-| [`examples/trading-desk/`](./examples/trading-desk/) | Two isolated agents coordinating via Discord and a shared research volume, with a mock trading API and a `cllama` governance proxy enforcing cost boundaries. |
+| [`examples/trading-desk/`](./examples/trading-desk/) | Three agents (coordinator, momentum trader, systems monitor) coordinating via Discord with a mock trading API, scheduled invocations, and `cllama` governance proxy enforcing credential starvation and cost boundaries. |
 
 ---
 
@@ -81,59 +93,44 @@ Any valid Dockerfile is a valid Clawfile. Any valid `docker-compose.yml` is a va
 
 ---
 
-## A Clawfile
+## Clawfile Directives
 
-```dockerfile
-FROM openclaw:latest
+The Clawfile extends the Dockerfile with directives that the `claw build` preprocessor translates into standard Dockerfile primitives (`LABEL`, `ENV`, `RUN`). The output is a plain OCI image.
 
-CLAW_TYPE openclaw
-AGENT AGENTS.md                   # behavioral contract — bind-mounted read-only
-
-PERSONA registry.claw.io/personas/crypto-crusher:v2
-
-MODEL primary   gpt-4o
-MODEL summarizer llama-3.2-3b
-
-CLLAMA cllama-org-policy/xai/grok-4.1-fast \
-  tone/sardonic-but-informed \
-  obfuscation/humanize-v2 \
-  purpose/engagement-farming
-
-TRACK apt pip npm
-
-INVOKE 0 9 * * *     tweet-cycle
-INVOKE 0,30 * * * *  engagement-sweep
-
-HANDLE discord
-
-SURFACE volume://shared-cache       read-write
-SURFACE service://market-scanner
-
-SKILL skills/crypto-feeds.md
-```
-
-`claw build` transpiles this to a standard Dockerfile. The output is a plain OCI image — runnable anywhere without `claw`.
+| Directive | Purpose |
+|---|---|
+| `CLAW_TYPE` | Selects the runtime driver (openclaw, nanoclaw, generic) |
+| `AGENT` | Names the behavioral contract file |
+| `MODEL` | Binds named model slots to providers |
+| `CLLAMA` | Declares governance proxy type(s) |
+| `HANDLE` | Declares platform identity (discord, slack) |
+| `INVOKE` | Scheduled invocations via cron |
+| `SURFACE` | Declared in pod YAML — volumes, services, channels |
+| `SKILL` | Operator policy files mounted read-only |
+| `CONFIGURE` | Runner-specific config mutations at init |
+| `TRACK` | Wraps package managers to log mutations |
+| `PRIVILEGE` | Drops container privileges |
 
 ---
 
 ## The Anatomy of a Claw
 
-```
-┌─────────────────────────────────────────────────┐
-│  Behavioral Contract  (read-only bind mount)     │
-│  AGENTS.md / CLAUDE.md — purpose, on the host   │
-│  Survives full container compromise              │
-├─────────────────────────────────────────────────┤
-│  Runner (internal execution)                    │
-│  OpenClaw · Nanobot · NanoClaw · Claude Code    │
-├─────────────────────────────────────────────────┤
-│  Persona (identity workspace)                   │
-│  Memory · history · style · knowledge           │
-├─────────────────────────────────────────────────┤
-│  cllama (optional governance proxy)             │
-│  Intercepts prompts outbound + responses inbound│
-│  Runner never knows it's there                  │
-└─────────────────────────────────────────────────┘
+```mermaid
+block-beta
+  columns 1
+  block:contract["Behavioral Contract (read-only bind mount)\nAGENTS.md / CLAUDE.md — purpose, on the host\nSurvives full container compromise"]
+  end
+  block:runner["Runner (internal execution)\nOpenClaw · NanoClaw · Claude Code · custom"]
+  end
+  block:persona["Persona (identity workspace)\nMemory · history · style · knowledge"]
+  end
+  block:proxy["cllama (optional governance proxy)\nIntercepts prompts outbound + responses inbound\nRunner never knows it's there"]
+  end
+
+  style contract fill:#1a1a2e,stroke:#22d3ee,color:#eee
+  style runner fill:#1a1a2e,stroke:#f0a500,color:#eee
+  style persona fill:#1a1a2e,stroke:#a78bfa,color:#eee
+  style proxy fill:#1a1a2e,stroke:#34d399,color:#eee
 ```
 
 The contract lives on the host. Even a root-compromised runner cannot rewrite its own mission. Swap runners without touching identity. Add or remove the governance proxy without rebuilding anything.
@@ -142,21 +139,16 @@ The contract lives on the host. Even a root-compromised runner cannot rewrite it
 
 ## cllama: The Governance Proxy
 
-When a reasoning model tries to govern itself, the guardrails are part of the same cognitive process they're trying to constrain. `cllama` is a **separate process, running a separate model**, sitting between the runner and the LLM provider. (See [`cllama-passthrough`](./cllama-passthrough/) for the reference implementation).
+When a reasoning model tries to govern itself, the guardrails are part of the same cognitive process they're trying to constrain. `cllama` is a **separate process** sitting between the runner and the LLM provider. The runner thinks it's talking directly to the model. It never sees the proxy.
 
-Think of it as the **blood-brain barrier** for your cyborg architecture. It sits exactly between internal cognition (the runner's LLM calls) and the outside world (provider APIs), filtering what goes in and out.
+- **Credential starvation:** The proxy holds the real API keys. Agents get unique bearer tokens. No credentials, no bypass.
+- **Identity resolution:** Single proxy serves an entire pod. Bearer tokens resolve which agent is calling.
+- **Cost accounting:** Extracts token usage from every response, multiplies by pricing table, tracks per agent/provider/model.
+- **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
 
-- **Outbound:** intercepts prompts. Gates what the runner is allowed to ask.
-- **Inbound:** intercepts responses. Rewrites or drops output that violates policy.
-- **Cost Accounting & Containment:** Tracks per-agent, per-model compute spend in real-time by extracting token usage from upstream responses and calculating exact costs. Exposes a live `/costs` dashboard, and enforces hard budgets by transparently downgrading requested models and rate-limiting expensive agents.
+The reference implementation is [`cllama-passthrough`](https://github.com/mostlydev/cllama-passthrough) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
 
-The runner thinks it's talking directly to the LLM. It never sees `cllama`.
-
-```
-raw cognition → purpose → policy → tone → obfuscation → world
-```
-
-Each stage independently versioned and swappable. Update your corporate voice policy once — realign an entire fleet without touching a single behavioral contract.
+See the [cllama specification](./docs/CLLAMA_SPEC.md) for the full standard.
 
 ---
 
@@ -206,7 +198,7 @@ In enterprise deployments, this naturally forms a **Hub-and-Spoke Governance Mod
 
 ---
 
-## Fleet Visibility
+## Fleet Visibility (Planned — Phase 5)
 
 ```bash
 $ claw ps
@@ -222,11 +214,11 @@ $ claw audit crypto-crusher-2 --last 24h
 18:01  engagement-sweep  OUTPUT DROPPED by cllama:purpose  (off-strategy)
 ```
 
-Drift is independently scored — not self-reported.
+Drift is independently scored — not self-reported. The structured logs from `cllama-passthrough` provide the raw telemetry today; the `claw audit` command and drift scoring are Phase 5.
 
 ---
 
-## Recipe Promotion
+## Recipe Promotion (Planned — Phase 6)
 
 ```bash
 $ claw recipe crypto-crusher-0 --since 7d
