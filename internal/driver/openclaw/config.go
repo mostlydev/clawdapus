@@ -72,6 +72,8 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 
 	// Apply HANDLE directives first: they provide structural defaults per platform.
 	// CONFIGURE runs after so operator overrides always take precedence.
+	var allMentionPatterns []string
+	agentName := rc.ServiceName
 	for platform := range rc.Handles {
 		switch platform {
 		case "discord":
@@ -96,34 +98,21 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			// Collect all discord bot IDs: own + peers, sorted for determinism.
 			allBotIDs := discordBotIDs(rc)
 
-			// Derive mention patterns from own handle: text name + Discord native mention.
-			var mentionPatterns []string
+			// Collect mention patterns into the shared slice (agents.list written after loop).
 			if h != nil {
 				username := h.Username
 				if username == "" {
 					username = rc.ServiceName
 				}
 				if username != "" {
-					mentionPatterns = append(mentionPatterns, fmt.Sprintf(`(?i)\b@?%s\b`, regexp.QuoteMeta(username)))
+					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`(?i)\b@?%s\b`, regexp.QuoteMeta(username)))
 				}
 				if h.ID != "" {
-					mentionPatterns = append(mentionPatterns, fmt.Sprintf(`<@!?%s>`, h.ID))
+					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`<@!?%s>`, h.ID))
 				}
-			}
-
-			// agents.list: single entry for this container's agent.
-			agentName := rc.ServiceName
-			if h != nil && h.Username != "" {
-				agentName = strings.ToUpper(h.Username[:1]) + h.Username[1:]
-			}
-			agentEntry := map[string]interface{}{"id": "main", "name": agentName}
-			if len(mentionPatterns) > 0 {
-				agentEntry["groupChat"] = map[string]interface{}{
-					"mentionPatterns": stringsToIface(mentionPatterns),
+				if h.Username != "" {
+					agentName = strings.ToUpper(h.Username[:1]) + h.Username[1:]
 				}
-			}
-			if err := setPath(config, "agents.list", []interface{}{agentEntry}); err != nil {
-				return nil, fmt.Errorf("config generation: HANDLE discord: agents.list: %w", err)
 			}
 
 			// Guild entries: requireMention + users allowlist + per-channel allow entries.
@@ -164,6 +153,29 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			// Unknown platform — no native config path known; log and skip.
 			// The env var broadcast still fires regardless.
 			fmt.Printf("[claw] warning: openclaw driver has no config mapping for HANDLE platform %q; skipping channel enablement\n", platform)
+		}
+	}
+
+	// Write agents.list once after the platform loop with all collected mention patterns.
+	if len(rc.Handles) > 0 {
+		// Deduplicate mention patterns
+		seen := make(map[string]struct{})
+		deduped := make([]string, 0, len(allMentionPatterns))
+		for _, p := range allMentionPatterns {
+			if _, ok := seen[p]; !ok {
+				seen[p] = struct{}{}
+				deduped = append(deduped, p)
+			}
+		}
+
+		agentEntry := map[string]interface{}{"id": "main", "name": agentName}
+		if len(deduped) > 0 {
+			agentEntry["groupChat"] = map[string]interface{}{
+				"mentionPatterns": stringsToIface(deduped),
+			}
+		}
+		if err := setPath(config, "agents.list", []interface{}{agentEntry}); err != nil {
+			return nil, fmt.Errorf("config generation: agents.list: %w", err)
 		}
 	}
 
