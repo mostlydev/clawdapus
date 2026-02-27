@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/mostlydev/clawdapus/internal/build"
+	"gopkg.in/yaml.v3"
 )
 
 // TestSpikeComposeUp is a full end-to-end integration test for the trading-desk
@@ -60,7 +61,13 @@ func TestSpikeComposeUp(t *testing.T) {
 		env["ANTHROPIC_API_KEY"] = "sk-spike-anthropic"
 	}
 	if env["ALLEN_BOT_TOKEN"] == "" {
-		t.Skip("ALLEN_BOT_TOKEN not set in .env — skipping spike test (need all 3 agents)")
+		env["ALLEN_BOT_TOKEN"] = env["TIVERTON_BOT_TOKEN"]
+	}
+	if env["MICRO_BOT_TOKEN"] == "" {
+		env["MICRO_BOT_TOKEN"] = env["TIVERTON_BOT_TOKEN"]
+	}
+	if env["MICRO_DISCORD_ID"] == "" {
+		env["MICRO_DISCORD_ID"] = env["TIVERTON_DISCORD_ID"]
 	}
 
 	// Build images before running compose up.
@@ -71,6 +78,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	}
 	spikeBuildImage(t, dir, "trading-desk:latest", "Clawfile")
 	spikeBuildImage(t, dir, "trading-desk-nanoclaw:latest", "Clawfile.nanoclaw")
+	spikeBuildImage(t, dir, "trading-desk-microclaw:latest", "Clawfile.microclaw")
 	spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
 	spikeEnsureCllamaPassthroughImage(t)
 
@@ -107,7 +115,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// teardown runs the compose down and dumps logs.
 	teardown := func() {
-		for _, svc := range []string{"tiverton", "westin", "allen", "trading-api"} {
+		for _, svc := range []string{"tiverton", "westin", "allen", "micro", "trading-api"} {
 			name := fmt.Sprintf("trading-desk-%s-1", svc)
 			out, _ := exec.Command("docker", "logs", "--tail", "100", name).CombinedOutput()
 			t.Logf("=== %s logs ===\n%s", name, string(out))
@@ -290,7 +298,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// ── Verify cllama context artifacts ─────────────────────────────────────
 
-	for _, agent := range []string{"tiverton", "westin", "allen"} {
+	for _, agent := range []string{"tiverton", "westin", "allen", "micro"} {
 		agentDir := filepath.Join(runtimeDir, "context", agent)
 		for _, rel := range []string{"AGENTS.md", "CLAWDAPUS.md", "metadata.json"} {
 			if _, err := os.Stat(filepath.Join(agentDir, rel)); err != nil {
@@ -417,6 +425,9 @@ func TestSpikeComposeUp(t *testing.T) {
 	if !strings.Contains(composeSrc, "ANTHROPIC_BASE_URL") {
 		t.Error("compose.generated.yml: expected ANTHROPIC_BASE_URL for nanoclaw cllama wiring")
 	}
+	if !strings.Contains(composeSrc, "/app/config/microclaw.config.yaml") {
+		t.Error("compose.generated.yml: expected microclaw config mount")
+	}
 
 	// ANTHROPIC_BASE_URL env var points to cllama proxy
 	allenEnvOut, errE := exec.Command("docker", "exec", allenContainer, "printenv", "ANTHROPIC_BASE_URL").Output()
@@ -437,6 +448,30 @@ func TestSpikeComposeUp(t *testing.T) {
 		t.Errorf("allen: CLAW_NETWORK not set: %v", errN)
 	} else {
 		t.Logf("allen CLAW_NETWORK: %s", strings.TrimSpace(string(allenNetwork)))
+	}
+
+	// ── Verify Micro (microclaw) artifacts ───────────────────────────────────
+
+	microConfigPath := filepath.Join(runtimeDir, "micro", "config", "microclaw.config.yaml")
+	microConfigData := spikeReadFile(t, microConfigPath)
+	var microCfg map[string]interface{}
+	if err := yaml.Unmarshal([]byte(microConfigData), &microCfg); err != nil {
+		t.Fatalf("parse microclaw.config.yaml: %v", err)
+	}
+	if got := microCfg["llm_provider"]; got != "anthropic" {
+		t.Errorf("microclaw.config.yaml: expected llm_provider=anthropic, got %v", got)
+	}
+	if got := microCfg["model"]; got != "claude-sonnet-4" {
+		t.Errorf("microclaw.config.yaml: expected model=claude-sonnet-4, got %v", got)
+	}
+	if got := microCfg["llm_base_url"]; got != "http://cllama-passthrough:8080/v1" {
+		t.Errorf("microclaw.config.yaml: expected llm_base_url=http://cllama-passthrough:8080/v1, got %v", got)
+	}
+
+	microContainer := spikeContainerName("micro")
+	spikeWaitHealthy(t, microContainer, 60*time.Second)
+	if out, err := exec.Command("docker", "exec", microContainer, "test", "-f", "/app/config/microclaw.config.yaml").CombinedOutput(); err != nil {
+		t.Errorf("micro: expected /app/config/microclaw.config.yaml in container: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
 
 	// Wait for trading-api to be running so its startup announcement has fired.
@@ -462,6 +497,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	// Poll the Discord channel until both messages appear (or timeout).
 	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "tiverton online", 10*time.Second)
 	spikeVerifyDiscordGreeting(t, env["WESTIN_BOT_TOKEN"], channelID, "westin online", 10*time.Second)
+	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "microclaw online", 15*time.Second)
 
 	// trading-api posts its own startup message to Discord via webhook — this
 	// proves non-claw services receive env vars (DISCORD_TRADING_API_WEBHOOK).

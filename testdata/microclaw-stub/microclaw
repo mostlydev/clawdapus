@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stub microclaw process for integration/spike tests.
+# Keep this script process alive so `pgrep -f microclaw` healthcheck passes.
+
+echo "microclaw-stub: running (pid $$)" >&2
+while true; do
+  sleep 3600
+done

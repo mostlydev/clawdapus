@@ -8,6 +8,8 @@ import (
 
 	"github.com/mostlydev/clawdapus/internal/clawfile"
 	"github.com/mostlydev/clawdapus/internal/driver"
+	_ "github.com/mostlydev/clawdapus/internal/driver/microclaw"
+	_ "github.com/mostlydev/clawdapus/internal/driver/nanoclaw"
 	_ "github.com/mostlydev/clawdapus/internal/driver/openclaw" // register built-in drivers for build-time validation
 )
 

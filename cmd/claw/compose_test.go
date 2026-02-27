@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
 func TestResolveComposeGeneratedPathDefaultMissing(t *testing.T) {
@@ -76,5 +78,13 @@ func TestResolveComposeGeneratedPathWithPodFileMissingGenerated(t *testing.T) {
 	_, err := resolveComposeGeneratedPath()
 	if err == nil {
 		t.Fatal("expected error when compose.generated.yml missing next to pod file")
+	}
+}
+
+func TestBuiltinDriversRegistered(t *testing.T) {
+	for _, clawType := range []string{"openclaw", "nanoclaw", "microclaw"} {
+		if _, err := driver.Lookup(clawType); err != nil {
+			t.Fatalf("expected driver %q to be registered in CLI package: %v", clawType, err)
+		}
 	}
 }

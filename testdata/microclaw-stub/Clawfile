@@ -1,0 +1,13 @@
+FROM alpine:3.20
+
+CLAW_TYPE microclaw
+AGENT AGENTS.md
+
+MODEL primary anthropic/claude-sonnet-4
+
+RUN apk add --no-cache bash tini procps
+COPY microclaw /usr/local/bin/microclaw
+RUN chmod +x /usr/local/bin/microclaw
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/sbin/tini", "--", "/app/entrypoint.sh"]

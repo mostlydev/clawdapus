@@ -2,15 +2,15 @@ x-claw:
   pod: trading-desk
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Trading Desk Pod (tiverton + westin + allen)
+# Trading Desk Pod (tiverton + westin + allen + micro)
 #
-# Mixed-driver pod: two openclaw agents + one nanoclaw agent coordinating via
-# Discord and a shared research volume.
+# Mixed-driver pod: two openclaw agents + one nanoclaw agent + one microclaw
+# agent coordinating via Discord and a shared research volume.
 #
 # Required environment variables (.env or Docker secrets):
 #   POSTGRES_PASSWORD, SECRET_KEY_BASE
-#   TIVERTON_BOT_TOKEN, WESTIN_BOT_TOKEN, ALLEN_BOT_TOKEN
-#   TIVERTON_DISCORD_ID, WESTIN_DISCORD_ID, ALLEN_DISCORD_ID
+#   TIVERTON_BOT_TOKEN, WESTIN_BOT_TOKEN, ALLEN_BOT_TOKEN, MICRO_BOT_TOKEN
+#   TIVERTON_DISCORD_ID, WESTIN_DISCORD_ID, ALLEN_DISCORD_ID, MICRO_DISCORD_ID
 #   DISCORD_GUILD_ID, DISCORD_TRADING_FLOOR_CHANNEL
 #   OPENROUTER_API_KEY, ANTHROPIC_API_KEY (proxy-side provider keys for cllama)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,3 +157,35 @@ services:
         - ./policy/risk-limits.md
     environment:
       DISCORD_BOT_TOKEN: "${ALLEN_BOT_TOKEN}"
+
+  # ── Micro — Operations Monitor (MicroClaw) ───────────────────────────────
+
+  micro:
+    image: trading-desk-microclaw:latest
+    build:
+      context: .
+      dockerfile: Clawfile.microclaw
+    x-claw:
+      agent: ./agents/MICRO.md
+      cllama: passthrough
+      cllama-env:
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      handles:
+        discord:
+          id: "${MICRO_DISCORD_ID}"
+          username: "micro"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Trading Floor"
+              channels:
+                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://clawd-shared read-write"
+      skills:
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: "${MICRO_BOT_TOKEN}"
+      CLAW_GREETING_CHANNEL: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+      CLAW_GREETING_MESSAGE: "microclaw online."

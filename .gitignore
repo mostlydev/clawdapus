@@ -39,4 +39,5 @@ packages/
 .claw-runtime/
 testdata/*
 !testdata/openclaw-stub/
+!testdata/microclaw-stub/
 *-notes.md

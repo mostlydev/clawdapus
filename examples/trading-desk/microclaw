@@ -1,0 +1,8 @@
+#!/bin/sh
+# Minimal long-running process for trading spike image.
+# Command name includes "microclaw" so driver healthcheck `pgrep -f microclaw` passes.
+
+echo "microclaw spike stub running (pid $$)" >&2
+while true; do
+    sleep 3600
+done
