@@ -809,6 +809,42 @@ func TestGenerateConfigHandleTelegram(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigHandleSlack(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "ops-bot",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"slack": {
+				ID:       "U0123456789",
+				Username: "opsbot",
+			},
+		},
+		PeerHandles: map[string]map[string]*driver.HandleInfo{},
+	}
+
+	config, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if v, _ := getPath(config, "channels.slack.enabled"); v != true {
+		t.Error("expected channels.slack.enabled=true")
+	}
+	if v, _ := getPath(config, "channels.slack.token"); v != "${SLACK_BOT_TOKEN}" {
+		t.Errorf("expected slack token reference, got %v", v)
+	}
+	if v, _ := getPath(config, "plugins.entries.slack.enabled"); v != true {
+		t.Error("expected plugins.entries.slack.enabled=true")
+	}
+
+	agentsList, _ := getPath(config, "agents.list")
+	agents := agentsList.([]interface{})
+	agent := agents[0].(map[string]interface{})
+	if agent["name"] != "Opsbot" {
+		t.Errorf("expected agent name 'Opsbot', got %v", agent["name"])
+	}
+}
+
 func TestGenerateConfigMultiPlatformMentionPatterns(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		ServiceName: "multi-bot",

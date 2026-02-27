@@ -172,7 +172,32 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 				return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
 			}
 		case "slack":
+			h := rc.Handles[platform]
 			if err := setPath(config, "channels.slack.enabled", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
+			}
+			if err := setPath(config, "channels.slack.token", "${SLACK_BOT_TOKEN}"); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
+			}
+
+			// Collect mention patterns into the shared slice (agents.list written after loop)
+			if h != nil {
+				username := h.Username
+				if username == "" {
+					username = rc.ServiceName
+				}
+				if username != "" {
+					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`(?i)\b@?%s\b`, regexp.QuoteMeta(username)))
+				}
+				if h.ID != "" {
+					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`<@%s>`, h.ID))
+				}
+				if h.Username != "" {
+					agentName = strings.ToUpper(h.Username[:1]) + h.Username[1:]
+				}
+			}
+
+			if err := setPath(config, "plugins.entries.slack.enabled", true); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 			}
 		default:
