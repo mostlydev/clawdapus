@@ -55,6 +55,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 | Phase 4 Slices 2+3 — cllama wiring in clawdapus repo | DONE |
 | Phase 4 Slice 1 — cllama-passthrough standalone proxy (in-repo) | DONE |
 | Phase 4 Task 3.4 — doc fixes (CLLAMA_SPEC, ADRs) | DONE |
+| Phase 4.5 — Unified worker architecture (config, provision, diagnostic) | DESIGN |
 | Phase 5 — Drift scoring | NOT STARTED |
 | Phase 6 — Recipe promotion | NOT STARTED |
 
