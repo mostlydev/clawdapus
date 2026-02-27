@@ -575,26 +575,16 @@ func spikeEnsureCllamaPassthroughImage(t *testing.T) {
 		return
 	}
 
-	// Try building from the sibling repo.
-	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	cllamaRepo, _ := filepath.Abs(filepath.Join(repoRoot, "..", "cllama-passthrough"))
-	cllamaDockerfile := filepath.Join(cllamaRepo, "Dockerfile")
-
-	if _, err := os.Stat(cllamaDockerfile); err == nil {
-		t.Logf("building real cllama-passthrough from %s", cllamaRepo)
-		cmd := exec.Command("docker", "build", "-t", tag, ".")
-		cmd.Dir = cllamaRepo
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Logf("real build failed, falling back to stub: %v\n%s", err, out)
-		} else {
-			t.Logf("built real cllama-passthrough image")
-			return
-		}
-	} else {
-		t.Logf("sibling repo not found at %s, building stub", cllamaRepo)
+	// Try building from the GitHub repo.
+	const repo = "https://github.com/mostlydev/cllama-passthrough.git"
+	t.Logf("building real cllama-passthrough from %s", repo)
+	cmd := exec.Command("docker", "build", "-t", tag, repo)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Logf("built real cllama-passthrough image from GitHub")
+		return
 	}
+	t.Logf("GitHub build failed, falling back to stub: %v\n%s", err, out)
 
 	// Fallback: minimal stub that passes healthcheck but doesn't proxy.
 	dockerfile := strings.NewReader(`FROM alpine:3.20
@@ -611,11 +601,11 @@ RUN chmod +x /cllama-passthrough
 ENTRYPOINT ["/cllama-passthrough"]
 `)
 
-	cmd := exec.Command("docker", "build", "-t", tag, "-")
-	cmd.Stdin = dockerfile
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("build cllama passthrough stub image: %v\n%s", err, out)
+	stubCmd := exec.Command("docker", "build", "-t", tag, "-")
+	stubCmd.Stdin = dockerfile
+	stubOut, stubErr := stubCmd.CombinedOutput()
+	if stubErr != nil {
+		t.Fatalf("build cllama passthrough stub image: %v\n%s", stubErr, stubOut)
 	}
 	t.Logf("built cllama-passthrough stub image (no real proxy)")
 }
