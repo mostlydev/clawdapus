@@ -1,5 +1,6 @@
 # ![Clawdapus Logo](docs/art/clawdapus.png)
 
+
 **Infrastructure-layer governance for AI agent containers.**
 
 > Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you.
