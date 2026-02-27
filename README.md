@@ -4,6 +4,20 @@
 
 > Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you.
 
+## Install AI Skill
+
+Give your coding agent (Claude Code, Cursor, etc.) full operational knowledge of Clawdapus:
+
+```bash
+# Claude Code
+cp -r skills/clawdapus ~/.claude/skills/
+
+# Cursor / Windsurf / other .cursorrules-based agents
+cat skills/clawdapus/SKILL.md >> .cursorrules
+```
+
+The skill teaches your agent the `claw` CLI, Clawfile syntax, claw-pod.yml structure, cllama proxy wiring, driver semantics, and troubleshooting patterns. It activates automatically when your agent encounters Clawdapus directives.
+
 ---
 
 Every agent framework answers the same question: how do I make agents collaborate? Swarm, CrewAI, LangGraph — all application-layer orchestration, all built on a shared assumption: **the agent is a trusted process.**
@@ -281,12 +295,6 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 - [`docs/decisions/009-contract-composition-and-policy.md`](./docs/decisions/009-contract-composition-and-policy.md) — ADR: Contract Composition and Policy Inclusion
 - [`docs/UPDATING.md`](./docs/UPDATING.md) — checklist of everything to update when implementation changes
 - [`TESTING.md`](./TESTING.md) — unit, E2E, and spike test runbook
-
-## AI Agent Guidance
-
-```bash
-cp -r skills/clawdapus ~/.claude/skills/
-```
 
 ## Contributing
 
