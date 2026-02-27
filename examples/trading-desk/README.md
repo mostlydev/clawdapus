@@ -50,7 +50,7 @@ ANTHROPIC_API_KEY=...
 docker build -t openclaw:latest -f Dockerfile.openclaw-base .
 
 # Deploy the full fleet
-claw compose up claw-pod.yml
+claw up claw-pod.yml
 
 # Check health
 docker exec trading-desk-tiverton-1 openclaw health --json
@@ -64,7 +64,7 @@ docker compose -f compose.generated.yml logs -f tiverton
 `cmd/claw/spike_test.go` is a full end-to-end test that:
 
 1. Builds all images (Clawfile → `trading-desk:latest`, mock trading API)
-2. Runs `claw compose up` on a pre-expanded pod YAML
+2. Runs `claw up` on a pre-expanded pod YAML
 3. Asserts generated artifacts — `openclaw.json` structure, `jobs.json` channel IDs, compose mounts
 4. Asserts cllama wiring — proxy service emitted, provider endpoints in `models.providers.*` rewritten to `cllama-passthrough`, bearer token injected, per-agent context dir generated
 5. Waits for containers to be healthy

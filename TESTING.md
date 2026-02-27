@@ -31,7 +31,7 @@ go test -tags e2e -v ./...
 ## Spike Test (live Discord + Docker required)
 
 The spike test (`TestSpikeComposeUp`) is the primary end-to-end validation instrument
-for the trading-desk example. It builds images, runs `claw compose up`, verifies all
+for the trading-desk example. It builds images, runs `claw up`, verifies all
 generated artifacts, starts containers, and confirms live Discord activity.
 
 **It is not a CI test.** It requires real credentials and a real Discord server.
@@ -39,7 +39,7 @@ Run it when implementing or validating new driver behavior end-to-end.
 
 ### What it validates
 
-- `claw compose up` succeeds without error on `examples/trading-desk/claw-pod.yml`
+- `claw up` succeeds without error on `examples/trading-desk/claw-pod.yml`
 - `openclaw.json` generated correctly: `channels.discord.token`, `guilds` keyed by
   guild ID, `groupPolicy`, `dmPolicy`, `allowBots`, `mentionPatterns`, peer `users[]`
 - `jobs.json` generated correctly: `agentTurn` payloads with `delivery.mode=announce`

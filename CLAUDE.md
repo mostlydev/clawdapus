@@ -38,7 +38,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - `internal/pod/` — claw-pod.yml parser, compose emitter
 - `internal/inspect/` — label parsing from built images
 - `internal/runtime/` — Docker SDK wrapper (read-only only)
-- `cmd/claw/compose_up.go` — main orchestration for `claw compose up`
+- `cmd/claw/compose_up.go` — main orchestration for `claw up`
 
 ## Implementation Status (as of 2026-02-27)
 
@@ -60,7 +60,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 
 ## Important Implementation Decisions (settled)
 
-- CLI commands are `claw compose up/down/ps/logs/health` (not `claw up` directly)
+- CLI commands are `claw up/down/ps/logs/health` (not `claw compose up`)
 - Config injection uses Go-native JSON5 patching in-memory — never shells out to `openclaw config set` (too slow/noisy)
 - Config written on host, mounted read-only into container (not mutated inside container)
 - JSON (not JSON5) for generated config — JSON is valid JSON5, YAGNI

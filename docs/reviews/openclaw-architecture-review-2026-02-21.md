@@ -28,7 +28,7 @@ Where it diverges from “fleet of claws talking publicly + API sidecar” is th
 ### 2) Medium — `claw.skill.emit` failures are fail-fast
 - Severity: Medium
 - File: `cmd/claw/compose_up.go`, `internal/runtime/service_skill.go`
-- Issue: If `claw.skill.emit` label exists but path is missing/invalid, `claw compose up` returns hard error.
+- Issue: If `claw.skill.emit` label exists but path is missing/invalid, `claw up` returns hard error.
 - Impact:
   - Single bad label can block full pod startup even though a generated fallback skill is available.
 - Next step:

@@ -21,14 +21,14 @@ claw build -t <image> <path>        # Clawfile -> Dockerfile.generated -> docker
 claw inspect <image>                 # show claw.* labels from built image
 
 # Pod lifecycle (mirrors docker compose UX)
-claw compose -f <pod>.yml up [-d]   # parse pod, enforce drivers, emit compose.generated.yml, launch
-claw compose -f <pod>.yml ps        # container status
-claw compose -f <pod>.yml logs <svc> # stream logs
-claw compose -f <pod>.yml health    # driver health probes
-claw compose -f <pod>.yml down      # tear down
+claw up [-f <pod>.yml] [-d]      # parse pod, enforce drivers, emit compose.generated.yml, launch
+claw down [-f <pod>.yml]         # tear down
+claw ps [-f <pod>.yml]           # container status
+claw logs [-f <pod>.yml] [svc]   # stream logs
+claw health [-f <pod>.yml]       # driver health probes
 ```
 
-`-f` locates `compose.generated.yml` next to the pod file. Without `-f`, uses `./claw-pod.yml`.
+`-f` locates `compose.generated.yml` next to the pod file. Without `-f`, `claw up` uses `./claw-pod.yml`; other lifecycle commands (`down`/`ps`/`logs`/`health`) look for `compose.generated.yml` in the current directory.
 
 ## Clawfile Reference
 
@@ -226,7 +226,7 @@ Clawdapus refuses to start containers when:
 1. Check `AGENT` file exists at the host path specified
 2. Run `claw doctor` to verify Docker dependencies
 3. Check `compose.generated.yml` for the actual compose that was generated
-4. Look at driver preflight errors in `claw compose up` output
+4. Look at driver preflight errors in `claw up` output
 
 ### Credential starvation failures
 - Move API keys from agent `environment:` to `x-claw.cllama-env:`
@@ -237,7 +237,7 @@ Clawdapus refuses to start containers when:
 - Config dir (`/app/config`) must be bind-mounted as directory, not file
 - OpenClaw does atomic writes via rename — file-only mounts cause EBUSY
 - Check generated `openclaw.json` in the runtime directory
-- OpenClaw health: `claw compose -f <pod>.yml health`
+- OpenClaw health: `claw health -f <pod>.yml`
 
 ### HANDLE/social topology issues
 - Handles broadcast as `CLAW_HANDLE_<UPPERCASED_NAME>_DISCORD_ID` etc.
@@ -246,7 +246,7 @@ Clawdapus refuses to start containers when:
 - Peer handles: each agent's guild `users[]` includes own ID + all peer bot IDs
 
 ### cllama proxy not working
-- Check proxy container is running: `claw compose -f <pod>.yml ps`
+- Check proxy container is running: `claw ps -f <pod>.yml`
 - Proxy named `cllama-passthrough` in compose — agents reach it at `http://cllama-passthrough:8080`
 - Dashboard at port 8081 of proxy container
 - Check `/claw/context/<agent-id>/metadata.json` has correct token
@@ -263,7 +263,7 @@ Clawdapus refuses to start containers when:
 ## Architecture Key Points
 
 - `claw build` transpiles Clawfile → standard Dockerfile → `docker build` → OCI image
-- `claw compose up` parses pod YAML → driver enforcement → `compose.generated.yml` → `docker compose`
+- `claw up` parses pod YAML → driver enforcement → `compose.generated.yml` → `docker compose`
 - **docker compose is the sole lifecycle authority**. Docker SDK is read-only.
 - Two-pass loop in compose_up: Pass 1 inspect+resolve all services + cllama wiring, Pass 2 materialize
 - Generated files are inspectable build artifacts, not hand-edited
