@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	_ "github.com/mostlydev/clawdapus/internal/driver/nanoclaw"
 	_ "github.com/mostlydev/clawdapus/internal/driver/openclaw"
 )
 
