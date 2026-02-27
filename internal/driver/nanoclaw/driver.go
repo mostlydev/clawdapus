@@ -42,24 +42,44 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		podName = rc.ServiceName
 	}
 
+	// Combine agent contract + CLAWDAPUS.md into single CLAUDE.md.
+	// Flows: orchestrator groups/main/ → agent-runner /workspace/group/CLAUDE.md → SDK auto-loads.
+	agentContent, err := os.ReadFile(rc.AgentHostPath)
+	if err != nil {
+		return nil, fmt.Errorf("nanoclaw driver: read agent contract: %w", err)
+	}
 	clawdapusMd := shared.GenerateClawdapusMD(rc, podName)
-	clawdapusPath := filepath.Join(opts.RuntimeDir, "CLAWDAPUS.md")
-	if err := os.WriteFile(clawdapusPath, []byte(clawdapusMd), 0644); err != nil {
-		return nil, fmt.Errorf("nanoclaw driver: write CLAWDAPUS.md: %w", err)
+	combined := string(agentContent) + "\n\n---\n\n" + clawdapusMd
+	combinedPath := filepath.Join(opts.RuntimeDir, "CLAUDE.md")
+	if err := os.WriteFile(combinedPath, []byte(combined), 0644); err != nil {
+		return nil, fmt.Errorf("nanoclaw driver: write combined CLAUDE.md: %w", err)
 	}
 
 	mounts := []driver.Mount{
-		{HostPath: rc.AgentHostPath, ContainerPath: "/workspace/AGENTS.md", ReadOnly: true},
-		{HostPath: clawdapusPath, ContainerPath: "/workspace/CLAWDAPUS.md", ReadOnly: true},
+		{HostPath: combinedPath, ContainerPath: "/workspace/groups/main/CLAUDE.md", ReadOnly: true},
 		{HostPath: "/var/run/docker.sock", ContainerPath: "/var/run/docker.sock", ReadOnly: false},
 	}
 
 	env := map[string]string{"CLAW_MANAGED": "true"}
+
 	if len(rc.Cllama) > 0 {
 		firstProxy := fmt.Sprintf("http://cllama-%s:8080/v1", rc.Cllama[0])
 		env["ANTHROPIC_BASE_URL"] = firstProxy
+		// Compose network name: {project}_{network}
+		env["CLAW_NETWORK"] = fmt.Sprintf("%s_claw-internal", podName)
+
 		if rc.CllamaToken != "" {
-			env["ANTHROPIC_API_KEY"] = rc.CllamaToken
+			// .env file for orchestrator's readEnvFile() — passes to agent-runners via stdin
+			envContent := fmt.Sprintf("ANTHROPIC_API_KEY=%s\n", rc.CllamaToken)
+			envPath := filepath.Join(opts.RuntimeDir, ".env")
+			if err := os.WriteFile(envPath, []byte(envContent), 0644); err != nil {
+				return nil, fmt.Errorf("nanoclaw driver: write .env: %w", err)
+			}
+			mounts = append(mounts, driver.Mount{
+				HostPath:      envPath,
+				ContainerPath: "/workspace/.env",
+				ReadOnly:      true,
+			})
 		}
 	}
 
@@ -68,7 +88,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		Tmpfs:       []string{"/tmp"},
 		ReadOnly:    false,
 		Restart:     "on-failure",
-		SkillDir:    "/home/node/.claude/skills",
+		SkillDir:    "/workspace/container/skills",
 		SkillLayout: "directory",
 		Healthcheck: &driver.Healthcheck{
 			Test:     []string{"CMD-SHELL", "pgrep -f 'node.*index' > /dev/null"},

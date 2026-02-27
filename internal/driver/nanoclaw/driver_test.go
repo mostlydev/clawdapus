@@ -100,7 +100,7 @@ func newTestRC(t *testing.T) (*driver.ResolvedClaw, string) {
 	t.Helper()
 	tmp := t.TempDir()
 	agentPath := filepath.Join(tmp, "AGENTS.md")
-	if err := os.WriteFile(agentPath, []byte("# Test Agent"), 0644); err != nil {
+	if err := os.WriteFile(agentPath, []byte("# Test Agent\n\nYou are Allen."), 0644); err != nil {
 		t.Fatal(err)
 	}
 	rc := &driver.ResolvedClaw{
@@ -130,18 +130,19 @@ func TestMaterializeBasic(t *testing.T) {
 		t.Error("expected ReadOnly=false for nanoclaw")
 	}
 
-	// SkillDir and SkillLayout
-	if result.SkillDir != "/home/node/.claude/skills" {
-		t.Errorf("expected Claude Code skill dir, got %q", result.SkillDir)
+	// SkillDir targets orchestrator's container/skills path
+	if result.SkillDir != "/workspace/container/skills" {
+		t.Errorf("expected orchestrator skill dir /workspace/container/skills, got %q", result.SkillDir)
 	}
 	if result.SkillLayout != "directory" {
 		t.Errorf("expected directory skill layout, got %q", result.SkillLayout)
 	}
 
-	// Check for Docker socket mount
+	// Check mounts
 	hasDockerSocket := false
-	hasAgent := false
-	hasClawdapus := false
+	hasCombinedClaude := false
+	hasOldAgent := false
+	hasOldClawdapus := false
 	for _, m := range result.Mounts {
 		if m.ContainerPath == "/var/run/docker.sock" {
 			hasDockerSocket = true
@@ -149,40 +150,47 @@ func TestMaterializeBasic(t *testing.T) {
 				t.Error("Docker socket mount should be read-write")
 			}
 		}
-		if m.ContainerPath == "/workspace/AGENTS.md" {
-			hasAgent = true
+		if m.ContainerPath == "/workspace/groups/main/CLAUDE.md" {
+			hasCombinedClaude = true
 			if !m.ReadOnly {
-				t.Error("agent mount should be read-only")
+				t.Error("combined CLAUDE.md mount should be read-only")
 			}
 		}
+		// Old paths must NOT appear
+		if m.ContainerPath == "/workspace/AGENTS.md" {
+			hasOldAgent = true
+		}
 		if m.ContainerPath == "/workspace/CLAWDAPUS.md" {
-			hasClawdapus = true
-			if !m.ReadOnly {
-				t.Error("CLAWDAPUS.md mount should be read-only")
-			}
+			hasOldClawdapus = true
 		}
 	}
 	if !hasDockerSocket {
 		t.Error("expected Docker socket mount")
 	}
-	if !hasAgent {
-		t.Error("expected agent contract mount at /workspace/AGENTS.md")
+	if !hasCombinedClaude {
+		t.Error("expected combined CLAUDE.md mount at /workspace/groups/main/CLAUDE.md")
 	}
-	if !hasClawdapus {
-		t.Error("expected CLAWDAPUS.md mount at /workspace/CLAWDAPUS.md")
+	if hasOldAgent {
+		t.Error("should NOT have old /workspace/AGENTS.md mount")
+	}
+	if hasOldClawdapus {
+		t.Error("should NOT have old /workspace/CLAWDAPUS.md mount")
 	}
 
-	// Verify CLAWDAPUS.md was written
-	clawdapusPath := filepath.Join(runtimeDir, "CLAWDAPUS.md")
-	content, err := os.ReadFile(clawdapusPath)
+	// Verify combined CLAUDE.md contains both agent content and CLAWDAPUS.md
+	combinedPath := filepath.Join(runtimeDir, "CLAUDE.md")
+	content, err := os.ReadFile(combinedPath)
 	if err != nil {
-		t.Fatalf("CLAWDAPUS.md not written: %v", err)
+		t.Fatalf("CLAUDE.md not written: %v", err)
 	}
-	if !strings.Contains(string(content), "nano-bot") {
-		t.Error("CLAWDAPUS.md should contain service name")
+	if !strings.Contains(string(content), "Test Agent") {
+		t.Error("combined CLAUDE.md should contain agent contract content")
 	}
 	if !strings.Contains(string(content), "test-pod") {
-		t.Error("CLAWDAPUS.md should contain pod name")
+		t.Error("combined CLAUDE.md should contain pod name from CLAWDAPUS.md")
+	}
+	if !strings.Contains(string(content), "nano-bot") {
+		t.Error("combined CLAUDE.md should contain service name from CLAWDAPUS.md")
 	}
 
 	// Environment
@@ -206,11 +214,43 @@ func TestMaterializeWithCllama(t *testing.T) {
 		t.Fatalf("Materialize failed: %v", err)
 	}
 
+	// ANTHROPIC_BASE_URL as env var (orchestrator forwards to agent-runners)
 	if result.Environment["ANTHROPIC_BASE_URL"] != "http://cllama-passthrough:8080/v1" {
 		t.Errorf("expected ANTHROPIC_BASE_URL rewritten to proxy, got %q", result.Environment["ANTHROPIC_BASE_URL"])
 	}
-	if result.Environment["ANTHROPIC_API_KEY"] != "nano-bot:abc123" {
-		t.Errorf("expected ANTHROPIC_API_KEY set to bearer token, got %q", result.Environment["ANTHROPIC_API_KEY"])
+
+	// ANTHROPIC_API_KEY must NOT be in env — goes to .env file instead
+	if _, ok := result.Environment["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY should NOT be in env vars — must go to .env file")
+	}
+
+	// CLAW_NETWORK for agent-runner pod connectivity
+	if result.Environment["CLAW_NETWORK"] != "test-pod_claw-internal" {
+		t.Errorf("expected CLAW_NETWORK=test-pod_claw-internal, got %q", result.Environment["CLAW_NETWORK"])
+	}
+
+	// .env file mount with ANTHROPIC_API_KEY
+	hasEnvMount := false
+	for _, m := range result.Mounts {
+		if m.ContainerPath == "/workspace/.env" {
+			hasEnvMount = true
+			if !m.ReadOnly {
+				t.Error(".env mount should be read-only")
+			}
+		}
+	}
+	if !hasEnvMount {
+		t.Error("expected .env mount at /workspace/.env for cllama token")
+	}
+
+	// Verify .env file content
+	envPath := filepath.Join(runtimeDir, ".env")
+	envContent, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf(".env not written: %v", err)
+	}
+	if !strings.Contains(string(envContent), "ANTHROPIC_API_KEY=nano-bot:abc123") {
+		t.Errorf(".env should contain ANTHROPIC_API_KEY token, got %q", string(envContent))
 	}
 }
 
@@ -232,5 +272,15 @@ func TestMaterializeWithoutCllama(t *testing.T) {
 	}
 	if _, ok := result.Environment["ANTHROPIC_API_KEY"]; ok {
 		t.Error("expected no ANTHROPIC_API_KEY when cllama not enabled")
+	}
+	if _, ok := result.Environment["CLAW_NETWORK"]; ok {
+		t.Error("expected no CLAW_NETWORK when cllama not enabled")
+	}
+
+	// No .env mount
+	for _, m := range result.Mounts {
+		if m.ContainerPath == "/workspace/.env" {
+			t.Error("expected no .env mount when cllama not enabled")
+		}
 	}
 }
