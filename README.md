@@ -14,6 +14,58 @@ Clawdapus treats the agent as an untrusted workload. It is the layer below the f
 
 ---
 
+## Quickstart: The Five Minute Pod
+
+Learn by doing. Build and deploy a governed agent in 30 seconds. No Discord tokens or databases required.
+
+```bash
+# 1. Install the CLI
+go build -o bin/claw ./cmd/claw
+
+# 2. Build the agent image (translates Clawfile -> Dockerfile -> OCI Image)
+# (Assumes openclaw:latest base image is available)
+./bin/claw build -t my-agent:latest examples/hello-world
+
+# 3. Deploy the fleet (translates claw-pod.yml -> docker-compose.yml -> runs it)
+export ANTHROPIC_API_KEY="sk-ant-..."
+./bin/claw compose up examples/hello-world/claw-pod.yml
+```
+
+### The Code Behind the Quickstart
+
+**The Image (`Clawfile`)**
+```dockerfile
+FROM openclaw:latest
+CLAW_TYPE openclaw
+AGENT AGENTS.md
+# No handles, no complex surfaces. Just a bot.
+```
+
+**The Deployment (`claw-pod.yml`)**
+```yaml
+services:
+  my-bot:
+    image: my-agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+      cllama: passthrough
+      # The proxy gets the real key. The agent only gets a dummy token.
+      cllama-env:
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+```
+
+---
+
+## Examples
+
+| Example | What it shows |
+|---------|---------------|
+| [`examples/openclaw/`](./examples/openclaw/) | Single OpenClaw agent with Discord handle, skill emit, and service surface |
+| [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
+| [`examples/trading-desk/`](./examples/trading-desk/) | Two isolated agents coordinating via Discord and a shared research volume, with a mock trading API and a `cllama` governance proxy enforcing cost boundaries. |
+
+---
+
 ## How It Works
 
 Clawdapus extends two formats you already know:
@@ -91,6 +143,8 @@ The contract lives on the host. Even a root-compromised runner cannot rewrite it
 ## cllama: The Governance Proxy
 
 When a reasoning model tries to govern itself, the guardrails are part of the same cognitive process they're trying to constrain. `cllama` is a **separate process, running a separate model**, sitting between the runner and the LLM provider. (See [`cllama-passthrough`](./cllama-passthrough/) for the reference implementation).
+
+Think of it as the **blood-brain barrier** for your cyborg architecture. It sits exactly between internal cognition (the runner's LLM calls) and the outside world (provider APIs), filtering what goes in and out.
 
 - **Outbound:** intercepts prompts. Gates what the runner is allowed to ask.
 - **Inbound:** intercepts responses. Rewrites or drops output that violates policy.
@@ -217,32 +271,6 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 4 — Shared governance proxy integration + credential starvation | Done |
 | Phase 5 — Drift scoring + fleet governance | Planned |
 | Phase 6 — Recipe promotion + worker mode | Planned |
-
----
-
-## Examples
-
-| Example | What it shows |
-|---------|---------------|
-| [`examples/openclaw/`](./examples/openclaw/) | Single OpenClaw agent with Discord handle, skill emit, and service surface |
-| [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
-| [`examples/trading-desk/`](./examples/trading-desk/) | Two isolated agents (tiverton + westin) coordinating via Discord and a shared research volume, with a mock trading API that posts webhook mentions using peer bot IDs injected via `CLAW_HANDLE_*`. Self-describing API surface via `claw.skill.emit`. |
-
----
-
-## Quickstart
-
-```bash
-# Prerequisites: Docker, docker compose, Go toolchain
-
-go install ./cmd/claw
-
-claw build -t my-agent examples/openclaw
-claw inspect my-agent
-claw compose -f examples/openclaw/claw-pod.yml up -d
-claw compose -f examples/openclaw/claw-pod.yml ps
-claw compose -f examples/openclaw/claw-pod.yml down
-```
 
 ---
 
