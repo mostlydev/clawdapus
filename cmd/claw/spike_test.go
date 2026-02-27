@@ -563,15 +563,40 @@ func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 }
 
 // spikeEnsureCllamaPassthroughImage guarantees a local image exists for
-// ghcr.io/mostlydev/cllama-passthrough:latest so spike tests don't depend on
-// external registry state.
+// ghcr.io/mostlydev/cllama-passthrough:latest. It tries, in order:
+//  1. Skip if the image already exists locally.
+//  2. Build from the sibling cllama-passthrough repo (../cllama-passthrough/).
+//  3. Fall back to a stub image (healthcheck-only, no real proxy).
 func spikeEnsureCllamaPassthroughImage(t *testing.T) {
 	t.Helper()
 	const tag = "ghcr.io/mostlydev/cllama-passthrough:latest"
 	if spikeImageExists(tag) {
+		t.Logf("cllama-passthrough image already exists")
 		return
 	}
 
+	// Try building from the sibling repo.
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	cllamaRepo, _ := filepath.Abs(filepath.Join(repoRoot, "..", "cllama-passthrough"))
+	cllamaDockerfile := filepath.Join(cllamaRepo, "Dockerfile")
+
+	if _, err := os.Stat(cllamaDockerfile); err == nil {
+		t.Logf("building real cllama-passthrough from %s", cllamaRepo)
+		cmd := exec.Command("docker", "build", "-t", tag, ".")
+		cmd.Dir = cllamaRepo
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Logf("real build failed, falling back to stub: %v\n%s", err, out)
+		} else {
+			t.Logf("built real cllama-passthrough image")
+			return
+		}
+	} else {
+		t.Logf("sibling repo not found at %s, building stub", cllamaRepo)
+	}
+
+	// Fallback: minimal stub that passes healthcheck but doesn't proxy.
 	dockerfile := strings.NewReader(`FROM alpine:3.20
 RUN cat >/cllama-passthrough <<'EOF'
 #!/bin/sh
@@ -592,6 +617,7 @@ ENTRYPOINT ["/cllama-passthrough"]
 	if err != nil {
 		t.Fatalf("build cllama passthrough stub image: %v\n%s", err, out)
 	}
+	t.Logf("built cllama-passthrough stub image (no real proxy)")
 }
 
 // spikeWaitHealthy waits until the Docker healthcheck reports "healthy".
