@@ -130,13 +130,12 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 ## The Anatomy of a Claw
 
 ```mermaid
-graph TD
-  contract["<b>Behavioral Contract</b><br/>read-only bind mount<br/>AGENTS.md / CLAUDE.md — purpose, on the host<br/>Survives full container compromise"]
-  runner["<b>Runner</b><br/>internal execution<br/>OpenClaw · NanoClaw · Claude Code · custom"]
-  persona["<b>Persona</b><br/>identity workspace<br/>Memory · history · style · knowledge"]
-  proxy["<b>cllama</b><br/>optional governance proxy<br/>Intercepts prompts outbound + responses inbound<br/>Runner never knows it's there"]
-
-  contract --- runner --- persona --- proxy
+block-beta
+  columns 1
+  contract["Behavioral Contract\nread-only bind mount\nAGENTS.md — purpose, on the host\nSurvives full container compromise"]
+  runner["Runner\nOpenClaw · NanoClaw · Claude Code · custom"]
+  persona["Persona\nMemory · history · style · knowledge"]
+  proxy["cllama — governance proxy\nIntercepts prompts outbound + responses inbound\nRunner never knows it's there"]
 
   style contract fill:#1a1a2e,stroke:#22d3ee,color:#eee
   style runner fill:#1a1a2e,stroke:#f0a500,color:#eee
