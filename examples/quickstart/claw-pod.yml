@@ -1,0 +1,13 @@
+services:
+  assistant:
+    image: quickstart-claw:latest
+    x-claw:
+      agent: ./AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+    environment:
+      # Uncomment ONE platform:
+      # DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      # TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      # SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN}"

@@ -90,6 +90,7 @@ go build -o bin/claw ./cmd/claw
 | [`examples/openclaw/`](./examples/openclaw/) | Single OpenClaw agent with Discord handle, skill emit, and service surface |
 | [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
 | [`examples/trading-desk/`](./examples/trading-desk/) | Three agents (coordinator, momentum trader, systems monitor) coordinating via Discord with a mock trading API, scheduled invocations, and `cllama` governance proxy enforcing credential starvation and cost boundaries. |
+| [`examples/quickstart/`](./examples/quickstart/) | 5-minute quickstart — single governed agent with cllama proxy |
 
 ---
 

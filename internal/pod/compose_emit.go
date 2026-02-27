@@ -19,6 +19,7 @@ type composeFile struct {
 
 type composeService struct {
 	Image       string              `yaml:"image"`
+	Ports       []string            `yaml:"ports,omitempty"`
 	ReadOnly    bool                `yaml:"read_only,omitempty"`
 	Tmpfs       []string            `yaml:"tmpfs,omitempty"`
 	Volumes     []string            `yaml:"volumes,omitempty"`
@@ -265,6 +266,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 
 		cf.Services[serviceName] = &composeService{
 			Image: proxy.Image,
+			Ports: []string{"8081:8081"}, // operator dashboard
 			Volumes: []string{
 				fmt.Sprintf("%s:/claw/context:ro", proxy.ContextHostDir),
 				fmt.Sprintf("%s:/claw/auth:rw", proxy.AuthHostDir),
