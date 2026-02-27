@@ -13,7 +13,6 @@ import (
 
 	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
-	"github.com/mostlydev/clawdapus/internal/driver/openclaw"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
 	"github.com/mostlydev/clawdapus/internal/inspect"
 	"github.com/mostlydev/clawdapus/internal/pod"
@@ -346,7 +345,7 @@ func runComposeUp(podFile string) error {
 					ordinalName := fmt.Sprintf("%s-%d", name, i)
 					ordinalRC := *rc
 					ordinalRC.ServiceName = ordinalName
-					md := openclaw.GenerateClawdapusMD(&ordinalRC, p.Name)
+					md := shared.GenerateClawdapusMD(&ordinalRC, p.Name)
 					contextInputs = append(contextInputs, cllama.AgentContextInput{
 						AgentID:     ordinalName,
 						AgentsMD:    string(agentContent),
@@ -363,7 +362,7 @@ func runComposeUp(podFile string) error {
 				continue
 			}
 
-			md := openclaw.GenerateClawdapusMD(rc, p.Name)
+			md := shared.GenerateClawdapusMD(rc, p.Name)
 			contextInputs = append(contextInputs, cllama.AgentContextInput{
 				AgentID:     name,
 				AgentsMD:    string(agentContent),

@@ -1,4 +1,4 @@
-package openclaw
+package shared
 
 import (
 	"fmt"
@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
-	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
 
 // GenerateClawdapusMD builds the CLAWDAPUS.md context file — the infrastructure
@@ -42,7 +41,7 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 				b.WriteString(fmt.Sprintf("- **Host:** %s\n", s.Target))
 				b.WriteString(fmt.Sprintf("- **Skill:** `skills/surface-%s.md`\n", s.Target))
 			case "channel":
-				if tokenVar := shared.PlatformTokenVar(s.Target); tokenVar != "" {
+				if tokenVar := PlatformTokenVar(s.Target); tokenVar != "" {
 					b.WriteString(fmt.Sprintf("- **Token:** `%s` (env)\n", tokenVar))
 				}
 				b.WriteString(fmt.Sprintf("- **Skill:** `skills/surface-%s.md`\n", s.Target))

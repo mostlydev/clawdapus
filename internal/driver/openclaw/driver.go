@@ -13,6 +13,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/shared"
 	"github.com/mostlydev/clawdapus/internal/health"
 )
 
@@ -97,7 +98,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	if podName == "" {
 		podName = rc.ServiceName
 	}
-	clawdapusMd := GenerateClawdapusMD(rc, podName)
+	clawdapusMd := shared.GenerateClawdapusMD(rc, podName)
 	clawdapusPath := filepath.Join(opts.RuntimeDir, "CLAWDAPUS.md")
 	if err := os.WriteFile(clawdapusPath, []byte(clawdapusMd), 0644); err != nil {
 		return nil, fmt.Errorf("openclaw driver: failed to write CLAWDAPUS.md: %w", err)
