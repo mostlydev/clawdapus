@@ -1,10 +1,13 @@
 package nanoclaw
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/docker/docker/client"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
@@ -78,9 +81,49 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 }
 
 func (d *Driver) PostApply(rc *driver.ResolvedClaw, opts driver.PostApplyOpts) error {
-	return fmt.Errorf("nanoclaw driver: PostApply not yet implemented")
+	if opts.ContainerID == "" {
+		return fmt.Errorf("nanoclaw driver: post-apply check failed: no container ID")
+	}
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return fmt.Errorf("nanoclaw driver: post-apply docker client: %w", err)
+	}
+	defer cli.Close()
+	info, err := cli.ContainerInspect(context.Background(), opts.ContainerID)
+	if err != nil {
+		return fmt.Errorf("nanoclaw driver: post-apply inspect: %w", err)
+	}
+	if !info.State.Running {
+		cid := opts.ContainerID
+		if len(cid) > 12 {
+			cid = cid[:12]
+		}
+		return fmt.Errorf("nanoclaw driver: container %s not running (status: %s)", cid, info.State.Status)
+	}
+	return nil
 }
 
 func (d *Driver) HealthProbe(ref driver.ContainerRef) (*driver.Health, error) {
-	return nil, fmt.Errorf("nanoclaw driver: HealthProbe not yet implemented")
+	if ref.ContainerID == "" {
+		return &driver.Health{OK: false, Detail: "no container ID"}, nil
+	}
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, fmt.Errorf("nanoclaw driver: health docker client: %w", err)
+	}
+	defer cli.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	info, err := cli.ContainerInspect(ctx, ref.ContainerID)
+	if err != nil {
+		return &driver.Health{OK: false, Detail: fmt.Sprintf("inspect: %v", err)}, nil
+	}
+	if info.State == nil || !info.State.Running {
+		status := "unknown"
+		if info.State != nil {
+			status = info.State.Status
+		}
+		return &driver.Health{OK: false, Detail: fmt.Sprintf("not running (%s)", status)}, nil
+	}
+	return &driver.Health{OK: true, Detail: "container running"}, nil
 }
