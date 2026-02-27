@@ -680,6 +680,58 @@ func TestEmitComposeNoProxiesUnchanged(t *testing.T) {
 	}
 }
 
+func TestEmitProxyPublishesDashboardPort(t *testing.T) {
+	p := &Pod{
+		Name: "test-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "bot:latest",
+				Claw:  &ClawBlock{Count: 1},
+			},
+		},
+	}
+	results := map[string]*driver.MaterializeResult{
+		"bot": {ReadOnly: true, Restart: "on-failure"},
+	}
+	proxies := []CllamaProxyConfig{{
+		ProxyType:      "passthrough",
+		Image:          "ghcr.io/mostlydev/cllama-passthrough:latest",
+		ContextHostDir: "/tmp/ctx",
+		AuthHostDir:    "/tmp/auth",
+		Environment:    map[string]string{},
+		PodName:        "test-pod",
+	}}
+
+	out, err := EmitCompose(p, results, proxies...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cf struct {
+		Services map[string]struct {
+			Ports []string `yaml:"ports"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
+		t.Fatal(err)
+	}
+
+	proxySvc, ok := cf.Services["cllama-passthrough"]
+	if !ok {
+		t.Fatal("expected cllama-passthrough service in output")
+	}
+	found := false
+	for _, port := range proxySvc.Ports {
+		if port == "8081:8081" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected port 8081:8081 on proxy service, got ports: %v", proxySvc.Ports)
+	}
+}
+
 func TestEmitComposeCllamaTokenPerOrdinalOverride(t *testing.T) {
 	p := &Pod{
 		Name: "token-pod",
