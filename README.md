@@ -90,11 +90,11 @@ The contract lives on the host. Even a root-compromised runner cannot rewrite it
 
 ## cllama: The Governance Proxy
 
-When a reasoning model tries to govern itself, the guardrails are part of the same cognitive process they're trying to constrain. `cllama` is a **separate process, running a separate model**, sitting between the runner and the LLM provider.
+When a reasoning model tries to govern itself, the guardrails are part of the same cognitive process they're trying to constrain. `cllama` is a **separate process, running a separate model**, sitting between the runner and the LLM provider. (See [`cllama-passthrough`](./cllama-passthrough/) for the reference implementation).
 
 - **Outbound:** intercepts prompts. Gates what the runner is allowed to ask.
 - **Inbound:** intercepts responses. Rewrites or drops output that violates policy.
-- **Cost Containment:** enforces hard budgets by transparently downgrading requested models and rate-limiting expensive agents.
+- **Cost Accounting & Containment:** Tracks per-agent, per-model compute spend in real-time by extracting token usage from upstream responses and calculating exact costs. Exposes a live `/costs` dashboard, and enforces hard budgets by transparently downgrading requested models and rate-limiting expensive agents.
 
 The runner thinks it's talking directly to the LLM. It never sees `cllama`.
 
@@ -213,8 +213,8 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 3.5 — HANDLE directive + social topology projection | Done |
 | Phase 3.6 — INVOKE scheduling + Discord config wiring | Done |
 | Phase 3.7 — Social topology: mentionPatterns, allowBots, peer handle users | Done |
-| Phase 3.8 — Channel surface bindings | Planned |
-| Phase 4 — Shared governance proxy integration + credential starvation | Planned |
+| Phase 3.8 — Channel surface bindings | Done |
+| Phase 4 — Shared governance proxy integration + credential starvation | Done |
 | Phase 5 — Drift scoring + fleet governance | Planned |
 | Phase 6 — Recipe promotion + worker mode | Planned |
 
