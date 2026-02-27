@@ -14,6 +14,7 @@ import (
 	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/openclaw"
+	"github.com/mostlydev/clawdapus/internal/driver/shared"
 	"github.com/mostlydev/clawdapus/internal/inspect"
 	"github.com/mostlydev/clawdapus/internal/pod"
 	"github.com/mostlydev/clawdapus/internal/runtime"
@@ -731,7 +732,7 @@ func resolveHandleSkills(runtimeDir string, handles map[string]*driver.HandleInf
 		}
 		name := fmt.Sprintf("handle-%s.md", platform)
 		skillPath := filepath.Join(skillsDir, name)
-		content := openclaw.GenerateHandleSkill(platform, info)
+		content := shared.GenerateHandleSkill(platform, info)
 		if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
 			return nil, fmt.Errorf("write handle skill %q: %w", name, err)
 		}

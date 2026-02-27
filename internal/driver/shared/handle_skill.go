@@ -1,4 +1,4 @@
-package openclaw
+package shared
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
-// GenerateHandleSkill produces a skill file describing this claw's identity and
+// GenerateHandleSkill produces a skill file describing a claw's identity and
 // membership on the given platform. Helps the agent understand how to present
 // itself and navigate its guild/channel topology.
 func GenerateHandleSkill(platform string, info *driver.HandleInfo) string {
