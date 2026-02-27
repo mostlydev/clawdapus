@@ -34,7 +34,7 @@ If context is lost, read these files in order:
 3. `docs/plans/2026-02-20-vertical-spike-clawfile-build.md` — Phase 1 completion + Phase 2 outline
 4. `CLAUDE.md` — project conventions
 
-Then pick up at the first PENDING task and dispatch a subagent per the plan.
+Then pick up at the first NOT STARTED task in the active phase plan.
 
 ## Phase 2 Hardening Complete
 
@@ -193,19 +193,38 @@ All 15 tasks done (11 core + 4 hardening). Exit criteria met:
 ## Phase 3 Slice 3: Channel Surface Bindings
 
 **Plan:** `docs/plans/2026-02-21-phase3-slice3-channel-surfaces.md`
-**Status:** PENDING
+**Status:** DONE
 
 | # | Task | Status | Commit | Notes |
 |---|------|--------|--------|-------|
-| 1 | Define ChannelConfig + update ResolvedSurface | PENDING | — | `internal/driver/types.go` |
-| 2 | Parse channel surfaces from x-claw (string + map forms) | PENDING | — | `internal/pod/parser.go` |
-| 3 | Wire channel surfaces through compose_up | PENDING | — | Pass ChannelConfig to driver |
-| 4 | OpenClaw driver — translate channel surface to config ops | PENDING | — | v1 hardcoded JSON5 patches |
-| 5 | Generate surface skill for channel surfaces | PENDING | — | `skills/surface-discord.md` |
-| 6 | CLAWDAPUS.md — channel surface section | PENDING | — | |
-| 7 | Preflight — driver capability check | PENDING | — | Fail on unsupported channel platform |
-| 8 | Update openclaw example | PENDING | — | |
-| 9 | Final verification | PENDING | — | `go test ./...` |
+| 1 | Define `ChannelConfig` + update `ResolvedSurface` | DONE | — | Driver model supports channel policy payload |
+| 2 | Parse channel surfaces from x-claw (string + map forms) | DONE | — | Pod parser supports shorthand and structured config |
+| 3 | Wire channel surfaces through `compose_up` | DONE | — | Channel config passed end-to-end into driver resolution |
+| 4 | OpenClaw driver channel translation | DONE | — | `applyDiscordChannelSurface` writes channel ACL config |
+| 5 | Generate channel surface skill files | DONE | — | `surface-discord.md` generated and mounted |
+| 6 | CLAWDAPUS.md channel surface output | DONE | — | Surfaces + skill index include channel entries |
+| 7 | Driver capability + fail-closed behavior | DONE | — | Unsupported/invalid channel targets rejected |
+| 8 | Trading desk example updated | DONE | — | Pod manifest and README include channel surface usage |
+| 9 | Final verification | DONE | — | `go test ./...` + spike validation |
+
+**Completed:** 2026-02-27
+
+---
+
+## Phase 4: cllama Sidecar Integration
+
+**Plan:** `docs/plans/2026-02-26-phase4-cllama-sidecar.md`
+**Status:** DONE (shipped scope); policy pipeline intentionally deferred
+
+| # | Task Group | Status | Notes |
+|---|------------|--------|-------|
+| 1 | Slice 1 — `mostlydev/cllama-passthrough` proxy implementation | DONE | Dual-server entrypoint, identity, provider registry, context loading, transparent proxy, structured logging, UI |
+| 2 | Slice 2 — clawdapus infra wiring | DONE | `Cllama []string`, two-pass compose flow, token/context generation, proxy service injection |
+| 3 | Slice 3 — OpenClaw integration + tests | DONE | Provider-level rewrite (`models.providers.*`), proxy metadata in CLAWDAPUS.md, tests updated |
+| 4 | Task 3.4 docs/ADR fixes | DONE | CLLAMA spec + ADR updates merged |
+| 5 | Submodule integration | DONE | `cllama-passthrough` added as submodule, tracking `master` |
+| 6 | Real-proxy spike run | DONE | `TestSpikeComposeUp` passed with live `cllama-passthrough` image |
+| 7 | Policy pipeline (future scope) | DEFERRED | Phase 5+ |
 
 ---
 

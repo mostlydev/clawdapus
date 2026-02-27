@@ -1,10 +1,12 @@
 # Clawdapus Architecture Plan
 
 **Date:** 2026-02-18
-**Status:** v8 — LLM configuration workers, HANDLE directive, channel surface restoration
+**Status:** Architecture baseline (principles current; execution status delegated to active progress trackers)
 **Source of truth:** `MANIFESTO.md`
 **Reviews:** Grok (structural critique), Codex (architecture + driver model), operator (cllama clarification, enforcement model)
 **Deliberation:** 3-agent talking stick (alpha/Codex, beta/Claude, gamma/Grok) — arch-review room, 3 rounds, consensus reached
+
+**Relevance note (2026-02-27):** This document remains the architecture source of truth, but slice-by-slice execution status lives in `CLAUDE.md` and phase-specific plans/progress docs.
 
 ## Implementation Status
 
@@ -14,10 +16,10 @@
 | Phase 2 — Driver framework + pod runtime + OpenClaw + volume surfaces | — | **DONE** |
 | Phase 3 — Surface manifests | Slice 1: CLAWDAPUS.md + multi-claw | **DONE** |
 | Phase 3 — Service surface skills | Slice 2: claw.skill.emit + fallback generation | **DONE** |
-| Phase 3.5 — HANDLE directive + social topology | — | **PENDING** — `docs/plans/2026-02-21-phase35-handle-directive.md` |
-| Phase 3 — Channel surface bindings | Slice 3: driver-mediated channel config | **PENDING** — `docs/plans/2026-02-21-phase3-slice3-channel-surfaces.md` |
+| Phase 3.5 — HANDLE directive + social topology | — | **DONE** |
+| Phase 3 — Channel surface bindings | Slice 3: driver-mediated channel config | **DONE** |
 | LLM Configuration Workers | — | **DESIGN** — `docs/plans/2026-02-21-llm-configuration-workers.md` |
-| Phase 4 — cllama sidecar + policy pipeline | — | NOT STARTED |
+| Phase 4 — cllama sidecar + policy pipeline | — | **IN PROGRESS** — sidecar contract/wiring shipped; policy pipeline deferred |
 | Phase 5 — Drift scoring + fleet governance | — | NOT STARTED |
 | Phase 6 — Recipe promotion + worker mode | — | NOT STARTED |
 
@@ -43,7 +45,7 @@ Invariants are stated as goals from the start. Each is promoted from SHOULD to M
 | Purpose is immutable from inside | Contract bind mount is always `:ro` | Phase 2 |
 | One lifecycle authority | `docker compose` is sole lifecycle authority; Docker SDK is read-only | Phase 2 |
 | Driver enforcement verified before up | Preflight validation: all enforcement ops applied and verified | Phase 2 |
-| No cllama decision on egress → deny | Sidecar exists and proxies all LLM traffic; no direct egress allowed | Phase 4 |
+| No cllama decision on LLM egress → deny | Sidecar exists and proxies all LLM traffic; direct non-LLM internet egress remains allowed | Phase 4 |
 | Missing required policy module → deny service call | Sidecar checks policy modules before routing tool calls to services | Phase 4 |
 
 See also: [ADR-001: cllama Transport](../decisions/001-cllama-transport.md), [ADR-002: Runtime Authority](../decisions/002-runtime-authority.md)

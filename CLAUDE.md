@@ -7,6 +7,9 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 **Key documents:**
 - `MANIFESTO.md` — vision, principles, full architecture (source of truth)
 - `docs/plans/2026-02-18-clawdapus-architecture.md` — implementation plan and decisions
+- `docs/plans/2026-02-26-phase4-cllama-sidecar.md` — Phase 4 cllama proxy integration plan
+- `docs/CLLAMA_SPEC.md` — cllama proxy specification
+- `docs/decisions/` — Architecture Decision Records (ADRs)
 
 ## Architecture (summary)
 
@@ -15,7 +18,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - **SKILL / x-claw.skills** → explicit skill files from image labels + pod manifests are resolved and mounted read-only into runner skill directories (`SkillDir`) at runtime.
 - **Driver framework** → abstract enforcement ops (set, unset, mount_ro, env, cron_upsert, healthcheck, wake). Each driver translates Clawfile directives into runner-specific config injection. Fail-closed: preflight + post-apply verification.
 - **claw-pod.yml** → extended docker-compose. `claw up` parses `x-claw` blocks, runs driver enforcement, optionally injects cllama sidecars, emits clean `compose.generated.yml`, calls `docker compose`.
-- **cllama sidecar** → optional bidirectional LLM proxy per Claw. Intercepts prompts outbound and responses inbound. Runner never knows. Only injected when `CLLAMA` directive is present.
+- **cllama sidecar** → optional bidirectional shared pod-level LLM proxy layer. Services are named `cllama-<type>`; runner talks to the first configured proxy and is unaware of interception.
 - **Config injection** → primary enforcement model. Surgically writes specific config branches using the runner's own tools (e.g. `openclaw config set` for JSON5-aware OpenClaw config). Works without cllama.
 - **Claws are users** → Claws authenticate to services with standard credentials (env vars, Docker secrets). Clawdapus enforces access modes only on mounts where Docker has authority. For services, the service's own auth governs access.
 - **docker compose** is the sole lifecycle authority. Docker SDK is read-only (inspect, logs, events).
@@ -38,7 +41,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - `internal/runtime/` — Docker SDK wrapper (read-only only)
 - `cmd/claw/compose_up.go` — main orchestration for `claw compose up`
 
-## Implementation Status (as of 2026-02-22)
+## Implementation Status (as of 2026-02-27)
 
 | Phase | Status |
 |-------|--------|
@@ -50,7 +53,9 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 | Phase 3 Slice 3 — INVOKE scheduling + Discord config wiring | DONE |
 | Phase 3 Slice 4 — Social topology: mentionPatterns, allowBots, peer handle users | DONE |
 | Phase 3 Slice 5 — Channel surface bindings: ChannelConfig, applyDiscordChannelSurface, surface-discord.md | DONE |
-| Phase 4 — cllama sidecar | NOT STARTED |
+| Phase 4 Slices 2+3 — cllama wiring in clawdapus repo | DONE |
+| Phase 4 Slice 1 — cllama-passthrough standalone proxy (separate repo) | DONE |
+| Phase 4 Task 3.4 — doc fixes (CLLAMA_SPEC, ADRs) | DONE |
 | Phase 5 — Drift scoring | NOT STARTED |
 | Phase 6 — Recipe promotion | NOT STARTED |
 
@@ -79,10 +84,22 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - **Map-form channel surfaces**: `channel://discord: {dm: {...}}` in pod YAML carries `ChannelConfig` parsed at the pod layer (`pod.Parse()`). String-form `"channel://discord"` yields nil `ChannelConfig` (simple enable). `ClawBlock.Surfaces` is `[]driver.ResolvedSurface`, not `[]string`
 - **`applyDiscordChannelSurface`** in `config.go` writes `dmPolicy`, `allowFrom`, and per-guild policy into the openclaw config map after the HANDLE loop. Unknown platforms are silently skipped (no error)
 - **Channel surface skills**: `GenerateChannelSkill` produces `surface-discord.md` (etc.); `resolveChannelGeneratedSkills` in compose_up.go writes and mounts it alongside service surface skills. CLAWDAPUS.md Surfaces section and Skills index both reference it
+- **cllama declaration model**: `Cllama []string` — supports multiple proxy types per agent. Clawfile: multiple `CLLAMA` directives. Pod YAML: `cllama: passthrough` (string coerced to `[]string`) or `cllama: [passthrough, policy]`
+- **cllama chain boundary**: data model supports multi-proxy chains; runtime currently fail-fast rejects `len(Cllama) > 1` until chain execution semantics land in Phase 5
+- **Credential starvation split**: real provider API keys belong only in `x-claw.cllama-env` (proxy service env), never in agent env blocks. `stripLLMKeys` + preflight check enforce this
+- **cllama-passthrough**: Separate repo `mostlydev/cllama-passthrough`. Standalone Go binary, OpenAI-compatible proxy on :8080, operator web UI on :8081. Multi-provider registry (OpenAI, Anthropic, OpenRouter, Ollama). Auth at `/claw/auth/providers.json` (env overrides file)
+- **Bearer token format**: `<agent-id>:<48-hex-chars>` via crypto/rand. Proxy validates secret against metadata.json. Per-ordinal tokens for count > 1 services
+- **cllama provider-level rewrite (schema fix)**: Plan originally wrote to `agents.defaults.model.baseURL/apiKey` but OpenClaw Zod schema rejects those keys. Fixed: cllama config writes to `models.providers.<provider>.{baseUrl,apiKey,api,models}` — schema-valid, per-provider, handles multi-provider pods. Helper functions: `collectCllamaProviderModels`, `splitModelRef`, `normalizeProviderID`, `defaultModelAPIForProvider` in `config.go`
+- **`x-claw.models` (deferred)**: Pod-level per-service model override is not yet supported. Currently models come from Clawfile `MODEL` labels only. Natural extension of existing override pattern but deferred — touches the model resolution path that cllama provider wiring depends on. Candidate for Phase 4.5 or early Phase 5
+- **`compose_up.go` two-pass loop**: Pass 1 inspect+resolve all services, then cllama wiring (detection, tokens, preflight, credential starvation, context gen, proxy config), then Pass 2 materialize. Enables pre-materialize token injection
+- **Image-baked env preflight**: `inspectImageEnv` via `docker image inspect` checks for provider API keys baked into the image ENV layer — fails fast if found for cllama-enabled agents. Cached per image ref
 
 ## Conventions
 
+- Project identity: "Opinionated Cognitive Architecture — Docker on Rails for Claws"
 - Don't add signatures to commit messages
+- Use `codex exec "prompt"` for external architectural review; config at `~/.codex/config.toml`
+- Implementation plans saved to `docs/plans/YYYY-MM-DD-<feature>.md` (accessible to Codex and other tools)
 - Archive of prior OpenClaw runtime is in `archive/openclaw-runtime/` — reference only
 - Generated files (`Dockerfile.generated`, `compose.generated.yml`) are build artifacts — inspectable but not hand-edited
 - Fail-closed everywhere: missing contract → no start, unknown surface target → error, preflight failure → abort
