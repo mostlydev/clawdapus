@@ -109,6 +109,19 @@ func TestParseFailsDuplicateSingleton(t *testing.T) {
 	}
 }
 
+func TestParseCllamaAllowsMultipleDirectives(t *testing.T) {
+	result, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE openclaw\nCLLAMA passthrough\nCLLAMA policy\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Config.Cllama) != 2 {
+		t.Fatalf("expected 2 CLLAMA entries, got %d", len(result.Config.Cllama))
+	}
+	if result.Config.Cllama[0] != "passthrough" || result.Config.Cllama[1] != "policy" {
+		t.Fatalf("unexpected CLLAMA ordering: %v", result.Config.Cllama)
+	}
+}
+
 func TestParseRequiresClawType(t *testing.T) {
 	_, err := Parse(strings.NewReader("FROM alpine\nAGENT AGENTS.md\n"))
 	if err == nil {

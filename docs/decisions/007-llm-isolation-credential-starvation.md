@@ -15,14 +15,14 @@ We need a way to strictly isolate LLM traffic to the sidecar without restricting
 
 We enforce LLM interception through **Credential Starvation** combined with **Driver-Level Configuration Injection**, rather than network isolation.
 
-1. **Configuration Injection:** When `CLLAMA` is active, the driver configures the runner's LLM provider settings (e.g., `baseURL`) to point to the local `cllama` sidecar endpoint.
+1. **Configuration Injection:** When `CLLAMA` is active, the driver configures the runner's LLM provider settings to point to the local `cllama` sidecar endpoint (OpenClaw: `models.providers.<provider>.baseUrl` with sidecar bearer `apiKey`).
 2. **Credential Starvation:** The real LLM provider API keys (e.g., `ANTHROPIC_API_KEY`) are *never* provided to the agent container. They are securely mounted only into the `cllama` sidecar. The agent container is provisioned with a local, dummy token (e.g., `CLLAMA_TOKEN_...`).
 
 ## Rationale
 
 This approach achieves strict isolation without breaking general egress:
 
-- **Security Guarantee:** Even if a malicious prompt or compromised runner bypasses the injected `baseURL` configuration and attempts to `curl` `api.anthropic.com` directly, the request will fail (`401 Unauthorized`) because the agent does not possess the real API keys.
+- **Security Guarantee:** Even if a malicious prompt or compromised runner bypasses injected provider config and attempts to `curl` `api.anthropic.com` directly, the request will fail (`401 Unauthorized`) because the agent does not possess the real API keys.
 - **Utility Preservation:** The agent container remains on a standard Docker network with internet egress, allowing it to function normally on Discord, Slack, and external APIs using its own platform-specific credentials.
 - **Simplicity:** It avoids the massive scope creep of building a universal HTTP egress proxy or managing complex iptables/network policies.
 

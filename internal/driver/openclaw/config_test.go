@@ -32,6 +32,119 @@ func TestGenerateConfigSetsModelPrimary(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigCllamaRewritesProviderBaseURL(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "anthropic/claude-sonnet-4"},
+		Cllama: []string{"passthrough"},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	modelsCfg, ok := config["models"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected models config")
+	}
+	providers, ok := modelsCfg["providers"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected models.providers config")
+	}
+	anthropic, ok := providers["anthropic"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected models.providers.anthropic config")
+	}
+	if anthropic["baseUrl"] != "http://cllama-passthrough:8080/v1" {
+		t.Errorf("expected proxy baseUrl, got %v", anthropic["baseUrl"])
+	}
+	modelEntries, ok := anthropic["models"].([]interface{})
+	if !ok || len(modelEntries) == 0 {
+		t.Fatalf("expected models.providers.anthropic.models entries, got %T %v", anthropic["models"], anthropic["models"])
+	}
+}
+
+func TestGenerateConfigNoCllamaNoProviderRewrite(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "anthropic/claude-sonnet-4"},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	modelsCfg, ok := config["models"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	if _, exists := modelsCfg["providers"]; exists {
+		t.Error("models.providers should not be set when cllama is empty")
+	}
+}
+
+func TestGenerateConfigCllamaInjectsDummyToken(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:      map[string]string{"primary": "anthropic/claude-sonnet-4"},
+		Cllama:      []string{"passthrough"},
+		CllamaToken: "tiverton:abc123hex",
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	modelsCfg := config["models"].(map[string]interface{})
+	providers := modelsCfg["providers"].(map[string]interface{})
+	anthropic := providers["anthropic"].(map[string]interface{})
+	if anthropic["apiKey"] != "tiverton:abc123hex" {
+		t.Errorf("expected dummy token, got %v", anthropic["apiKey"])
+	}
+}
+
+func TestGenerateConfigCllamaRewritesAllModelProviders(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{
+			"primary":  "openrouter/moonshotai/kimi-k2.5",
+			"fallback": "anthropic/claude-sonnet-4-6",
+		},
+		Cllama:      []string{"passthrough"},
+		CllamaToken: "westin:abc123hex",
+	}
+
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+
+	modelsCfg := config["models"].(map[string]interface{})
+	providers := modelsCfg["providers"].(map[string]interface{})
+	for _, provider := range []string{"openrouter", "anthropic"} {
+		entry, ok := providers[provider].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected models.providers.%s", provider)
+		}
+		if entry["baseUrl"] != "http://cllama-passthrough:8080/v1" {
+			t.Fatalf("provider %s baseUrl mismatch: %v", provider, entry["baseUrl"])
+		}
+		if entry["apiKey"] != "westin:abc123hex" {
+			t.Fatalf("provider %s apiKey mismatch: %v", provider, entry["apiKey"])
+		}
+	}
+}
+
 func TestGenerateConfigAppliesConfigureDirectives(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models: make(map[string]string),
@@ -170,7 +283,7 @@ func TestGenerateConfigModelFallbacksIsArray(t *testing.T) {
 
 func TestGenerateConfigRejectsUnknownCommand(t *testing.T) {
 	rc := &driver.ResolvedClaw{
-		Models:     make(map[string]string),
+		Models: make(map[string]string),
 		Configures: []string{
 			"some random command",
 		},
@@ -593,7 +706,7 @@ func TestGenerateConfigDiscordPeerHandlesInUsers(t *testing.T) {
 		Configures: []string{},
 		Handles: map[string]*driver.HandleInfo{
 			"discord": {
-				ID: "OWN",
+				ID:     "OWN",
 				Guilds: []driver.GuildInfo{{ID: "G1"}},
 			},
 		},

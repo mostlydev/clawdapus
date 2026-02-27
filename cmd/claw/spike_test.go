@@ -53,6 +53,12 @@ func TestSpikeComposeUp(t *testing.T) {
 	if env["SECRET_KEY_BASE"] == "" {
 		env["SECRET_KEY_BASE"] = strings.Repeat("0", 64)
 	}
+	if env["OPENROUTER_API_KEY"] == "" {
+		env["OPENROUTER_API_KEY"] = "sk-spike-openrouter"
+	}
+	if env["ANTHROPIC_API_KEY"] == "" {
+		env["ANTHROPIC_API_KEY"] = "sk-spike-anthropic"
+	}
 
 	// Build images before running compose up.
 	// openclaw:latest is the base runtime image; build it from the local
@@ -62,6 +68,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	}
 	spikeBuildImage(t, dir, "trading-desk:latest", "Clawfile")
 	spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
+	spikeEnsureCllamaPassthroughImage(t)
 
 	// Write a pre-expanded spike pod YAML so Go YAML parser sees real IDs.
 	rawPod := spikeReadFile(t, filepath.Join(dir, "claw-pod.yml"))
@@ -127,6 +134,67 @@ func TestSpikeComposeUp(t *testing.T) {
 	var configMap map[string]interface{}
 	if err := json.Unmarshal([]byte(configData), &configMap); err != nil {
 		t.Fatalf("parse openclaw.json: %v", err)
+	}
+	agents, ok := configMap["agents"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("openclaw.json: missing 'agents' object")
+	}
+	defaults, ok := agents["defaults"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("openclaw.json: missing 'agents.defaults' object")
+	}
+	model, ok := defaults["model"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("openclaw.json: missing 'agents.defaults.model' object")
+	}
+
+	modelsCfg, ok := configMap["models"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("openclaw.json: missing 'models' object")
+	}
+	providersCfg, ok := modelsCfg["providers"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("openclaw.json: missing 'models.providers' object")
+	}
+
+	expectedProviders := make(map[string]struct{})
+	if primary, _ := model["primary"].(string); primary != "" {
+		if parts := strings.SplitN(primary, "/", 2); len(parts) == 2 {
+			expectedProviders[parts[0]] = struct{}{}
+		}
+	}
+	if fallbacks, _ := model["fallbacks"].([]interface{}); len(fallbacks) > 0 {
+		if fallback, _ := fallbacks[0].(string); fallback != "" {
+			if parts := strings.SplitN(fallback, "/", 2); len(parts) == 2 {
+				expectedProviders[parts[0]] = struct{}{}
+			}
+		}
+	}
+	if len(expectedProviders) == 0 {
+		t.Fatalf("openclaw.json: expected at least one provider from model refs, got primary=%v fallback=%v", model["primary"], model["fallbacks"])
+	}
+
+	var cllamaToken string
+	for provider := range expectedProviders {
+		entry, ok := providersCfg[provider].(map[string]interface{})
+		if !ok {
+			t.Fatalf("openclaw.json: missing models.providers.%s object", provider)
+		}
+		if got := entry["baseUrl"]; got != "http://cllama-passthrough:8080/v1" {
+			t.Errorf("openclaw.json: expected models.providers.%s.baseUrl=http://cllama-passthrough:8080/v1, got %v", provider, got)
+		}
+		providerToken, _ := entry["apiKey"].(string)
+		if matched, _ := regexp.MatchString(`^tiverton:[0-9a-f]{48}$`, providerToken); !matched {
+			t.Errorf("openclaw.json: expected cllama token format tiverton:<48-hex> for provider %s, got %q", provider, providerToken)
+		}
+		if providerToken == env["OPENROUTER_API_KEY"] || providerToken == env["ANTHROPIC_API_KEY"] {
+			t.Errorf("openclaw.json: provider %s apiKey should be cllama token, not provider key", provider)
+		}
+		if cllamaToken == "" {
+			cllamaToken = providerToken
+		} else if providerToken != cllamaToken {
+			t.Errorf("openclaw.json: expected one shared cllama token across providers, got %q and %q", cllamaToken, providerToken)
+		}
 	}
 
 	channels, ok := configMap["channels"].(map[string]interface{})
@@ -208,6 +276,32 @@ func TestSpikeComposeUp(t *testing.T) {
 		if !strings.Contains(composeSrc, want) {
 			t.Errorf("compose.generated.yml: expected to contain %q", want)
 		}
+	}
+	if !strings.Contains(composeSrc, "cllama-passthrough:") {
+		t.Errorf("compose.generated.yml: expected cllama-passthrough service")
+	}
+	if !strings.Contains(composeSrc, "CLAW_CONTEXT_ROOT: /claw/context") {
+		t.Errorf("compose.generated.yml: expected cllama context root env")
+	}
+
+	// ── Verify cllama context artifacts ─────────────────────────────────────
+
+	for _, agent := range []string{"tiverton", "westin"} {
+		agentDir := filepath.Join(runtimeDir, "context", agent)
+		for _, rel := range []string{"AGENTS.md", "CLAWDAPUS.md", "metadata.json"} {
+			if _, err := os.Stat(filepath.Join(agentDir, rel)); err != nil {
+				t.Errorf("cllama context missing %s/%s: %v", agent, rel, err)
+			}
+		}
+	}
+	metaPath := filepath.Join(runtimeDir, "context", "tiverton", "metadata.json")
+	metaData := spikeReadFile(t, metaPath)
+	var meta map[string]interface{}
+	if err := json.Unmarshal([]byte(metaData), &meta); err != nil {
+		t.Fatalf("parse tiverton metadata.json: %v", err)
+	}
+	if tok, _ := meta["token"].(string); tok != cllamaToken {
+		t.Errorf("metadata token mismatch: metadata=%q provider.apiKey=%q", tok, cllamaToken)
 	}
 
 	// ── Verify containers can serve the mounted files ────────────────────────
@@ -382,6 +476,38 @@ func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("docker build %s: %v\n%s", tag, err, out)
+	}
+}
+
+// spikeEnsureCllamaPassthroughImage guarantees a local image exists for
+// ghcr.io/mostlydev/cllama-passthrough:latest so spike tests don't depend on
+// external registry state.
+func spikeEnsureCllamaPassthroughImage(t *testing.T) {
+	t.Helper()
+	const tag = "ghcr.io/mostlydev/cllama-passthrough:latest"
+	if spikeImageExists(tag) {
+		return
+	}
+
+	dockerfile := strings.NewReader(`FROM alpine:3.20
+RUN cat >/cllama-passthrough <<'EOF'
+#!/bin/sh
+if [ "$1" = "-healthcheck" ]; then
+  exit 0
+fi
+while true; do
+  sleep 3600
+done
+EOF
+RUN chmod +x /cllama-passthrough
+ENTRYPOINT ["/cllama-passthrough"]
+`)
+
+	cmd := exec.Command("docker", "build", "-t", tag, "-")
+	cmd.Stdin = dockerfile
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build cllama passthrough stub image: %v\n%s", err, out)
 	}
 }
 

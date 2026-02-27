@@ -36,9 +36,18 @@ type composeHealthcheck struct {
 	Retries  int      `yaml:"retries"`
 }
 
+type CllamaProxyConfig struct {
+	ProxyType      string            // e.g. "passthrough", "policy"
+	Image          string            // e.g. ghcr.io/mostlydev/cllama-passthrough:latest
+	ContextHostDir string            // host path for shared context dir
+	AuthHostDir    string            // host path for provider auth state
+	Environment    map[string]string // proxy-only env (e.g. CLAW_POD, provider keys)
+	PodName        string
+}
+
 // EmitCompose generates a compose.generated.yml string from pod definition and
 // driver materialization results. Output is deterministic (sorted service names).
-func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, error) {
+func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies ...CllamaProxyConfig) (string, error) {
 	cf := &composeFile{
 		Services: make(map[string]*composeService),
 		Volumes:  make(map[string]interface{}),
@@ -205,6 +214,13 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 			for k, v := range result.Environment {
 				env[k] = v
 			}
+			if isClaw && svc.Claw != nil && len(svc.Claw.CllamaTokens) > 0 {
+				if tok, ok := svc.Claw.CllamaTokens[serviceName]; ok && strings.TrimSpace(tok) != "" {
+					env["CLLAMA_TOKEN"] = tok
+				} else if tok, ok := svc.Claw.CllamaTokens[name]; ok && strings.TrimSpace(tok) != "" {
+					env["CLLAMA_TOKEN"] = tok
+				}
+			}
 			if len(env) > 0 {
 				cs.Environment = env
 			}
@@ -220,6 +236,53 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult) (string, 
 			}
 
 			cf.Services[serviceName] = cs
+		}
+	}
+
+	for _, proxy := range proxies {
+		if strings.TrimSpace(proxy.ProxyType) == "" {
+			return "", fmt.Errorf("proxy type must not be empty")
+		}
+		if strings.TrimSpace(proxy.Image) == "" {
+			return "", fmt.Errorf("proxy image must not be empty")
+		}
+		if strings.TrimSpace(proxy.ContextHostDir) == "" {
+			return "", fmt.Errorf("proxy %q context host dir must not be empty", proxy.ProxyType)
+		}
+		if strings.TrimSpace(proxy.AuthHostDir) == "" {
+			return "", fmt.Errorf("proxy %q auth host dir must not be empty", proxy.ProxyType)
+		}
+
+		hasClaw = true
+		serviceName := "cllama-" + proxy.ProxyType
+		env := map[string]string{
+			"CLAW_CONTEXT_ROOT": "/claw/context",
+			"CLAW_AUTH_DIR":     "/claw/auth",
+		}
+		for k, v := range proxy.Environment {
+			env[k] = v
+		}
+
+		cf.Services[serviceName] = &composeService{
+			Image: proxy.Image,
+			Volumes: []string{
+				fmt.Sprintf("%s:/claw/context:ro", proxy.ContextHostDir),
+				fmt.Sprintf("%s:/claw/auth:rw", proxy.AuthHostDir),
+			},
+			Environment: env,
+			Restart:     "on-failure",
+			Healthcheck: &composeHealthcheck{
+				Test:     []string{"CMD", fmt.Sprintf("/cllama-%s", proxy.ProxyType), "-healthcheck"},
+				Interval: "15s",
+				Timeout:  "5s",
+				Retries:  3,
+			},
+			Labels: map[string]string{
+				"claw.pod":        proxy.PodName,
+				"claw.role":       "proxy",
+				"claw.proxy.type": proxy.ProxyType,
+			},
+			Networks: []string{"claw-internal"},
 		}
 	}
 

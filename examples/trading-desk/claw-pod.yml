@@ -12,6 +12,7 @@ x-claw:
 #   TIVERTON_BOT_TOKEN, WESTIN_BOT_TOKEN
 #   TIVERTON_DISCORD_ID, WESTIN_DISCORD_ID
 #   DISCORD_GUILD_ID, DISCORD_TRADING_FLOOR_CHANNEL
+#   OPENROUTER_API_KEY (proxy-side provider key for cllama)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -51,6 +52,11 @@ services:
       dockerfile: Clawfile
     x-claw:
       agent: ./agents/TIVERTON.md
+      cllama: passthrough
+      # Provider keys for cllama only. These never enter agent service env.
+      cllama-env:
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
       handles:
         discord:
           id: "${TIVERTON_DISCORD_ID}"
@@ -96,6 +102,7 @@ services:
       dockerfile: Clawfile
     x-claw:
       agent: ./agents/WESTIN.md
+      cllama: passthrough
       handles:
         discord:
           id: "${WESTIN_DISCORD_ID}"

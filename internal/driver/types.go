@@ -22,10 +22,10 @@ type ResolvedClaw struct {
 	ServiceName   string
 	ImageRef      string
 	ClawType      string
-	Agent         string            // filename from image labels (e.g., "AGENTS.md")
-	AgentHostPath string            // resolved host path for bind mount
-	Models        map[string]string // slot -> provider/model
-	Handles       map[string]*HandleInfo // platform -> contact card (from x-claw handles block)
+	Agent         string                            // filename from image labels (e.g., "AGENTS.md")
+	AgentHostPath string                            // resolved host path for bind mount
+	Models        map[string]string                 // slot -> provider/model
+	Handles       map[string]*HandleInfo            // platform -> contact card (from x-claw handles block)
 	PeerHandles   map[string]map[string]*HandleInfo // service name -> platform -> HandleInfo for sibling services
 	Surfaces      []ResolvedSurface
 	Skills        []ResolvedSkill
@@ -34,6 +34,8 @@ type ResolvedClaw struct {
 	Invocations   []Invocation      // scheduled agent tasks from image labels + pod x-claw.invoke
 	Count         int               // from pod x-claw (default 1)
 	Environment   map[string]string // from pod environment block
+	Cllama        []string          // ordered cllama proxy types (e.g., ["passthrough"])
+	CllamaToken   string            // per-agent bearer token injected when cllama is active
 }
 
 // HandleInfo is the full contact card for an agent on a platform.
@@ -107,9 +109,9 @@ type MaterializeResult struct {
 	Tmpfs       []string          // paths needing tmpfs (for read_only: true)
 	Environment map[string]string // additional env vars
 	Healthcheck *Healthcheck
-	ReadOnly    bool              // default: true
-	Restart     string            // default: "on-failure"
-	SkillDir    string            // container path for skills (e.g., "/claw/skills")
+	ReadOnly    bool   // default: true
+	Restart     string // default: "on-failure"
+	SkillDir    string // container path for skills (e.g., "/claw/skills")
 }
 
 type Mount struct {

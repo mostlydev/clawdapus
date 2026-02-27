@@ -82,6 +82,41 @@ func TestGenerateClawdapusMDNoSurfaces(t *testing.T) {
 	}
 }
 
+func TestClawdapusMDIncludesProxySection(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "tiverton",
+		ClawType:    "openclaw",
+		Cllama:      []string{"passthrough"},
+	}
+	md := GenerateClawdapusMD(rc, "test-pod")
+	if !strings.Contains(md, "## LLM Proxy") {
+		t.Error("expected LLM Proxy section")
+	}
+	if !strings.Contains(md, "cllama-passthrough:8080") {
+		t.Error("expected proxy endpoint with type name")
+	}
+}
+
+func TestClawdapusMDMultipleProxies(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "tiverton",
+		ClawType:    "openclaw",
+		Cllama:      []string{"passthrough", "policy"},
+	}
+	md := GenerateClawdapusMD(rc, "test-pod")
+	if !strings.Contains(md, "passthrough -> policy") {
+		t.Error("expected chain description")
+	}
+}
+
+func TestClawdapusMDNoProxyWhenNoCllama(t *testing.T) {
+	rc := &driver.ResolvedClaw{ServiceName: "tiverton", ClawType: "openclaw"}
+	md := GenerateClawdapusMD(rc, "test-pod")
+	if strings.Contains(md, "## LLM Proxy") {
+		t.Error("should not include proxy section")
+	}
+}
+
 func TestGenerateClawdapusMDListsExplicitSkills(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		ServiceName: "worker",

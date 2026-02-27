@@ -20,7 +20,7 @@ type ClawInfo struct {
 	ClawType    string
 	Agent       string
 	Models      map[string]string
-	Cllama      string
+	Cllama      []string
 	Persona     string
 	Handles     []string
 	Surfaces    []string
@@ -52,6 +52,7 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 	skills := make([]indexedEntry, 0)
 	configures := make([]indexedEntry, 0)
 	invokeEntries := make([]indexedEntry, 0)
+	cllamaByIndex := make(map[int]string)
 
 	for key, value := range labels {
 		if !strings.HasPrefix(key, "claw.") {
@@ -67,7 +68,14 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 			slot := strings.TrimPrefix(key, "claw.model.")
 			info.Models[slot] = value
 		case key == "claw.cllama.default":
-			info.Cllama = value
+			if _, exists := cllamaByIndex[0]; !exists {
+				cllamaByIndex[0] = value
+			}
+		case strings.HasPrefix(key, "claw.cllama."):
+			suffix := strings.TrimPrefix(key, "claw.cllama.")
+			if parsed, err := strconv.Atoi(suffix); err == nil {
+				cllamaByIndex[parsed] = value
+			}
 		case key == "claw.persona.default":
 			info.Persona = value
 		case strings.HasPrefix(key, "claw.handle."):
@@ -176,6 +184,17 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 				Schedule: e.Value[:tab],
 				Command:  e.Value[tab+1:],
 			})
+		}
+	}
+
+	if len(cllamaByIndex) > 0 {
+		indices := make([]int, 0, len(cllamaByIndex))
+		for idx := range cllamaByIndex {
+			indices = append(indices, idx)
+		}
+		sort.Ints(indices)
+		for _, idx := range indices {
+			info.Cllama = append(info.Cllama, cllamaByIndex[idx])
 		}
 	}
 

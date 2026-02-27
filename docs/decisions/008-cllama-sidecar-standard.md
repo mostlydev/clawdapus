@@ -9,14 +9,15 @@ Initially, `cllama` was conceived as a specific proxy component injected by Claw
 
 ## Decision
 
-We formalize `cllama` as a **mini-standard** rather than a single hardcoded implementation. 
+We formalize `cllama` as a **mini-standard** rather than a single hardcoded implementation.
 
 1. **The cllama Contract:** A `cllama` sidecar is any container image that:
    - Exposes an OpenAI-compatible proxy endpoint.
    - Accepts Clawdapus orchestration context (e.g., agent identity, loaded policy modules, capability labels, and the behavioral contract) injected via environment variables or volume mounts by the Clawdapus pod emitter.
    - Emits standardized logs or labels back to Clawdapus for audit and drift scoring.
-2. **Identity and Authorization Awareness:** The Clawdapus driver will inject the agent's identity (ordinal, pod name, `HANDLE` projections) and any `require_cllama` constraints directly into the sidecar's environment. The sidecar uses this context to act as an intelligent authorization and control layer, capable of enforcing rights dynamically.
-3. **Reference Implementation:** We will provide a base `cllama-passthrough` container image. This reference image will perform no mutations (acting as a pure proxy) but will validate the contract, log requests, and prove the networking/interception model. It serves as the default for testing and the foundation for custom sidecars.
+2. **Identity and Authorization Awareness:** The Clawdapus driver injects pod-level context and shared per-agent mounts. The sidecar resolves caller identity from bearer tokens (`<agent-id>:<secret>`) and the mounted context (`/claw/context/<agent-id>/`), enabling dynamic rights enforcement per agent.
+3. **Multi-Proxy Data Model:** `Cllama` is represented as `[]string`, allowing an ordered list of proxy types for future chainable governance pipelines.
+4. **Reference Implementation:** We will provide a base `cllama-passthrough` container image. This reference image will perform no mutations (acting as a pure proxy) but will validate the contract, log requests, and prove the networking/interception model. It serves as the default for testing and the foundation for custom sidecars.
 
 ## Rationale
 
@@ -33,3 +34,4 @@ Passing identity and rights into the sidecar elevates it from a dumb proxy to a 
 
 **Negative:**
 - We must formally define and version the "cllama context contract" (the specific environment variables, log formats, and mounts passed to the sidecar) to ensure compatibility.
+- Although `Cllama []string` supports chains at the data model level, runtime chain execution is deferred and currently fails fast for multiple proxy types (Phase 5 scope).

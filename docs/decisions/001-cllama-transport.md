@@ -14,15 +14,18 @@ cllama is a bidirectional LLM proxy — it intercepts both outbound prompts (run
 
 *Note: Initially, the architecture specified a "sidecar per Claw" model. This was updated to a shared pod-level proxy to reduce resource overhead and enable centralized compute budgeting across the fleet.*
 
-Each pod with a `CLLAMA` directive gets a single `cllama-proxy` container injected into the generated compose file by `claw up`. The proxy:
+Each pod with a `CLLAMA` directive gets one or more typed proxy services injected into the generated compose file by `claw compose up`. Services are named `cllama-<type>` (for example, `cllama-passthrough`). The proxy layer:
 
 - Exposes an OpenAI-compatible API endpoint on a pod-internal network.
+- Is configured from `Cllama []string` declarations (image and pod-level), enabling future chainable proxy stacks.
 - Resolves multi-agent identity via unique per-agent **Bearer Tokens**.
 - Receives the runner's LLM calls (runner's `*_API_BASE` env vars are rewritten to point at the shared proxy).
 - Dynamically loads the specific agent's behavioral contract from a shared context mount (`/claw/context/<agent-id>/`).
 - Holds the real LLM provider API keys (runners never see them, relying on "Credential Starvation").
 - Applies the governance pipeline bidirectionally (decoration, tool scoping, drift scoring).
 - Enforces pod-wide rate limits and compute budgets.
+
+**Phase 4 execution boundary:** The data model supports multiple proxy types, but runtime currently fails fast if more than one type is declared. Multi-proxy chain execution is intentionally deferred to Phase 5.
 
 **Secondary mode: adapter (documented, not built yet).**
 
@@ -37,7 +40,7 @@ Adapter mode will be designed and built when a concrete runner requires it.
 - Key isolation is free — runner never holds provider API keys (Credential Starvation).
 - Logging and audit are centralized at the pod proxy.
 - Proxy failure = LLM calls fail = fail-closed (runner can't bypass to direct provider).
-- **Resource Efficiency:** One proxy per pod instead of one per agent.
+- **Resource Efficiency:** One proxy per pod per declared proxy type instead of one per agent.
 - **Compute Control:** Enables pod-wide rate limiting and centralized budget enforcement.
 
 **Negative:**

@@ -230,3 +230,24 @@ func TestEmitMultipleInvokeOrdering(t *testing.T) {
 		t.Error("expected claw.invoke.0 before claw.invoke.1")
 	}
 }
+
+func TestEmitCllamaIndexedLabels(t *testing.T) {
+	input := "FROM alpine\nCLAW_TYPE openclaw\nCLLAMA passthrough\nCLLAMA policy\n"
+	parsed, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := Emit(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, `LABEL claw.cllama.0="passthrough"`) {
+		t.Fatalf("expected claw.cllama.0 label, got:\n%s", output)
+	}
+	if !strings.Contains(output, `LABEL claw.cllama.1="policy"`) {
+		t.Fatalf("expected claw.cllama.1 label, got:\n%s", output)
+	}
+	if strings.Contains(output, "claw.cllama.default") {
+		t.Fatalf("did not expect legacy claw.cllama.default label, got:\n%s", output)
+	}
+}

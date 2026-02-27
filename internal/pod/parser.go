@@ -38,14 +38,15 @@ type rawInvokeEntry struct {
 }
 
 type rawClawBlock struct {
-	Agent    string                 `yaml:"agent"`
-	Persona  string                 `yaml:"persona"`
-	Cllama   string                 `yaml:"cllama"`
-	Count    int                    `yaml:"count"`
-	Handles  map[string]interface{} `yaml:"handles"`
-	Surfaces []interface{}          `yaml:"surfaces"`
-	Skills   []string               `yaml:"skills"`
-	Invoke   []rawInvokeEntry       `yaml:"invoke"`
+	Agent     string                 `yaml:"agent"`
+	Persona   string                 `yaml:"persona"`
+	Cllama    interface{}            `yaml:"cllama"`
+	CllamaEnv map[string]string      `yaml:"cllama-env"`
+	Count     int                    `yaml:"count"`
+	Handles   map[string]interface{} `yaml:"handles"`
+	Surfaces  []interface{}          `yaml:"surfaces"`
+	Skills    []string               `yaml:"skills"`
+	Invoke    []rawInvokeEntry       `yaml:"invoke"`
 }
 
 // Parse reads a claw-pod.yml from the given reader.
@@ -87,6 +88,10 @@ func Parse(r io.Reader) (*Pod, error) {
 			if count < 1 {
 				count = 1
 			}
+			cllama, err := parseStringOrList(svc.XClaw.Cllama)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: parse cllama: %w", name, err)
+			}
 			parsedSurfaces := make([]driver.ResolvedSurface, 0, len(svc.XClaw.Surfaces))
 			for _, rawSurf := range svc.XClaw.Surfaces {
 				switch v := rawSurf.(type) {
@@ -127,20 +132,59 @@ func Parse(r io.Reader) (*Pod, error) {
 				})
 			}
 			service.Claw = &ClawBlock{
-				Agent:    svc.XClaw.Agent,
-				Persona:  svc.XClaw.Persona,
-				Cllama:   svc.XClaw.Cllama,
-				Count:    count,
-				Handles:  handles,
-				Surfaces: parsedSurfaces,
-				Skills:   skills,
-				Invoke:   invoke,
+				Agent:     svc.XClaw.Agent,
+				Persona:   svc.XClaw.Persona,
+				Cllama:    cllama,
+				CllamaEnv: svc.XClaw.CllamaEnv,
+				Count:     count,
+				Handles:   handles,
+				Surfaces:  parsedSurfaces,
+				Skills:    skills,
+				Invoke:    invoke,
 			}
 		}
 		pod.Services[name] = service
 	}
 
 	return pod, nil
+}
+
+func parseStringOrList(raw interface{}) ([]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	switch v := raw.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil, fmt.Errorf("string value must not be empty")
+		}
+		return []string{v}, nil
+	case []string:
+		out := make([]string, 0, len(v))
+		for i, item := range v {
+			if strings.TrimSpace(item) == "" {
+				return nil, fmt.Errorf("list item %d must not be empty", i)
+			}
+			out = append(out, item)
+		}
+		return out, nil
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for i, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("list item %d must be a string, got %T", i, item)
+			}
+			if strings.TrimSpace(s) == "" {
+				return nil, fmt.Errorf("list item %d must not be empty", i)
+			}
+			out = append(out, s)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("expected string or list, got %T", raw)
+	}
 }
 
 // parseHandles converts a raw x-claw handles map into typed HandleInfo structs.

@@ -239,3 +239,114 @@ func TestResolveChannelIDMultipleGuilds(t *testing.T) {
 		t.Errorf("expected trading-floor ID=222 from second guild, got %q", id)
 	}
 }
+
+func TestResolveCllama(t *testing.T) {
+	tests := []struct {
+		name  string
+		image []string
+		pod   []string
+		want  []string
+	}{
+		{
+			name:  "pod overrides image",
+			image: []string{"passthrough"},
+			pod:   []string{"passthrough", "policy"},
+			want:  []string{"passthrough", "policy"},
+		},
+		{
+			name:  "image fallback",
+			image: []string{"passthrough"},
+			pod:   nil,
+			want:  []string{"passthrough"},
+		},
+		{
+			name:  "both empty",
+			image: nil,
+			pod:   nil,
+			want:  nil,
+		},
+		{
+			name:  "pod only",
+			image: nil,
+			pod:   []string{"passthrough"},
+			want:  []string{"passthrough"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveCllama(tt.image, tt.pod)
+			if len(got) != len(tt.want) {
+				t.Fatalf("resolveCllama(%v, %v) length=%d, want %d", tt.image, tt.pod, len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("resolveCllama(%v, %v) = %v, want %v", tt.image, tt.pod, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestDetectCllama(t *testing.T) {
+	claws := map[string]*driver.ResolvedClaw{
+		"bot-a": {Cllama: nil},
+		"bot-b": {Cllama: []string{"passthrough"}},
+		"bot-c": {Cllama: []string{"passthrough", "policy"}},
+	}
+	enabled, agents := detectCllama(claws)
+	if !enabled {
+		t.Error("expected cllama enabled")
+	}
+	if len(agents) != 2 || agents[0] != "bot-b" || agents[1] != "bot-c" {
+		t.Errorf("expected [bot-b bot-c], got %v", agents)
+	}
+}
+
+func TestCollectProxyTypes(t *testing.T) {
+	claws := map[string]*driver.ResolvedClaw{
+		"bot-a": {Cllama: []string{"passthrough"}},
+		"bot-b": {Cllama: []string{"passthrough", "policy"}},
+	}
+	types := collectProxyTypes(claws)
+	if len(types) != 2 || types[0] != "passthrough" || types[1] != "policy" {
+		t.Errorf("expected [passthrough policy], got %v", types)
+	}
+}
+
+func TestStripLLMKeys(t *testing.T) {
+	env := map[string]string{
+		"OPENAI_API_KEY":    "sk-real",
+		"ANTHROPIC_API_KEY": "sk-ant",
+		"DISCORD_BOT_TOKEN": "keep",
+		"LOG_LEVEL":         "info",
+	}
+	stripLLMKeys(env)
+	if _, ok := env["OPENAI_API_KEY"]; ok {
+		t.Error("should strip OPENAI_API_KEY")
+	}
+	if _, ok := env["ANTHROPIC_API_KEY"]; ok {
+		t.Error("should strip ANTHROPIC_API_KEY")
+	}
+	if env["DISCORD_BOT_TOKEN"] != "keep" {
+		t.Error("should keep non-LLM keys")
+	}
+}
+
+func TestIsProviderKey(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{"OPENAI_API_KEY", true},
+		{"ANTHROPIC_API_KEY", true},
+		{"OPENROUTER_API_KEY", true},
+		{"PROVIDER_API_KEY_CUSTOM", true},
+		{"DISCORD_BOT_TOKEN", false},
+		{"LOG_LEVEL", false},
+	}
+	for _, tt := range tests {
+		if got := isProviderKey(tt.key); got != tt.want {
+			t.Errorf("isProviderKey(%q) = %v, want %v", tt.key, got, tt.want)
+		}
+	}
+}

@@ -13,8 +13,8 @@ func TestParseLabelsExtractsClawLabels(t *testing.T) {
 		"claw.privilege.runtime": "claw-user",
 		"claw.configure.0":       "openclaw config set agents.defaults.heartbeat.every 30m",
 		"claw.configure.1":       "openclaw config set agents.defaults.heartbeat.target none",
-		"claw.skill.0":          "./skills/custom-workflow.md",
-		"claw.skill.1":          "./skills/team-conventions.md",
+		"claw.skill.0":           "./skills/custom-workflow.md",
+		"claw.skill.1":           "./skills/team-conventions.md",
 		"maintainer":             "someone",
 	}
 
@@ -100,9 +100,9 @@ func TestParseLabelsExtractsHandles(t *testing.T) {
 
 func TestParseLabelsHandlesSortedAlphabetically(t *testing.T) {
 	raw := map[string]string{
-		"claw.type":           "openclaw",
-		"claw.handle.slack":   "true",
-		"claw.handle.discord": "true",
+		"claw.type":            "openclaw",
+		"claw.handle.slack":    "true",
+		"claw.handle.discord":  "true",
 		"claw.handle.telegram": "true",
 	}
 
@@ -124,11 +124,11 @@ func TestParseLabelsHandlesSortedAlphabetically(t *testing.T) {
 
 func TestParseLabelsIgnoresFalseyHandleValues(t *testing.T) {
 	raw := map[string]string{
-		"claw.type":           "openclaw",
-		"claw.handle.discord": "false",
-		"claw.handle.slack":   "0",
+		"claw.type":            "openclaw",
+		"claw.handle.discord":  "false",
+		"claw.handle.slack":    "0",
 		"claw.handle.telegram": "yes",
-		"claw.handle.matrix":  "true",
+		"claw.handle.matrix":   "true",
 	}
 
 	info := ParseLabels(raw)
@@ -205,5 +205,32 @@ func TestParseLabelsInvocations(t *testing.T) {
 	}
 	if info.Invocations[1].Command != "News poll" {
 		t.Errorf("expected invocations[1].Command=%q, got %q", "News poll", info.Invocations[1].Command)
+	}
+}
+
+func TestParseLabelsCllamaIndexedOrdering(t *testing.T) {
+	raw := map[string]string{
+		"claw.cllama.1": "policy",
+		"claw.cllama.0": "passthrough",
+	}
+	info := ParseLabels(raw)
+	if len(info.Cllama) != 2 {
+		t.Fatalf("expected 2 cllama entries, got %d", len(info.Cllama))
+	}
+	if info.Cllama[0] != "passthrough" || info.Cllama[1] != "policy" {
+		t.Fatalf("unexpected cllama ordering: %v", info.Cllama)
+	}
+}
+
+func TestParseLabelsCllamaLegacyFallback(t *testing.T) {
+	raw := map[string]string{
+		"claw.cllama.default": "passthrough",
+	}
+	info := ParseLabels(raw)
+	if len(info.Cllama) != 1 {
+		t.Fatalf("expected 1 cllama entry, got %d", len(info.Cllama))
+	}
+	if info.Cllama[0] != "passthrough" {
+		t.Fatalf("expected legacy cllama passthrough, got %v", info.Cllama)
 	}
 }

@@ -27,12 +27,14 @@ type InvokeEntry struct {
 
 // ClawBlock represents the x-claw extension on a service.
 type ClawBlock struct {
-	Agent    string
-	Persona  string
-	Cllama   string
-	Count    int
-	Handles  map[string]*driver.HandleInfo // platform → contact card
-	Surfaces []driver.ResolvedSurface
-	Skills   []string
-	Invoke   []InvokeEntry
+	Agent        string
+	Persona      string
+	Cllama       []string
+	CllamaEnv    map[string]string
+	CllamaTokens map[string]string // runtime-only: expanded service name -> token
+	Count        int
+	Handles      map[string]*driver.HandleInfo // platform → contact card
+	Surfaces     []driver.ResolvedSurface
+	Skills       []string
+	Invoke       []InvokeEntry
 }

@@ -78,13 +78,13 @@ cllama is an open standard for a context-aware, bidirectional proxy — a separa
 It sits between the runner and the LLM provider. Outbound, it evaluates prompts before the LLM sees them to prevent policy violations. Inbound, it evaluates responses before the runner sees them, dropping output that drifts from purpose. The runner never knows the proxy exists; it thinks it's talking directly to the model.
 
 **Intelligent Authorization & Compute Metering:** 
-Clawdapus injects the agent's identity (`CLAW_ID`) and compiled behavioral contract directly into the proxy at startup. Because it is context-aware, the proxy acts as a dynamic governance enforcement point. It can drop specific tool calls based on the agent's identity. Furthermore, because it acts as the central router, it enforces hard compute budgets, silently downgrading a requested model (e.g., from `gpt-4o` to `claude-3-haiku`) or applying rate limits (`429s`) without the agent knowing its compute was throttled.
+Clawdapus injects compiled contract context into shared proxy mounts and resolves caller identity from bearer tokens (`<agent-id>:<secret>`). Because it is context-aware, the proxy acts as a dynamic governance enforcement point. It can drop specific tool calls based on the agent's identity. Furthermore, because it acts as the central router, it enforces hard compute budgets, silently downgrading a requested model (e.g., from `gpt-4o` to `claude-3-haiku`) or applying rate limits (`429s`) without the agent knowing its compute was throttled.
 
 **Enforcement via Credential Starvation:** 
 Isolation is achieved by strictly separating secrets. The proxy holds the real LLM provider API keys. The agent container is provisioned with a unique Bearer Token. Because the agent lacks the credentials to call providers directly, all successful inference *must* pass through the proxy, even if a malicious prompt tricks the agent into ignoring its configured base URL.
 
 **Transport (Shared Pod Proxy):** 
-By default, Clawdapus deploys a single shared governance proxy per pod. It uses the Bearer Token to resolve which agent is making the request, dynamically loads that agent's specific contract, and applies the policy. This drastically reduces resource overhead for multi-agent fleets while enabling pod-wide compute budgeting.
+By default, Clawdapus deploys shared governance proxy service(s) per pod, named by type (`cllama-<type>`). It uses the Bearer Token to resolve which agent is making the request, dynamically loads that agent's specific contract, and applies the policy. This drastically reduces resource overhead for multi-agent fleets while enabling pod-wide compute budgeting.
 
 ---
 
@@ -99,7 +99,7 @@ The Clawfile is an extended Dockerfile. Any valid Dockerfile is a valid Clawfile
 - **`AGENT`** — Names the behavioral contract file to be bind-mounted.
 - **`PERSONA`** — Imports a downloadable persona workspace from a registry.
 - **`MODEL`** — Binds named model slots (e.g., `primary`, `summarizer`) to providers and models.
-- **`CLLAMA`** — Declares the default policy stack, provider, and model for the sidecar proxy.
+- **`CLLAMA`** — Declares the sidecar proxy type(s) and policy stack order.
 - **`INVOKE`** — Invocation schedules, managed via cron.
 - **`CONFIGURE`** — Shell commands that run at container init to mutate base defaults (e.g., using `jq` to alter runner JSON configs).
 - **`PRIVILEGE`** — Drops container privileges to standard users, or locks down the filesystem/network.

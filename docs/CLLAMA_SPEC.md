@@ -19,7 +19,8 @@ This document defines the contract between Clawdapus (the orchestrator) and a `c
 A `cllama` sidecar MUST expose an HTTP API compatible with the OpenAI Chat Completions API (`POST /v1/chat/completions`).
 
 - **Listen Port:** The proxy MUST listen on `0.0.0.0:8080`.
-- **Base URL Replacement:** Clawdapus configures the agent's runner (e.g., OpenClaw, Claude Code) to use `http://<sidecar-hostname>:8080/v1` as its LLM base URL.
+- **Base URL Replacement:** Clawdapus configures the agent's runner (e.g., OpenClaw, Claude Code) to use `http://cllama-<type>:8080/v1` as its LLM base URL (first proxy in chain when chaining is enabled).
+- **Implementation Scope (Phase 4):** The wire protocol supports chained proxies, but runtime enforcement currently allows only one proxy type per pod. Declaring multiple proxy types fails fast until Phase 5 chain execution is implemented.
 
 ## 3. Context Injection (The Environment & Shared Mounts)
 
@@ -71,7 +72,7 @@ The proxy SHOULD execute the following pipeline:
 The proxy strips the dummy token, attaches the real `PROVIDER_API_KEY`, and forwards the decorated request to the upstream LLM provider.
 
 ### D. Inbound Interception (Amendment & Drift Scoring)
-1. **Response Evaluation:** The proxy evaluates the provider's response against the `enforce` rules in `/claw/AGENTS.md` and the active `CLAW_POLICY_MODULES`.
+1. **Response Evaluation:** The proxy evaluates the provider's response against the `enforce` rules in `/claw/context/<agent-id>/AGENTS.md` and the active `CLAW_POLICY_MODULES`.
 2. **Amendment:** If the response contains restricted information (e.g., PII leakage) or violates the tone/instructions of the contract, the proxy MAY rewrite the content.
 3. **Drift Scoring:** The proxy analyzes how far the provider's raw response drifted from the agent's ideal behavior defined in the contract. It MUST emit a structured log of this drift score.
 
@@ -95,7 +96,7 @@ Clawdapus provides a reference image: `ghcr.io/mostlydev/cllama-passthrough`.
 
 The passthrough reference:
 - Adheres to the v1 HTTP API and Listen Port.
-- Validates the environment (`CLAW_ID`, etc.) and mounts.
+- Validates the environment (`CLAW_POD`, `CLAW_CONTEXT_ROOT`, provider credentials), bearer-token identity resolution, and mounts.
 - Acts as a pure, transparent proxy (no decoration, no amendment).
 - Emits structured logs of all traffic.
 

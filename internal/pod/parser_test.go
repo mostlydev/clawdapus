@@ -138,3 +138,74 @@ func TestParsePodExtractsEnvironment(t *testing.T) {
 		t.Errorf("expected DISCORD_TOKEN env var")
 	}
 }
+
+func TestParsePodCllamaStringCoercesToList(t *testing.T) {
+	yaml := `
+x-claw:
+  pod: test-pod
+
+services:
+  bot:
+    image: bot:latest
+    x-claw:
+      cllama: passthrough
+`
+	p, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := p.Services["bot"].Claw.Cllama
+	if len(got) != 1 || got[0] != "passthrough" {
+		t.Fatalf("expected [passthrough], got %v", got)
+	}
+}
+
+func TestParsePodCllamaList(t *testing.T) {
+	yaml := `
+x-claw:
+  pod: test-pod
+
+services:
+  bot:
+    image: bot:latest
+    x-claw:
+      cllama:
+        - passthrough
+        - policy
+`
+	p, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := p.Services["bot"].Claw.Cllama
+	if len(got) != 2 || got[0] != "passthrough" || got[1] != "policy" {
+		t.Fatalf("expected [passthrough policy], got %v", got)
+	}
+}
+
+func TestParseCllamaEnvBlock(t *testing.T) {
+	yaml := `
+x-claw:
+  pod: test-pod
+
+services:
+  bot:
+    image: bot:latest
+    x-claw:
+      cllama: passthrough
+      cllama-env:
+        OPENAI_API_KEY: sk-real-key
+        ANTHROPIC_API_KEY: sk-ant-key
+`
+	p, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := p.Services["bot"].Claw.CllamaEnv
+	if env["OPENAI_API_KEY"] != "sk-real-key" {
+		t.Errorf("expected OPENAI_API_KEY, got %v", env)
+	}
+	if env["ANTHROPIC_API_KEY"] != "sk-ant-key" {
+		t.Errorf("expected ANTHROPIC_API_KEY, got %v", env)
+	}
+}

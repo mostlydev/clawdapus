@@ -87,9 +87,7 @@ func Parse(r io.Reader) (*ParseResult, error) {
 			if len(args) < 1 {
 				return nil, fmt.Errorf("line %d: CLLAMA requires a value", node.StartLine)
 			}
-			if err := setSingleton("CLLAMA", &config.Cllama, remainder, node.StartLine); err != nil {
-				return nil, err
-			}
+			config.Cllama = append(config.Cllama, remainder)
 
 		case "persona":
 			if len(args) < 1 {

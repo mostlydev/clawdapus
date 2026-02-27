@@ -1,6 +1,7 @@
 # Trading Desk Example
 
-A reference pod showing seven OpenClaw agents running as a governed fleet — each with a Discord presence, scheduled tasks, and shared infrastructure context.
+A reference pod showing two OpenClaw agents running as a governed fleet — each with a Discord presence, scheduled tasks, and shared infrastructure context.
+This spike now enables cllama passthrough routing for trader agents (`cllama-passthrough`).
 
 ## What's in the box
 
@@ -38,6 +39,8 @@ DISCORD_TRADING_FLOOR_CHANNEL=...
 DISCORD_INFRA_CHANNEL=...
 
 POSTGRES_PASSWORD=...
+OPENROUTER_API_KEY=...
+ANTHROPIC_API_KEY=...
 ```
 
 ## Running
@@ -63,12 +66,14 @@ docker compose -f compose.generated.yml logs -f tiverton
 1. Builds all images (Clawfile → `trading-desk:latest`, mock trading API)
 2. Runs `claw compose up` on a pre-expanded pod YAML
 3. Asserts generated artifacts — `openclaw.json` structure, `jobs.json` channel IDs, compose mounts
-4. Waits for containers to be healthy
-5. Polls the Discord channel REST API to confirm startup greetings arrived
+4. Asserts cllama wiring — proxy service emitted, provider endpoints in `models.providers.*` rewritten to `cllama-passthrough`, bearer token injected, per-agent context dir generated
+5. Waits for containers to be healthy
+6. Polls the Discord channel REST API to confirm startup greetings arrived
 
 **Requirements:**
 - Docker running
 - Real bot tokens in `examples/trading-desk/.env` (`TIVERTON_BOT_TOKEN` and `WESTIN_BOT_TOKEN` at minimum)
+- Provider key for proxy env (`OPENROUTER_API_KEY`; `ANTHROPIC_API_KEY` optional fallback)
 - Internet access from Docker containers (no internal-only Docker Desktop network mode)
 
 **Run:**
@@ -84,7 +89,9 @@ The test skips automatically if `TIVERTON_BOT_TOKEN` is not set in `.env`.
 | Assertion | What it checks |
 |-----------|---------------|
 | `openclaw.json` structure | `channels.discord.token`, `guilds` keyed by guild ID |
+| `openclaw.json` cllama rewrite | `models.providers.<provider>.baseUrl` points to `cllama-passthrough`, `apiKey` is per-agent token |
 | `jobs.json` structure | `agentTurn` payload, `delivery.to` = resolved channel ID |
+| cllama context files | `.claw-runtime/context/<agent>/` contains `AGENTS.md`, `CLAWDAPUS.md`, `metadata.json` |
 | Compose mounts | `/app/config` directory, `/app/state/cron` directory |
 | Container readability | `/app/config/openclaw.json`, `/app/state/cron/jobs.json`, `/claw/AGENTS.md` |
 | Skills populated | `/claw/skills/` contains extracted skill files |

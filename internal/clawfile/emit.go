@@ -52,8 +52,8 @@ func buildLabelLines(config *ClawConfig) []string {
 	if config.Agent != "" {
 		lines = append(lines, formatLabel("claw.agent.file", config.Agent))
 	}
-	if config.Cllama != "" {
-		lines = append(lines, formatLabel("claw.cllama.default", config.Cllama))
+	for i, c := range config.Cllama {
+		lines = append(lines, formatLabel(fmt.Sprintf("claw.cllama.%d", i), c))
 	}
 	if config.Persona != "" {
 		lines = append(lines, formatLabel("claw.persona.default", config.Persona))

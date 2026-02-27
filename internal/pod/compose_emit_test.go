@@ -560,3 +560,163 @@ func TestEmitComposeIsDeterministic(t *testing.T) {
 		t.Error("expected alpha to appear before zulu (sorted order)")
 	}
 }
+
+func TestEmitComposeWithCllamaProxy(t *testing.T) {
+	p := &Pod{
+		Name: "test-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "bot:latest",
+				Claw:  &ClawBlock{Count: 1},
+			},
+		},
+	}
+	results := map[string]*driver.MaterializeResult{
+		"bot": {ReadOnly: true, Restart: "on-failure"},
+	}
+	proxies := []CllamaProxyConfig{{
+		ProxyType:      "passthrough",
+		Image:          "ghcr.io/mostlydev/cllama-passthrough:latest",
+		ContextHostDir: "/tmp/test/.claw-runtime/context",
+		AuthHostDir:    "/tmp/test/.claw-runtime/proxy-auth",
+		Environment: map[string]string{
+			"CLAW_POD":       "test-pod",
+			"OPENAI_API_KEY": "sk-real",
+		},
+		PodName: "test-pod",
+	}}
+	out, err := EmitCompose(p, results, proxies...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cf struct {
+		Services map[string]interface{} `yaml:"services"`
+		Networks map[string]interface{} `yaml:"networks"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cf.Services["cllama-passthrough"]; !ok {
+		t.Error("expected cllama-passthrough service in output")
+	}
+	if !strings.Contains(out, "ghcr.io/mostlydev/cllama-passthrough") {
+		t.Error("expected proxy image in output")
+	}
+	if _, ok := cf.Networks["claw-internal"]; !ok {
+		t.Error("expected claw-internal network")
+	}
+}
+
+func TestEmitComposeMultipleProxies(t *testing.T) {
+	p := &Pod{
+		Name: "test-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "bot:latest",
+				Claw:  &ClawBlock{Count: 1},
+			},
+		},
+	}
+	results := map[string]*driver.MaterializeResult{
+		"bot": {ReadOnly: true, Restart: "on-failure"},
+	}
+	proxies := []CllamaProxyConfig{
+		{
+			ProxyType:      "passthrough",
+			Image:          "ghcr.io/mostlydev/cllama-passthrough:latest",
+			ContextHostDir: "/tmp/ctx",
+			AuthHostDir:    "/tmp/auth",
+			Environment:    map[string]string{},
+			PodName:        "test-pod",
+		},
+		{
+			ProxyType:      "policy",
+			Image:          "ghcr.io/mostlydev/cllama-policy:latest",
+			ContextHostDir: "/tmp/ctx",
+			AuthHostDir:    "/tmp/auth",
+			Environment:    map[string]string{},
+			PodName:        "test-pod",
+		},
+	}
+	out, err := EmitCompose(p, results, proxies...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cf struct {
+		Services map[string]interface{} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cf.Services["cllama-passthrough"]; !ok {
+		t.Error("expected cllama-passthrough service")
+	}
+	if _, ok := cf.Services["cllama-policy"]; !ok {
+		t.Error("expected cllama-policy service")
+	}
+}
+
+func TestEmitComposeNoProxiesUnchanged(t *testing.T) {
+	p := &Pod{
+		Name: "test-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "bot:latest",
+				Claw:  &ClawBlock{},
+			},
+		},
+	}
+	results := map[string]*driver.MaterializeResult{
+		"bot": {ReadOnly: true, Restart: "on-failure"},
+	}
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "cllama-") {
+		t.Error("should not contain proxy service when proxies are not configured")
+	}
+}
+
+func TestEmitComposeCllamaTokenPerOrdinalOverride(t *testing.T) {
+	p := &Pod{
+		Name: "token-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "bot:latest",
+				Claw: &ClawBlock{
+					Count: 2,
+					CllamaTokens: map[string]string{
+						"bot-0": "bot-0:token",
+						"bot-1": "bot-1:token",
+					},
+				},
+			},
+		},
+	}
+	results := map[string]*driver.MaterializeResult{
+		"bot": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+			Environment: map[string]string{
+				"CLLAMA_TOKEN": "default-token",
+			},
+		},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "bot-0:") || !strings.Contains(out, "bot-1:") {
+		t.Fatal("expected ordinal-expanded services")
+	}
+	if !strings.Contains(out, "CLLAMA_TOKEN: bot-0:token") {
+		t.Error("expected bot-0 token override")
+	}
+	if !strings.Contains(out, "CLLAMA_TOKEN: bot-1:token") {
+		t.Error("expected bot-1 token override")
+	}
+}

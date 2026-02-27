@@ -41,6 +41,35 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 	}
 
+	if len(rc.Cllama) > 0 {
+		firstProxy := fmt.Sprintf("http://cllama-%s:8080/v1", rc.Cllama[0])
+		providerModels := collectCllamaProviderModels(rc.Models)
+		for provider, modelIDs := range providerModels {
+			basePath := "models.providers." + provider
+			if err := setPath(config, basePath+".baseUrl", firstProxy); err != nil {
+				return nil, fmt.Errorf("config generation: cllama provider %q baseUrl: %w", provider, err)
+			}
+			if rc.CllamaToken != "" {
+				if err := setPath(config, basePath+".apiKey", rc.CllamaToken); err != nil {
+					return nil, fmt.Errorf("config generation: cllama provider %q apiKey: %w", provider, err)
+				}
+			}
+			if err := setPath(config, basePath+".api", defaultModelAPIForProvider(provider)); err != nil {
+				return nil, fmt.Errorf("config generation: cllama provider %q api: %w", provider, err)
+			}
+			modelDefs := make([]interface{}, 0, len(modelIDs))
+			for _, modelID := range modelIDs {
+				modelDefs = append(modelDefs, map[string]interface{}{
+					"id":   modelID,
+					"name": modelID,
+				})
+			}
+			if err := setPath(config, basePath+".models", modelDefs); err != nil {
+				return nil, fmt.Errorf("config generation: cllama provider %q models: %w", provider, err)
+			}
+		}
+	}
+
 	// Apply HANDLE directives first: they provide structural defaults per platform.
 	// CONFIGURE runs after so operator overrides always take precedence.
 	for platform := range rc.Handles {
@@ -160,7 +189,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			if err := applyDiscordChannelSurface(config, surface.ChannelConfig); err != nil {
 				return nil, fmt.Errorf("config generation: SURFACE channel://discord: %w", err)
 			}
-		// Other platforms: silently skip (unsupported = no config, not an error here)
+			// Other platforms: silently skip (unsupported = no config, not an error here)
 		}
 	}
 
@@ -251,6 +280,86 @@ func applyDiscordChannelSurface(config map[string]interface{}, cc *driver.Channe
 		}
 	}
 	return nil
+}
+
+func collectCllamaProviderModels(models map[string]string) map[string][]string {
+	byProvider := make(map[string]map[string]struct{})
+	for _, rawRef := range models {
+		provider, modelID, ok := splitModelRef(rawRef)
+		if !ok {
+			continue
+		}
+		if _, exists := byProvider[provider]; !exists {
+			byProvider[provider] = make(map[string]struct{})
+		}
+		byProvider[provider][modelID] = struct{}{}
+	}
+
+	out := make(map[string][]string, len(byProvider))
+	for provider, ids := range byProvider {
+		modelIDs := make([]string, 0, len(ids))
+		for id := range ids {
+			modelIDs = append(modelIDs, id)
+		}
+		sort.Strings(modelIDs)
+		out[provider] = modelIDs
+	}
+	return out
+}
+
+func splitModelRef(ref string) (string, string, bool) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return "", "", false
+	}
+
+	parts := strings.SplitN(trimmed, "/", 2)
+	if len(parts) == 1 {
+		// openclaw treats unqualified model refs as anthropic/<model>.
+		return "anthropic", parts[0], true
+	}
+
+	provider := normalizeProviderID(parts[0])
+	modelID := strings.TrimSpace(parts[1])
+	if provider == "" || modelID == "" {
+		return "", "", false
+	}
+	return provider, modelID, true
+}
+
+func normalizeProviderID(provider string) string {
+	normalized := strings.ToLower(strings.TrimSpace(provider))
+	switch normalized {
+	case "z.ai", "z-ai":
+		return "zai"
+	case "opencode-zen":
+		return "opencode"
+	case "qwen":
+		return "qwen-portal"
+	case "kimi-code":
+		return "kimi-coding"
+	case "bytedance", "doubao":
+		return "volcengine"
+	default:
+		return normalized
+	}
+}
+
+func defaultModelAPIForProvider(provider string) string {
+	switch normalizeProviderID(provider) {
+	case "anthropic", "synthetic", "minimax-portal", "kimi-coding", "cloudflare-ai-gateway", "xiaomi":
+		return "anthropic-messages"
+	case "google":
+		return "google-generative-ai"
+	case "github-copilot":
+		return "github-copilot"
+	case "amazon-bedrock":
+		return "bedrock-converse-stream"
+	case "ollama":
+		return "ollama"
+	default:
+		return "openai-completions"
+	}
 }
 
 // getOrCreatePath navigates a dotted path in config, creating intermediate maps,

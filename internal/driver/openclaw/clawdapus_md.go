@@ -50,6 +50,21 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		}
 	}
 
+	if len(rc.Cllama) > 0 {
+		b.WriteString("## LLM Proxy\n\n")
+		b.WriteString("Your LLM requests are routed through a governance proxy.\n\n")
+		firstProxy := fmt.Sprintf("cllama-%s", rc.Cllama[0])
+		b.WriteString(fmt.Sprintf("- **Endpoint:** `http://%s:8080/v1`\n", firstProxy))
+		b.WriteString("- **Auth:** Bearer token (pre-configured)\n")
+		if len(rc.Cllama) == 1 {
+			b.WriteString(fmt.Sprintf("- **Mode:** %s\n", rc.Cllama[0]))
+		} else {
+			b.WriteString(fmt.Sprintf("- **Chain:** %s\n", strings.Join(rc.Cllama, " -> ")))
+		}
+		b.WriteString("\nAll inference requests pass through this proxy for logging and policy enforcement.\n")
+		b.WriteString("You do not need to configure this - model settings are pre-wired.\n\n")
+	}
+
 	// Handles
 	if len(rc.Handles) > 0 {
 		b.WriteString("## Handles\n\n")

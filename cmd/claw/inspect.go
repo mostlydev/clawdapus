@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	clawinspect "github.com/mostlydev/clawdapus/internal/inspect"
 	"github.com/spf13/cobra"
@@ -25,8 +26,8 @@ var inspectCmd = &cobra.Command{
 
 		fmt.Printf("Claw Type: %s\n", info.ClawType)
 		fmt.Printf("Agent:     %s\n", info.Agent)
-		if info.Cllama != "" {
-			fmt.Printf("Cllama:    %s\n", info.Cllama)
+		if len(info.Cllama) > 0 {
+			fmt.Printf("Cllama:    %s\n", strings.Join(info.Cllama, ", "))
 		}
 		if info.Persona != "" {
 			fmt.Printf("Persona:   %s\n", info.Persona)

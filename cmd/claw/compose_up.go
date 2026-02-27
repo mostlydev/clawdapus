@@ -1,14 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/openclaw"
 	"github.com/mostlydev/clawdapus/internal/inspect"
@@ -67,6 +70,7 @@ func runComposeUp(podFile string) error {
 	results := make(map[string]*driver.MaterializeResult)
 	drivers := make(map[string]driver.Driver)
 	resolvedClaws := make(map[string]*driver.ResolvedClaw)
+	serviceRuntimeDirs := make(map[string]string)
 
 	// Pre-collect all pod handles so each service can reference its peers.
 	// This is a cheap pass over the already-parsed pod YAML — no image inspection needed.
@@ -200,6 +204,7 @@ func runComposeUp(podFile string) error {
 			Environment:   svc.Environment,
 			Surfaces:      surfaces,
 			Skills:        skills,
+			Cllama:        resolveCllama(info.Cllama, svc.Claw.Cllama),
 		}
 
 		// Merge image-level invocations (from Clawfile INVOKE labels via inspect)
@@ -235,9 +240,182 @@ func runComposeUp(podFile string) error {
 			return fmt.Errorf("service %q: validation failed: %w", name, err)
 		}
 
+		drivers[name] = d
+		resolvedClaws[name] = rc
+		serviceRuntimeDirs[name] = svcRuntimeDir
+		fmt.Printf("[claw] %s: validated (%s driver)\n", name, rc.ClawType)
+	}
+
+	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
+	proxies := make([]pod.CllamaProxyConfig, 0)
+	if cllamaEnabled {
+		proxyTypes := collectProxyTypes(resolvedClaws)
+		if len(proxyTypes) > 1 {
+			return fmt.Errorf("multi-proxy chaining not yet supported: found proxy types %v; Phase 4 supports one proxy type per pod", proxyTypes)
+		}
+
+		tokens := make(map[string]string)
+		for _, name := range cllamaAgents {
+			rc := resolvedClaws[name]
+			if rc.Count > 1 {
+				for i := 0; i < rc.Count; i++ {
+					ordinalName := fmt.Sprintf("%s-%d", name, i)
+					tokens[ordinalName] = cllama.GenerateToken(ordinalName)
+				}
+				rc.CllamaToken = tokens[fmt.Sprintf("%s-0", name)]
+			} else {
+				tokens[name] = cllama.GenerateToken(name)
+				rc.CllamaToken = tokens[name]
+			}
+
+			if svc := p.Services[name]; svc != nil && svc.Claw != nil {
+				if svc.Claw.CllamaTokens == nil {
+					svc.Claw.CllamaTokens = make(map[string]string)
+				}
+				if rc.Count > 1 {
+					for i := 0; i < rc.Count; i++ {
+						ordinalName := fmt.Sprintf("%s-%d", name, i)
+						svc.Claw.CllamaTokens[ordinalName] = tokens[ordinalName]
+					}
+				} else {
+					svc.Claw.CllamaTokens[name] = tokens[name]
+				}
+			}
+		}
+
+		imageEnvCache := make(map[string]map[string]string)
+		for _, name := range cllamaAgents {
+			svc := p.Services[name]
+			if svc == nil {
+				continue
+			}
+			for k := range svc.Environment {
+				if isProviderKey(k) {
+					return fmt.Errorf("service %q: provider key %q found in pod env; cllama requires credential starvation (move provider keys to x-claw.cllama-env)", name, k)
+				}
+			}
+
+			imageEnv, ok := imageEnvCache[svc.Image]
+			if !ok {
+				imageEnv, err = inspectImageEnv(svc.Image)
+				if err != nil {
+					return fmt.Errorf("service %q: inspect image env for credential starvation: %w", name, err)
+				}
+				imageEnvCache[svc.Image] = imageEnv
+			}
+			for k := range imageEnv {
+				if isProviderKey(k) {
+					return fmt.Errorf("service %q: provider key %q found in image-baked env; cllama requires credential starvation", name, k)
+				}
+			}
+		}
+
+		for _, name := range cllamaAgents {
+			stripLLMKeys(resolvedClaws[name].Environment)
+		}
+
+		proxyEnv := map[string]string{
+			"CLAW_POD": p.Name,
+		}
+		for _, name := range cllamaAgents {
+			svc := p.Services[name]
+			if svc == nil || svc.Claw == nil {
+				continue
+			}
+			for k, v := range svc.Claw.CllamaEnv {
+				if _, exists := proxyEnv[k]; !exists {
+					proxyEnv[k] = v
+				}
+			}
+		}
+
+		contextInputs := make([]cllama.AgentContextInput, 0)
+		for _, name := range cllamaAgents {
+			rc := resolvedClaws[name]
+			if rc.AgentHostPath == "" {
+				return fmt.Errorf("service %q: no agent host path available for cllama context generation", name)
+			}
+			agentContent, err := os.ReadFile(rc.AgentHostPath)
+			if err != nil {
+				return fmt.Errorf("service %q: read AGENTS.md for cllama context: %w", name, err)
+			}
+
+			if rc.Count > 1 {
+				for i := 0; i < rc.Count; i++ {
+					ordinalName := fmt.Sprintf("%s-%d", name, i)
+					ordinalRC := *rc
+					ordinalRC.ServiceName = ordinalName
+					md := openclaw.GenerateClawdapusMD(&ordinalRC, p.Name)
+					contextInputs = append(contextInputs, cllama.AgentContextInput{
+						AgentID:     ordinalName,
+						AgentsMD:    string(agentContent),
+						ClawdapusMD: md,
+						Metadata: map[string]interface{}{
+							"service": name,
+							"ordinal": i,
+							"pod":     p.Name,
+							"type":    rc.ClawType,
+							"token":   tokens[ordinalName],
+						},
+					})
+				}
+				continue
+			}
+
+			md := openclaw.GenerateClawdapusMD(rc, p.Name)
+			contextInputs = append(contextInputs, cllama.AgentContextInput{
+				AgentID:     name,
+				AgentsMD:    string(agentContent),
+				ClawdapusMD: md,
+				Metadata: map[string]interface{}{
+					"service": name,
+					"pod":     p.Name,
+					"type":    rc.ClawType,
+					"token":   tokens[name],
+				},
+			})
+		}
+		if err := cllama.GenerateContextDir(runtimeDir, contextInputs); err != nil {
+			return fmt.Errorf("generate cllama context dir: %w", err)
+		}
+
+		authDir := filepath.Join(runtimeDir, "proxy-auth")
+		if err := os.MkdirAll(authDir, 0700); err != nil {
+			return fmt.Errorf("create cllama auth dir: %w", err)
+		}
+
+		for _, proxyType := range proxyTypes {
+			proxies = append(proxies, pod.CllamaProxyConfig{
+				ProxyType:      proxyType,
+				Image:          fmt.Sprintf("ghcr.io/mostlydev/cllama-%s:latest", proxyType),
+				ContextHostDir: filepath.Join(runtimeDir, "context"),
+				AuthHostDir:    authDir,
+				Environment:    proxyEnv,
+				PodName:        p.Name,
+			})
+		}
+		fmt.Printf("[claw] cllama proxies enabled: %s (agents: %s)\n",
+			strings.Join(proxyTypes, ", "), strings.Join(cllamaAgents, ", "))
+	}
+
+	// Pass 2: materialize after cllama tokens/context are resolved.
+	for _, name := range sortedResolvedClawNames(resolvedClaws) {
+		rc := resolvedClaws[name]
+		d := drivers[name]
+		svcRuntimeDir := serviceRuntimeDirs[name]
+
 		result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: svcRuntimeDir, PodName: p.Name})
 		if err != nil {
 			return fmt.Errorf("service %q: materialization failed: %w", name, err)
+		}
+
+		if rc.CllamaToken != "" {
+			if result.Environment == nil {
+				result.Environment = make(map[string]string)
+			}
+			if _, exists := result.Environment["CLLAMA_TOKEN"]; !exists {
+				result.Environment["CLLAMA_TOKEN"] = rc.CllamaToken
+			}
 		}
 
 		// Mount individual skill files into the driver's skill directory
@@ -252,12 +430,10 @@ func runComposeUp(podFile string) error {
 		}
 
 		results[name] = result
-		drivers[name] = d
-		resolvedClaws[name] = rc
-		fmt.Printf("[claw] %s: validated and materialized (%s driver)\n", name, rc.ClawType)
+		fmt.Printf("[claw] %s: materialized (%s driver)\n", name, rc.ClawType)
 	}
 
-	output, err := pod.EmitCompose(p, results)
+	output, err := pod.EmitCompose(p, results, proxies...)
 	if err != nil {
 		return err
 	}
@@ -328,6 +504,95 @@ func mergeResolvedSkills(imageSkills, podSkills []driver.ResolvedSkill) []driver
 	}
 
 	return merged
+}
+
+func resolveCllama(imageLevel, podLevel []string) []string {
+	if len(podLevel) > 0 {
+		return podLevel
+	}
+	return imageLevel
+}
+
+func detectCllama(claws map[string]*driver.ResolvedClaw) (bool, []string) {
+	agents := make([]string, 0)
+	for name, rc := range claws {
+		if len(rc.Cllama) > 0 {
+			agents = append(agents, name)
+		}
+	}
+	sort.Strings(agents)
+	return len(agents) > 0, agents
+}
+
+func collectProxyTypes(claws map[string]*driver.ResolvedClaw) []string {
+	seen := make(map[string]struct{})
+	for _, rc := range claws {
+		for _, proxyType := range rc.Cllama {
+			if strings.TrimSpace(proxyType) == "" {
+				continue
+			}
+			seen[proxyType] = struct{}{}
+		}
+	}
+	types := make([]string, 0, len(seen))
+	for proxyType := range seen {
+		types = append(types, proxyType)
+	}
+	sort.Strings(types)
+	return types
+}
+
+func sortedResolvedClawNames(claws map[string]*driver.ResolvedClaw) []string {
+	names := make([]string, 0, len(claws))
+	for name := range claws {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func isProviderKey(key string) bool {
+	switch key {
+	case "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY":
+		return true
+	}
+	return strings.HasPrefix(key, "PROVIDER_API_KEY")
+}
+
+func stripLLMKeys(env map[string]string) {
+	for key := range env {
+		if isProviderKey(key) {
+			delete(env, key)
+		}
+	}
+}
+
+func inspectImageEnv(imageRef string) (map[string]string, error) {
+	cmd := exec.Command("docker", "image", "inspect", "--format", "{{json .Config.Env}}", imageRef)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker image inspect %q: %w", imageRef, err)
+	}
+
+	raw := strings.TrimSpace(string(out))
+	if raw == "" || raw == "null" {
+		return map[string]string{}, nil
+	}
+
+	var envList []string
+	if err := json.Unmarshal(out, &envList); err != nil {
+		return nil, fmt.Errorf("decode image env for %q: %w", imageRef, err)
+	}
+
+	env := make(map[string]string, len(envList))
+	for _, item := range envList {
+		if key, value, ok := strings.Cut(item, "="); ok {
+			env[key] = value
+			continue
+		}
+		env[item] = ""
+	}
+	return env, nil
 }
 
 func resolveSkillEmit(serviceName, runtimeDir, imageRef, emitPath string) (*driver.ResolvedSkill, error) {
