@@ -80,3 +80,11 @@ func TestGenerateChannelSkillSlack(t *testing.T) {
 		t.Error("expected SLACK_BOT_TOKEN hint")
 	}
 }
+
+func TestGenerateChannelSkillEmptyTargetDoesNotPanic(t *testing.T) {
+	surface := driver.ResolvedSurface{Scheme: "channel", Target: ""}
+	skill := GenerateChannelSkill(surface)
+	if !strings.Contains(skill, "Unknown Channel Surface") {
+		t.Errorf("expected fallback platform title, got: %s", skill)
+	}
+}

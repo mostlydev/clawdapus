@@ -12,7 +12,7 @@ import (
 // Describes the platform, token env var, routing config, and usage guidance.
 func GenerateChannelSkill(surface driver.ResolvedSurface) string {
 	var b strings.Builder
-	platformTitle := strings.ToUpper(surface.Target[:1]) + surface.Target[1:]
+	platformTitle := titleCasePlatform(surface.Target)
 
 	b.WriteString(fmt.Sprintf("# %s Channel Surface\n\n", platformTitle))
 	b.WriteString(fmt.Sprintf("**Platform:** %s\n", platformTitle))
@@ -64,4 +64,12 @@ func GenerateChannelSkill(surface driver.ResolvedSurface) string {
 	}
 
 	return b.String()
+}
+
+func titleCasePlatform(platform string) string {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return "Unknown"
+	}
+	return strings.ToUpper(platform[:1]) + platform[1:]
 }

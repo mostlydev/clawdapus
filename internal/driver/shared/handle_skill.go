@@ -13,7 +13,7 @@ import (
 func GenerateHandleSkill(platform string, info *driver.HandleInfo) string {
 	var b strings.Builder
 
-	title := strings.ToUpper(platform[:1]) + platform[1:]
+	title := titleCasePlatform(platform)
 	b.WriteString(fmt.Sprintf("# %s Handle\n\n", title))
 	b.WriteString(fmt.Sprintf("Your identity on %s. Use this information when sending messages, mentioning yourself, or routing responses.\n\n", title))
 

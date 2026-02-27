@@ -249,6 +249,13 @@ func TestMaterializeWithCllama(t *testing.T) {
 	if err != nil {
 		t.Fatalf(".env not written: %v", err)
 	}
+	envInfo, err := os.Stat(envPath)
+	if err != nil {
+		t.Fatalf(".env stat failed: %v", err)
+	}
+	if perm := envInfo.Mode().Perm(); perm != 0o600 {
+		t.Errorf("expected .env permissions 0600, got %o", perm)
+	}
 	if !strings.Contains(string(envContent), "ANTHROPIC_API_KEY=nano-bot:abc123") {
 		t.Errorf(".env should contain ANTHROPIC_API_KEY token, got %q", string(envContent))
 	}

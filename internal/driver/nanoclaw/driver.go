@@ -72,7 +72,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			// .env file for orchestrator's readEnvFile() — passes to agent-runners via stdin
 			envContent := fmt.Sprintf("ANTHROPIC_API_KEY=%s\n", rc.CllamaToken)
 			envPath := filepath.Join(opts.RuntimeDir, ".env")
-			if err := os.WriteFile(envPath, []byte(envContent), 0644); err != nil {
+			if err := os.WriteFile(envPath, []byte(envContent), 0600); err != nil {
 				return nil, fmt.Errorf("nanoclaw driver: write .env: %w", err)
 			}
 			mounts = append(mounts, driver.Mount{

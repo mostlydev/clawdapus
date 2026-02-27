@@ -48,3 +48,11 @@ func TestGenerateHandleSkillWithGuilds(t *testing.T) {
 		t.Error("expected channel name with # prefix")
 	}
 }
+
+func TestGenerateHandleSkillEmptyPlatformDoesNotPanic(t *testing.T) {
+	info := &driver.HandleInfo{ID: "123456789"}
+	out := GenerateHandleSkill("", info)
+	if !strings.Contains(out, "# Unknown Handle") {
+		t.Errorf("expected fallback title, got: %s", out)
+	}
+}
