@@ -76,5 +76,3 @@ A planning file can be deleted when:
 |------|--------|--------|
 | `2026-02-18-clawdapus-architecture.md` | Reference — all phases listed | Keep; update phase statuses |
 | `phase2-progress.md` | Active tracker | Keep; update as phases complete |
-| `2026-02-21-phase3-slice3-channel-surfaces.md` | PENDING | Keep until implemented |
-| `2026-02-21-llm-configuration-workers.md` | Design/PENDING | Keep until implemented |

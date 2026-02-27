@@ -565,7 +565,7 @@ func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 // spikeEnsureCllamaPassthroughImage guarantees a local image exists for
 // ghcr.io/mostlydev/cllama-passthrough:latest. It tries, in order:
 //  1. Skip if the image already exists locally.
-//  2. Build from the sibling cllama-passthrough repo (../cllama-passthrough/).
+//  2. Build from the GitHub cllama-passthrough repo.
 //  3. Fall back to a stub image (healthcheck-only, no real proxy).
 func spikeEnsureCllamaPassthroughImage(t *testing.T) {
 	t.Helper()
