@@ -28,20 +28,27 @@ go build -o bin/claw ./cmd/claw
 
 ## Install AI Skill
 
-Give your coding agent (Claude Code, Cursor, etc.) full operational knowledge of Clawdapus:
+Give your coding agent full operational knowledge of Clawdapus — the `claw` CLI, Clawfile syntax, claw-pod.yml structure, cllama proxy wiring, driver semantics, and troubleshooting patterns.
 
 ```bash
+SKILL_URL="https://raw.githubusercontent.com/mostlydev/clawdapus/master/skills/clawdapus/SKILL.md"
+
 # Claude Code
 mkdir -p ~/.claude/skills/clawdapus
-curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/skills/clawdapus/SKILL.md \
-  -o ~/.claude/skills/clawdapus/SKILL.md
+curl -sSL "$SKILL_URL" -o ~/.claude/skills/clawdapus/SKILL.md
+
+# Codex CLI
+curl -sSL "$SKILL_URL" >> ~/.codex/AGENTS.md
+
+# Gemini CLI
+curl -sSL "$SKILL_URL" >> ~/.gemini/GEMINI.md
+
+# OpenCode
+curl -sSL "$SKILL_URL" >> AGENTS.md
 
 # Cursor / Windsurf / other .cursorrules-based agents
-curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/skills/clawdapus/SKILL.md \
-  >> .cursorrules
+curl -sSL "$SKILL_URL" >> .cursorrules
 ```
-
-The skill teaches your agent the `claw` CLI, Clawfile syntax, claw-pod.yml structure, cllama proxy wiring, driver semantics, and troubleshooting patterns. It activates automatically when your agent encounters Clawdapus directives.
 
 ---
 
@@ -310,7 +317,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 - [`docs/decisions/007-llm-isolation-credential-starvation.md`](./docs/decisions/007-llm-isolation-credential-starvation.md) — ADR: LLM Isolation via Credential Starvation
 - [`docs/decisions/008-cllama-sidecar-standard.md`](./docs/decisions/008-cllama-sidecar-standard.md) — ADR: cllama as a Standardized Sidecar Interface
 - [`docs/decisions/009-contract-composition-and-policy.md`](./docs/decisions/009-contract-composition-and-policy.md) — ADR: Contract Composition and Policy Inclusion
-- [`docs/decisions/010-cli-surface-simplification.md`](./docs/decisions/010-cli-surface-simplification.md) — ADR: CLI Surface Simplification (`claw compose *` → `claw *`)
+- [`docs/decisions/010-cli-surface-simplification.md`](./docs/decisions/010-cli-surface-simplification.md) — ADR: CLI Surface Simplification (compose-prefixed lifecycle commands → top-level `claw *`)
 - [`docs/UPDATING.md`](./docs/UPDATING.md) — checklist of everything to update when implementation changes
 - [`TESTING.md`](./TESTING.md) — unit, E2E, and spike test runbook
 
