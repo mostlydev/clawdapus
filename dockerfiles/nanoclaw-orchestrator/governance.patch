@@ -1,0 +1,19 @@
+--- a/src/container-runner.ts
++++ b/src/container-runner.ts
+@@ -215,6 +215,16 @@
+   // Pass host timezone so container's local time matches the user's
+   args.push('-e', `TZ=${TIMEZONE}`);
+
++  // Forward LLM proxy URL so cllama governance reaches agent containers
++  if (process.env.ANTHROPIC_BASE_URL) {
++    args.push('-e', `ANTHROPIC_BASE_URL=${process.env.ANTHROPIC_BASE_URL}`);
++  }
++
++  // Join Clawdapus pod network so agent-runners can reach sidecar services (cllama proxy)
++  if (process.env.CLAW_NETWORK) {
++    args.push('--network', process.env.CLAW_NETWORK);
++  }
++
+   // Run as host user so bind-mounted files are accessible.
+   // Skip when running as root (uid 0), as the container's node user (uid 1000),
+   // or when getuid is unavailable (native Windows without WSL).
