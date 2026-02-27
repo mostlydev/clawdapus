@@ -2,17 +2,17 @@ x-claw:
   pod: trading-desk
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Trading Desk Pod (minimal: tiverton + westin)
+# Trading Desk Pod (tiverton + westin + allen)
 #
-# Two isolated openclaw agents coordinating via Discord and a shared research
-# volume. Each agent runs its own openclaw instance in its own container.
+# Mixed-driver pod: two openclaw agents + one nanoclaw agent coordinating via
+# Discord and a shared research volume.
 #
 # Required environment variables (.env or Docker secrets):
 #   POSTGRES_PASSWORD, SECRET_KEY_BASE
-#   TIVERTON_BOT_TOKEN, WESTIN_BOT_TOKEN
-#   TIVERTON_DISCORD_ID, WESTIN_DISCORD_ID
+#   TIVERTON_BOT_TOKEN, WESTIN_BOT_TOKEN, ALLEN_BOT_TOKEN
+#   TIVERTON_DISCORD_ID, WESTIN_DISCORD_ID, ALLEN_DISCORD_ID
 #   DISCORD_GUILD_ID, DISCORD_TRADING_FLOOR_CHANNEL
-#   OPENROUTER_API_KEY (proxy-side provider key for cllama)
+#   OPENROUTER_API_KEY, ANTHROPIC_API_KEY (proxy-side provider keys for cllama)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -127,3 +127,33 @@ services:
       DISCORD_BOT_TOKEN: "${WESTIN_BOT_TOKEN}"
       CLAW_GREETING_CHANNEL: "${DISCORD_TRADING_FLOOR_CHANNEL}"
       CLAW_GREETING_MESSAGE: "westin online."
+
+  # ── Allen — Systems Monitor (NanoClaw) ────────────────────────────────────
+
+  allen:
+    image: trading-desk-nanoclaw:latest
+    build:
+      context: .
+      dockerfile: Clawfile.nanoclaw
+    x-claw:
+      agent: ./agents/ALLEN.md
+      cllama: passthrough
+      cllama-env:
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      handles:
+        discord:
+          id: "${ALLEN_DISCORD_ID}"
+          username: "allen"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Trading Floor"
+              channels:
+                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+                  name: trading-floor
+      surfaces:
+        - "service://trading-api"
+        - "volume://clawd-shared read-write"
+      skills:
+        - ./policy/risk-limits.md
+    environment:
+      DISCORD_BOT_TOKEN: "${ALLEN_BOT_TOKEN}"
