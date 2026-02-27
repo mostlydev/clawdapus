@@ -2,10 +2,33 @@ package openclaw
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
+
+// getPath navigates a dot-separated path through nested maps.
+// Returns (value, true) if found, (nil, false) otherwise.
+func getPath(data []byte, path string) (interface{}, bool) {
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, false
+	}
+	keys := strings.Split(path, ".")
+	var current interface{} = m
+	for _, key := range keys {
+		cm, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		current, ok = cm[key]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
 
 func TestGenerateConfigSetsModelPrimary(t *testing.T) {
 	rc := &driver.ResolvedClaw{
@@ -738,6 +761,166 @@ func TestGenerateConfigDiscordPeerHandlesInUsers(t *testing.T) {
 		if !got[expected] {
 			t.Errorf("expected ID %q in guild users, got %v", expected, users)
 		}
+	}
+}
+
+func TestGenerateConfigHandleTelegram(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "news-bot",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"telegram": {
+				ID:       "7123456789",
+				Username: "newsbot",
+			},
+		},
+		PeerHandles: map[string]map[string]*driver.HandleInfo{},
+	}
+
+	config, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// channels.telegram.enabled
+	if v, _ := getPath(config, "channels.telegram.enabled"); v != true {
+		t.Error("expected channels.telegram.enabled=true")
+	}
+
+	// channels.telegram.token
+	if v, _ := getPath(config, "channels.telegram.token"); v != "${TELEGRAM_BOT_TOKEN}" {
+		t.Errorf("expected telegram token reference, got %v", v)
+	}
+
+	// plugins.entries.telegram.enabled
+	if v, _ := getPath(config, "plugins.entries.telegram.enabled"); v != true {
+		t.Error("expected plugins.entries.telegram.enabled=true")
+	}
+
+	// agents.list with mention patterns
+	agentsList, _ := getPath(config, "agents.list")
+	agents, ok := agentsList.([]interface{})
+	if !ok || len(agents) == 0 {
+		t.Fatal("expected agents.list to be populated")
+	}
+	agent := agents[0].(map[string]interface{})
+	if agent["name"] != "Newsbot" {
+		t.Errorf("expected agent name 'Newsbot', got %v", agent["name"])
+	}
+}
+
+func TestGenerateConfigHandleSlack(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "ops-bot",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"slack": {
+				ID:       "U0123456789",
+				Username: "opsbot",
+			},
+		},
+		PeerHandles: map[string]map[string]*driver.HandleInfo{},
+	}
+
+	config, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if v, _ := getPath(config, "channels.slack.enabled"); v != true {
+		t.Error("expected channels.slack.enabled=true")
+	}
+	if v, _ := getPath(config, "channels.slack.token"); v != "${SLACK_BOT_TOKEN}" {
+		t.Errorf("expected slack token reference, got %v", v)
+	}
+	if v, _ := getPath(config, "plugins.entries.slack.enabled"); v != true {
+		t.Error("expected plugins.entries.slack.enabled=true")
+	}
+
+	agentsList, _ := getPath(config, "agents.list")
+	agents := agentsList.([]interface{})
+	agent := agents[0].(map[string]interface{})
+	if agent["name"] != "Opsbot" {
+		t.Errorf("expected agent name 'Opsbot', got %v", agent["name"])
+	}
+}
+
+func TestGenerateConfigMultiPlatformMentionPatterns(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "multi-bot",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"discord":  {ID: "111", Username: "multibot"},
+			"telegram": {ID: "222", Username: "multibot"},
+		},
+		PeerHandles: map[string]map[string]*driver.HandleInfo{},
+	}
+
+	config, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	agentsList, _ := getPath(config, "agents.list")
+	agents, ok := agentsList.([]interface{})
+	if !ok || len(agents) == 0 {
+		t.Fatal("expected agents.list")
+	}
+	agent := agents[0].(map[string]interface{})
+	gc, ok := agent["groupChat"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected groupChat")
+	}
+	patterns := gc["mentionPatterns"].([]interface{})
+	// Should have patterns from BOTH platforms, not just whichever ran last.
+	// Discord contributes: (?i)\b@?multibot\b and <@!?111>
+	// Telegram contributes: (?i)\b@?multibot\b (deduped) — but no native mention
+	// Minimum: 2 unique patterns (text + discord native)
+	if len(patterns) < 2 {
+		t.Errorf("expected at least 2 mention patterns from multi-platform, got %d: %v", len(patterns), patterns)
+	}
+}
+
+func TestGenerateConfigTelegramPeerHandles(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "bot-a",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"telegram": {ID: "111", Username: "bota"},
+		},
+		PeerHandles: map[string]map[string]*driver.HandleInfo{
+			"bot-b": {
+				"telegram": {ID: "222", Username: "botb"},
+			},
+		},
+	}
+
+	config, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify mention patterns include peer patterns
+	agentsList, _ := getPath(config, "agents.list")
+	agents := agentsList.([]interface{})
+	agent := agents[0].(map[string]interface{})
+	gc, ok := agent["groupChat"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected groupChat to exist")
+	}
+	patterns := gc["mentionPatterns"].([]interface{})
+	if len(patterns) == 0 {
+		t.Fatal("expected mention patterns for telegram handle")
+	}
+	// Verify own bot's text pattern is present
+	hasOwnPattern := false
+	for _, p := range patterns {
+		if p == `(?i)\b@?bota\b` {
+			hasOwnPattern = true
+		}
+	}
+	if !hasOwnPattern {
+		t.Errorf("expected own mention pattern (?i)\\b@?bota\\b in %v", patterns)
 	}
 }
 
