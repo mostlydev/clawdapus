@@ -59,6 +59,9 @@ func TestSpikeComposeUp(t *testing.T) {
 	if env["ANTHROPIC_API_KEY"] == "" {
 		env["ANTHROPIC_API_KEY"] = "sk-spike-anthropic"
 	}
+	if env["ALLEN_BOT_TOKEN"] == "" {
+		t.Skip("ALLEN_BOT_TOKEN not set in .env — skipping spike test (need all 3 agents)")
+	}
 
 	// Build images before running compose up.
 	// openclaw:latest is the base runtime image; build it from the local
@@ -67,6 +70,7 @@ func TestSpikeComposeUp(t *testing.T) {
 		spikeBuildImage(t, dir, "openclaw:latest", "Dockerfile.openclaw-base")
 	}
 	spikeBuildImage(t, dir, "trading-desk:latest", "Clawfile")
+	spikeBuildImage(t, dir, "trading-desk-nanoclaw:latest", "Clawfile.nanoclaw")
 	spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
 	spikeEnsureCllamaPassthroughImage(t)
 
@@ -103,7 +107,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// teardown runs the compose down and dumps logs.
 	teardown := func() {
-		for _, svc := range []string{"tiverton", "westin", "trading-api"} {
+		for _, svc := range []string{"tiverton", "westin", "allen", "trading-api"} {
 			name := fmt.Sprintf("trading-desk-%s-1", svc)
 			out, _ := exec.Command("docker", "logs", "--tail", "100", name).CombinedOutput()
 			t.Logf("=== %s logs ===\n%s", name, string(out))
@@ -286,7 +290,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// ── Verify cllama context artifacts ─────────────────────────────────────
 
-	for _, agent := range []string{"tiverton", "westin"} {
+	for _, agent := range []string{"tiverton", "westin", "allen"} {
 		agentDir := filepath.Join(runtimeDir, "context", agent)
 		for _, rel := range []string{"AGENTS.md", "CLAWDAPUS.md", "metadata.json"} {
 			if _, err := os.Stat(filepath.Join(agentDir, rel)); err != nil {
@@ -358,6 +362,83 @@ func TestSpikeComposeUp(t *testing.T) {
 	healthOut, _ := exec.Command("docker", "exec", containerName, "openclaw", "health", "--json").Output()
 	t.Logf("openclaw health --json: %s", strings.TrimSpace(string(healthOut)))
 
+	// ── Verify Allen (nanoclaw orchestrator) container artifacts ─────────────
+
+	allenContainer := spikeContainerName("allen")
+	spikeWaitRunning(t, allenContainer, 45*time.Second)
+
+	// Combined CLAUDE.md at /workspace/groups/main/CLAUDE.md (agent contract + CLAWDAPUS.md)
+	allenClaude, errA := exec.Command("docker", "exec", allenContainer, "cat", "/workspace/groups/main/CLAUDE.md").Output()
+	if errA != nil {
+		t.Errorf("allen: docker exec cat /workspace/groups/main/CLAUDE.md: %v", errA)
+	} else {
+		claudeStr := string(allenClaude)
+		if !strings.Contains(claudeStr, "Allen") {
+			t.Errorf("allen: CLAUDE.md doesn't mention Allen: %q", claudeStr[:min(200, len(claudeStr))])
+		}
+		if !strings.Contains(claudeStr, "trading-desk") {
+			t.Errorf("allen: CLAUDE.md doesn't reference pod name 'trading-desk'")
+		}
+		t.Logf("allen CLAUDE.md: %d bytes", len(allenClaude))
+	}
+
+	// Docker socket must be mounted
+	allenSock, errS := exec.Command("docker", "exec", allenContainer, "ls", "-la", "/var/run/docker.sock").Output()
+	if errS != nil {
+		t.Errorf("allen: Docker socket not mounted at /var/run/docker.sock: %v", errS)
+	} else {
+		t.Logf("allen docker.sock: %s", strings.TrimSpace(string(allenSock)))
+	}
+
+	// Skills must use directory layout at orchestrator path
+	allenSkills, errSk := exec.Command("docker", "exec", allenContainer, "find", "/workspace/container/skills", "-name", "SKILL.md").Output()
+	if errSk != nil {
+		t.Errorf("allen: failed to list skills at /workspace/container/skills: %v", errSk)
+	} else if strings.TrimSpace(string(allenSkills)) == "" {
+		t.Error("allen: no SKILL.md files found in /workspace/container/skills/")
+	} else {
+		t.Logf("allen skills (directory layout):\n%s", strings.TrimSpace(string(allenSkills)))
+	}
+
+	// .env file with cllama bearer token (orchestrator's readEnvFile passes to agent-runners)
+	allenEnvFile, errEF := exec.Command("docker", "exec", allenContainer, "cat", "/workspace/.env").Output()
+	if errEF != nil {
+		t.Errorf("allen: .env not mounted at /workspace/.env: %v", errEF)
+	} else if !strings.Contains(string(allenEnvFile), "ANTHROPIC_API_KEY=") {
+		t.Errorf("allen: .env should contain ANTHROPIC_API_KEY, got %q", string(allenEnvFile))
+	} else {
+		t.Logf("allen .env: %d bytes", len(allenEnvFile))
+	}
+
+	// Verify compose.generated.yml has nanoclaw-specific markers
+	if !strings.Contains(composeSrc, "/var/run/docker.sock") {
+		t.Error("compose.generated.yml: expected Docker socket mount for nanoclaw service")
+	}
+	if !strings.Contains(composeSrc, "ANTHROPIC_BASE_URL") {
+		t.Error("compose.generated.yml: expected ANTHROPIC_BASE_URL for nanoclaw cllama wiring")
+	}
+
+	// ANTHROPIC_BASE_URL env var points to cllama proxy
+	allenEnvOut, errE := exec.Command("docker", "exec", allenContainer, "printenv", "ANTHROPIC_BASE_URL").Output()
+	if errE != nil {
+		t.Errorf("allen: ANTHROPIC_BASE_URL not set: %v", errE)
+	} else {
+		allenBaseURL := strings.TrimSpace(string(allenEnvOut))
+		if !strings.Contains(allenBaseURL, "cllama-passthrough") {
+			t.Errorf("allen: ANTHROPIC_BASE_URL should point to cllama proxy, got %q", allenBaseURL)
+		} else {
+			t.Logf("allen ANTHROPIC_BASE_URL: %s", allenBaseURL)
+		}
+	}
+
+	// CLAW_NETWORK env var is set for agent-runner pod connectivity
+	allenNetwork, errN := exec.Command("docker", "exec", allenContainer, "printenv", "CLAW_NETWORK").Output()
+	if errN != nil {
+		t.Errorf("allen: CLAW_NETWORK not set: %v", errN)
+	} else {
+		t.Logf("allen CLAW_NETWORK: %s", strings.TrimSpace(string(allenNetwork)))
+	}
+
 	// Wait for trading-api to be running so its startup announcement has fired.
 	spikeWaitRunning(t, spikeContainerName("trading-api"), 30*time.Second)
 	// Show what env vars trading-api actually received (no values — just key presence + webhook prefix).
@@ -386,9 +467,11 @@ func TestSpikeComposeUp(t *testing.T) {
 	// proves non-claw services receive env vars (DISCORD_TRADING_API_WEBHOOK).
 	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "trading-api online", 15*time.Second)
 
-	// The startup message must contain Discord mentions for both agents.
+	// The startup message must contain Discord mentions for openclaw agents.
 	// CLAW_HANDLE_* vars are broadcast to all pod services by claw, so trading-api
 	// picks up the agent IDs and includes <@ID> mentions in its webhook message.
+	// Note: Allen (nanoclaw) has no greeting mechanism — the mock_server.py only
+	// formats mentions for agents it knows about (tiverton, westin).
 	if tivertonID := env["TIVERTON_DISCORD_ID"]; tivertonID != "" {
 		spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "<@"+tivertonID+">", 5*time.Second)
 	}
@@ -459,7 +542,7 @@ func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 
 	clawfilePath := filepath.Join(contextDir, dockerfile)
 
-	if filepath.Base(dockerfile) == "Clawfile" {
+	if strings.HasPrefix(filepath.Base(dockerfile), "Clawfile") {
 		// Transpile Clawfile → Dockerfile.generated, then docker build
 		generatedPath, err := build.Generate(clawfilePath)
 		if err != nil {
