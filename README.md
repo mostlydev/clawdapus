@@ -286,6 +286,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 3.7 — Social topology: mentionPatterns, allowBots, peer handle users | Done |
 | Phase 3.8 — Channel surface bindings | Done |
 | Phase 4 — Shared governance proxy integration + credential starvation | Done |
+| Phase 4.5 — Unified worker architecture (config, provision, diagnostic) | Design |
 | Phase 5 — Drift scoring + fleet governance | Planned |
 | Phase 6 — Recipe promotion + worker mode | Planned |
 
