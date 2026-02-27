@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
 
 // GenerateServiceSkill produces a fallback markdown skill file for a service
@@ -36,7 +37,7 @@ func GenerateChannelSkill(surface driver.ResolvedSurface) string {
 
 	b.WriteString(fmt.Sprintf("# %s Channel Surface\n\n", platformTitle))
 	b.WriteString(fmt.Sprintf("**Platform:** %s\n", platformTitle))
-	if tokenVar := platformTokenVar(surface.Target); tokenVar != "" {
+	if tokenVar := shared.PlatformTokenVar(surface.Target); tokenVar != "" {
 		b.WriteString(fmt.Sprintf("**Token env var:** `%s`\n", tokenVar))
 	}
 	b.WriteString("\n")
@@ -84,18 +85,4 @@ func GenerateChannelSkill(surface driver.ResolvedSurface) string {
 	}
 
 	return b.String()
-}
-
-// platformTokenVar returns the conventional env var name for a platform's bot token.
-func platformTokenVar(platform string) string {
-	switch strings.ToLower(platform) {
-	case "discord":
-		return "DISCORD_BOT_TOKEN"
-	case "slack":
-		return "SLACK_BOT_TOKEN"
-	case "telegram":
-		return "TELEGRAM_BOT_TOKEN"
-	default:
-		return ""
-	}
 }
