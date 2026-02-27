@@ -28,5 +28,5 @@ var composePsCmd = &cobra.Command{
 }
 
 func init() {
-	composeCmd.AddCommand(composePsCmd)
+	rootCmd.AddCommand(composePsCmd)
 }
