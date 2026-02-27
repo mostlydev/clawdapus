@@ -32,10 +32,13 @@ Give your coding agent (Claude Code, Cursor, etc.) full operational knowledge of
 
 ```bash
 # Claude Code
-cp -r skills/clawdapus ~/.claude/skills/
+mkdir -p ~/.claude/skills/clawdapus
+curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/skills/clawdapus/SKILL.md \
+  -o ~/.claude/skills/clawdapus/SKILL.md
 
 # Cursor / Windsurf / other .cursorrules-based agents
-cat skills/clawdapus/SKILL.md >> .cursorrules
+curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/skills/clawdapus/SKILL.md \
+  >> .cursorrules
 ```
 
 The skill teaches your agent the `claw` CLI, Clawfile syntax, claw-pod.yml structure, cllama proxy wiring, driver semantics, and troubleshooting patterns. It activates automatically when your agent encounters Clawdapus directives.
