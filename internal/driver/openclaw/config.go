@@ -145,9 +145,35 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			if err := setPath(config, "plugins.entries.discord.enabled", true); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 			}
-		case "slack", "telegram":
-			if err := setPath(config, "channels."+platform+".enabled", true); err != nil {
-				return nil, fmt.Errorf("config generation: HANDLE %s: %w", platform, err)
+		case "telegram":
+			h := rc.Handles[platform]
+			if err := setPath(config, "channels.telegram.enabled", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
+			}
+			if err := setPath(config, "channels.telegram.token", "${TELEGRAM_BOT_TOKEN}"); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
+			}
+
+			// Collect mention patterns into the shared slice (agents.list written after loop by Task 2.5)
+			if h != nil {
+				username := h.Username
+				if username == "" {
+					username = rc.ServiceName
+				}
+				if username != "" {
+					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`(?i)\b@?%s\b`, regexp.QuoteMeta(username)))
+				}
+				if h.Username != "" {
+					agentName = strings.ToUpper(h.Username[:1]) + h.Username[1:]
+				}
+			}
+
+			if err := setPath(config, "plugins.entries.telegram.enabled", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
+			}
+		case "slack":
+			if err := setPath(config, "channels.slack.enabled", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 			}
 		default:
 			// Unknown platform — no native config path known; log and skip.

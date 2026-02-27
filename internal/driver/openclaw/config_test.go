@@ -764,6 +764,51 @@ func TestGenerateConfigDiscordPeerHandlesInUsers(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigHandleTelegram(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "news-bot",
+		ClawType:    "openclaw",
+		Handles: map[string]*driver.HandleInfo{
+			"telegram": {
+				ID:       "7123456789",
+				Username: "newsbot",
+			},
+		},
+		PeerHandles: map[string]map[string]*driver.HandleInfo{},
+	}
+
+	config, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// channels.telegram.enabled
+	if v, _ := getPath(config, "channels.telegram.enabled"); v != true {
+		t.Error("expected channels.telegram.enabled=true")
+	}
+
+	// channels.telegram.token
+	if v, _ := getPath(config, "channels.telegram.token"); v != "${TELEGRAM_BOT_TOKEN}" {
+		t.Errorf("expected telegram token reference, got %v", v)
+	}
+
+	// plugins.entries.telegram.enabled
+	if v, _ := getPath(config, "plugins.entries.telegram.enabled"); v != true {
+		t.Error("expected plugins.entries.telegram.enabled=true")
+	}
+
+	// agents.list with mention patterns
+	agentsList, _ := getPath(config, "agents.list")
+	agents, ok := agentsList.([]interface{})
+	if !ok || len(agents) == 0 {
+		t.Fatal("expected agents.list to be populated")
+	}
+	agent := agents[0].(map[string]interface{})
+	if agent["name"] != "Newsbot" {
+		t.Errorf("expected agent name 'Newsbot', got %v", agent["name"])
+	}
+}
+
 func TestGenerateConfigMultiPlatformMentionPatterns(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		ServiceName: "multi-bot",
