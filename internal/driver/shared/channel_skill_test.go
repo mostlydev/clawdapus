@@ -1,4 +1,4 @@
-package openclaw
+package shared
 
 import (
 	"strings"
@@ -22,9 +22,9 @@ func TestGenerateChannelSkillSimple(t *testing.T) {
 	if !strings.Contains(skill, "Usage") {
 		t.Error("expected Usage section in skill")
 	}
-	// No DM or Guild sections for nil config
-	if strings.Contains(skill, "Direct Messages") {
-		t.Error("expected no DM section for nil ChannelConfig")
+	// Must not reference OpenClaw specifically
+	if strings.Contains(skill, "OpenClaw") {
+		t.Error("shared channel skill must not reference OpenClaw")
 	}
 }
 

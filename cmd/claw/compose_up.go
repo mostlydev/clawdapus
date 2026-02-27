@@ -686,7 +686,7 @@ func resolveChannelGeneratedSkills(runtimeDir string, surfaces []driver.Resolved
 		if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
 			return nil, fmt.Errorf("create channel skill dir: %w", err)
 		}
-		content := openclaw.GenerateChannelSkill(surface)
+		content := shared.GenerateChannelSkill(surface)
 		if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
 			return nil, fmt.Errorf("write channel skill %q: %w", name, err)
 		}
