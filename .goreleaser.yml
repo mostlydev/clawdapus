@@ -1,0 +1,28 @@
+version: 2
+
+before:
+  hooks:
+    - go mod verify
+    - go vet ./...
+    - go test ./...
+
+builds:
+  - main: ./cmd/claw
+    binary: claw
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
+
+archives:
+  - format: tar.gz
+    name_template: "clawdapus_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
