@@ -112,6 +112,7 @@ type MaterializeResult struct {
 	ReadOnly    bool   // default: true
 	Restart     string // default: "on-failure"
 	SkillDir    string // container path for skills (e.g., "/claw/skills")
+	SkillLayout string // "" (flat, default) or "directory" (Claude Code: skills/name/SKILL.md)
 }
 
 type Mount struct {

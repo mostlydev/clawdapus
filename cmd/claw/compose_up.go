@@ -421,9 +421,15 @@ func runComposeUp(podFile string) error {
 		// Mount individual skill files into the driver's skill directory
 		if result.SkillDir != "" && len(rc.Skills) > 0 {
 			for _, sk := range rc.Skills {
+				containerPath := filepath.Join(result.SkillDir, sk.Name)
+				if result.SkillLayout == "directory" {
+					// Claude Code format: skills/name/SKILL.md
+					stem := strings.TrimSuffix(sk.Name, filepath.Ext(sk.Name))
+					containerPath = filepath.Join(result.SkillDir, stem, "SKILL.md")
+				}
 				result.Mounts = append(result.Mounts, driver.Mount{
 					HostPath:      sk.HostPath,
-					ContainerPath: filepath.Join(result.SkillDir, sk.Name),
+					ContainerPath: containerPath,
 					ReadOnly:      true,
 				})
 			}
