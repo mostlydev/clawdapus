@@ -28,5 +28,5 @@ var composeDownCmd = &cobra.Command{
 }
 
 func init() {
-	composeCmd.AddCommand(composeDownCmd)
+	rootCmd.AddCommand(composeDownCmd)
 }

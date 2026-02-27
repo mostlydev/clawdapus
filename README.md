@@ -74,11 +74,11 @@ services:
         - "volume://shared-research read-write"
 ```
 
-`claw build` transpiles the Clawfile to a standard Dockerfile. `claw compose up` parses the pod YAML, runs driver enforcement, generates per-agent configs, wires the cllama proxy, and calls `docker compose`. The output is standard OCI images and a standard compose file. Eject from Clawdapus anytime — you still have working Docker artifacts.
+`claw build` transpiles the Clawfile to a standard Dockerfile. `claw up` parses the pod YAML, runs driver enforcement, generates per-agent configs, wires the cllama proxy, and calls `docker compose`. The output is standard OCI images and a standard compose file. Eject from Clawdapus anytime — you still have working Docker artifacts.
 
 ```bash
 go build -o bin/claw ./cmd/claw
-./bin/claw compose up examples/trading-desk/claw-pod.yml
+./bin/claw up examples/trading-desk/claw-pod.yml
 ```
 
 ---
@@ -102,7 +102,7 @@ Clawdapus extends two formats you already know:
 | `Clawfile` | `Dockerfile` | Build an immutable agent image |
 | `claw-pod.yml` | `docker-compose.yml` | Run a governed agent fleet |
 | `claw build` | `docker build` | Transpile + build OCI image |
-| `claw compose up` | `docker compose up` | Enforce + deploy |
+| `claw up` | `docker compose up` | Enforce + deploy |
 
 Any valid Dockerfile is a valid Clawfile. Any valid `docker-compose.yml` is a valid `claw-pod.yml`. Extended directives live in namespaces Docker already ignores. Eject from Clawdapus anytime — you still have a working OCI image and a working compose file.
 

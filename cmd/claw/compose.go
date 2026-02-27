@@ -4,16 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/spf13/cobra"
 )
 
 var composePodFile string
-
-var composeCmd = &cobra.Command{
-	Use:   "compose",
-	Short: "Pod lifecycle commands (up, down, ps, logs, health)",
-}
 
 func resolveComposeGeneratedPath() (string, error) {
 	if composePodFile != "" {
@@ -23,7 +16,7 @@ func resolveComposeGeneratedPath() (string, error) {
 		}
 		generatedPath := filepath.Join(filepath.Dir(absPodFile), "compose.generated.yml")
 		if _, err := os.Stat(generatedPath); err != nil {
-			return "", fmt.Errorf("no compose.generated.yml found next to %q (run 'claw compose up %s' first)", composePodFile, composePodFile)
+			return "", fmt.Errorf("no compose.generated.yml found next to %q (run 'claw up %s' first)", composePodFile, composePodFile)
 		}
 		return generatedPath, nil
 	}
@@ -41,6 +34,6 @@ func resolveComposeGeneratedPath() (string, error) {
 }
 
 func init() {
-	rootCmd.AddCommand(composeCmd)
-	composeCmd.PersistentFlags().StringVarP(&composePodFile, "file", "f", "", "Path to claw-pod.yml (locates compose.generated.yml next to it)")
+	// Register -f as a persistent flag on root so all lifecycle commands inherit it.
+	rootCmd.PersistentFlags().StringVarP(&composePodFile, "file", "f", "", "Path to claw-pod.yml (locates compose.generated.yml next to it)")
 }

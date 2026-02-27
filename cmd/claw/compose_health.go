@@ -129,5 +129,5 @@ func shortContainerID(id string) string {
 }
 
 func init() {
-	composeCmd.AddCommand(composeHealthCmd)
+	rootCmd.AddCommand(composeHealthCmd)
 }

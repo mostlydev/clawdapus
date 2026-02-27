@@ -37,5 +37,5 @@ var composeLogsCmd = &cobra.Command{
 
 func init() {
 	composeLogsCmd.Flags().BoolVar(&composeLogsFollow, "follow", false, "Follow log output")
-	composeCmd.AddCommand(composeLogsCmd)
+	rootCmd.AddCommand(composeLogsCmd)
 }

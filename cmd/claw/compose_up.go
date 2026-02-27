@@ -455,7 +455,7 @@ func runComposeUp(podFile string) error {
 	}
 
 	if len(drivers) > 0 && !composeUpDetach {
-		return fmt.Errorf("claw-managed services require detached mode for fail-closed post-apply verification; rerun with 'claw compose up -d %s'", podFile)
+		return fmt.Errorf("claw-managed services require detached mode for fail-closed post-apply verification; rerun with 'claw up -d %s'", podFile)
 	}
 
 	composeArgs := []string{"compose", "-f", generatedPath, "up"}
@@ -803,5 +803,5 @@ func resolveChannelID(handles map[string]*driver.HandleInfo, channelName string)
 
 func init() {
 	composeUpCmd.Flags().BoolVarP(&composeUpDetach, "detach", "d", false, "Run in background")
-	composeCmd.AddCommand(composeUpCmd)
+	rootCmd.AddCommand(composeUpCmd)
 }

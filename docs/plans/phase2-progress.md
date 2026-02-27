@@ -22,7 +22,7 @@
 | 11 | Example claw-pod.yml + integration smoke | DONE | `72102a1` | Example pod + integration test behind build tag |
 | 12 | E2E Docker integration | DONE | — | Stub fixture, PostApply wiring, Docker SDK verify, 3 e2e tests |
 | 13 | HealthProbe wired (docker exec) | DONE | — | Real `openclaw health --json` exec inside container, ParseHealthJSON reuse |
-| 14 | `claw compose health` CLI | DONE | — | Iterates containers, inspects claw.type label, calls driver HealthProbe |
+| 14 | `claw health` CLI | DONE | — | Iterates containers, inspects claw.type label, calls driver HealthProbe |
 | 15 | Pod-internal network isolation | DONE | — | `claw-internal` network with `internal: true`, claw services only |
 | 16 | E2E HealthProbe + network tests | DONE | — | TestE2EHealthProbe, network assertions in lifecycle test |
 
@@ -46,7 +46,7 @@ All 15 tasks done (11 core + 4 hardening). Exit criteria met:
 - Path traversal guard on contract resolution
 - Deterministic compose output (sorted service names, stable ordinals)
 - HealthProbe wired: real docker exec of `openclaw health --json` with ParseHealthJSON
-- `claw compose health` CLI: table output of service health via driver probes
+- `claw health` CLI: table output of service health via driver probes
 - Network isolation: `claw-internal` network with `internal: true` for all claw services
 
 **Completed:** 2026-02-20
@@ -240,7 +240,7 @@ First target: migrate channel surface config translation (Phase 3 Slice 3, Task 
 ## Key Decisions Made During Execution
 
 - CONFIGURE directives now emitted as `claw.configure.N` labels (Task 1)
-- CLI commands are `claw compose up/down/ps/logs` (not `claw up`)
+- CLI commands are `claw up/down/ps/logs/health` (not `claw compose up`)
 - `read_only: true` + `tmpfs` + bounded `restart: on-failure` for all Claw services
 - JSON (not JSON5) for config generation — JSON is valid JSON5, YAGNI
 - Locally-built images for tests, no alpine/openclaw dependency in critical path
