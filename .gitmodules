@@ -1,4 +1,4 @@
 [submodule "cllama-passthrough"]
 	path = cllama-passthrough
 	url = git@github.com:mostlydev/cllama-passthrough.git
-	branch = main
+	branch = master
