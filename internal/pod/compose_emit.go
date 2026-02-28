@@ -39,7 +39,7 @@ type composeHealthcheck struct {
 
 type CllamaProxyConfig struct {
 	ProxyType      string            // e.g. "passthrough", "policy"
-	Image          string            // e.g. ghcr.io/mostlydev/cllama-passthrough:latest
+	Image          string            // e.g. ghcr.io/mostlydev/cllama:latest
 	ContextHostDir string            // host path for shared context dir
 	AuthHostDir    string            // host path for provider auth state
 	Environment    map[string]string // proxy-only env (e.g. CLAW_POD, provider keys)

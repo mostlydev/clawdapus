@@ -576,7 +576,7 @@ func TestEmitComposeWithCllamaProxy(t *testing.T) {
 	}
 	proxies := []CllamaProxyConfig{{
 		ProxyType:      "passthrough",
-		Image:          "ghcr.io/mostlydev/cllama-passthrough:latest",
+		Image:          "ghcr.io/mostlydev/cllama:latest",
 		ContextHostDir: "/tmp/test/.claw-runtime/context",
 		AuthHostDir:    "/tmp/test/.claw-runtime/proxy-auth",
 		Environment: map[string]string{
@@ -600,7 +600,7 @@ func TestEmitComposeWithCllamaProxy(t *testing.T) {
 	if _, ok := cf.Services["cllama-passthrough"]; !ok {
 		t.Error("expected cllama-passthrough service in output")
 	}
-	if !strings.Contains(out, "ghcr.io/mostlydev/cllama-passthrough") {
+	if !strings.Contains(out, "ghcr.io/mostlydev/cllama") {
 		t.Error("expected proxy image in output")
 	}
 	if _, ok := cf.Networks["claw-internal"]; !ok {
@@ -624,7 +624,7 @@ func TestEmitComposeMultipleProxies(t *testing.T) {
 	proxies := []CllamaProxyConfig{
 		{
 			ProxyType:      "passthrough",
-			Image:          "ghcr.io/mostlydev/cllama-passthrough:latest",
+			Image:          "ghcr.io/mostlydev/cllama:latest",
 			ContextHostDir: "/tmp/ctx",
 			AuthHostDir:    "/tmp/auth",
 			Environment:    map[string]string{},
@@ -695,7 +695,7 @@ func TestEmitProxyPublishesDashboardPort(t *testing.T) {
 	}
 	proxies := []CllamaProxyConfig{{
 		ProxyType:      "passthrough",
-		Image:          "ghcr.io/mostlydev/cllama-passthrough:latest",
+		Image:          "ghcr.io/mostlydev/cllama:latest",
 		ContextHostDir: "/tmp/ctx",
 		AuthHostDir:    "/tmp/auth",
 		Environment:    map[string]string{},

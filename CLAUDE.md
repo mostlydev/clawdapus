@@ -53,7 +53,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 | Phase 3 Slice 4 — Social topology: mentionPatterns, allowBots, peer handle users | DONE |
 | Phase 3 Slice 5 — Channel surface bindings: ChannelConfig, applyDiscordChannelSurface, surface-discord.md | DONE |
 | Phase 4 Slices 2+3 — cllama wiring in clawdapus repo | DONE |
-| Phase 4 Slice 1 — cllama-passthrough standalone proxy (in-repo) | DONE |
+| Phase 4 Slice 1 — cllama standalone proxy (in-repo) | DONE |
 | Phase 4 Task 3.4 — doc fixes (CLLAMA_SPEC, ADRs) | DONE |
 | Phase 4.5 — Unified worker architecture (config, provision, diagnostic) | DESIGN |
 | Phase 5 — Drift scoring | NOT STARTED |
@@ -61,7 +61,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 
 ## Important Implementation Decisions (settled)
 
-- CLI commands are `claw up/down/ps/logs/health` (not `claw compose up`)
+- CLI commands are `claw up/down/ps/logs/health` (top-level, no compose namespace)
 - Config injection uses Go-native JSON5 patching in-memory — never shells out to `openclaw config set` (too slow/noisy)
 - Config written on host, mounted read-only into container (not mutated inside container)
 - JSON (not JSON5) for generated config — JSON is valid JSON5, YAGNI
@@ -87,7 +87,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - **cllama declaration model**: `Cllama []string` — supports multiple proxy types per agent. Clawfile: multiple `CLLAMA` directives. Pod YAML: `cllama: passthrough` (string coerced to `[]string`) or `cllama: [passthrough, policy]`
 - **cllama chain boundary**: data model supports multi-proxy chains; runtime currently fail-fast rejects `len(Cllama) > 1` until chain execution semantics land in Phase 5
 - **Credential starvation split**: real provider API keys belong only in `x-claw.cllama-env` (proxy service env), never in agent env blocks. `stripLLMKeys` + preflight check enforce this
-- **cllama-passthrough**: Standalone Go binary (in `./cllama-passthrough`). OpenAI-compatible proxy on :8080, operator web UI on :8081. Multi-provider registry (OpenAI, Anthropic, OpenRouter, Ollama). Auth at `/claw/auth/providers.json` (env overrides file)
+- **cllama**: Standalone Go binary (in `./cllama`). OpenAI-compatible proxy on :8080, operator web UI on :8081. Multi-provider registry (OpenAI, Anthropic, OpenRouter, Ollama). Auth at `/claw/auth/providers.json` (env overrides file)
 - **Bearer token format**: `<agent-id>:<48-hex-chars>` via crypto/rand. Proxy validates secret against metadata.json. Per-ordinal tokens for count > 1 services
 - **cllama provider-level rewrite (schema fix)**: Plan originally wrote to `agents.defaults.model.baseURL/apiKey` but OpenClaw Zod schema rejects those keys. Fixed: cllama config writes to `models.providers.<provider>.{baseUrl,apiKey,api,models}` — schema-valid, per-provider, handles multi-provider pods. Helper functions: `collectCllamaProviderModels`, `splitModelRef`, `normalizeProviderID`, `defaultModelAPIForProvider` in `config.go`
 - **`x-claw.models` (deferred)**: Pod-level per-service model override is not yet supported. Currently models come from Clawfile `MODEL` labels only. Natural extension of existing override pattern but deferred — touches the model resolution path that cllama provider wiring depends on. Candidate for Phase 4.5 or early Phase 5

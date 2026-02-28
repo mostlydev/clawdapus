@@ -24,7 +24,7 @@ import (
 )
 
 // TestSpikeComposeUp is a full end-to-end integration test for the trading-desk
-// example. It builds images, runs claw compose up, verifies generated artifacts
+// example. It builds images, runs claw up, verifies generated artifacts
 // (openclaw.json, jobs.json, compose.generated.yml), and checks that containers
 // start healthy.
 //
@@ -599,32 +599,32 @@ func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 }
 
 // spikeEnsureCllamaPassthroughImage guarantees a local image exists for
-// ghcr.io/mostlydev/cllama-passthrough:latest. It tries, in order:
+// ghcr.io/mostlydev/cllama:latest. It tries, in order:
 //  1. Skip if the image already exists locally.
-//  2. Build from the GitHub cllama-passthrough repo.
+//  2. Build from the GitHub cllama repo.
 //  3. Fall back to a stub image (healthcheck-only, no real proxy).
 func spikeEnsureCllamaPassthroughImage(t *testing.T) {
 	t.Helper()
-	const tag = "ghcr.io/mostlydev/cllama-passthrough:latest"
+	const tag = "ghcr.io/mostlydev/cllama:latest"
 	if spikeImageExists(tag) {
-		t.Logf("cllama-passthrough image already exists")
+		t.Logf("cllama image already exists")
 		return
 	}
 
 	// Try building from the GitHub repo.
-	const repo = "https://github.com/mostlydev/cllama-passthrough.git"
-	t.Logf("building real cllama-passthrough from %s", repo)
+	const repo = "https://github.com/mostlydev/cllama.git"
+	t.Logf("building real cllama from %s", repo)
 	cmd := exec.Command("docker", "build", "-t", tag, repo)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Logf("built real cllama-passthrough image from GitHub")
+		t.Logf("built real cllama image from GitHub")
 		return
 	}
 	t.Logf("GitHub build failed, falling back to stub: %v\n%s", err, out)
 
 	// Fallback: minimal stub that passes healthcheck but doesn't proxy.
 	dockerfile := strings.NewReader(`FROM alpine:3.20
-RUN cat >/cllama-passthrough <<'EOF'
+RUN cat >/cllama <<'EOF'
 #!/bin/sh
 if [ "$1" = "-healthcheck" ]; then
   exit 0
@@ -633,17 +633,17 @@ while true; do
   sleep 3600
 done
 EOF
-RUN chmod +x /cllama-passthrough
-ENTRYPOINT ["/cllama-passthrough"]
+RUN chmod +x /cllama
+ENTRYPOINT ["/cllama"]
 `)
 
 	stubCmd := exec.Command("docker", "build", "-t", tag, "-")
 	stubCmd.Stdin = dockerfile
 	stubOut, stubErr := stubCmd.CombinedOutput()
 	if stubErr != nil {
-		t.Fatalf("build cllama passthrough stub image: %v\n%s", stubErr, stubOut)
+		t.Fatalf("build cllama stub image: %v\n%s", stubErr, stubOut)
 	}
-	t.Logf("built cllama-passthrough stub image (no real proxy)")
+	t.Logf("built cllama stub image (no real proxy)")
 }
 
 // spikeWaitHealthy waits until the Docker healthcheck reports "healthy".

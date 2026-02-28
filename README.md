@@ -169,7 +169,6 @@ block-beta
   style persona fill:#1a1a2e,stroke:#a78bfa,color:#eee
   style proxy fill:#1a1a2e,stroke:#34d399,color:#eee
 ```
-![readme-1](docs/art/mermaid/readme-1.svg)
 
 The contract lives on the host. Even a root-compromised runner cannot rewrite its own mission. Swap runners without touching identity. Add or remove the governance proxy without rebuilding anything.
 
@@ -184,7 +183,7 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Cost accounting:** Extracts token usage from every response, multiplies by pricing table, tracks per agent/provider/model.
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
 
-The reference implementation is [`cllama-passthrough`](https://github.com/mostlydev/cllama-passthrough) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
+The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
 
 See the [cllama specification](./docs/CLLAMA_SPEC.md) for the full standard.
 
@@ -252,7 +251,7 @@ $ claw audit crypto-crusher-2 --last 24h
 18:01  engagement-sweep  OUTPUT DROPPED by cllama:purpose  (off-strategy)
 ```
 
-Drift is independently scored — not self-reported. The structured logs from `cllama-passthrough` provide the raw telemetry today; the `claw audit` command and drift scoring are Phase 5.
+Drift is independently scored — not self-reported. The structured logs from `cllama` provide the raw telemetry today; the `claw audit` command and drift scoring are Phase 5.
 
 ---
 

@@ -92,7 +92,7 @@ Logs must contain the following fields:
 ## 6. Ecosystem Implementations
 
 ### The Passthrough Reference
-Clawdapus provides a reference image: `ghcr.io/mostlydev/cllama-passthrough`.
+Clawdapus provides a reference image: `ghcr.io/mostlydev/cllama`.
 
 The passthrough reference:
 - Adheres to the v1 HTTP API and Listen Port.
