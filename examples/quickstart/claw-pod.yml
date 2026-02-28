@@ -6,8 +6,12 @@ services:
       cllama: passthrough
       cllama-env:
         OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "quickstart-bot"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "My Server"
     environment:
-      # Uncomment ONE platform:
-      # DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
-      # TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
-      # SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN}"
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"

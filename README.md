@@ -13,6 +13,40 @@ Clawdapus treats the agent as an untrusted workload. It is the layer below the f
 
 ---
 
+## Quickstart (5 minutes)
+
+**You need:** Docker Desktop, an [OpenRouter](https://openrouter.ai/) API key, a [Discord bot token](https://discord.com/developers/applications), and an OpenClaw base image.
+
+```bash
+# Install
+curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/install.sh | sh
+
+# Clone the quickstart example
+git clone https://github.com/mostlydev/clawdapus.git
+cd clawdapus/examples/quickstart
+
+# Configure
+cp .env.example .env
+# Edit .env — add OPENROUTER_API_KEY, DISCORD_BOT_TOKEN, DISCORD_BOT_ID, DISCORD_GUILD_ID
+
+# Build and launch
+source .env
+claw build -t quickstart-claw .
+claw up -f claw-pod.yml -d
+
+# Verify
+claw ps -f claw-pod.yml        # assistant + cllama-passthrough both running
+claw health -f claw-pod.yml    # both healthy
+```
+
+Open **http://localhost:8081** — the cllama governance proxy dashboard. Watch every LLM call in real time: which agent, which model, token counts, cost.
+
+Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
+
+See [`examples/quickstart/`](./examples/quickstart/) for the full walkthrough, Telegram/Slack alternatives, and migration from existing OpenClaw.
+
+---
+
 ## Install
 
 ```bash
@@ -26,7 +60,7 @@ Or build from source:
 go build -o bin/claw ./cmd/claw
 ```
 
-## Install AI Skill
+### Install AI Skill
 
 Give your coding agent full operational knowledge of Clawdapus — the `claw` CLI, Clawfile syntax, claw-pod.yml structure, cllama proxy wiring, driver semantics, and troubleshooting patterns.
 
@@ -101,22 +135,6 @@ services:
 
 `claw build` transpiles the Clawfile to a standard Dockerfile. `claw up` parses the pod YAML, runs driver enforcement, generates per-agent configs, wires the cllama proxy, and calls `docker compose`. The output is standard OCI images and a standard compose file. Eject from Clawdapus anytime — you still have working Docker artifacts.
 
-```bash
-go build -o bin/claw ./cmd/claw
-./bin/claw up examples/trading-desk/claw-pod.yml
-```
-
----
-
-## Examples
-
-| Example | What it shows |
-|---------|---------------|
-| [`examples/openclaw/`](./examples/openclaw/) | Single OpenClaw agent with Discord handle, skill emit, and service surface |
-| [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
-| [`examples/trading-desk/`](./examples/trading-desk/) | Three agents (coordinator, momentum trader, systems monitor) coordinating via Discord with a mock trading API, scheduled invocations, and `cllama` governance proxy enforcing credential starvation and cost boundaries. |
-| [`examples/quickstart/`](./examples/quickstart/) | 5-minute quickstart — single governed agent with cllama proxy |
-
 ---
 
 ## How It Works
@@ -144,7 +162,7 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 | `AGENT` | Names the behavioral contract file |
 | `MODEL` | Binds named model slots to providers |
 | `CLLAMA` | Declares governance proxy type(s) |
-| `HANDLE` | Declares platform identity (discord, slack) |
+| `HANDLE` | Declares platform identity (discord, telegram, slack) |
 | `INVOKE` | Scheduled invocations via cron |
 | `SURFACE` | Declared in pod YAML — volumes, services, channels |
 | `SKILL` | Operator policy files mounted read-only |
@@ -182,8 +200,9 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Identity resolution:** Single proxy serves an entire pod. Bearer tokens resolve which agent is calling.
 - **Cost accounting:** Extracts token usage from every response, multiplies by pricing table, tracks per agent/provider/model.
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
+- **Operator dashboard:** Real-time web UI at port 8081 — agent activity, provider status, cost breakdown.
 
-The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
+The reference implementation is [`cllama-passthrough`](https://github.com/mostlydev/cllama-passthrough) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
 
 See the [cllama specification](./docs/CLLAMA_SPEC.md) for the full standard.
 
@@ -221,6 +240,17 @@ $ claw skillmap crypto-crusher-0
 
 ---
 
+## Examples
+
+| Example | What it shows |
+|---------|---------------|
+| [`examples/quickstart/`](./examples/quickstart/) | **Start here** — single governed agent with Discord, cllama proxy, and dashboard |
+| [`examples/openclaw/`](./examples/openclaw/) | Single OpenClaw agent with Discord handle, skill emit, and service surface |
+| [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
+| [`examples/trading-desk/`](./examples/trading-desk/) | Three agents coordinating via Discord with a mock trading API, scheduled invocations, and cllama governance proxy |
+
+---
+
 ## The Master Claw (The Top Octopus)
 
 Clawdapus is designed for autonomous fleet governance. The operator writes the `Clawfile` and sets the budgets, but day-to-day oversight can be delegated to a **Master Claw** — an AI governor.
@@ -229,7 +259,7 @@ Clawdapus is designed for autonomous fleet governance. The operator writes the `
 The `cllama` proxy is the programmatic choke point. It sits on the network, enforces the hard rules (rate limits, budgets, PII blocking), and emits structured telemetry logs (drift, cost, interventions). It doesn't "think" about management; it is a passive sensor and firewall.
 
 **The Master Claw is the Brain:**
-The Master Claw is an actual LLM-powered agent running in the pod, tasked with reading proxy telemetry. If a proxy reports an agent drifting, burning budget, or failing policy checks, the Master Claw makes an executive decision to dynamically shift budgets, promote recipes, or quarantine the drifting agent. 
+The Master Claw is an actual LLM-powered agent running in the pod, tasked with reading proxy telemetry. If a proxy reports an agent drifting, burning budget, or failing policy checks, the Master Claw makes an executive decision to dynamically shift budgets, promote recipes, or quarantine the drifting agent.
 
 In enterprise deployments, this naturally forms a **Hub-and-Spoke Governance Model**. Multiple pods across different zones have their own `cllama` proxies acting as local firewalls, while a single Master Claw ingests telemetry from them all to autonomously manage the entire neural fleet.
 
@@ -286,14 +316,14 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 
 ## Status
 
-**Active development — pre-release.**
+**v0.1.0 released** — [download](https://github.com/mostlydev/clawdapus/releases/tag/v0.1.0)
 
 | Phase | Status |
 |-------|--------|
 | Phase 1 — Clawfile parser + build | Done |
 | Phase 2 — Driver framework + pod runtime + OpenClaw + volume surfaces | Done |
 | Phase 3 — Surface manifests, service skills, CLAWDAPUS.md | Done |
-| Phase 3.5 — HANDLE directive + social topology projection | Done |
+| Phase 3.5 — HANDLE directive + social topology (Discord, Telegram, Slack) | Done |
 | Phase 3.6 — INVOKE scheduling + Discord config wiring | Done |
 | Phase 3.7 — Social topology: mentionPatterns, allowBots, peer handle users | Done |
 | Phase 3.8 — Channel surface bindings | Done |
@@ -317,7 +347,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 - [`docs/decisions/007-llm-isolation-credential-starvation.md`](./docs/decisions/007-llm-isolation-credential-starvation.md) — ADR: LLM Isolation via Credential Starvation
 - [`docs/decisions/008-cllama-sidecar-standard.md`](./docs/decisions/008-cllama-sidecar-standard.md) — ADR: cllama as a Standardized Sidecar Interface
 - [`docs/decisions/009-contract-composition-and-policy.md`](./docs/decisions/009-contract-composition-and-policy.md) — ADR: Contract Composition and Policy Inclusion
-- [`docs/decisions/010-cli-surface-simplification.md`](./docs/decisions/010-cli-surface-simplification.md) — ADR: CLI Surface Simplification (compose-prefixed lifecycle commands → top-level `claw *`)
+- [`docs/decisions/010-cli-surface-simplification.md`](./docs/decisions/010-cli-surface-simplification.md) — ADR: CLI Surface Simplification (`claw compose *` → `claw *`)
 - [`docs/UPDATING.md`](./docs/UPDATING.md) — checklist of everything to update when implementation changes
 - [`TESTING.md`](./TESTING.md) — unit, E2E, and spike test runbook
 
