@@ -14,7 +14,7 @@ cllama is a bidirectional LLM proxy — it intercepts both outbound prompts (run
 
 *Note: Initially, the architecture specified a "sidecar per Claw" model. This was updated to a shared pod-level proxy to reduce resource overhead and enable centralized compute budgeting across the fleet.*
 
-Each pod with a `CLLAMA` directive gets one or more typed proxy services injected into the generated compose file by `claw compose up`. Services are named `cllama-<type>` (for example, `cllama-passthrough`). The proxy layer:
+Each pod with a `CLLAMA` directive gets one or more typed proxy services injected into the generated compose file by `claw up`. Services are named `cllama-<type>` (for example, `cllama-passthrough`). The proxy layer:
 
 - Exposes an OpenAI-compatible API endpoint on a pod-internal network.
 - Is configured from `Cllama []string` declarations (image and pod-level), enabling future chainable proxy stacks.

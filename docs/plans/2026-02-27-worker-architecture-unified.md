@@ -60,7 +60,7 @@ This is the highest-value idea from the init-claw doc. Crash-loop debugging is w
 ## Execution Order
 
 ```
-claw compose up
+claw up
   │
   ├─ Parse Clawfile + claw-pod.yml
   ├─ Driver preflight (existing — can the worker even run?)
@@ -79,7 +79,7 @@ claw compose up
   │
   └─ [3] Diagnostic Worker (on failure only)
         └─ Read logs + config, emit diagnostic-report.yml
-        └─ Report surfaced via claw compose health / claw inspect
+        └─ Report surfaced via claw health / claw inspect
 ```
 
 Step 1 and 2 are strictly ordered (provision before config — config worker needs the directories to exist). Step 3 is reactive, not part of the startup sequence.
@@ -171,7 +171,7 @@ analysis:
     component: config
     summary: "Config key 'agents.list[0].groupChat.mentionPatterns' is empty"
     evidence: "Config file /app/config/openclaw.json line 23"
-    suggestion: "HANDLE directive may not have been applied — check claw compose health"
+    suggestion: "HANDLE directive may not have been applied — check claw health"
 ```
 
 ### Intent Manifest + Completion Report
@@ -247,7 +247,7 @@ Every worker run produces artifacts that are retained and inspectable:
 | Provision report | `.claw/workers/<service>/provision-report.yml` | `claw inspect <service>` |
 | Intent manifest | `.claw/workers/<service>/intent.yml` | `claw inspect <service>` |
 | Completion report | `.claw/workers/<service>/completion-report.yml` | `claw inspect <service>` |
-| Diagnostic report | `.claw/workers/<service>/diagnostic-report.yml` | `claw compose health` |
+| Diagnostic report | `.claw/workers/<service>/diagnostic-report.yml` | `claw health` |
 | Volume diff | `.claw/workers/<service>/volume-diff.txt` | `claw inspect <service>` |
 
 The **volume diff** captures what the provision worker changed — snapshot before, diff after. This preserves inspectability for open-ended `freeform` tasks. If the worker ran `apt update` or modified 3 files, the diff shows exactly what.
@@ -256,7 +256,7 @@ The **volume diff** captures what the provision worker changed — snapshot befo
 
 ## Idempotency
 
-Workers MUST be idempotent. Running `claw compose up` twice should produce the same result.
+Workers MUST be idempotent. Running `claw up` twice should produce the same result.
 
 - **Config workers:** Write to a clean staging directory each time. Old staging dir is wiped before the worker runs. Config is always generated fresh from intents.
 - **Provision workers:** `directory_exists` + `create_if_missing` is naturally idempotent. `freeform` tasks are instructed to check before acting ("install updates only if not already at latest"). The volume diff audit trail lets operators verify.
@@ -288,7 +288,7 @@ Workers MUST be idempotent. Running `claw compose up` twice should produce the s
 | Config injection (current) | Workers eventually replace direct Go-coded config patching. Migration is gradual: current v1 driver works alongside workers during transition |
 | `CONFIGURE` directive | Worker-based CONFIGURE is smarter — LLM interprets in context rather than blind execution |
 | cllama sidecar | Complementary. Workers run at setup; cllama runs at runtime. Different LLMs, different jobs |
-| `claw compose health` | Extended to surface diagnostic reports alongside existing healthcheck output |
+| `claw health` | Extended to surface diagnostic reports alongside existing healthcheck output |
 | `inspectImageEnv` | Unchanged. Still runs before workers to catch baked credentials |
 | Fail-closed invariant | Strengthened. Verification is now explicit and independently run per intent |
 

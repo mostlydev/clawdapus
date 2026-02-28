@@ -2,11 +2,11 @@
 
 **Date:** 2026-02-27
 **Status:** Accepted
-**Supersedes:** Decision in phase2-progress.md ("CLI commands are `claw compose up/down/ps/logs` (not `claw up`)")
+**Supersedes:** Decision in phase2-progress.md (legacy compose-namespaced lifecycle commands)
 
 ## Context
 
-The original CLI design used `claw compose up/down/ps/logs/health` — a parent `compose` subcommand with children. The rationale was Docker familiarity: users who know `docker compose up` would recognize the pattern.
+The original CLI design nested lifecycle verbs under a `compose` parent (`up/down/ps/logs/health`). The rationale was Docker familiarity: users who know `docker compose up` would recognize the pattern.
 
 After building through Phase 4, this prefix is dead weight. Docker needs the `compose` qualifier because `docker` is a multi-purpose tool (`docker build`, `docker run`, `docker compose up`, `docker image ls` — compose is one of many namespaces). `claw` is single-purpose: it governs agent pods. There is no ambiguity about what `claw up` does.
 
@@ -14,15 +14,15 @@ The project is pre-release with no external users. This is the last good opportu
 
 ## Decision
 
-**Flatten all `claw compose *` subcommands to top-level `claw *` commands.**
+**Flatten compose-namespaced lifecycle subcommands to top-level `claw *` commands.**
 
-| Before | After |
+| Legacy (nested under `compose`) | Current |
 |--------|-------|
-| `claw compose up [-f pod.yml] [-d]` | `claw up [-f pod.yml] [-d]` |
-| `claw compose down [-f pod.yml]` | `claw down [-f pod.yml]` |
-| `claw compose ps [-f pod.yml]` | `claw ps [-f pod.yml]` |
-| `claw compose logs [-f pod.yml] [svc]` | `claw logs [-f pod.yml] [svc]` |
-| `claw compose health [-f pod.yml]` | `claw health [-f pod.yml]` |
+| `up [-f pod.yml] [-d]` | `claw up [-f pod.yml] [-d]` |
+| `down [-f pod.yml]` | `claw down [-f pod.yml]` |
+| `ps [-f pod.yml]` | `claw ps [-f pod.yml]` |
+| `logs [-f pod.yml] [svc]` | `claw logs [-f pod.yml] [svc]` |
+| `health [-f pod.yml]` | `claw health [-f pod.yml]` |
 
 The full CLI surface becomes:
 
@@ -61,8 +61,8 @@ No backwards compatibility shim — pre-release, zero external users.
 
 ## Alternatives Considered
 
-1. **Keep `claw compose *`** — maintains Docker analogy but adds friction to the most common commands. The analogy is already imperfect (`claw build` was never `claw compose build`). Rejected: consistency over analogy.
+1. **Keep compose-namespaced lifecycle commands** — maintains Docker analogy but adds friction to the most common commands. The analogy is already imperfect (`claw build` was never nested under `compose`). Rejected: consistency over analogy.
 
-2. **Support both** — `claw up` as alias for `claw compose up`. Adds maintenance burden and confusion about which is canonical. Rejected: pick one.
+2. **Support both** — top-level verbs plus compose-namespaced aliases. Adds maintenance burden and confusion about which is canonical. Rejected: pick one.
 
 3. **Different verb names** — e.g., `claw deploy`, `claw teardown`. Rejected: `up`/`down`/`ps`/`logs` are already universally understood from Docker and need no explanation.

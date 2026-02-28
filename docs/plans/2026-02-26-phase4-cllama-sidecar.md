@@ -1925,7 +1925,7 @@ Slices 1 and 2-3 can proceed in parallel (separate repos).
 
 1. **Unit tests:** `go test ./...` in both repos — all pass
 2. **Build proxy:** `docker build -t cllama-passthrough .` in the passthrough repo
-3. **Manual E2E (clawdapus):** Create a test `claw-pod.yml` with `x-claw: cllama: passthrough` and `cllama-env: {OPENAI_API_KEY: sk-test}`. Run `claw compose up -d`. Verify:
+3. **Manual E2E (clawdapus):** Create a test `claw-pod.yml` with `x-claw: cllama: passthrough` and `cllama-env: {OPENAI_API_KEY: sk-test}`. Run `claw up -d`. Verify:
    - `compose.generated.yml` contains `cllama-passthrough` service (not generic `cllama-proxy`)
    - `.claw-runtime/context/<agent>/` has AGENTS.md, CLAWDAPUS.md, metadata.json
    - Agent's `openclaw.json` has `models.providers.<provider>.baseUrl: http://cllama-passthrough:8080/v1` and dummy provider `apiKey`

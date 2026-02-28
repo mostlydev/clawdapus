@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Render mermaid diagrams to SVG when scoped markdown files change.
+# The rendered SVGs are non-deterministic (mermaid-cli varies IDs across runs),
+# so we render to a temp dir and only update if the visual content changed.
+
+SCOPE_PATTERNS=(
+  "README.md"
+  "cllama-passthrough/README.md"
+  "docs/.*\.md"
+)
+
+# Check if any scoped markdown file is staged
+staged_md=false
+for pattern in "${SCOPE_PATTERNS[@]}"; do
+  if git diff --cached --name-only | grep -qE "^${pattern}$"; then
+    staged_md=true
+    break
+  fi
+done
+
+if [[ "$staged_md" != true ]]; then
+  exit 0
+fi
+
+# Check if npx is available
+if ! command -v npx >/dev/null 2>&1; then
+  echo "WARNING: npx not found — skipping mermaid rendering" >&2
+  exit 0
+fi
+
+echo "Mermaid diagrams: rendering SVGs..."
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+"$REPO_ROOT/scripts/render-mermaid.sh"
+
+# Stage generated SVGs (only if they exist)
+if ls docs/art/mermaid/*.svg >/dev/null 2>&1; then
+  git add docs/art/mermaid/*.svg
+fi
+
+# Stage any markdown files that were modified by the script
+for pattern in "${SCOPE_PATTERNS[@]}"; do
+  git diff --name-only | grep -E "^${pattern}$" | xargs -I{} git add "{}" 2>/dev/null || true
+done

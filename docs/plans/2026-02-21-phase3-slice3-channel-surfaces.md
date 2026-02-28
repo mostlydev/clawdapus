@@ -1239,7 +1239,7 @@ if strings.Contains(string(out3), "surface-discord.md") {
 **Step 4: Verify the pod parses cleanly**
 
 ```bash
-go build -o bin/claw ./cmd/claw && ./bin/claw compose -f examples/trading-desk/claw-pod.yml up --dry-run 2>&1 | head -20
+go build -o bin/claw ./cmd/claw && ./bin/claw up -f examples/trading-desk/claw-pod.yml --dry-run 2>&1 | head -20
 ```
 
 If `--dry-run` isn't a flag, just verify build succeeds:

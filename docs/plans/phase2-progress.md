@@ -240,7 +240,7 @@ First target: migrate channel surface config translation (Phase 3 Slice 3, Task 
 ## Key Decisions Made During Execution
 
 - CONFIGURE directives now emitted as `claw.configure.N` labels (Task 1)
-- CLI commands are `claw up/down/ps/logs/health` (not `claw compose up`)
+- CLI commands are `claw up/down/ps/logs/health` (top-level, no compose namespace)
 - `read_only: true` + `tmpfs` + bounded `restart: on-failure` for all Claw services
 - JSON (not JSON5) for config generation — JSON is valid JSON5, YAGNI
 - Locally-built images for tests, no alpine/openclaw dependency in critical path

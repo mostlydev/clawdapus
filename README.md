@@ -169,6 +169,7 @@ block-beta
   style persona fill:#1a1a2e,stroke:#a78bfa,color:#eee
   style proxy fill:#1a1a2e,stroke:#34d399,color:#eee
 ```
+![readme-1](docs/art/mermaid/readme-1.svg)
 
 The contract lives on the host. Even a root-compromised runner cannot rewrite its own mission. Swap runners without touching identity. Add or remove the governance proxy without rebuilding anything.
 
