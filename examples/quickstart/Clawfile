@@ -1,4 +1,20 @@
-FROM openclaw:latest
+FROM node:22-slim
+
+# Install openclaw runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash ca-certificates cron curl git jq tini \
+    build-essential python3 make g++ cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-prompt --no-onboard --method npm
+
+RUN mkdir -p /claw
+COPY entrypoint.sh /claw/entrypoint.sh
+RUN chmod +x /claw/entrypoint.sh
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/claw/entrypoint.sh"]
+
+# --- Claw directives ---
 
 CLAW_TYPE openclaw
 AGENT AGENTS.md

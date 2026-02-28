@@ -5,7 +5,6 @@ Get a governed OpenClaw agent running in 5 minutes.
 ## Prerequisites
 
 - Docker Desktop running
-- An [OpenClaw](https://github.com/openclaws/openclaw) base image (`openclaw:latest`)
 - An [OpenRouter](https://openrouter.ai/) API key (or Anthropic/OpenAI)
 - A Discord bot token ([create one here](https://discord.com/developers/applications))
 
