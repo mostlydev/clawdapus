@@ -19,7 +19,8 @@
 | Phase 3.5 — HANDLE directive + social topology | — | **DONE** |
 | Phase 3 — Channel surface bindings | Slice 3: driver-mediated channel config | **DONE** |
 | Phase 4 — cllama sidecar + policy pipeline | — | **IN PROGRESS** — sidecar contract/wiring shipped; policy pipeline deferred |
-| Phase 4.5 — Unified worker architecture | — | **DESIGN** — `docs/plans/2026-02-27-worker-architecture-unified.md` |
+| Phase 4.5 — Interactive claw init & agent add | — | **DONE** — `docs/plans/2026-02-28-claw-init-agent-add-design.md` |
+| Phase 4.6 — Unified worker architecture | — | **DESIGN** — `docs/plans/2026-02-27-worker-architecture-unified.md` |
 | Phase 5 — Drift scoring + fleet governance | — | NOT STARTED |
 | Phase 6 — Recipe promotion + worker mode | — | NOT STARTED |
 

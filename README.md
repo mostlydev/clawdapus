@@ -78,6 +78,12 @@ Service detail view:
 
 ![Clawdapus Dash Detail](docs/screenshots/clawdash-detail.png)
 
+`claw agent add` preserves the project's existing layout by default:
+- Canonical project: adds `agents/<name>/Clawfile` + `agents/<name>/AGENTS.md`
+- Flat project: adds `Clawfile.<name>` + `AGENTS-<name>.md`
+
+Use `--layout canonical` or `--layout flat` to override auto-detection.
+
 ---
 
 ## Install
@@ -180,8 +186,8 @@ Clawdapus extends two formats you already know:
 
 | Clawdapus | Docker equivalent | Purpose |
 |-----------|------------------|---------|
-| `claw init` | `docker init` + project templating | Scaffold canonical project layout |
-| `claw agent add` | _(none)_ | Add agents and wire pod/service/env updates |
+| `claw init` | `docker init` + project templating | Scaffold canonical-by-default project layout |
+| `claw agent add` | _(none)_ | Add agents while preserving existing layout (`--layout auto|canonical|flat`) |
 | `Clawfile` | `Dockerfile` | Build an immutable agent image |
 | `claw-pod.yml` | `docker-compose.yml` | Run a governed agent fleet |
 | `claw build` | `docker build` | Transpile + build OCI image |
@@ -395,7 +401,8 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 3.7 — Social topology: mentionPatterns, allowBots, peer handle users | Done |
 | Phase 3.8 — Channel surface bindings | Done |
 | Phase 4 — Shared governance proxy integration + credential starvation | Done |
-| Phase 4.5 — Unified worker architecture (config, provision, diagnostic) | Design |
+| Phase 4.5 — Interactive claw init & claw agent add (canonical layout) | Done |
+| Phase 4.6 — Unified worker architecture (config, provision, diagnostic) | Design |
 | Phase 5 — Drift scoring + fleet governance | Planned |
 | Phase 6 — Recipe promotion + worker mode | Planned |
 
