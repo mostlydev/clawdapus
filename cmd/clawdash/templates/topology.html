@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>clawctl - topology</title>
+  <title>clawdapus dash - topology</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -138,7 +138,7 @@
 
     .lane-heads {
       display: grid;
-      grid-template-columns: repeat(5, 220px);
+      grid-template-columns: repeat({{len .Lanes}}, 220px);
       column-gap: 0;
       min-width: {{.CanvasWidth}}px;
       margin-bottom: 8px;
@@ -237,6 +237,11 @@
       font-size: 12px;
     }
     .noscript a { color: var(--cyan); }
+    .empty {
+      padding: 18px 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
 
     @media (max-width: 740px) {
       .topbar {
@@ -247,7 +252,7 @@
 </head>
 <body>
   <header class="topbar">
-    <a href="/" class="topbar-brand"><span>CLAWCTL</span> {{.PodName}}</a>
+    <a href="/" class="topbar-brand"><span>CLAWDAPUS DASH</span> {{.PodName}}</a>
     <nav class="topbar-nav" aria-label="Primary">
       <a href="/"><span class="dot"></span>Fleet</a>
       <a href="/topology" class="active"><span class="dot"></span>Topology</a>
@@ -257,7 +262,9 @@
 
   <main>
     <h1 class="page-title">Topology</h1>
-    <p class="page-subtitle">Channels, agents, proxies, services, and volumes with live health markers.</p>
+    <p class="page-subtitle">
+      Channels, agents, {{if .HasCllama}}proxies, {{end}}services, and volumes with live health markers.
+    </p>
 
     {{if .HasStatusErrors}}
       <div class="banner">{{.StatusError}}</div>
@@ -265,35 +272,39 @@
 
     <div class="topology-shell">
       <div class="lane-heads">
-        <div>Channels</div>
-        <div>Agents</div>
-        <div>Proxies</div>
-        <div>Services</div>
-        <div>Volumes</div>
-      </div>
-
-      <div class="topology-stage" id="topology-stage">
-        <svg class="topology-svg" viewBox="0 0 {{.CanvasWidth}} {{.CanvasHeight}}" preserveAspectRatio="none">
-          {{range .Edges}}
-            <path class="topology-edge" d="{{.Path}}" stroke="{{.Color}}" data-from="{{.FromID}}" data-to="{{.ToID}}"></path>
-          {{end}}
-        </svg>
-
-        {{range .Nodes}}
-          <div
-            class="topology-node lane-{{.Lane}}"
-            style="left: {{.X}}px; top: {{.Y}}px; width: {{.Width}}px; height: {{.Height}}px;"
-            data-node-id="{{.ID}}"
-            data-neighbors="{{.Neighbors}}"
-            {{if .ServiceName}}data-service="{{.ServiceName}}"{{end}}
-          >
-            <span class="node-label">{{.Label}}</span>
-            <span class="status-dot {{.StatusClass}}" {{if .ServiceName}}data-status-dot="{{.ServiceName}}"{{end}}></span>
-          </div>
+        {{range .Lanes}}
+          <div>{{.Title}}</div>
         {{end}}
       </div>
 
-      <div class="hint">Hover a node to isolate connected paths. Colors: cyan channel, amber service, green volume/host, purple proxy.</div>
+      {{if .HasNodes}}
+        <div class="topology-stage" id="topology-stage">
+          <svg class="topology-svg" viewBox="0 0 {{.CanvasWidth}} {{.CanvasHeight}}" preserveAspectRatio="none">
+            {{range .Edges}}
+              <path class="topology-edge" d="{{.Path}}" stroke="{{.Color}}" data-from="{{.FromID}}" data-to="{{.ToID}}"></path>
+            {{end}}
+          </svg>
+
+          {{range .Nodes}}
+            <div
+              class="topology-node lane-{{.Lane}}"
+              style="left: {{.X}}px; top: {{.Y}}px; width: {{.Width}}px; height: {{.Height}}px;"
+              data-node-id="{{.ID}}"
+              data-neighbors="{{.Neighbors}}"
+              {{if .ServiceName}}data-service="{{.ServiceName}}"{{end}}
+            >
+              <span class="node-label">{{.Label}}</span>
+              <span class="status-dot {{.StatusClass}}" {{if .ServiceName}}data-status-dot="{{.ServiceName}}"{{end}}></span>
+            </div>
+          {{end}}
+        </div>
+        <div class="hint">
+          Hover a node to isolate connected paths. Colors: cyan channel, amber service, green volume/host{{if .HasCllama}}, purple proxy{{end}}.
+        </div>
+      {{else}}
+        <div class="empty">No topology nodes are available for this pod snapshot yet.</div>
+      {{end}}
+
       <noscript>
         <div class="noscript">Live updates are disabled because JavaScript is off. <a href="/topology">Refresh now</a>.</div>
       </noscript>

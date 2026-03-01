@@ -1,19 +1,19 @@
-# clawctl — Fleet Dashboard Design
+# Clawdapus Dash (`clawdash`) — Fleet Dashboard Design
 
 **Date:** 2026-02-28
 **Status:** IMPLEMENTED
 
 ## Overview
 
-`clawctl` is a standalone operator-facing container auto-injected into every Clawdapus pod. It provides fleet-level observability: a single pane of glass showing all agents, services, cllama proxies, surfaces, and their live health status.
+Clawdapus Dash (`clawdash`) is a standalone operator-facing container auto-injected into every Clawdapus pod. It provides fleet-level observability: a single pane of glass showing all agents, services, cllama proxies, surfaces, and their live health status.
 
 ## Architecture
 
 ### Container Model
 
-- **Service name:** `clawctl`
-- **Image:** `ghcr.io/mostlydev/clawctl:latest` (Go binary, embedded HTML templates)
-- **Port:** `:8082` (configurable via `CLAWCTL_ADDR`)
+- **Service name:** `clawdash`
+- **Image:** `ghcr.io/mostlydev/clawdash:latest` (Go binary, embedded HTML templates)
+- **Port:** `:8082` (configurable via `CLAWDASH_ADDR`)
 - **Hardening:** `read_only: true`, `tmpfs: [/tmp]`, `restart: on-failure` — same as all claw services
 - **Network:** `claw-internal`
 - **Labels:** `claw.pod: <pod-name>`, `claw.role: dashboard`
@@ -39,7 +39,7 @@ Two complementary inputs:
 
 ### Injection into Compose
 
-Same pattern as cllama sidecar injection in `compose_emit.go`. A new `ClawctlConfig` struct passed to `EmitCompose`, which adds the `clawctl` service entry to `compose.generated.yml`. Always injected when the pod has any `x-claw` services (same `hasClaw` gate).
+Same pattern as cllama sidecar injection in `compose_emit.go`. A new `ClawdashConfig` struct passed to `EmitCompose`, which adds the `clawdash` service entry to `compose.generated.yml`. Always injected when the pod has any `x-claw` services (same `hasClaw` gate).
 
 ### Manifest Generation
 
@@ -164,7 +164,7 @@ Inherits cllama's design language for visual cohesion across the pod's operator 
 - **Fonts:** Geist Mono (monospace, labels/badges), Outfit (sans-serif, body text)
 - **Color palette:** Same CSS variables — `--bg: #0c1017`, `--cyan: #22d3ee`, `--amber: #f0a500`, `--green: #34d399`, `--red: #ef4444`, `--purple: #a78bfa`
 - **Scan-line overlay:** Same subtle `repeating-linear-gradient` texture
-- **Top bar:** `CLAWCTL` brand in Geist Mono uppercase, nav tabs (Fleet / Topology / Detail)
+- **Top bar:** `CLAWDAPUS DASH` brand in Geist Mono uppercase, nav tabs (Fleet / Topology / Detail)
 - **Cards:** `--bg-raised` background, `--line` border, subtle hover glow
 - **Badges/pills:** Rounded, small, colored by type (cyan for claw types, amber for proxy, green for native)
 
@@ -186,16 +186,16 @@ Fallback: if JS is disabled, a `<noscript>` block shows a manual refresh link. T
 
 - **Log streaming** — `claw logs` covers this from CLI
 - **Health timeline / history** — Future enhancement, needs persistent storage
-- **Config editing** — clawctl is read-only; config changes go through `claw-pod.yml`
-- **Cost tracking** — Lives in cllama's dashboard (`:8081`); clawctl links to it
+- **Config editing** — clawdash is read-only; config changes go through `claw-pod.yml`
+- **Cost tracking** — Lives in cllama's dashboard (host `:8181` -> container `:8081`); clawdash links to it when cllama is present
 - **Authentication** — Pod-internal only (not exposed to the internet by default)
 
 ## Implementation Sequence
 
 1. **Manifest generation** — Add `PodManifest` types, serialize in `compose_up.go` after Pass 1
-2. **Compose injection** — Add `ClawctlConfig` to `EmitCompose`, inject `clawctl` service
-3. **Go binary scaffold** — `clawctl/` directory (same repo), HTTP server, Docker API client, template rendering
+2. **Compose injection** — Add `ClawdashConfig` to `EmitCompose`, inject `clawdash` service
+3. **Go binary scaffold** — `clawdash/` directory (same repo), HTTP server, Docker API client, template rendering
 4. **Fleet page** — Card grid with live health polling
 5. **Topology page** — Layered column diagram with SVG connections
 6. **Detail page** — Service drill-down panels
-7. **Image build** — Dockerfile, CI, `ghcr.io/mostlydev/clawctl:latest`
+7. **Image build** — Dockerfile, CI, `ghcr.io/mostlydev/clawdash:latest`

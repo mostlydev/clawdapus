@@ -248,6 +248,7 @@ func runComposeUp(podFile string) error {
 
 	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
 	proxies := make([]pod.CllamaProxyConfig, 0)
+	cllamaDashboardPort := envOrDefault("CLLAMA_UI_PORT", "8181")
 	if cllamaEnabled {
 		proxyTypes := collectProxyTypes(resolvedClaws)
 		if len(proxyTypes) > 1 {
@@ -390,6 +391,7 @@ func runComposeUp(podFile string) error {
 				Image:          fmt.Sprintf("ghcr.io/mostlydev/cllama-%s:latest", proxyType),
 				ContextHostDir: filepath.Join(runtimeDir, "context"),
 				AuthHostDir:    authDir,
+				DashboardPort:  cllamaDashboardPort,
 				Environment:    proxyEnv,
 				PodName:        p.Name,
 			})
@@ -404,11 +406,12 @@ func runComposeUp(podFile string) error {
 	}
 	fmt.Printf("[claw] wrote %s\n", manifestPath)
 
-	p.Clawctl = &pod.ClawctlConfig{
-		Image:              "ghcr.io/mostlydev/clawctl:latest",
-		Addr:               envOrDefault("CLAWCTL_ADDR", ":8082"),
+	p.Clawdash = &pod.ClawdashConfig{
+		Image:              "ghcr.io/mostlydev/clawdash:latest",
+		Addr:               envOrDefault("CLAWDASH_ADDR", ":8082"),
 		ManifestHostPath:   manifestPath,
 		DockerSockHostPath: "/var/run/docker.sock",
+		CllamaCostsURL:     firstIf(cllamaEnabled, fmt.Sprintf("http://localhost:%s/costs", cllamaDashboardPort)),
 		PodName:            p.Name,
 	}
 
@@ -803,6 +806,13 @@ func envOrDefault(key, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func firstIf(ok bool, value string) string {
+	if ok {
+		return value
+	}
+	return ""
 }
 
 // resolveChannelID looks up a channel by name in the discord handle's guild topology.

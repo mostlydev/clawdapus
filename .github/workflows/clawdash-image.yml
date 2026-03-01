@@ -1,4 +1,4 @@
-name: clawctl Image
+name: clawdash Image
 
 on:
   push:
@@ -8,12 +8,12 @@ on:
       - "v*"
   pull_request:
     paths:
-      - "cmd/clawctl/**"
-      - "internal/clawctl/**"
-      - "dockerfiles/clawctl/**"
+      - "cmd/clawdash/**"
+      - "internal/clawdash/**"
+      - "dockerfiles/clawdash/**"
       - "go.mod"
       - "go.sum"
-      - ".github/workflows/clawctl-image.yml"
+      - ".github/workflows/clawdash-image.yml"
   workflow_dispatch:
 
 permissions:
@@ -40,7 +40,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/clawctl
+          images: ghcr.io/${{ github.repository_owner }}/clawdash
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
@@ -49,7 +49,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: dockerfiles/clawctl/Dockerfile
+          file: dockerfiles/clawdash/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

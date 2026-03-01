@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mostlydev/clawdapus/internal/clawctl"
+	"github.com/mostlydev/clawdapus/internal/clawdash"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/pod"
 )
@@ -26,10 +26,10 @@ func writePodManifest(runtimeDir string, p *pod.Pod, resolved map[string]*driver
 	return path, nil
 }
 
-func buildPodManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw, proxies []pod.CllamaProxyConfig) *clawctl.PodManifest {
-	out := &clawctl.PodManifest{
+func buildPodManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw, proxies []pod.CllamaProxyConfig) *clawdash.PodManifest {
+	out := &clawdash.PodManifest{
 		PodName:  p.Name,
-		Services: make(map[string]clawctl.ServiceManifest, len(p.Services)),
+		Services: make(map[string]clawdash.ServiceManifest, len(p.Services)),
 	}
 
 	names := make([]string, 0, len(p.Services))
@@ -40,7 +40,7 @@ func buildPodManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw, prox
 
 	for _, name := range names {
 		svc := p.Services[name]
-		manifest := clawctl.ServiceManifest{
+		manifest := clawdash.ServiceManifest{
 			ImageRef: svc.Image,
 			Count:    1,
 		}
@@ -71,9 +71,9 @@ func buildPodManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw, prox
 	}
 
 	if len(proxies) > 0 {
-		out.Proxies = make([]clawctl.ProxyManifest, 0, len(proxies))
+		out.Proxies = make([]clawdash.ProxyManifest, 0, len(proxies))
 		for _, proxy := range proxies {
-			out.Proxies = append(out.Proxies, clawctl.ProxyManifest{
+			out.Proxies = append(out.Proxies, clawdash.ProxyManifest{
 				ProxyType:   proxy.ProxyType,
 				ServiceName: "cllama-" + strings.TrimSpace(proxy.ProxyType),
 				Image:       proxy.Image,
@@ -87,13 +87,13 @@ func buildPodManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw, prox
 	return out
 }
 
-func toSurfaceManifest(in []driver.ResolvedSurface) []clawctl.SurfaceManifest {
+func toSurfaceManifest(in []driver.ResolvedSurface) []clawdash.SurfaceManifest {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]clawctl.SurfaceManifest, 0, len(in))
+	out := make([]clawdash.SurfaceManifest, 0, len(in))
 	for _, s := range in {
-		out = append(out, clawctl.SurfaceManifest{
+		out = append(out, clawdash.SurfaceManifest{
 			Scheme:        s.Scheme,
 			Target:        s.Target,
 			AccessMode:    s.AccessMode,

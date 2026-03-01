@@ -698,6 +698,7 @@ func TestEmitProxyPublishesDashboardPort(t *testing.T) {
 		Image:          "ghcr.io/mostlydev/cllama:latest",
 		ContextHostDir: "/tmp/ctx",
 		AuthHostDir:    "/tmp/auth",
+		DashboardPort:  "8999",
 		Environment:    map[string]string{},
 		PodName:        "test-pod",
 	}}
@@ -722,13 +723,13 @@ func TestEmitProxyPublishesDashboardPort(t *testing.T) {
 	}
 	found := false
 	for _, port := range proxySvc.Ports {
-		if port == "8081:8081" {
+		if port == "8999:8081" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected port 8081:8081 on proxy service, got ports: %v", proxySvc.Ports)
+		t.Errorf("expected port 8999:8081 on proxy service, got ports: %v", proxySvc.Ports)
 	}
 }
 

@@ -39,9 +39,9 @@ claw ps -f claw-pod.yml        # assistant + cllama-passthrough both running
 claw health -f claw-pod.yml    # both healthy
 ```
 
-Open **http://localhost:8081** — the cllama governance proxy dashboard. Watch every LLM call in real time: which agent, which model, token counts, cost.
+Open **http://localhost:8181** — the cllama governance proxy dashboard. Watch every LLM call in real time: which agent, which model, token counts, cost.
 
-Open **http://localhost:8082** — the clawctl fleet dashboard. View live service health, topology wiring, and per-service drill-down status.
+Open **http://localhost:8082** — the Clawdapus Dash fleet dashboard. View live service health, topology wiring, and per-service drill-down status.
 
 Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
 
@@ -222,7 +222,7 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Identity resolution:** Single proxy serves an entire pod. Bearer tokens resolve which agent is calling.
 - **Cost accounting:** Extracts token usage from every response, multiplies by pricing table, tracks per agent/provider/model.
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
-- **Operator dashboard:** Real-time web UI at port 8081 — agent activity, provider status, cost breakdown.
+- **Operator dashboard:** Real-time web UI at host port 8181 by default (container `:8081`) — agent activity, provider status, cost breakdown.
 
 The reference implementation is [`cllama-passthrough`](https://github.com/mostlydev/cllama-passthrough) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
 

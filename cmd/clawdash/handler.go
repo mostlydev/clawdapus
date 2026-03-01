@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	manifestpkg "github.com/mostlydev/clawdapus/internal/clawctl"
+	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
@@ -26,12 +26,13 @@ type statusSource interface {
 }
 
 type handler struct {
-	manifest     *manifestpkg.PodManifest
-	statusSource statusSource
-	tpl          *template.Template
+	manifest       *manifestpkg.PodManifest
+	statusSource   statusSource
+	cllamaCostsURL string
+	tpl            *template.Template
 }
 
-func newHandler(manifest *manifestpkg.PodManifest, source statusSource) http.Handler {
+func newHandler(manifest *manifestpkg.PodManifest, source statusSource, cllamaCostsURL string) http.Handler {
 	funcs := template.FuncMap{
 		"statusClass":   statusClass,
 		"pathEscape":    url.PathEscape,
@@ -41,11 +42,12 @@ func newHandler(manifest *manifestpkg.PodManifest, source statusSource) http.Han
 		"statusLabel":   statusLabel,
 		"hasStatusData": hasStatusData,
 	}
-	tpl := template.Must(template.New("clawctl").Funcs(funcs).ParseFS(templateFS, "templates/*.html"))
+	tpl := template.Must(template.New("clawdash").Funcs(funcs).ParseFS(templateFS, "templates/*.html"))
 	return &handler{
-		manifest:     manifest,
-		statusSource: source,
-		tpl:          tpl,
+		manifest:       manifest,
+		statusSource:   source,
+		cllamaCostsURL: strings.TrimSpace(cllamaCostsURL),
+		tpl:            tpl,
 	}
 }
 
@@ -79,6 +81,8 @@ type fleetPageData struct {
 	Agents          []fleetCard
 	Proxies         []fleetCard
 	Infrastructure  []fleetCard
+	HasCllama       bool
+	CllamaCostsURL  string
 	StatusError     string
 	HasStatusErrors bool
 }
@@ -183,6 +187,8 @@ func (h *handler) buildFleetPageData(statuses map[string]serviceStatus, statusEr
 		Agents:          agents,
 		Proxies:         proxies,
 		Infrastructure:  infra,
+		HasCllama:       len(proxies) > 0,
+		CllamaCostsURL:  h.cllamaCostsURL,
 		StatusError:     statusErr,
 		HasStatusErrors: statusErr != "",
 	}

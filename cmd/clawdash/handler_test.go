@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	manifestpkg "github.com/mostlydev/clawdapus/internal/clawctl"
+	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
@@ -83,7 +83,7 @@ func testStatuses() map[string]serviceStatus {
 }
 
 func TestFleetPageRenders(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()})
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181/costs")
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -101,7 +101,7 @@ func TestFleetPageRenders(t *testing.T) {
 }
 
 func TestTopologyPageRenders(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()})
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181/costs")
 	req := httptest.NewRequest(http.MethodGet, "/topology", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -115,7 +115,7 @@ func TestTopologyPageRenders(t *testing.T) {
 }
 
 func TestAPIStatusJSON(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()})
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181/costs")
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -135,7 +135,7 @@ func TestAPIStatusJSON(t *testing.T) {
 }
 
 func TestDetailMissingServiceNotFound(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()})
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181/costs")
 	req := httptest.NewRequest(http.MethodGet, "/detail/missing", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)

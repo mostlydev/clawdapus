@@ -30,30 +30,32 @@ func main() {
 }
 
 type config struct {
-	Addr         string
-	ManifestPath string
+	Addr           string
+	ManifestPath   string
+	CllamaCostsURL string
 }
 
 func loadConfig() config {
 	return config{
-		Addr:         envOr("CLAWCTL_ADDR", ":8082"),
-		ManifestPath: envOr("CLAWCTL_MANIFEST", "/claw/pod-manifest.json"),
+		Addr:           envOr("CLAWDASH_ADDR", ":8082"),
+		ManifestPath:   envOr("CLAWDASH_MANIFEST", "/claw/pod-manifest.json"),
+		CllamaCostsURL: strings.TrimSpace(os.Getenv("CLAWDASH_CLLAMA_COSTS_URL")),
 	}
 }
 
 func run(cfg config) error {
 	manifest, err := readManifest(cfg.ManifestPath)
 	if err != nil {
-		return fmt.Errorf("clawctl: read manifest: %w", err)
+		return fmt.Errorf("clawdash: read manifest: %w", err)
 	}
 
 	source, err := newDockerStatusSource(manifest.PodName)
 	if err != nil {
-		return fmt.Errorf("clawctl: docker client: %w", err)
+		return fmt.Errorf("clawdash: docker client: %w", err)
 	}
 	defer source.Close()
 
-	h := newHandler(manifest, source)
+	h := newHandler(manifest, source, cfg.CllamaCostsURL)
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           h,
@@ -62,7 +64,7 @@ func run(cfg config) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		fmt.Fprintf(os.Stderr, "clawctl ui listening on %s\n", cfg.Addr)
+		fmt.Fprintf(os.Stderr, "clawdash ui listening on %s\n", cfg.Addr)
 		errCh <- srv.ListenAndServe()
 	}()
 
@@ -86,21 +88,21 @@ func run(cfg config) error {
 func runHealthcheck(cfg config) error {
 	manifest, err := readManifest(cfg.ManifestPath)
 	if err != nil {
-		return fmt.Errorf("clawctl healthcheck: read manifest: %w", err)
+		return fmt.Errorf("clawdash healthcheck: read manifest: %w", err)
 	}
 	if strings.TrimSpace(manifest.PodName) == "" {
-		return fmt.Errorf("clawctl healthcheck: manifest podName is empty")
+		return fmt.Errorf("clawdash healthcheck: manifest podName is empty")
 	}
 	source, err := newDockerStatusSource(manifest.PodName)
 	if err != nil {
-		return fmt.Errorf("clawctl healthcheck: docker client: %w", err)
+		return fmt.Errorf("clawdash healthcheck: docker client: %w", err)
 	}
 	defer source.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := source.Ping(ctx); err != nil {
-		return fmt.Errorf("clawctl healthcheck: docker ping failed: %w", err)
+		return fmt.Errorf("clawdash healthcheck: docker ping failed: %w", err)
 	}
 	return nil
 }

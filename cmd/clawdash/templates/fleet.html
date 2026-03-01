@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>clawctl - fleet</title>
+  <title>clawdapus dash - fleet</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -117,6 +117,9 @@
       text-decoration: none;
     }
     .topbar-links a:hover { text-decoration: underline; }
+    .topbar-links .disabled {
+      color: var(--muted);
+    }
 
     main {
       max-width: 1180px;
@@ -134,6 +137,11 @@
       margin: 8px 0 20px;
       color: var(--muted);
       font-size: 13px;
+    }
+    .inline-note {
+      margin: -8px 0 16px;
+      color: var(--muted);
+      font-size: 12px;
     }
 
     .banner {
@@ -350,19 +358,26 @@
 </head>
 <body>
   <header class="topbar">
-    <a href="/" class="topbar-brand"><span>CLAWCTL</span> {{.PodName}}</a>
+    <a href="/" class="topbar-brand"><span>CLAWDAPUS DASH</span> {{.PodName}}</a>
     <nav class="topbar-nav" aria-label="Primary">
       <a href="/" class="active"><span class="dot"></span>Fleet</a>
       <a href="/topology"><span class="dot"></span>Topology</a>
     </nav>
     <div class="topbar-links">
-      <a href="http://localhost:8081/costs" target="_blank" rel="noreferrer">cllama costs</a>
+      {{if and .HasCllama .CllamaCostsURL}}
+        <a href="{{.CllamaCostsURL}}" target="_blank" rel="noreferrer">cllama costs</a>
+      {{else}}
+        <span class="disabled">no cllama costs</span>
+      {{end}}
     </div>
   </header>
 
   <main>
     <h1 class="page-title">Fleet Overview</h1>
     <p class="page-subtitle">Live view of agents, proxies, and infrastructure for pod <strong>{{.PodName}}</strong>.</p>
+    {{if not .HasCllama}}
+      <p class="inline-note">This pod has no cllama proxy, so the cllama costs dashboard link is hidden.</p>
+    {{end}}
 
     {{if .HasStatusErrors}}
       <div class="banner">{{.StatusError}}</div>
@@ -420,12 +435,12 @@
       {{end}}
     </section>
 
-    <section class="panel">
-      <div class="panel-header">
-        <h2 class="panel-title">Proxies</h2>
-        <span class="panel-count">{{len .Proxies}}</span>
-      </div>
-      {{if .Proxies}}
+    {{if .HasCllama}}
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Proxies</h2>
+          <span class="panel-count">{{len .Proxies}}</span>
+        </div>
         <div class="card-grid">
           {{range .Proxies}}
           <a class="service-card" href="{{.DetailPath}}">
@@ -451,10 +466,8 @@
           </a>
           {{end}}
         </div>
-      {{else}}
-        <div class="empty">No cllama proxies declared.</div>
-      {{end}}
-    </section>
+      </section>
+    {{end}}
 
     <section class="panel">
       <div class="panel-header">

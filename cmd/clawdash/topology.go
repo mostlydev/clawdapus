@@ -5,18 +5,26 @@ import (
 	"sort"
 	"strings"
 
-	manifestpkg "github.com/mostlydev/clawdapus/internal/clawctl"
+	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
 )
 
 type topologyPageData struct {
 	PodName         string
 	ActiveTab       string
+	Lanes           []topologyLane
 	CanvasWidth     int
 	CanvasHeight    int
 	Nodes           []topologyNode
 	Edges           []topologyEdge
+	HasNodes        bool
+	HasCllama       bool
 	StatusError     string
 	HasStatusErrors bool
+}
+
+type topologyLane struct {
+	Key   string
+	Title string
 }
 
 type topologyNode struct {
@@ -140,27 +148,43 @@ func buildTopologyPageData(manifest *manifestpkg.PodManifest, statuses map[strin
 		rowGap    = 68
 		canvasPad = 36
 		minRows   = 3
-		laneCount = 5
 	)
 
-	laneX := map[string]int{
-		"channel": xStart + laneGap*0,
-		"agent":   xStart + laneGap*1,
-		"proxy":   xStart + laneGap*2,
-		"service": xStart + laneGap*3,
-		"volume":  xStart + laneGap*4,
+	lanesMeta := make([]topologyLane, 0, 5)
+	lanesMeta = append(lanesMeta, topologyLane{Key: "channel", Title: "Channels"})
+	lanesMeta = append(lanesMeta, topologyLane{Key: "agent", Title: "Agents"})
+	hasCllama := len(proxyNames) > 0
+	if hasCllama {
+		lanesMeta = append(lanesMeta, topologyLane{Key: "proxy", Title: "Proxies"})
+	}
+	lanesMeta = append(lanesMeta, topologyLane{Key: "service", Title: "Services"})
+	lanesMeta = append(lanesMeta, topologyLane{Key: "volume", Title: "Volumes"})
+
+	laneX := make(map[string]int, len(lanesMeta))
+	for i, lane := range lanesMeta {
+		laneX[lane.Key] = xStart + laneGap*i
 	}
 
 	type laneNodes struct {
 		lane  string
 		names []string
 	}
-	lanes := []laneNodes{
-		{lane: "channel", names: channels},
-		{lane: "agent", names: agentNames},
-		{lane: "proxy", names: proxyNames},
-		{lane: "service", names: services},
-		{lane: "volume", names: volumes},
+	lanes := make([]laneNodes, 0, len(lanesMeta))
+	for _, lane := range lanesMeta {
+		names := []string{}
+		switch lane.Key {
+		case "channel":
+			names = channels
+		case "agent":
+			names = agentNames
+		case "proxy":
+			names = proxyNames
+		case "service":
+			names = services
+		case "volume":
+			names = volumes
+		}
+		lanes = append(lanes, laneNodes{lane: lane.Key, names: names})
 	}
 
 	nodeMap := make(map[string]topologyNode)
@@ -246,7 +270,7 @@ func buildTopologyPageData(manifest *manifestpkg.PodManifest, statuses map[strin
 		nodes[i].Neighbors = strings.Join(neighbors, ",")
 	}
 
-	canvasWidth := xStart + laneGap*(laneCount-1) + nodeW + canvasPad
+	canvasWidth := xStart + laneGap*(len(lanesMeta)-1) + nodeW + canvasPad
 	canvasHeight := yStart + maxRows*rowGap + canvasPad
 	if canvasHeight < 300 {
 		canvasHeight = 300
@@ -255,10 +279,13 @@ func buildTopologyPageData(manifest *manifestpkg.PodManifest, statuses map[strin
 	return topologyPageData{
 		PodName:         manifest.PodName,
 		ActiveTab:       "topology",
+		Lanes:           lanesMeta,
 		CanvasWidth:     canvasWidth,
 		CanvasHeight:    canvasHeight,
 		Nodes:           nodes,
 		Edges:           edges,
+		HasNodes:        len(nodes) > 0,
+		HasCllama:       hasCllama,
 		StatusError:     statusErr,
 		HasStatusErrors: statusErr != "",
 	}

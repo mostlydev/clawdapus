@@ -44,15 +44,17 @@ type CllamaProxyConfig struct {
 	Image          string            // e.g. ghcr.io/mostlydev/cllama:latest
 	ContextHostDir string            // host path for shared context dir
 	AuthHostDir    string            // host path for provider auth state
+	DashboardPort  string            // host port published to proxy UI :8081 (default "8181")
 	Environment    map[string]string // proxy-only env (e.g. CLAW_POD, provider keys)
 	PodName        string
 }
 
-type ClawctlConfig struct {
-	Image              string // e.g. ghcr.io/mostlydev/clawctl:latest
+type ClawdashConfig struct {
+	Image              string // e.g. ghcr.io/mostlydev/clawdash:latest
 	Addr               string // e.g. :8082
 	ManifestHostPath   string // host path to pod-manifest.json
 	DockerSockHostPath string // host path to docker socket
+	CllamaCostsURL     string // external costs URL for operator browser
 	PodName            string
 }
 
@@ -266,6 +268,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 
 		hasClaw = true
 		serviceName := "cllama-" + proxy.ProxyType
+		dashboardPort := hostPortOrDefault(proxy.DashboardPort, "8181")
 		env := map[string]string{
 			"CLAW_CONTEXT_ROOT": "/claw/context",
 			"CLAW_AUTH_DIR":     "/claw/auth",
@@ -276,7 +279,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 
 		cf.Services[serviceName] = &composeService{
 			Image: proxy.Image,
-			Ports: []string{"8081:8081"}, // operator dashboard
+			Ports: []string{fmt.Sprintf("%s:8081", dashboardPort)}, // operator dashboard
 			Volumes: []string{
 				fmt.Sprintf("%s:/claw/context:ro", proxy.ContextHostDir),
 				fmt.Sprintf("%s:/claw/auth:rw", proxy.AuthHostDir),
@@ -299,51 +302,54 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		}
 	}
 
-	if hasClaw && p.Clawctl != nil {
-		if strings.TrimSpace(p.Clawctl.Image) == "" {
-			return "", fmt.Errorf("clawctl image must not be empty")
+	if hasClaw && p.Clawdash != nil {
+		if strings.TrimSpace(p.Clawdash.Image) == "" {
+			return "", fmt.Errorf("clawdash image must not be empty")
 		}
-		if strings.TrimSpace(p.Clawctl.ManifestHostPath) == "" {
-			return "", fmt.Errorf("clawctl manifest host path must not be empty")
+		if strings.TrimSpace(p.Clawdash.ManifestHostPath) == "" {
+			return "", fmt.Errorf("clawdash manifest host path must not be empty")
 		}
 
-		addr := strings.TrimSpace(p.Clawctl.Addr)
+		addr := strings.TrimSpace(p.Clawdash.Addr)
 		if addr == "" {
 			addr = ":8082"
 		}
-		port := clawctlPort(addr)
-		socketPath := strings.TrimSpace(p.Clawctl.DockerSockHostPath)
+		port := clawdashPort(addr)
+		socketPath := strings.TrimSpace(p.Clawdash.DockerSockHostPath)
 		if socketPath == "" {
 			socketPath = "/var/run/docker.sock"
 		}
 
-		cf.Services["clawctl"] = &composeService{
-			Image:    p.Clawctl.Image,
+		cf.Services["clawdash"] = &composeService{
+			Image:    p.Clawdash.Image,
 			Ports:    []string{fmt.Sprintf("%s:%s", port, port)},
 			ReadOnly: true,
 			Tmpfs:    []string{"/tmp"},
 			Volumes: []string{
-				fmt.Sprintf("%s:/claw/pod-manifest.json:ro", p.Clawctl.ManifestHostPath),
+				fmt.Sprintf("%s:/claw/pod-manifest.json:ro", p.Clawdash.ManifestHostPath),
 				fmt.Sprintf("%s:/var/run/docker.sock:ro", socketPath),
 			},
 			Environment: map[string]string{
-				"CLAWCTL_ADDR":     addr,
-				"CLAWCTL_MANIFEST": "/claw/pod-manifest.json",
-				"CLAW_POD":         p.Clawctl.PodName,
+				"CLAWDASH_ADDR":     addr,
+				"CLAWDASH_MANIFEST": "/claw/pod-manifest.json",
+				"CLAW_POD":          p.Clawdash.PodName,
 			},
 			Restart: "on-failure",
 			Healthcheck: &composeHealthcheck{
-				Test:     []string{"CMD", "/clawctl", "-healthcheck"},
+				Test:     []string{"CMD", "/clawdash", "-healthcheck"},
 				Interval: "15s",
 				Timeout:  "5s",
 				Retries:  3,
 			},
 			Labels: map[string]string{
-				"claw.pod":     p.Clawctl.PodName,
+				"claw.pod":     p.Clawdash.PodName,
 				"claw.role":    "dashboard",
-				"claw.service": "clawctl",
+				"claw.service": "clawdash",
 			},
 			Networks: []string{"claw-internal"},
+		}
+		if strings.TrimSpace(p.Clawdash.CllamaCostsURL) != "" {
+			cf.Services["clawdash"].Environment["CLAWDASH_CLLAMA_COSTS_URL"] = p.Clawdash.CllamaCostsURL
 		}
 	}
 
@@ -448,7 +454,7 @@ func surfaceAccessMode(surface driver.ResolvedSurface) (string, error) {
 	}
 }
 
-func clawctlPort(addr string) string {
+func clawdashPort(addr string) string {
 	port := strings.TrimSpace(addr)
 	if strings.HasPrefix(addr, ":") {
 		port = strings.TrimPrefix(addr, ":")
@@ -462,6 +468,17 @@ func clawctlPort(addr string) string {
 	value, err := strconv.Atoi(strings.TrimSpace(port))
 	if err != nil || value < 1 || value > 65535 {
 		return "8082"
+	}
+	return strconv.Itoa(value)
+}
+
+func hostPortOrDefault(port, fallback string) string {
+	value, err := strconv.Atoi(strings.TrimSpace(port))
+	if err != nil || value < 1 || value > 65535 {
+		value, err = strconv.Atoi(strings.TrimSpace(fallback))
+		if err != nil || value < 1 || value > 65535 {
+			return "8181"
+		}
 	}
 	return strconv.Itoa(value)
 }
