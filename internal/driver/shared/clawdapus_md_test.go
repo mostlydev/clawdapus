@@ -56,7 +56,7 @@ func TestClawdapusMDIncludesProxySection(t *testing.T) {
 	if !strings.Contains(md, "## LLM Proxy") {
 		t.Error("expected LLM Proxy section")
 	}
-	if !strings.Contains(md, "cllama-passthrough:8080") {
+	if !strings.Contains(md, "cllama:8080") {
 		t.Error("expected proxy endpoint with type name")
 	}
 }

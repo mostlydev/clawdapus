@@ -388,7 +388,7 @@ func runComposeUp(podFile string) error {
 		for _, proxyType := range proxyTypes {
 			proxies = append(proxies, pod.CllamaProxyConfig{
 				ProxyType:      proxyType,
-				Image:          fmt.Sprintf("ghcr.io/mostlydev/cllama-%s:latest", proxyType),
+				Image:          cllama.ProxyImageRef(proxyType),
 				ContextHostDir: filepath.Join(runtimeDir, "context"),
 				AuthHostDir:    authDir,
 				DashboardPort:  cllamaDashboardPort,

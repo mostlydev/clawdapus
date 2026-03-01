@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
@@ -53,7 +54,7 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 	if len(rc.Cllama) > 0 {
 		b.WriteString("## LLM Proxy\n\n")
 		b.WriteString("Your LLM requests are routed through a governance proxy.\n\n")
-		firstProxy := fmt.Sprintf("cllama-%s", rc.Cllama[0])
+		firstProxy := cllama.ProxyServiceName(rc.Cllama[0])
 		b.WriteString(fmt.Sprintf("- **Endpoint:** `http://%s:8080/v1`\n", firstProxy))
 		b.WriteString("- **Auth:** Bearer token (pre-configured)\n")
 		if len(rc.Cllama) == 1 {

@@ -30,9 +30,10 @@ func main() {
 }
 
 type config struct {
-	Addr           string
-	ManifestPath   string
-	CllamaCostsURL string
+	Addr            string
+	ManifestPath    string
+	CllamaCostsURL  string
+	CostLogFallback bool
 }
 
 func loadConfig() config {
@@ -40,6 +41,9 @@ func loadConfig() config {
 		Addr:           envOr("CLAWDASH_ADDR", ":8082"),
 		ManifestPath:   envOr("CLAWDASH_MANIFEST", "/claw/pod-manifest.json"),
 		CllamaCostsURL: strings.TrimSpace(os.Getenv("CLAWDASH_CLLAMA_COSTS_URL")),
+		CostLogFallback: envBool(
+			"CLAWDASH_COST_LOG_FALLBACK",
+		),
 	}
 }
 
@@ -55,7 +59,7 @@ func run(cfg config) error {
 	}
 	defer source.Close()
 
-	h := newHandler(manifest, source, cfg.CllamaCostsURL)
+	h := newHandler(manifest, source, cfg.CllamaCostsURL, cfg.CostLogFallback)
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           h,
@@ -113,4 +117,9 @@ func envOr(key, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func envBool(key string) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }

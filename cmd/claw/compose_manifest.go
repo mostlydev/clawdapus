@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/clawdash"
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/pod"
 )
@@ -75,7 +76,7 @@ func buildPodManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw, prox
 		for _, proxy := range proxies {
 			out.Proxies = append(out.Proxies, clawdash.ProxyManifest{
 				ProxyType:   proxy.ProxyType,
-				ServiceName: "cllama-" + strings.TrimSpace(proxy.ProxyType),
+				ServiceName: cllama.ProxyServiceName(proxy.ProxyType),
 				Image:       proxy.Image,
 			})
 		}

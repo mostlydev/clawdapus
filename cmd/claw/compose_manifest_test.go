@@ -56,7 +56,7 @@ func TestBuildPodManifestIncludesResolvedState(t *testing.T) {
 		},
 	}
 	proxies := []pod.CllamaProxyConfig{
-		{ProxyType: "passthrough", Image: "ghcr.io/mostlydev/cllama-passthrough:latest"},
+		{ProxyType: "passthrough", Image: "ghcr.io/mostlydev/cllama:latest"},
 	}
 
 	got := buildPodManifest(p, resolved, proxies)
@@ -92,8 +92,8 @@ func TestBuildPodManifestIncludesResolvedState(t *testing.T) {
 	if len(got.Proxies) != 1 {
 		t.Fatalf("expected 1 proxy, got %d", len(got.Proxies))
 	}
-	if got.Proxies[0].ServiceName != "cllama-passthrough" {
-		t.Fatalf("expected proxy service cllama-passthrough, got %q", got.Proxies[0].ServiceName)
+	if got.Proxies[0].ServiceName != "cllama" {
+		t.Fatalf("expected proxy service cllama, got %q", got.Proxies[0].ServiceName)
 	}
 }
 

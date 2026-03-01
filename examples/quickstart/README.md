@@ -36,11 +36,13 @@ claw up -f claw-pod.yml -d
 ## 4. Verify
 
 ```bash
-claw ps -f claw-pod.yml       # assistant + cllama-passthrough both running
+claw ps -f claw-pod.yml       # assistant + cllama both running
 claw health -f claw-pod.yml   # both healthy
 ```
 
-Open **http://localhost:8081** — the cllama governance proxy dashboard. This shows every LLM call in real time: which agent, which model, token counts, estimated cost, latency.
+Open **http://localhost:8181** — the cllama governance proxy dashboard. This shows every LLM call in real time: which agent, which model, token counts, estimated cost, latency.
+
+Open **http://localhost:8082** — the Clawdapus Dash fleet dashboard (services, topology, detail view, integrated costs when available).
 
 ## 5. Talk to your bot
 
@@ -49,7 +51,7 @@ Message `@quickstart-bot` in your Discord server. Every message routes through t
 Check the audit trail:
 
 ```bash
-claw logs -f claw-pod.yml cllama-passthrough
+claw logs -f claw-pod.yml cllama
 ```
 
 Structured JSON for every request: agent, model, tokens, cost, latency.

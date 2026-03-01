@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/client"
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
@@ -63,7 +64,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	env := map[string]string{"CLAW_MANAGED": "true"}
 
 	if len(rc.Cllama) > 0 {
-		firstProxy := fmt.Sprintf("http://cllama-%s:8080/v1", rc.Cllama[0])
+		firstProxy := cllama.ProxyBaseURL(rc.Cllama[0])
 		env["ANTHROPIC_BASE_URL"] = firstProxy
 		// Compose network name: {project}_{network}
 		env["CLAW_NETWORK"] = fmt.Sprintf("%s_claw-internal", podName)

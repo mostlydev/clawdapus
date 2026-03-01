@@ -80,7 +80,7 @@ func TestGenerateConfigCllamaRewritesProviderBaseURL(t *testing.T) {
 	if !ok {
 		t.Fatal("expected models.providers.anthropic config")
 	}
-	if anthropic["baseUrl"] != "http://cllama-passthrough:8080/v1" {
+	if anthropic["baseUrl"] != "http://cllama:8080/v1" {
 		t.Errorf("expected proxy baseUrl, got %v", anthropic["baseUrl"])
 	}
 	modelEntries, ok := anthropic["models"].([]interface{})
@@ -159,7 +159,7 @@ func TestGenerateConfigCllamaRewritesAllModelProviders(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected models.providers.%s", provider)
 		}
-		if entry["baseUrl"] != "http://cllama-passthrough:8080/v1" {
+		if entry["baseUrl"] != "http://cllama:8080/v1" {
 			t.Fatalf("provider %s baseUrl mismatch: %v", provider, entry["baseUrl"])
 		}
 		if entry["apiKey"] != "westin:abc123hex" {

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"gopkg.in/yaml.v3"
 )
@@ -267,7 +268,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		}
 
 		hasClaw = true
-		serviceName := "cllama-" + proxy.ProxyType
+		serviceName := cllama.ProxyServiceName(proxy.ProxyType)
 		dashboardPort := hostPortOrDefault(proxy.DashboardPort, "8181")
 		env := map[string]string{
 			"CLAW_CONTEXT_ROOT": "/claw/context",
@@ -287,7 +288,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 			Environment: env,
 			Restart:     "on-failure",
 			Healthcheck: &composeHealthcheck{
-				Test:     []string{"CMD", fmt.Sprintf("/cllama-%s", proxy.ProxyType), "-healthcheck"},
+				Test:     []string{"CMD", cllama.ProxyHealthcheckBinary(proxy.ProxyType), "-healthcheck"},
 				Interval: "15s",
 				Timeout:  "5s",
 				Retries:  3,

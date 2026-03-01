@@ -174,7 +174,7 @@ func TestMaterializeCllamaOpenAIModelRewrite(t *testing.T) {
 	if got := cfg["model"]; got != "openrouter/moonshotai/kimi-k2.5" {
 		t.Fatalf("expected cllama model provider-prefixed, got %v", got)
 	}
-	if got := cfg["llm_base_url"]; got != "http://cllama-passthrough:8080/v1" {
+	if got := cfg["llm_base_url"]; got != "http://cllama:8080/v1" {
 		t.Fatalf("expected cllama llm_base_url rewrite, got %v", got)
 	}
 	if got := cfg["api_key"]; got != "agent:token" {

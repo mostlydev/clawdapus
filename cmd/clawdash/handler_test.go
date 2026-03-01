@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -48,7 +51,7 @@ func testManifest() *manifestpkg.PodManifest {
 			},
 		},
 		Proxies: []manifestpkg.ProxyManifest{
-			{ProxyType: "passthrough", ServiceName: "cllama-passthrough", Image: "cllama:latest"},
+			{ProxyType: "passthrough", ServiceName: "cllama", Image: "cllama:latest"},
 		},
 	}
 }
@@ -71,8 +74,8 @@ func testStatuses() map[string]serviceStatus {
 			Instances: 1,
 			Running:   1,
 		},
-		"cllama-passthrough": {
-			Service:   "cllama-passthrough",
+		"cllama": {
+			Service:   "cllama",
 			Status:    "healthy",
 			State:     "running",
 			Uptime:    "3m 1s",
@@ -83,7 +86,7 @@ func testStatuses() map[string]serviceStatus {
 }
 
 func TestFleetPageRenders(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181")
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181", false)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -104,10 +107,49 @@ func TestFleetPageRenders(t *testing.T) {
 	if !strings.Contains(body, "Cost emission not available yet") {
 		t.Fatalf("expected costs emission warning in body")
 	}
+	if strings.Contains(body, "Open cllama dashboard") {
+		t.Fatalf("expected costs link to be hidden when /costs/api is unavailable")
+	}
+}
+
+func TestFleetPageShowsCostLinkWhenCostAPIAvailable(t *testing.T) {
+	raw := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181", false)
+	h, ok := raw.(*handler)
+	if !ok {
+		t.Fatal("expected *handler")
+	}
+	h.httpClient = &http.Client{
+		Timeout: time.Second,
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.String() != "http://cllama:8081/costs/api" {
+				return nil, fmt.Errorf("unexpected URL: %s", req.URL.String())
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"total_cost_usd":1.2345,"total_requests":42}`)),
+			}, nil
+		}),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "$1.2345") {
+		t.Fatalf("expected rendered API cost summary, got body:\n%s", body)
+	}
+	if !strings.Contains(body, "Open cllama dashboard") {
+		t.Fatalf("expected costs link when API summary is available")
+	}
 }
 
 func TestTopologyPageRenders(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181")
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181", false)
 	req := httptest.NewRequest(http.MethodGet, "/topology", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -121,7 +163,7 @@ func TestTopologyPageRenders(t *testing.T) {
 }
 
 func TestAPIStatusJSON(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181")
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181", false)
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -141,7 +183,7 @@ func TestAPIStatusJSON(t *testing.T) {
 }
 
 func TestDetailMissingServiceNotFound(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181")
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181", false)
 	req := httptest.NewRequest(http.MethodGet, "/detail/missing", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -149,4 +191,10 @@ func TestDetailMissingServiceNotFound(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

@@ -35,7 +35,7 @@ claw build -t quickstart-assistant ./agents/assistant
 claw up -f claw-pod.yml -d
 
 # Verify
-claw ps -f claw-pod.yml        # assistant + cllama-passthrough both running
+claw ps -f claw-pod.yml        # assistant + cllama both running
 claw health -f claw-pod.yml    # both healthy
 ```
 
@@ -68,6 +68,7 @@ Fleet view with integrated costs status:
 ![Clawdapus Dash Fleet](docs/screenshots/clawdash-fleet-costs.png)
 
 If a cllama build does not emit `GET /costs/api`, Clawdapus Dash surfaces an explicit "cost emission not available yet" state instead of linking to a dead page.
+API data is authoritative; log-derived cost estimation is opt-in via `CLAWDASH_COST_LOG_FALLBACK=1`.
 
 Topology view:
 
@@ -240,7 +241,7 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
 - **Operator dashboard:** Real-time web UI at host port 8181 by default (container `:8081`) — agent activity, provider status, cost breakdown.
 
-The reference implementation is [`cllama-passthrough`](https://github.com/mostlydev/cllama-passthrough) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
+The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
 
 See the [cllama specification](./docs/CLLAMA_SPEC.md) for the full standard.
 

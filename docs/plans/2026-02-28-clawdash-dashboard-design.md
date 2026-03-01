@@ -187,8 +187,8 @@ Fallback: if JS is disabled, a `<noscript>` block shows a manual refresh link. T
 - **Log streaming** — `claw logs` covers this from CLI
 - **Health timeline / history** — Future enhancement, needs persistent storage
 - **Config editing** — clawdash is read-only; config changes go through `claw-pod.yml`
-- **Cost tracking** — Clawdapus Dash embeds the cllama costs UI when cllama is present (default host URL `http://localhost:8181`, backed by cllama container `:8081`), and also keeps an external link for direct open.
-- **Cost emission contract** — cllama should expose a stable JSON endpoint for dashboards (for example `GET /costs/api`) so Clawdapus Dash can render native cost cards without relying on an embedded frame.
+- **Cost deep-dive UX** — Clawdapus Dash shows native fleet-level cost summary cards. Detailed provider/agent drill-down remains on cllama's own UI (`http://localhost:8181` by default) when `GET /costs/api` is available.
+- **Cost emission contract** — Clawdapus Dash expects a stable JSON endpoint (`GET /costs/api`) from cllama. API data is authoritative; optional log-derived fallback can be enabled explicitly for legacy builds.
 - **Authentication** — Pod-internal only (not exposed to the internet by default)
 
 ## Implementation Sequence

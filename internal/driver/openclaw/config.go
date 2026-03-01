@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
@@ -42,7 +43,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 	}
 
 	if len(rc.Cllama) > 0 {
-		firstProxy := fmt.Sprintf("http://cllama-%s:8080/v1", rc.Cllama[0])
+		firstProxy := cllama.ProxyBaseURL(rc.Cllama[0])
 		providerModels := collectCllamaProviderModels(rc.Models)
 		for provider, modelIDs := range providerModels {
 			basePath := "models.providers." + provider

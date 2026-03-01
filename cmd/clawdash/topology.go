@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
+	"github.com/mostlydev/clawdapus/internal/cllama"
 )
 
 type topologyPageData struct {
@@ -121,8 +122,8 @@ func buildTopologyPageData(manifest *manifestpkg.PodManifest, statuses map[strin
 		for _, proxyType := range svc.Cllama {
 			proxyService := proxyByType[proxyType]
 			if proxyService == "" {
-				proxyService = "cllama-" + proxyType
-				if proxyService != "cllama-" {
+				proxyService = cllama.ProxyServiceName(proxyType)
+				if strings.TrimSpace(proxyService) != "" {
 					proxyNames = append(proxyNames, proxyService)
 				}
 			}

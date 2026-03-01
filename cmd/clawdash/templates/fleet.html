@@ -413,7 +413,7 @@
       <a href="/topology"><span class="dot"></span>Topology</a>
     </nav>
     <div class="topbar-links">
-      {{if and .HasCostSummary .CllamaCostsURL}}
+      {{if .HasCostLink}}
         <a href="{{.CllamaCostsURL}}" target="_blank" rel="noreferrer">cllama costs</a>
       {{else if .HasCllama}}
         <span class="disabled">no cllama costs</span>
@@ -454,10 +454,13 @@
                 <div class="cost-value">{{.CostSummary.ProxyCount}}</div>
               </div>
             </div>
+            {{if .CostSummaryErr}}
+              <p class="cost-note warn">{{.CostSummaryErr}}</p>
+            {{end}}
           {{else}}
             <p class="cost-note warn">Cost emission not available yet: {{.CostSummaryErr}}</p>
           {{end}}
-          {{if and .HasCostSummary .CllamaCostsURL}}
+          {{if .HasCostLink}}
             <a class="cost-link" href="{{.CllamaCostsURL}}" target="_blank" rel="noreferrer">Open cllama dashboard</a>
           {{end}}
         </div>

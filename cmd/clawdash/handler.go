@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,7 +18,12 @@ import (
 	"strings"
 	"time"
 
+	containerapi "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
@@ -27,14 +35,15 @@ type statusSource interface {
 }
 
 type handler struct {
-	manifest       *manifestpkg.PodManifest
-	statusSource   statusSource
-	cllamaCostsURL string
-	httpClient     *http.Client
-	tpl            *template.Template
+	manifest        *manifestpkg.PodManifest
+	statusSource    statusSource
+	cllamaCostsURL  string
+	costLogFallback bool
+	httpClient      *http.Client
+	tpl             *template.Template
 }
 
-func newHandler(manifest *manifestpkg.PodManifest, source statusSource, cllamaCostsURL string) http.Handler {
+func newHandler(manifest *manifestpkg.PodManifest, source statusSource, cllamaCostsURL string, costLogFallback bool) http.Handler {
 	funcs := template.FuncMap{
 		"statusClass":   statusClass,
 		"pathEscape":    url.PathEscape,
@@ -46,9 +55,10 @@ func newHandler(manifest *manifestpkg.PodManifest, source statusSource, cllamaCo
 	}
 	tpl := template.Must(template.New("clawdash").Funcs(funcs).ParseFS(templateFS, "templates/*.html"))
 	return &handler{
-		manifest:       manifest,
-		statusSource:   source,
-		cllamaCostsURL: strings.TrimSpace(cllamaCostsURL),
+		manifest:        manifest,
+		statusSource:    source,
+		cllamaCostsURL:  strings.TrimSpace(cllamaCostsURL),
+		costLogFallback: costLogFallback,
 		httpClient: &http.Client{
 			Timeout: 2 * time.Second,
 		},
@@ -88,6 +98,7 @@ type fleetPageData struct {
 	Infrastructure  []fleetCard
 	HasCllama       bool
 	CllamaCostsURL  string
+	HasCostLink     bool
 	HasCostSummary  bool
 	CostSummary     cllamaCostSummary
 	CostSummaryErr  string
@@ -99,6 +110,7 @@ type cllamaCostSummary struct {
 	TotalCostUSD float64
 	Requests     int
 	ProxyCount   int
+	Source       string
 }
 
 type fleetCard struct {
@@ -205,6 +217,7 @@ func (h *handler) buildFleetPageData(ctx context.Context, statuses map[string]se
 		Infrastructure:  infra,
 		HasCllama:       len(proxies) > 0,
 		CllamaCostsURL:  h.cllamaCostsURL,
+		HasCostLink:     costSummary != nil && costSummary.Source == "api" && strings.TrimSpace(h.cllamaCostsURL) != "",
 		HasCostSummary:  costSummary != nil,
 		CostSummary:     firstCostSummary(costSummary),
 		CostSummaryErr:  costErr,
@@ -318,7 +331,7 @@ func (h *handler) buildDetailPageData(name string, statuses map[string]serviceSt
 	for _, proxyType := range svc.Cllama {
 		serviceName := proxyByType[proxyType]
 		if serviceName == "" {
-			serviceName = "cllama-" + proxyType
+			serviceName = cllama.ProxyServiceName(proxyType)
 		}
 		cllamaRows = append(cllamaRows, cllamaDetailRow{
 			ProxyType:   proxyType,
@@ -564,7 +577,31 @@ func (h *handler) fetchCllamaCostSummary(ctx context.Context) (*cllamaCostSummar
 	if len(h.manifest.Proxies) == 0 {
 		return nil, ""
 	}
+	summary, apiErr := h.fetchCllamaCostSummaryFromAPI(ctx)
+	if summary != nil {
+		summary.Source = "api"
+		return summary, ""
+	}
+	if !h.costLogFallback {
+		return nil, apiErr
+	}
+	if summary, err := h.fetchCllamaCostSummaryFromLogs(ctx); summary != nil {
+		summary.Source = "logs"
+		if strings.TrimSpace(apiErr) != "" {
+			return summary, fmt.Sprintf("cost API unavailable (%s); showing log-derived estimate", apiErr)
+		}
+		if strings.TrimSpace(err) != "" {
+			return summary, err
+		}
+		return summary, "showing log-derived estimate"
+	}
+	if strings.TrimSpace(apiErr) != "" {
+		return nil, apiErr
+	}
+	return nil, "no cllama cost data available"
+}
 
+func (h *handler) fetchCllamaCostSummaryFromAPI(ctx context.Context) (*cllamaCostSummary, string) {
 	summary := &cllamaCostSummary{}
 	success := 0
 	lastErr := ""
@@ -614,6 +651,104 @@ func (h *handler) fetchCllamaCostSummary(ctx context.Context) (*cllamaCostSummar
 	}
 	summary.ProxyCount = success
 	return summary, ""
+}
+
+func (h *handler) fetchCllamaCostSummaryFromLogs(ctx context.Context) (*cllamaCostSummary, string) {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, fmt.Sprintf("docker client unavailable for cost log fallback: %v", err)
+	}
+	defer cli.Close()
+
+	summary := &cllamaCostSummary{}
+	success := 0
+	lastErr := ""
+
+	for _, proxy := range h.manifest.Proxies {
+		serviceName := strings.TrimSpace(proxy.ServiceName)
+		if serviceName == "" {
+			continue
+		}
+
+		containerID, err := findProxyContainerID(ctx, cli, h.manifest.PodName, serviceName)
+		if err != nil {
+			lastErr = fmt.Sprintf("%s container lookup failed: %v", serviceName, err)
+			continue
+		}
+
+		rc, err := cli.ContainerLogs(ctx, containerID, containerapi.LogsOptions{
+			ShowStdout: true,
+			ShowStderr: false,
+			Tail:       "500",
+		})
+		if err != nil {
+			lastErr = fmt.Sprintf("%s log read failed: %v", serviceName, err)
+			continue
+		}
+
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		_, copyErr := stdcopy.StdCopy(&stdout, &stderr, rc)
+		_ = rc.Close()
+		if copyErr != nil && copyErr != io.EOF {
+			lastErr = fmt.Sprintf("%s log decode failed: %v", serviceName, copyErr)
+			continue
+		}
+
+		total, reqs := parseCostSummaryFromLogs(stdout.String())
+		summary.TotalCostUSD += total
+		summary.Requests += reqs
+		success++
+	}
+
+	if success == 0 {
+		if strings.TrimSpace(lastErr) == "" {
+			lastErr = "no proxy logs available for cost fallback"
+		}
+		return nil, lastErr
+	}
+	summary.ProxyCount = success
+	return summary, ""
+}
+
+func findProxyContainerID(ctx context.Context, cli *client.Client, podName, serviceName string) (string, error) {
+	args := filters.NewArgs(
+		filters.Arg("label", "claw.pod="+strings.TrimSpace(podName)),
+		filters.Arg("label", "claw.service="+strings.TrimSpace(serviceName)),
+	)
+	containers, err := cli.ContainerList(ctx, containerapi.ListOptions{
+		All:     true,
+		Filters: args,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(containers) == 0 {
+		return "", fmt.Errorf("not found")
+	}
+	return containers[0].ID, nil
+}
+
+func parseCostSummaryFromLogs(logs string) (float64, int) {
+	total := 0.0
+	requests := 0
+	scanner := bufio.NewScanner(strings.NewReader(logs))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &payload); err != nil {
+			continue
+		}
+		if _, ok := payload["cost_usd"]; !ok {
+			continue
+		}
+		total += asFloat(payload["cost_usd"])
+		requests++
+	}
+	return total, requests
 }
 
 func asFloat(v interface{}) float64 {

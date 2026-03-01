@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/client"
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
 	"gopkg.in/yaml.v3"
@@ -253,7 +254,7 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 		if strings.TrimSpace(rc.CllamaToken) == "" {
 			return nil, fmt.Errorf("microclaw driver: CLLAMA is enabled but token is empty")
 		}
-		firstProxy := fmt.Sprintf("http://cllama-%s:8080/v1", rc.Cllama[0])
+		firstProxy := cllama.ProxyBaseURL(rc.Cllama[0])
 		cfg["llm_base_url"] = firstProxy
 		cfg["api_key"] = rc.CllamaToken
 
