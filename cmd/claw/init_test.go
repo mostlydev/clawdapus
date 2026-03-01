@@ -38,6 +38,14 @@ func TestInitScaffoldCreatesFiles(t *testing.T) {
 	if !strings.Contains(pod, "agent: ./agents/assistant/AGENTS.md") {
 		t.Fatalf("expected pod scaffold to include pod-root-relative agent path; got:\n%s", pod)
 	}
+	for _, envLine := range []string{
+		"DISCORD_BOT_TOKEN: \"${DISCORD_BOT_TOKEN}\"",
+		"DISCORD_BOT_ID: \"${DISCORD_BOT_ID}\"",
+	} {
+		if !strings.Contains(pod, envLine) {
+			t.Fatalf("expected pod scaffold to include %q; got:\n%s", envLine, pod)
+		}
+	}
 }
 
 func TestInitScaffoldRefusesToOverwrite(t *testing.T) {

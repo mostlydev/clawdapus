@@ -119,3 +119,30 @@ If a run is killed hard (SIGKILL), clean up manually:
 ```bash
 docker compose -p trading-desk down --volumes --remove-orphans
 ```
+
+### Quickstart Docs Smoke Test
+
+Validates that the documented quickstart shell blocks are runnable end-to-end in a
+fresh Docker CLI container:
+
+- Extracts shell code blocks from:
+  - `README.md` quickstart section
+  - `examples/quickstart/README.md`
+- Runs extracted commands in a new `docker:27-cli` container (mounted to local repo
+  + Docker socket)
+- Rewrites `.env` from provided credentials and checks runtime health convergence
+  (`assistant=healthy`, `cllama-passthrough=healthy`)
+- Verifies cllama runtime signals in logs (`api listening on :8080`, `ui listening on :8081`)
+
+Run:
+
+```bash
+go test -tags spike -v -run TestQuickstartDocsRunInFreshDockerContainer ./cmd/claw/...
+```
+
+Required env vars (or values in `examples/quickstart/.env`):
+
+- `OPENROUTER_API_KEY`
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_BOT_ID`
+- `DISCORD_GUILD_ID`

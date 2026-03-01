@@ -74,7 +74,7 @@ type ChannelGuildConfig struct {
 // ChannelDMConfig is the DM routing config for a channel surface.
 type ChannelDMConfig struct {
 	Enabled   bool
-	Policy    string   // "allowlist", "denylist", or ""
+	Policy    string   // "pairing", "allowlist", "open", "disabled", or "" (legacy "denylist" alias supported)
 	AllowFrom []string // user IDs allowed to DM the bot
 }
 
