@@ -61,6 +61,22 @@ claw up -d
 claw agent add researcher
 ```
 
+## Dashboard Screenshots
+
+Fleet view with integrated costs status:
+
+![Clawdapus Dash Fleet](docs/screenshots/clawdash-fleet-costs.png)
+
+If a cllama build does not emit `GET /costs/api`, Clawdapus Dash surfaces an explicit "cost emission not available yet" state instead of linking to a dead page.
+
+Topology view:
+
+![Clawdapus Dash Topology](docs/screenshots/clawdash-topology.png)
+
+Service detail view:
+
+![Clawdapus Dash Detail](docs/screenshots/clawdash-detail.png)
+
 ---
 
 ## Install

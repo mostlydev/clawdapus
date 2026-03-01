@@ -161,6 +161,9 @@
       margin-bottom: 18px;
       overflow: hidden;
     }
+    .panel-body {
+      padding: 14px;
+    }
     .panel-header {
       display: flex;
       align-items: center;
@@ -342,6 +345,52 @@
     }
     .noscript a { color: var(--cyan); }
 
+    .costs-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }
+    .cost-stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: var(--bg);
+    }
+    .cost-label {
+      font-family: "Geist Mono", monospace;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+    .cost-value {
+      font-size: 17px;
+      color: var(--ink-bright);
+      font-weight: 600;
+    }
+    .cost-note {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .cost-note.warn {
+      color: var(--amber);
+    }
+    .cost-link {
+      display: inline-block;
+      margin-top: 10px;
+      font-family: "Geist Mono", monospace;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--cyan);
+      text-decoration: none;
+    }
+    .cost-link:hover {
+      text-decoration: underline;
+    }
+
     @media (max-width: 740px) {
       .topbar {
         padding: 0 12px;
@@ -364,9 +413,9 @@
       <a href="/topology"><span class="dot"></span>Topology</a>
     </nav>
     <div class="topbar-links">
-      {{if and .HasCllama .CllamaCostsURL}}
+      {{if and .HasCostSummary .CllamaCostsURL}}
         <a href="{{.CllamaCostsURL}}" target="_blank" rel="noreferrer">cllama costs</a>
-      {{else}}
+      {{else if .HasCllama}}
         <span class="disabled">no cllama costs</span>
       {{end}}
     </div>
@@ -381,6 +430,38 @@
 
     {{if .HasStatusErrors}}
       <div class="banner">{{.StatusError}}</div>
+    {{end}}
+
+    {{if .HasCllama}}
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Costs</h2>
+          <span class="panel-count">cllama</span>
+        </div>
+        <div class="panel-body">
+          {{if .HasCostSummary}}
+            <div class="costs-grid">
+              <div class="cost-stat">
+                <div class="cost-label">Total USD</div>
+                <div class="cost-value">${{printf "%.4f" .CostSummary.TotalCostUSD}}</div>
+              </div>
+              <div class="cost-stat">
+                <div class="cost-label">Requests</div>
+                <div class="cost-value">{{.CostSummary.Requests}}</div>
+              </div>
+              <div class="cost-stat">
+                <div class="cost-label">Proxies Reporting</div>
+                <div class="cost-value">{{.CostSummary.ProxyCount}}</div>
+              </div>
+            </div>
+          {{else}}
+            <p class="cost-note warn">Cost emission not available yet: {{.CostSummaryErr}}</p>
+          {{end}}
+          {{if and .HasCostSummary .CllamaCostsURL}}
+            <a class="cost-link" href="{{.CllamaCostsURL}}" target="_blank" rel="noreferrer">Open cllama dashboard</a>
+          {{end}}
+        </div>
+      </section>
     {{end}}
 
     <section class="panel">

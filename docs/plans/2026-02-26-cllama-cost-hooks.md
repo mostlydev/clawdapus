@@ -6,6 +6,8 @@
 
 **Architecture:** The proxy already intercepts every LLM request and response. Cost hooks read the `usage` block from OpenAI-compatible responses, multiply by a pricing table, and aggregate in-memory per agent. A new `internal/cost/` package owns the pricing table and accumulator. The logger gains `tokens_in`, `tokens_out`, `cost_usd` fields. The UI gains a `/costs` page. No persistent storage — costs reset on proxy restart (persistence is a future concern; structured logs are the durable record).
 
+**Emission contract for fleet dashboards:** `GET /costs/api` is the stable machine-readable interface for downstream dashboards (including Clawdapus Dash). UI routing (`/` vs `/costs`) may evolve, but `/costs/api` should remain stable and versioned when shape changes.
+
 **Tech Stack:** Go 1.23, `sync` (thread-safe accumulator), `encoding/json` (response parsing), `html/template` (UI), `time` (windowed stats)
 
 **Repo:** `mostlydev/cllama-passthrough` (at `/Users/wojtek/dev/ai/clawdapus/cllama-passthrough`)

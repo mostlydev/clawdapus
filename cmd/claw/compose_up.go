@@ -411,7 +411,7 @@ func runComposeUp(podFile string) error {
 		Addr:               envOrDefault("CLAWDASH_ADDR", ":8082"),
 		ManifestHostPath:   manifestPath,
 		DockerSockHostPath: "/var/run/docker.sock",
-		CllamaCostsURL:     firstIf(cllamaEnabled, fmt.Sprintf("http://localhost:%s/costs", cllamaDashboardPort)),
+		CllamaCostsURL:     firstIf(cllamaEnabled, fmt.Sprintf("http://localhost:%s", cllamaDashboardPort)),
 		PodName:            p.Name,
 	}
 

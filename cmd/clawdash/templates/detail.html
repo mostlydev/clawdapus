@@ -363,11 +363,11 @@
       </details>
     </div>
 
-    <div class="panel">
-      <details>
-        <summary>Surfaces</summary>
-        <div class="panel-body">
-          {{if .Surfaces}}
+    {{if .Surfaces}}
+      <div class="panel">
+        <details>
+          <summary>Surfaces</summary>
+          <div class="panel-body">
             <table>
               <thead>
                 <tr><th>Scheme</th><th>Target</th><th>Access</th><th>Ports</th></tr>
@@ -383,18 +383,16 @@
                 {{end}}
               </tbody>
             </table>
-          {{else}}
-            <div class="empty">No declared surfaces.</div>
-          {{end}}
-        </div>
-      </details>
-    </div>
+          </div>
+        </details>
+      </div>
+    {{end}}
 
-    <div class="panel">
-      <details>
-        <summary>Handles</summary>
-        <div class="panel-body">
-          {{if .Handles}}
+    {{if .Handles}}
+      <div class="panel">
+        <details>
+          <summary>Handles</summary>
+          <div class="panel-body">
             <table>
               <thead>
                 <tr><th>Platform</th><th>Username</th><th>ID</th><th>Guilds</th></tr>
@@ -421,35 +419,31 @@
                 {{end}}
               </tbody>
             </table>
-          {{else}}
-            <div class="empty">No handle metadata for this service.</div>
-          {{end}}
-        </div>
-      </details>
-    </div>
+          </div>
+        </details>
+      </div>
+    {{end}}
 
-    <div class="panel">
-      <details>
-        <summary>Skills</summary>
-        <div class="panel-body">
-          {{if .Skills}}
+    {{if .Skills}}
+      <div class="panel">
+        <details>
+          <summary>Skills</summary>
+          <div class="panel-body">
             <ul>
               {{range .Skills}}
                 <li>{{.}}</li>
               {{end}}
             </ul>
-          {{else}}
-            <div class="empty">No skills declared.</div>
-          {{end}}
-        </div>
-      </details>
-    </div>
+          </div>
+        </details>
+      </div>
+    {{end}}
 
-    <div class="panel">
-      <details>
-        <summary>Invoke</summary>
-        <div class="panel-body">
-          {{if .Invocations}}
+    {{if .Invocations}}
+      <div class="panel">
+        <details>
+          <summary>Invoke</summary>
+          <div class="panel-body">
             <table>
               <thead>
                 <tr><th>Name</th><th>Schedule</th><th>Message</th><th>To</th></tr>
@@ -465,18 +459,16 @@
                 {{end}}
               </tbody>
             </table>
-          {{else}}
-            <div class="empty">No scheduled invocations.</div>
-          {{end}}
-        </div>
-      </details>
-    </div>
+          </div>
+        </details>
+      </div>
+    {{end}}
 
-    <div class="panel">
-      <details>
-        <summary>Models</summary>
-        <div class="panel-body">
-          {{if .Models}}
+    {{if .Models}}
+      <div class="panel">
+        <details>
+          <summary>Models</summary>
+          <div class="panel-body">
             <table>
               <thead>
                 <tr><th>Slot</th><th>Provider / Model</th></tr>
@@ -490,18 +482,16 @@
                 {{end}}
               </tbody>
             </table>
-          {{else}}
-            <div class="empty">No model slots in manifest.</div>
-          {{end}}
-        </div>
-      </details>
-    </div>
+          </div>
+        </details>
+      </div>
+    {{end}}
 
-    <div class="panel">
-      <details>
-        <summary>Cllama</summary>
-        <div class="panel-body">
-          {{if .Cllama}}
+    {{if .Cllama}}
+      <div class="panel">
+        <details>
+          <summary>Cllama</summary>
+          <div class="panel-body">
             <table>
               <thead>
                 <tr><th>Proxy Type</th><th>Proxy Service</th><th>Token</th></tr>
@@ -516,12 +506,10 @@
                 {{end}}
               </tbody>
             </table>
-          {{else}}
-            <div class="empty">No cllama proxy wiring.</div>
-          {{end}}
-        </div>
-      </details>
-    </div>
+          </div>
+        </details>
+      </div>
+    {{end}}
 
     <noscript>
       <div class="noscript">Live updates are disabled because JavaScript is off. <a href="/detail/{{pathEscape .ServiceName}}">Refresh now</a>.</div>

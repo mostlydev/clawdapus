@@ -11,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ type handler struct {
 	manifest       *manifestpkg.PodManifest
 	statusSource   statusSource
 	cllamaCostsURL string
+	httpClient     *http.Client
 	tpl            *template.Template
 }
 
@@ -47,7 +49,10 @@ func newHandler(manifest *manifestpkg.PodManifest, source statusSource, cllamaCo
 		manifest:       manifest,
 		statusSource:   source,
 		cllamaCostsURL: strings.TrimSpace(cllamaCostsURL),
-		tpl:            tpl,
+		httpClient: &http.Client{
+			Timeout: 2 * time.Second,
+		},
+		tpl: tpl,
 	}
 }
 
@@ -83,8 +88,17 @@ type fleetPageData struct {
 	Infrastructure  []fleetCard
 	HasCllama       bool
 	CllamaCostsURL  string
+	HasCostSummary  bool
+	CostSummary     cllamaCostSummary
+	CostSummaryErr  string
 	StatusError     string
 	HasStatusErrors bool
+}
+
+type cllamaCostSummary struct {
+	TotalCostUSD float64
+	Requests     int
+	ProxyCount   int
 }
 
 type fleetCard struct {
@@ -110,12 +124,12 @@ type handleRow struct {
 
 func (h *handler) renderFleet(w http.ResponseWriter, r *http.Request) {
 	statuses, statusErr := h.snapshot(r.Context())
-	data := h.buildFleetPageData(statuses, statusErr)
+	data := h.buildFleetPageData(r.Context(), statuses, statusErr)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = h.tpl.ExecuteTemplate(w, "fleet.html", data)
 }
 
-func (h *handler) buildFleetPageData(statuses map[string]serviceStatus, statusErr string) fleetPageData {
+func (h *handler) buildFleetPageData(ctx context.Context, statuses map[string]serviceStatus, statusErr string) fleetPageData {
 	serviceNames := sortedServiceNames(h.manifest.Services)
 	proxyByService := make(map[string]manifestpkg.ProxyManifest, len(h.manifest.Proxies))
 	for _, p := range h.manifest.Proxies {
@@ -181,6 +195,8 @@ func (h *handler) buildFleetPageData(statuses map[string]serviceStatus, statusEr
 	}
 	sort.Slice(proxies, func(i, j int) bool { return proxies[i].ServiceName < proxies[j].ServiceName })
 
+	costSummary, costErr := h.fetchCllamaCostSummary(ctx)
+
 	return fleetPageData{
 		PodName:         h.manifest.PodName,
 		ActiveTab:       "fleet",
@@ -189,6 +205,9 @@ func (h *handler) buildFleetPageData(statuses map[string]serviceStatus, statusEr
 		Infrastructure:  infra,
 		HasCllama:       len(proxies) > 0,
 		CllamaCostsURL:  h.cllamaCostsURL,
+		HasCostSummary:  costSummary != nil,
+		CostSummary:     firstCostSummary(costSummary),
+		CostSummaryErr:  costErr,
 		StatusError:     statusErr,
 		HasStatusErrors: statusErr != "",
 	}
@@ -532,4 +551,115 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstCostSummary(in *cllamaCostSummary) cllamaCostSummary {
+	if in == nil {
+		return cllamaCostSummary{}
+	}
+	return *in
+}
+
+func (h *handler) fetchCllamaCostSummary(ctx context.Context) (*cllamaCostSummary, string) {
+	if len(h.manifest.Proxies) == 0 {
+		return nil, ""
+	}
+
+	summary := &cllamaCostSummary{}
+	success := 0
+	lastErr := ""
+
+	for _, proxy := range h.manifest.Proxies {
+		serviceName := strings.TrimSpace(proxy.ServiceName)
+		if serviceName == "" {
+			continue
+		}
+		endpoint := fmt.Sprintf("http://%s:8081/costs/api", serviceName)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			lastErr = fmt.Sprintf("build request for %s: %v", serviceName, err)
+			continue
+		}
+
+		resp, err := h.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Sprintf("%s unavailable: %v", serviceName, err)
+			continue
+		}
+
+		var payload map[string]interface{}
+		if resp.StatusCode == http.StatusOK {
+			if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+				lastErr = fmt.Sprintf("%s invalid JSON from /costs/api", serviceName)
+				_ = resp.Body.Close()
+				continue
+			}
+		} else {
+			lastErr = fmt.Sprintf("%s missing /costs/api (status %d)", serviceName, resp.StatusCode)
+			_ = resp.Body.Close()
+			continue
+		}
+		_ = resp.Body.Close()
+
+		summary.TotalCostUSD += asFloat(payload["total_cost_usd"])
+		summary.Requests += asInt(payload["total_requests"])
+		success++
+	}
+
+	if success == 0 {
+		if strings.TrimSpace(lastErr) == "" {
+			lastErr = "no cllama cost emission endpoint detected"
+		}
+		return nil, lastErr
+	}
+	summary.ProxyCount = success
+	return summary, ""
+}
+
+func asFloat(v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case json.Number:
+		f, err := n.Float64()
+		if err == nil {
+			return f
+		}
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
+		if err == nil {
+			return f
+		}
+	}
+	return 0
+}
+
+func asInt(v interface{}) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case json.Number:
+		i, err := n.Int64()
+		if err == nil {
+			return int(i)
+		}
+	case string:
+		i, err := strconv.Atoi(strings.TrimSpace(n))
+		if err == nil {
+			return i
+		}
+	}
+	return 0
 }

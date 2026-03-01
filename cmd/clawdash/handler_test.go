@@ -83,7 +83,7 @@ func testStatuses() map[string]serviceStatus {
 }
 
 func TestFleetPageRenders(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181/costs")
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181")
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -98,10 +98,16 @@ func TestFleetPageRenders(t *testing.T) {
 	if !strings.Contains(body, "bot") {
 		t.Fatalf("expected service name in body")
 	}
+	if !strings.Contains(body, "Costs") {
+		t.Fatalf("expected costs panel in body")
+	}
+	if !strings.Contains(body, "Cost emission not available yet") {
+		t.Fatalf("expected costs emission warning in body")
+	}
 }
 
 func TestTopologyPageRenders(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181/costs")
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181")
 	req := httptest.NewRequest(http.MethodGet, "/topology", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -115,7 +121,7 @@ func TestTopologyPageRenders(t *testing.T) {
 }
 
 func TestAPIStatusJSON(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181/costs")
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181")
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -135,7 +141,7 @@ func TestAPIStatusJSON(t *testing.T) {
 }
 
 func TestDetailMissingServiceNotFound(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181/costs")
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181")
 	req := httptest.NewRequest(http.MethodGet, "/detail/missing", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)

@@ -22,7 +22,7 @@ func TestEmitComposeInjectsClawdashDashboard(t *testing.T) {
 			Addr:               ":8082",
 			ManifestHostPath:   "/tmp/.claw-runtime/pod-manifest.json",
 			DockerSockHostPath: "/var/run/docker.sock",
-			CllamaCostsURL:     "http://localhost:8181/costs",
+			CllamaCostsURL:     "http://localhost:8181",
 			PodName:            "ops-pod",
 		},
 	}
@@ -78,7 +78,7 @@ func TestEmitComposeInjectsClawdashDashboard(t *testing.T) {
 	if clawdashSvc.Environment["CLAWDASH_MANIFEST"] != "/claw/pod-manifest.json" {
 		t.Fatalf("expected CLAWDASH_MANIFEST env, got %v", clawdashSvc.Environment["CLAWDASH_MANIFEST"])
 	}
-	if clawdashSvc.Environment["CLAWDASH_CLLAMA_COSTS_URL"] != "http://localhost:8181/costs" {
+	if clawdashSvc.Environment["CLAWDASH_CLLAMA_COSTS_URL"] != "http://localhost:8181" {
 		t.Fatalf("expected CLAWDASH_CLLAMA_COSTS_URL env, got %v", clawdashSvc.Environment["CLAWDASH_CLLAMA_COSTS_URL"])
 	}
 	if clawdashSvc.Labels["claw.role"] != "dashboard" {
