@@ -53,7 +53,7 @@ type jobState struct {
 
 // GenerateJobsJSON produces the openclaw cron/jobs.json content for rc.Invocations.
 // IDs are deterministic: same service + schedule + message always produces the same ID,
-// so re-running claw compose up is idempotent.
+// so re-running claw up is idempotent.
 func GenerateJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 	now := time.Now().UnixMilli()
 	jobs := make([]job, 0, len(rc.Invocations))

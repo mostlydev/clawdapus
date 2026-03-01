@@ -29,7 +29,7 @@ cp .env.example .env
 
 ```bash
 source .env
-claw build -t quickstart-claw .
+claw build -t quickstart-assistant ./agents/assistant
 claw up -f claw-pod.yml -d
 ```
 
@@ -57,7 +57,7 @@ Structured JSON for every request: agent, model, tokens, cost, latency.
 ## What's happening under the hood
 
 - **Credential starvation:** Your OpenRouter key lives in the proxy only. The agent gets a bearer token. It literally cannot call providers directly — it doesn't have the keys.
-- **Behavioral contract:** `AGENTS.md` is bind-mounted read-only. Even root inside the container can't modify it.
+- **Behavioral contract:** `agents/assistant/AGENTS.md` is bind-mounted read-only. Even root inside the container can't modify it.
 - **Identity projection:** The HANDLE directive wires Discord config automatically — `allowBots`, `mentionPatterns`, guild membership. No manual config.
 - **Cost tracking:** The proxy extracts `usage` from every LLM response and tracks cost per agent/model/provider.
 
@@ -65,7 +65,7 @@ Structured JSON for every request: agent, model, tokens, cost, latency.
 
 Replace the Discord configuration:
 
-**Telegram:** Change `HANDLE discord` to `HANDLE telegram` in the Clawfile. In `claw-pod.yml`, replace the `handles:` block with `telegram: {id: "${TELEGRAM_BOT_ID}", username: "mybot"}` and set `TELEGRAM_BOT_TOKEN` in `environment:`.
+**Telegram:** Change `HANDLE discord` to `HANDLE telegram` in `agents/assistant/Clawfile`. In `claw-pod.yml`, replace the `handles:` block with `telegram: {id: "${TELEGRAM_BOT_ID}", username: "mybot"}` and set `TELEGRAM_BOT_TOKEN` in `environment:`.
 
 **Slack:** Same pattern — `HANDLE slack`, swap the handles block, use `SLACK_BOT_TOKEN`.
 
@@ -75,7 +75,7 @@ Already have an OpenClaw bot running? Import your config:
 
 ```bash
 claw init --from ~/path/to/openclaw/config
-# Generates Clawfile, claw-pod.yml, AGENTS.md pre-configured from your setup
+# Generates migration scaffold pre-configured from your setup
 ```
 
 ## Clean up
