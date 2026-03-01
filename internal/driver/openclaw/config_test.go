@@ -531,8 +531,8 @@ func TestGenerateConfigDiscordFullConfig(t *testing.T) {
 	if discord["groupPolicy"] != "allowlist" {
 		t.Errorf("expected channels.discord.groupPolicy=allowlist, got %v", discord["groupPolicy"])
 	}
-	if discord["dmPolicy"] != "allowlist" {
-		t.Errorf("expected channels.discord.dmPolicy=allowlist, got %v", discord["dmPolicy"])
+	if discord["dmPolicy"] != "pairing" {
+		t.Errorf("expected channels.discord.dmPolicy=pairing, got %v", discord["dmPolicy"])
 	}
 
 	guilds, ok := discord["guilds"].(map[string]interface{})

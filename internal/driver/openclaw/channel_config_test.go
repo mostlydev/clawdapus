@@ -34,9 +34,17 @@ func TestGenerateConfigChannelSurfaceDMPolicy(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	discord := config["channels"].(map[string]interface{})["discord"].(map[string]interface{})
-	// SURFACE channel should override HANDLE's default dmPolicy
-	if discord["dmPolicy"] != "denylist" {
-		t.Errorf("expected dmPolicy=denylist from channel surface, got %v", discord["dmPolicy"])
+	// SURFACE channel should override HANDLE's default dmPolicy. Legacy
+	// "denylist" is normalized to openclaw's current "open" mode.
+	if discord["dmPolicy"] != "open" {
+		t.Errorf("expected dmPolicy=open from channel surface, got %v", discord["dmPolicy"])
+	}
+	allowFrom, ok := discord["allowFrom"].([]interface{})
+	if !ok {
+		t.Fatalf("expected allowFrom to be an array, got %T", discord["allowFrom"])
+	}
+	if len(allowFrom) != 1 || allowFrom[0] != "*" {
+		t.Errorf(`expected allowFrom=["*"] for dmPolicy=open, got %v`, allowFrom)
 	}
 }
 

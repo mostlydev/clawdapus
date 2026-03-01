@@ -87,7 +87,9 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			if err := setPath(config, "channels.discord.groupPolicy", "allowlist"); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 			}
-			if err := setPath(config, "channels.discord.dmPolicy", "allowlist"); err != nil {
+			// Use pairing mode by default so Discord DM behavior is valid without
+			// requiring an explicit allowFrom wildcard.
+			if err := setPath(config, "channels.discord.dmPolicy", "pairing"); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 			}
 			// allowBots: unconditional — peer agents must be able to mention each other.
@@ -320,13 +322,20 @@ func stringsToIface(ss []string) []interface{} {
 // applyDiscordChannelSurface applies ChannelConfig to the openclaw config map
 // for the discord channel. Runs after HANDLE so it can refine/override routing.
 func applyDiscordChannelSurface(config map[string]interface{}, cc *driver.ChannelConfig) error {
+	dmPolicy := ""
 	if cc.DM.Policy != "" {
-		if err := setPath(config, "channels.discord.dmPolicy", cc.DM.Policy); err != nil {
+		dmPolicy = normalizeDiscordDMPolicy(cc.DM.Policy)
+		if err := setPath(config, "channels.discord.dmPolicy", dmPolicy); err != nil {
 			return err
 		}
 	}
-	if len(cc.DM.AllowFrom) > 0 {
-		if err := setPath(config, "channels.discord.allowFrom", stringsToIface(cc.DM.AllowFrom)); err != nil {
+
+	allowFrom := append([]string(nil), cc.DM.AllowFrom...)
+	if dmPolicy == "open" && !containsString(allowFrom, "*") {
+		allowFrom = append(allowFrom, "*")
+	}
+	if len(allowFrom) > 0 {
+		if err := setPath(config, "channels.discord.allowFrom", stringsToIface(allowFrom)); err != nil {
 			return err
 		}
 	}
@@ -349,6 +358,28 @@ func applyDiscordChannelSurface(config map[string]interface{}, cc *driver.Channe
 		}
 	}
 	return nil
+}
+
+func normalizeDiscordDMPolicy(policy string) string {
+	value := strings.ToLower(strings.TrimSpace(policy))
+	switch value {
+	case "denylist":
+		// Backward-compatible alias for the current openclaw "open" mode.
+		return "open"
+	case "pairing", "allowlist", "open", "disabled":
+		return value
+	default:
+		return strings.TrimSpace(policy)
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func collectCllamaProviderModels(models map[string]string) map[string][]string {
