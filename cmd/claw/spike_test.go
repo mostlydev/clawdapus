@@ -63,6 +63,12 @@ func TestSpikeComposeUp(t *testing.T) {
 	if env["ALLEN_BOT_TOKEN"] == "" {
 		env["ALLEN_BOT_TOKEN"] = env["TIVERTON_BOT_TOKEN"]
 	}
+	if env["LOGAN_BOT_TOKEN"] == "" {
+		env["LOGAN_BOT_TOKEN"] = env["TIVERTON_BOT_TOKEN"]
+	}
+	if env["LOGAN_DISCORD_ID"] == "" {
+		env["LOGAN_DISCORD_ID"] = env["TIVERTON_DISCORD_ID"]
+	}
 	if env["MICRO_BOT_TOKEN"] == "" {
 		env["MICRO_BOT_TOKEN"] = env["TIVERTON_BOT_TOKEN"]
 	}
@@ -78,6 +84,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	}
 	spikeBuildImage(t, dir, "trading-desk:latest", "Clawfile")
 	spikeBuildImage(t, dir, "trading-desk-nanoclaw:latest", "Clawfile.nanoclaw")
+	spikeBuildImage(t, dir, "trading-desk-nullclaw:latest", "Clawfile.nullclaw")
 	spikeBuildImage(t, dir, "trading-desk-microclaw:latest", "Clawfile.microclaw")
 	spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
 	spikeEnsureCllamaPassthroughImage(t)
@@ -115,7 +122,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// teardown runs the compose down and dumps logs.
 	teardown := func() {
-		for _, svc := range []string{"tiverton", "westin", "allen", "micro", "trading-api"} {
+		for _, svc := range []string{"tiverton", "westin", "allen", "logan", "micro", "trading-api"} {
 			name := fmt.Sprintf("trading-desk-%s-1", svc)
 			out, _ := exec.Command("docker", "logs", "--tail", "100", name).CombinedOutput()
 			t.Logf("=== %s logs ===\n%s", name, string(out))
@@ -298,7 +305,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// ── Verify cllama context artifacts ─────────────────────────────────────
 
-	for _, agent := range []string{"tiverton", "westin", "allen", "micro"} {
+	for _, agent := range []string{"tiverton", "westin", "allen", "logan", "micro"} {
 		agentDir := filepath.Join(runtimeDir, "context", agent)
 		for _, rel := range []string{"AGENTS.md", "CLAWDAPUS.md", "metadata.json"} {
 			if _, err := os.Stat(filepath.Join(agentDir, rel)); err != nil {
@@ -450,6 +457,53 @@ func TestSpikeComposeUp(t *testing.T) {
 		t.Logf("allen CLAW_NETWORK: %s", strings.TrimSpace(string(allenNetwork)))
 	}
 
+	// ── Verify Logan (nullclaw) artifacts ───────────────────────────────────
+
+	loganConfigPath := filepath.Join(runtimeDir, "logan", "nullclaw-home", "config.json")
+	loganConfigData := spikeReadFile(t, loganConfigPath)
+	var loganCfg map[string]interface{}
+	if err := json.Unmarshal([]byte(loganConfigData), &loganCfg); err != nil {
+		t.Fatalf("parse logan nullclaw config.json: %v", err)
+	}
+
+	loganChannels, ok := loganCfg["channels"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("logan config.json: missing channels object")
+	}
+	loganDiscord, ok := loganChannels["discord"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("logan config.json: missing channels.discord object")
+	}
+	loganAccounts, ok := loganDiscord["accounts"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("logan config.json: missing channels.discord.accounts object")
+	}
+	loganMainAccount, ok := loganAccounts["main"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("logan config.json: missing channels.discord.accounts.main object")
+	}
+	if tok, _ := loganMainAccount["token"].(string); tok == "" {
+		t.Errorf("logan config.json: expected channels.discord.accounts.main.token to be set")
+	}
+	if gid, _ := loganMainAccount["guild_id"].(string); gid != env["DISCORD_GUILD_ID"] {
+		t.Errorf("logan config.json: expected guild_id=%q, got %q", env["DISCORD_GUILD_ID"], gid)
+	}
+	if models, ok := loganCfg["models"].(map[string]interface{}); ok {
+		if providers, ok := models["providers"].(map[string]interface{}); ok {
+			if anthropic, ok := providers["anthropic"].(map[string]interface{}); ok {
+				if got := anthropic["base_url"]; got != "http://cllama-passthrough:8080/v1" {
+					t.Errorf("logan config.json: expected anthropic.base_url=http://cllama-passthrough:8080/v1, got %v", got)
+				}
+			}
+		}
+	}
+
+	loganContainer := spikeContainerName("logan")
+	spikeWaitHealthy(t, loganContainer, 60*time.Second)
+	if out, err := exec.Command("docker", "exec", loganContainer, "cat", "/root/.nullclaw/config.json").CombinedOutput(); err != nil {
+		t.Errorf("logan: expected /root/.nullclaw/config.json in container: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+
 	// ── Verify Micro (microclaw) artifacts ───────────────────────────────────
 
 	microConfigPath := filepath.Join(runtimeDir, "micro", "config", "microclaw.config.yaml")
@@ -493,10 +547,11 @@ func TestSpikeComposeUp(t *testing.T) {
 	spikeWaitHealthy(t, containerName, 60*time.Second)
 
 	// ── Verify startup greetings appeared in Discord ─────────────────────────
-	// Each agent sends a greeting via openclaw message send on startup.
-	// Poll the Discord channel until both messages appear (or timeout).
+	// Each greeting-enabled service posts a startup message.
+	// Poll the Discord channel until expected messages appear (or timeout).
 	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "tiverton online", 10*time.Second)
 	spikeVerifyDiscordGreeting(t, env["WESTIN_BOT_TOKEN"], channelID, "westin online", 10*time.Second)
+	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "nullclaw online", 15*time.Second)
 	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "microclaw online", 15*time.Second)
 
 	// trading-api posts its own startup message to Discord via webhook — this

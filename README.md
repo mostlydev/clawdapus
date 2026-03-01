@@ -192,6 +192,34 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 
 ---
 
+## Nullclaw `CONFIGURE` Examples
+
+Use these when you want high-level `HANDLE` defaults, but need runtime-specific policy details.
+
+```dockerfile
+# Base identity on a platform:
+HANDLE discord
+
+# "Can talk on" -> pin to one guild/server
+CONFIGURE nullclaw config set channels.discord.accounts.main.guild_id "123456789012345678"
+
+# "Can talk to" -> require mention in group chats
+CONFIGURE nullclaw config set channels.discord.accounts.main.require_mention true
+
+# Telegram allowlist for DMs
+CONFIGURE nullclaw config set channels.telegram.accounts.main.allow_from ["111111111","222222222"]
+
+# Slack transport mode selection
+CONFIGURE nullclaw config set channels.slack.accounts.main.mode "socket"
+```
+
+Notes:
+- `CONFIGURE` is driver-side DSL here (`nullclaw config set <path> <value>`), applied to generated `config.json`.
+- Values are parsed as JSON when possible: booleans/numbers/arrays/objects should be unquoted; strings should be quoted.
+- `CONFIGURE` runs after defaults, so it overrides what `HANDLE` generated.
+
+---
+
 ## The Anatomy of a Claw
 
 ```mermaid

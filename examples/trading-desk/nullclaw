@@ -1,0 +1,60 @@
+#!/bin/sh
+set -eu
+
+cmd="${1:-run}"
+
+case "$cmd" in
+  run)
+    # Minimal health endpoint expected by the nullclaw driver.
+    mkdir -p /tmp/nullclaw-spike
+    printf "ok\n" >/tmp/nullclaw-spike/health
+    exec python3 -m http.server 3000 --directory /tmp/nullclaw-spike
+    ;;
+  cron)
+    sub="${2:-}"
+    case "$sub" in
+      list)
+        jobs_file=/tmp/nullclaw-spike/cron.jobs
+        count=0
+        if [ -f "$jobs_file" ]; then
+          count="$(wc -l <"$jobs_file" | tr -d ' ')"
+        fi
+        echo "info(cron): Scheduled jobs (${count}):"
+        if [ -f "$jobs_file" ]; then
+          i=0
+          while IFS="$(printf '\t')" read -r expr command; do
+            [ -n "${expr:-}" ] || continue
+            i=$((i + 1))
+            echo "info(cron): - job-${i} | ${expr} | next=0 | status=n/a cmd: ${command}"
+          done <"$jobs_file"
+        fi
+        ;;
+      add)
+        if [ "$#" -lt 4 ]; then
+          echo "error: usage: nullclaw cron add '<schedule>' '<command>'" >&2
+          exit 2
+        fi
+        mkdir -p /tmp/nullclaw-spike
+        printf "%s\t%s\n" "$3" "$4" >>/tmp/nullclaw-spike/cron.jobs
+        echo "info(cron): added schedule '$3'"
+        ;;
+      *)
+        echo "error: unknown nullclaw cron subcommand '$sub'" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  agent)
+    # Spike stub accepts agent invocations so PostApply cron wiring can call it.
+    if [ "${2:-}" = "-m" ]; then
+      echo "nullclaw agent: ${3:-}"
+      exit 0
+    fi
+    echo "error: usage: nullclaw agent -m <message>" >&2
+    exit 2
+    ;;
+  *)
+    echo "error: unknown nullclaw subcommand '$cmd'" >&2
+    exit 2
+    ;;
+esac
