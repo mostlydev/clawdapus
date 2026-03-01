@@ -597,8 +597,8 @@ func TestEmitComposeWithCllamaProxy(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := cf.Services["cllama-passthrough"]; !ok {
-		t.Error("expected cllama-passthrough service in output")
+	if _, ok := cf.Services["cllama"]; !ok {
+		t.Error("expected cllama service in output")
 	}
 	if !strings.Contains(out, "ghcr.io/mostlydev/cllama") {
 		t.Error("expected proxy image in output")
@@ -650,8 +650,8 @@ func TestEmitComposeMultipleProxies(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := cf.Services["cllama-passthrough"]; !ok {
-		t.Error("expected cllama-passthrough service")
+	if _, ok := cf.Services["cllama"]; !ok {
+		t.Error("expected cllama service")
 	}
 	if _, ok := cf.Services["cllama-policy"]; !ok {
 		t.Error("expected cllama-policy service")
@@ -698,6 +698,7 @@ func TestEmitProxyPublishesDashboardPort(t *testing.T) {
 		Image:          "ghcr.io/mostlydev/cllama:latest",
 		ContextHostDir: "/tmp/ctx",
 		AuthHostDir:    "/tmp/auth",
+		DashboardPort:  "8999",
 		Environment:    map[string]string{},
 		PodName:        "test-pod",
 	}}
@@ -716,19 +717,19 @@ func TestEmitProxyPublishesDashboardPort(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	proxySvc, ok := cf.Services["cllama-passthrough"]
+	proxySvc, ok := cf.Services["cllama"]
 	if !ok {
-		t.Fatal("expected cllama-passthrough service in output")
+		t.Fatal("expected cllama service in output")
 	}
 	found := false
 	for _, port := range proxySvc.Ports {
-		if port == "8081:8081" {
+		if port == "8999:8081" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected port 8081:8081 on proxy service, got ports: %v", proxySvc.Ports)
+		t.Errorf("expected port 8999:8081 on proxy service, got ports: %v", proxySvc.Ports)
 	}
 }
 

@@ -215,7 +215,7 @@ func TestMaterializeWithCllama(t *testing.T) {
 	}
 
 	// ANTHROPIC_BASE_URL as env var (orchestrator forwards to agent-runners)
-	if result.Environment["ANTHROPIC_BASE_URL"] != "http://cllama-passthrough:8080/v1" {
+	if result.Environment["ANTHROPIC_BASE_URL"] != "http://cllama:8080/v1" {
 		t.Errorf("expected ANTHROPIC_BASE_URL rewritten to proxy, got %q", result.Environment["ANTHROPIC_BASE_URL"])
 	}
 

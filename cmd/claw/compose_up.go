@@ -248,6 +248,7 @@ func runComposeUp(podFile string) error {
 
 	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
 	proxies := make([]pod.CllamaProxyConfig, 0)
+	cllamaDashboardPort := envOrDefault("CLLAMA_UI_PORT", "8181")
 	if cllamaEnabled {
 		proxyTypes := collectProxyTypes(resolvedClaws)
 		if len(proxyTypes) > 1 {
@@ -387,15 +388,31 @@ func runComposeUp(podFile string) error {
 		for _, proxyType := range proxyTypes {
 			proxies = append(proxies, pod.CllamaProxyConfig{
 				ProxyType:      proxyType,
-				Image:          fmt.Sprintf("ghcr.io/mostlydev/cllama-%s:latest", proxyType),
+				Image:          cllama.ProxyImageRef(proxyType),
 				ContextHostDir: filepath.Join(runtimeDir, "context"),
 				AuthHostDir:    authDir,
+				DashboardPort:  cllamaDashboardPort,
 				Environment:    proxyEnv,
 				PodName:        p.Name,
 			})
 		}
 		fmt.Printf("[claw] cllama proxies enabled: %s (agents: %s)\n",
 			strings.Join(proxyTypes, ", "), strings.Join(cllamaAgents, ", "))
+	}
+
+	manifestPath, err := writePodManifest(runtimeDir, p, resolvedClaws, proxies)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("[claw] wrote %s\n", manifestPath)
+
+	p.Clawdash = &pod.ClawdashConfig{
+		Image:              "ghcr.io/mostlydev/clawdash:latest",
+		Addr:               envOrDefault("CLAWDASH_ADDR", ":8082"),
+		ManifestHostPath:   manifestPath,
+		DockerSockHostPath: "/var/run/docker.sock",
+		CllamaCostsURL:     firstIf(cllamaEnabled, fmt.Sprintf("http://localhost:%s", cllamaDashboardPort)),
+		PodName:            p.Name,
 	}
 
 	// Pass 2: materialize after cllama tokens/context are resolved.
@@ -781,6 +798,21 @@ func shortContainerIDForPostApply(id string) string {
 		return id
 	}
 	return id[:12]
+}
+
+func envOrDefault(key, fallback string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+func firstIf(ok bool, value string) string {
+	if ok {
+		return value
+	}
+	return ""
 }
 
 // resolveChannelID looks up a channel by name in the discord handle's guild topology.

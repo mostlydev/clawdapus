@@ -1,7 +1,7 @@
 # Trading Desk Example
 
 A reference pod showing mixed managed agents (`openclaw`, `nanoclaw`, `nullclaw`, `microclaw`) running as a governed fleet — each with Discord presence and shared infrastructure context.
-This spike now enables cllama passthrough routing for trader agents (`cllama-passthrough`).
+This spike now enables cllama passthrough routing for trader agents (`cllama`).
 
 ## What's in the box
 
@@ -74,7 +74,7 @@ docker compose -f compose.generated.yml logs -f tiverton
 1. Builds all images (`Clawfile*` variants for all claw types, plus mock trading API)
 2. Runs `claw up` on a pre-expanded pod YAML
 3. Asserts generated artifacts — `openclaw.json` structure, `jobs.json` channel IDs, compose mounts
-4. Asserts cllama wiring — proxy service emitted, provider endpoints in `models.providers.*` rewritten to `cllama-passthrough`, bearer token injected, per-agent context dir generated
+4. Asserts cllama wiring — proxy service emitted, provider endpoints in `models.providers.*` rewritten to `cllama`, bearer token injected, per-agent context dir generated
 5. Waits for containers to be healthy
 6. Polls the Discord channel REST API to confirm startup greetings arrived
 
@@ -97,7 +97,7 @@ The test skips automatically if `TIVERTON_BOT_TOKEN` is not set in `.env`.
 | Assertion | What it checks |
 |-----------|---------------|
 | `openclaw.json` structure | `channels.discord.token`, `guilds` keyed by guild ID |
-| `openclaw.json` cllama rewrite | `models.providers.<provider>.baseUrl` points to `cllama-passthrough`, `apiKey` is per-agent token |
+| `openclaw.json` cllama rewrite | `models.providers.<provider>.baseUrl` points to `cllama`, `apiKey` is per-agent token |
 | `jobs.json` structure | `agentTurn` payload, `delivery.to` = resolved channel ID |
 | cllama context files | `.claw-runtime/context/<agent>/` contains `AGENTS.md`, `CLAWDAPUS.md`, `metadata.json` |
 | Compose mounts | `/app/config` directory, `/app/state/cron` directory |

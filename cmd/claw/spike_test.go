@@ -199,8 +199,8 @@ func TestSpikeComposeUp(t *testing.T) {
 		if !ok {
 			t.Fatalf("openclaw.json: missing models.providers.%s object", provider)
 		}
-		if got := entry["baseUrl"]; got != "http://cllama-passthrough:8080/v1" {
-			t.Errorf("openclaw.json: expected models.providers.%s.baseUrl=http://cllama-passthrough:8080/v1, got %v", provider, got)
+		if got := entry["baseUrl"]; got != "http://cllama:8080/v1" {
+			t.Errorf("openclaw.json: expected models.providers.%s.baseUrl=http://cllama:8080/v1, got %v", provider, got)
 		}
 		providerToken, _ := entry["apiKey"].(string)
 		if matched, _ := regexp.MatchString(`^tiverton:[0-9a-f]{48}$`, providerToken); !matched {
@@ -296,8 +296,8 @@ func TestSpikeComposeUp(t *testing.T) {
 			t.Errorf("compose.generated.yml: expected to contain %q", want)
 		}
 	}
-	if !strings.Contains(composeSrc, "cllama-passthrough:") {
-		t.Errorf("compose.generated.yml: expected cllama-passthrough service")
+	if !strings.Contains(composeSrc, "cllama:") {
+		t.Errorf("compose.generated.yml: expected cllama service")
 	}
 	if !strings.Contains(composeSrc, "CLAW_CONTEXT_ROOT: /claw/context") {
 		t.Errorf("compose.generated.yml: expected cllama context root env")
@@ -442,7 +442,7 @@ func TestSpikeComposeUp(t *testing.T) {
 		t.Errorf("allen: ANTHROPIC_BASE_URL not set: %v", errE)
 	} else {
 		allenBaseURL := strings.TrimSpace(string(allenEnvOut))
-		if !strings.Contains(allenBaseURL, "cllama-passthrough") {
+		if !strings.Contains(allenBaseURL, "cllama") {
 			t.Errorf("allen: ANTHROPIC_BASE_URL should point to cllama proxy, got %q", allenBaseURL)
 		} else {
 			t.Logf("allen ANTHROPIC_BASE_URL: %s", allenBaseURL)
@@ -518,8 +518,8 @@ func TestSpikeComposeUp(t *testing.T) {
 	if got := microCfg["model"]; got != "claude-sonnet-4" {
 		t.Errorf("microclaw.config.yaml: expected model=claude-sonnet-4, got %v", got)
 	}
-	if got := microCfg["llm_base_url"]; got != "http://cllama-passthrough:8080/v1" {
-		t.Errorf("microclaw.config.yaml: expected llm_base_url=http://cllama-passthrough:8080/v1, got %v", got)
+	if got := microCfg["llm_base_url"]; got != "http://cllama:8080/v1" {
+		t.Errorf("microclaw.config.yaml: expected llm_base_url=http://cllama:8080/v1, got %v", got)
 	}
 
 	microContainer := spikeContainerName("micro")

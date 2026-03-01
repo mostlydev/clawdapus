@@ -35,11 +35,13 @@ claw build -t quickstart-assistant ./agents/assistant
 claw up -f claw-pod.yml -d
 
 # Verify
-claw ps -f claw-pod.yml        # assistant + cllama-passthrough both running
+claw ps -f claw-pod.yml        # assistant + cllama both running
 claw health -f claw-pod.yml    # both healthy
 ```
 
-Open **http://localhost:8081** — the cllama governance proxy dashboard. Watch every LLM call in real time: which agent, which model, token counts, cost.
+Open **http://localhost:8181** — the cllama governance proxy dashboard. Watch every LLM call in real time: which agent, which model, token counts, cost.
+
+Open **http://localhost:8082** — the Clawdapus Dash fleet dashboard. View live service health, topology wiring, and per-service drill-down status.
 
 Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
 
@@ -58,6 +60,23 @@ claw up -d
 # add another agent later
 claw agent add researcher
 ```
+
+## Dashboard Screenshots
+
+Fleet view with integrated costs status:
+
+![Clawdapus Dash Fleet](docs/screenshots/clawdash-fleet-costs.png)
+
+If a cllama build does not emit `GET /costs/api`, Clawdapus Dash surfaces an explicit "cost emission not available yet" state instead of linking to a dead page.
+API data is authoritative; log-derived cost estimation is opt-in via `CLAWDASH_COST_LOG_FALLBACK=1`.
+
+Topology view:
+
+![Clawdapus Dash Topology](docs/screenshots/clawdash-topology.png)
+
+Service detail view:
+
+![Clawdapus Dash Detail](docs/screenshots/clawdash-detail.png)
 
 ---
 
@@ -248,9 +267,9 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Identity resolution:** Single proxy serves an entire pod. Bearer tokens resolve which agent is calling.
 - **Cost accounting:** Extracts token usage from every response, multiplies by pricing table, tracks per agent/provider/model.
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
-- **Operator dashboard:** Real-time web UI at port 8081 — agent activity, provider status, cost breakdown.
+- **Operator dashboard:** Real-time web UI at host port 8181 by default (container `:8081`) — agent activity, provider status, cost breakdown.
 
-The reference implementation is [`cllama-passthrough`](https://github.com/mostlydev/cllama-passthrough) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
+The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
 
 See the [cllama specification](./docs/CLLAMA_SPEC.md) for the full standard.
 
