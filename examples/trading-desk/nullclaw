@@ -8,7 +8,7 @@ case "$cmd" in
     # Minimal health endpoint expected by the nullclaw driver.
     mkdir -p /tmp/nullclaw-spike
     printf "ok\n" >/tmp/nullclaw-spike/health
-    exec busybox httpd -f -p 3000 -h /tmp/nullclaw-spike
+    exec python3 -m http.server 3000 --directory /tmp/nullclaw-spike
     ;;
   cron)
     sub="${2:-}"

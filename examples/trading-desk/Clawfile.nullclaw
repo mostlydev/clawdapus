@@ -7,7 +7,7 @@ MODEL primary anthropic/claude-sonnet-4
 
 HANDLE discord
 
-RUN apk add --no-cache curl jq tini
+RUN apk add --no-cache curl jq tini python3
 COPY nullclaw /usr/local/bin/nullclaw
 RUN chmod +x /usr/local/bin/nullclaw
 COPY nullclaw-entrypoint.sh /app/entrypoint.sh
