@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>clawctl - fleet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0c1017;
+      --bg-raised: #131a24;
+      --bg-surface: #19222f;
+      --ink: #d4dce8;
+      --ink-bright: #edf2f7;
+      --muted: #5e7085;
+      --line: #1f2d3d;
+      --line-bright: #2a3a4d;
+      --amber: #f0a500;
+      --amber-dim: #a07000;
+      --cyan: #22d3ee;
+      --cyan-dim: #0e7490;
+      --green: #34d399;
+      --green-dim: #065f46;
+      --red: #ef4444;
+      --purple: #a78bfa;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Outfit", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+      position: relative;
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.03) 2px,
+        rgba(0,0,0,0.03) 4px
+      );
+      z-index: 9999;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 48px;
+      background: var(--bg-raised);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .topbar-brand {
+      font-family: "Geist Mono", monospace;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 11px;
+      text-decoration: none;
+    }
+    .topbar-brand span { color: var(--cyan); }
+    .topbar-nav {
+      display: flex;
+      gap: 2px;
+    }
+    .topbar-nav a {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 16px;
+      height: 48px;
+      color: var(--muted);
+      text-decoration: none;
+      border-bottom: 2px solid transparent;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .topbar-nav a:hover { color: var(--ink-bright); }
+    .topbar-nav a.active {
+      color: var(--ink-bright);
+      border-bottom-color: var(--cyan);
+    }
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .topbar-links {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-family: "Geist Mono", monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .topbar-links a {
+      color: var(--amber);
+      text-decoration: none;
+    }
+    .topbar-links a:hover { text-decoration: underline; }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 20px 40px;
+    }
+
+    .page-title {
+      margin: 0;
+      color: var(--ink-bright);
+      font-size: 24px;
+      font-weight: 600;
+    }
+    .page-subtitle {
+      margin: 8px 0 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .banner {
+      border: 1px solid var(--amber-dim);
+      background: rgba(240,165,0,0.10);
+      color: var(--amber);
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .panel {
+      background: var(--bg-raised);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin-bottom: 18px;
+      overflow: hidden;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-title {
+      margin: 0;
+      font-family: "Geist Mono", monospace;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+    .panel-count {
+      font-family: "Geist Mono", monospace;
+      font-size: 10px;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+      padding: 14px;
+    }
+
+    .service-card {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.15s, transform 0.15s;
+      display: block;
+    }
+    .service-card:hover {
+      border-color: var(--line-bright);
+      transform: translateY(-2px);
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .card-name {
+      font-family: "Geist Mono", monospace;
+      font-size: 14px;
+      color: var(--ink-bright);
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .badge {
+      font-family: "Geist Mono", monospace;
+      border-radius: 999px;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .badge-cyan {
+      color: var(--cyan);
+      border-color: var(--cyan-dim);
+      background: rgba(34, 211, 238, 0.10);
+    }
+    .badge-amber {
+      color: var(--amber);
+      border-color: var(--amber-dim);
+      background: rgba(240, 165, 0, 0.10);
+    }
+    .badge-green {
+      color: var(--green);
+      border-color: var(--green-dim);
+      background: rgba(52, 211, 153, 0.10);
+    }
+
+    .card-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-top: 6px;
+      gap: 8px;
+    }
+    .card-label {
+      color: var(--muted);
+      font-family: "Geist Mono", monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .card-value {
+      color: var(--ink);
+      text-align: right;
+      word-break: break-word;
+    }
+
+    .status-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-family: "Geist Mono", monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+    }
+    .status-healthy .status-dot,
+    .status-dot.status-healthy { background: var(--green); }
+    .status-starting .status-dot,
+    .status-dot.status-starting { background: var(--amber); }
+    .status-unhealthy .status-dot,
+    .status-dot.status-unhealthy { background: var(--red); }
+    .status-unknown .status-dot,
+    .status-dot.status-unknown { background: var(--muted); }
+
+    .handle-list {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    .handle-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      background: var(--bg-surface);
+      border-radius: 999px;
+      font-size: 11px;
+      padding: 2px 7px;
+      max-width: 100%;
+    }
+    .handle-platform {
+      color: var(--cyan);
+      font-family: "Geist Mono", monospace;
+      text-transform: uppercase;
+      font-size: 10px;
+    }
+
+    .count-chip {
+      font-family: "Geist Mono", monospace;
+      font-size: 10px;
+      color: var(--amber);
+      border: 1px solid var(--amber-dim);
+      border-radius: 999px;
+      padding: 2px 7px;
+      margin-left: 8px;
+    }
+
+    .empty {
+      padding: 20px 14px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .noscript {
+      margin-top: 14px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .noscript a { color: var(--cyan); }
+
+    @media (max-width: 740px) {
+      .topbar {
+        padding: 0 12px;
+        gap: 8px;
+      }
+      .topbar-links {
+        display: none;
+      }
+      .card-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="topbar-brand"><span>CLAWCTL</span> {{.PodName}}</a>
+    <nav class="topbar-nav" aria-label="Primary">
+      <a href="/" class="active"><span class="dot"></span>Fleet</a>
+      <a href="/topology"><span class="dot"></span>Topology</a>
+    </nav>
+    <div class="topbar-links">
+      <a href="http://localhost:8081/costs" target="_blank" rel="noreferrer">cllama costs</a>
+    </div>
+  </header>
+
+  <main>
+    <h1 class="page-title">Fleet Overview</h1>
+    <p class="page-subtitle">Live view of agents, proxies, and infrastructure for pod <strong>{{.PodName}}</strong>.</p>
+
+    {{if .HasStatusErrors}}
+      <div class="banner">{{.StatusError}}</div>
+    {{end}}
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Agents</h2>
+        <span class="panel-count">{{len .Agents}}</span>
+      </div>
+      {{if .Agents}}
+        <div class="card-grid">
+          {{range .Agents}}
+          <a class="service-card" href="{{.DetailPath}}">
+            <div class="card-head">
+              <div class="card-name">{{.ServiceName}}{{if gt .Count 1}}<span class="count-chip">x{{.Count}}</span>{{end}}</div>
+              <span class="badge {{.RoleClass}}">{{.RoleBadge}}</span>
+            </div>
+            <div class="card-row {{.StatusClass}}">
+              <span class="card-label">status</span>
+              <span class="status-wrap">
+                <span class="status-dot {{.StatusClass}}" data-status-dot="{{.ServiceName}}"></span>
+                <span data-status-text="{{.ServiceName}}">{{statusLabel .Status}}</span>
+              </span>
+            </div>
+            <div class="card-row">
+              <span class="card-label">model</span>
+              <span class="card-value">{{if .Model}}{{.Model}}{{else}}-{{end}}</span>
+            </div>
+            <div class="card-row">
+              <span class="card-label">handles</span>
+              <span class="card-value handle-list">
+                {{if .Handles}}
+                  {{range .Handles}}
+                    <span class="handle-pill"><span class="handle-platform">{{.Platform}}</span>{{.Username}}</span>
+                  {{end}}
+                {{else}}
+                  -
+                {{end}}
+              </span>
+            </div>
+            <div class="card-row">
+              <span class="card-label">cllama</span>
+              <span class="card-value">{{if .ProxyType}}{{.ProxyType}}{{else}}-{{end}}</span>
+            </div>
+            <div class="card-row">
+              <span class="card-label">uptime</span>
+              <span class="card-value" data-uptime-text="{{.ServiceName}}">{{.Uptime}}</span>
+            </div>
+          </a>
+          {{end}}
+        </div>
+      {{else}}
+        <div class="empty">No claw agents found in this pod manifest.</div>
+      {{end}}
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Proxies</h2>
+        <span class="panel-count">{{len .Proxies}}</span>
+      </div>
+      {{if .Proxies}}
+        <div class="card-grid">
+          {{range .Proxies}}
+          <a class="service-card" href="{{.DetailPath}}">
+            <div class="card-head">
+              <div class="card-name">{{.ServiceName}}</div>
+              <span class="badge {{.RoleClass}}">{{.RoleBadge}}</span>
+            </div>
+            <div class="card-row {{.StatusClass}}">
+              <span class="card-label">status</span>
+              <span class="status-wrap">
+                <span class="status-dot {{.StatusClass}}" data-status-dot="{{.ServiceName}}"></span>
+                <span data-status-text="{{.ServiceName}}">{{statusLabel .Status}}</span>
+              </span>
+            </div>
+            <div class="card-row">
+              <span class="card-label">proxy type</span>
+              <span class="card-value">{{.ProxyType}}</span>
+            </div>
+            <div class="card-row">
+              <span class="card-label">uptime</span>
+              <span class="card-value" data-uptime-text="{{.ServiceName}}">{{.Uptime}}</span>
+            </div>
+          </a>
+          {{end}}
+        </div>
+      {{else}}
+        <div class="empty">No cllama proxies declared.</div>
+      {{end}}
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Infrastructure</h2>
+        <span class="panel-count">{{len .Infrastructure}}</span>
+      </div>
+      {{if .Infrastructure}}
+        <div class="card-grid">
+          {{range .Infrastructure}}
+          <a class="service-card" href="{{.DetailPath}}">
+            <div class="card-head">
+              <div class="card-name">{{.ServiceName}}</div>
+              <span class="badge {{.RoleClass}}">{{.RoleBadge}}</span>
+            </div>
+            <div class="card-row {{.StatusClass}}">
+              <span class="card-label">status</span>
+              <span class="status-wrap">
+                <span class="status-dot {{.StatusClass}}" data-status-dot="{{.ServiceName}}"></span>
+                <span data-status-text="{{.ServiceName}}">{{statusLabel .Status}}</span>
+              </span>
+            </div>
+            <div class="card-row">
+              <span class="card-label">uptime</span>
+              <span class="card-value" data-uptime-text="{{.ServiceName}}">{{.Uptime}}</span>
+            </div>
+          </a>
+          {{end}}
+        </div>
+      {{else}}
+        <div class="empty">No native infrastructure services detected.</div>
+      {{end}}
+    </section>
+
+    <noscript>
+      <p class="noscript">Live updates are disabled because JavaScript is off. <a href="/">Refresh now</a>.</p>
+    </noscript>
+  </main>
+
+  <script>
+    (() => {
+      const dotFor = (service) => document.querySelectorAll(`[data-status-dot="${CSS.escape(service)}"]`);
+      const textFor = (service) => document.querySelectorAll(`[data-status-text="${CSS.escape(service)}"]`);
+      const uptimeFor = (service) => document.querySelectorAll(`[data-uptime-text="${CSS.escape(service)}"]`);
+
+      const classFor = (status) => {
+        if (status === "healthy" || status === "running") return "status-healthy";
+        if (status === "starting") return "status-starting";
+        if (status === "unhealthy" || status === "stopped" || status === "dead" || status === "exited") return "status-unhealthy";
+        return "status-unknown";
+      };
+
+      const apply = (payload) => {
+        if (!payload || !payload.services) return;
+        Object.entries(payload.services).forEach(([service, status]) => {
+          const klass = classFor(status.status || "unknown");
+          dotFor(service).forEach((el) => {
+            el.classList.remove("status-healthy", "status-starting", "status-unhealthy", "status-unknown");
+            el.classList.add(klass);
+          });
+          textFor(service).forEach((el) => {
+            el.textContent = (status.status || "unknown");
+          });
+          uptimeFor(service).forEach((el) => {
+            el.textContent = status.uptime || "-";
+          });
+        });
+      };
+
+      const refresh = async () => {
+        try {
+          const res = await fetch('/api/status', { cache: 'no-store' });
+          if (!res.ok) return;
+          apply(await res.json());
+        } catch (_) {
+          // Keep the last rendered state when polling fails.
+        }
+      };
+
+      refresh();
+      setInterval(refresh, 15000);
+    })();
+  </script>
+</body>
+</html>

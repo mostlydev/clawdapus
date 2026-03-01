@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>clawctl - topology</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0c1017;
+      --bg-raised: #131a24;
+      --ink: #d4dce8;
+      --ink-bright: #edf2f7;
+      --muted: #5e7085;
+      --line: #1f2d3d;
+      --line-bright: #2a3a4d;
+      --amber: #f0a500;
+      --amber-dim: #a07000;
+      --cyan: #22d3ee;
+      --green: #34d399;
+      --purple: #a78bfa;
+      --red: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Outfit", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+      position: relative;
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.03) 2px,
+        rgba(0,0,0,0.03) 4px
+      );
+      z-index: 9999;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 48px;
+      background: var(--bg-raised);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .topbar-brand {
+      font-family: "Geist Mono", monospace;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 11px;
+      text-decoration: none;
+    }
+    .topbar-brand span { color: var(--cyan); }
+    .topbar-nav {
+      display: flex;
+      gap: 2px;
+    }
+    .topbar-nav a {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 16px;
+      height: 48px;
+      color: var(--muted);
+      text-decoration: none;
+      border-bottom: 2px solid transparent;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .topbar-nav a:hover { color: var(--ink-bright); }
+    .topbar-nav a.active {
+      color: var(--ink-bright);
+      border-bottom-color: var(--purple);
+    }
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    main {
+      max-width: 1250px;
+      margin: 0 auto;
+      padding: 28px 20px 40px;
+    }
+
+    .page-title {
+      margin: 0;
+      color: var(--ink-bright);
+      font-size: 24px;
+      font-weight: 600;
+    }
+    .page-subtitle {
+      margin: 8px 0 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .banner {
+      border: 1px solid var(--amber-dim);
+      background: rgba(240,165,0,0.10);
+      color: var(--amber);
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .topology-shell {
+      background: var(--bg-raised);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+
+    .lane-heads {
+      display: grid;
+      grid-template-columns: repeat(5, 220px);
+      column-gap: 0;
+      min-width: {{.CanvasWidth}}px;
+      margin-bottom: 8px;
+      font-family: "Geist Mono", monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      padding-left: 20px;
+    }
+
+    .topology-stage {
+      position: relative;
+      width: {{.CanvasWidth}}px;
+      height: {{.CanvasHeight}}px;
+      background: #0f1520;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .topology-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    .topology-edge {
+      fill: none;
+      stroke-width: 2.2;
+      opacity: 0.76;
+      transition: opacity 0.18s;
+    }
+
+    .topology-node {
+      position: absolute;
+      z-index: 2;
+      border: 1px solid var(--line);
+      background: #151d2a;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      transition: border-color 0.18s, opacity 0.18s;
+      cursor: default;
+    }
+    .topology-node:hover {
+      border-color: var(--line-bright);
+    }
+
+    .node-label {
+      font-family: "Geist Mono", monospace;
+      font-size: 11px;
+      color: var(--ink-bright);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex: 0 0 auto;
+    }
+
+    .status-dot.status-healthy { background: var(--green); }
+    .status-dot.status-starting { background: var(--amber); }
+    .status-dot.status-unhealthy { background: var(--red); }
+    .status-dot.status-unknown { background: var(--muted); }
+
+    .lane-channel .node-label { color: var(--cyan); }
+    .lane-agent .node-label { color: var(--ink-bright); }
+    .lane-proxy .node-label { color: var(--purple); }
+    .lane-service .node-label { color: var(--amber); }
+    .lane-volume .node-label { color: var(--green); }
+
+    .muted {
+      opacity: 0.14 !important;
+    }
+
+    .hint {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .noscript {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .noscript a { color: var(--cyan); }
+
+    @media (max-width: 740px) {
+      .topbar {
+        padding: 0 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="topbar-brand"><span>CLAWCTL</span> {{.PodName}}</a>
+    <nav class="topbar-nav" aria-label="Primary">
+      <a href="/"><span class="dot"></span>Fleet</a>
+      <a href="/topology" class="active"><span class="dot"></span>Topology</a>
+    </nav>
+    <div style="width:112px"></div>
+  </header>
+
+  <main>
+    <h1 class="page-title">Topology</h1>
+    <p class="page-subtitle">Channels, agents, proxies, services, and volumes with live health markers.</p>
+
+    {{if .HasStatusErrors}}
+      <div class="banner">{{.StatusError}}</div>
+    {{end}}
+
+    <div class="topology-shell">
+      <div class="lane-heads">
+        <div>Channels</div>
+        <div>Agents</div>
+        <div>Proxies</div>
+        <div>Services</div>
+        <div>Volumes</div>
+      </div>
+
+      <div class="topology-stage" id="topology-stage">
+        <svg class="topology-svg" viewBox="0 0 {{.CanvasWidth}} {{.CanvasHeight}}" preserveAspectRatio="none">
+          {{range .Edges}}
+            <path class="topology-edge" d="{{.Path}}" stroke="{{.Color}}" data-from="{{.FromID}}" data-to="{{.ToID}}"></path>
+          {{end}}
+        </svg>
+
+        {{range .Nodes}}
+          <div
+            class="topology-node lane-{{.Lane}}"
+            style="left: {{.X}}px; top: {{.Y}}px; width: {{.Width}}px; height: {{.Height}}px;"
+            data-node-id="{{.ID}}"
+            data-neighbors="{{.Neighbors}}"
+            {{if .ServiceName}}data-service="{{.ServiceName}}"{{end}}
+          >
+            <span class="node-label">{{.Label}}</span>
+            <span class="status-dot {{.StatusClass}}" {{if .ServiceName}}data-status-dot="{{.ServiceName}}"{{end}}></span>
+          </div>
+        {{end}}
+      </div>
+
+      <div class="hint">Hover a node to isolate connected paths. Colors: cyan channel, amber service, green volume/host, purple proxy.</div>
+      <noscript>
+        <div class="noscript">Live updates are disabled because JavaScript is off. <a href="/topology">Refresh now</a>.</div>
+      </noscript>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const stage = document.getElementById('topology-stage');
+      if (!stage) return;
+
+      const nodes = Array.from(stage.querySelectorAll('[data-node-id]'));
+      const edges = Array.from(stage.querySelectorAll('.topology-edge'));
+
+      const classFor = (status) => {
+        if (status === 'healthy' || status === 'running') return 'status-healthy';
+        if (status === 'starting') return 'status-starting';
+        if (status === 'unhealthy' || status === 'stopped' || status === 'dead' || status === 'exited') return 'status-unhealthy';
+        return 'status-unknown';
+      };
+
+      const clearMute = () => {
+        nodes.forEach((n) => n.classList.remove('muted'));
+        edges.forEach((e) => e.classList.remove('muted'));
+      };
+
+      const muteUnrelated = (activeID, neighbors) => {
+        const keep = new Set([activeID, ...neighbors]);
+        nodes.forEach((node) => {
+          if (!keep.has(node.dataset.nodeId)) node.classList.add('muted');
+        });
+        edges.forEach((edge) => {
+          const from = edge.dataset.from;
+          const to = edge.dataset.to;
+          if (!(keep.has(from) && keep.has(to))) edge.classList.add('muted');
+        });
+      };
+
+      nodes.forEach((node) => {
+        node.addEventListener('mouseenter', () => {
+          clearMute();
+          const id = node.dataset.nodeId;
+          const neighbors = (node.dataset.neighbors || '').split(',').filter(Boolean);
+          muteUnrelated(id, neighbors);
+        });
+        node.addEventListener('mouseleave', clearMute);
+      });
+
+      const apply = (payload) => {
+        if (!payload || !payload.services) return;
+        Object.entries(payload.services).forEach(([service, status]) => {
+          const dotClass = classFor(status.status || 'unknown');
+          document.querySelectorAll(`[data-status-dot="${CSS.escape(service)}"]`).forEach((dot) => {
+            dot.classList.remove('status-healthy', 'status-starting', 'status-unhealthy', 'status-unknown');
+            dot.classList.add(dotClass);
+          });
+        });
+      };
+
+      const refresh = async () => {
+        try {
+          const res = await fetch('/api/status', { cache: 'no-store' });
+          if (!res.ok) return;
+          apply(await res.json());
+        } catch (_) {
+          // keep previous state
+        }
+      };
+
+      refresh();
+      setInterval(refresh, 15000);
+    })();
+  </script>
+</body>
+</html>

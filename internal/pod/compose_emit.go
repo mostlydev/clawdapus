@@ -3,7 +3,9 @@ package pod
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -44,6 +46,14 @@ type CllamaProxyConfig struct {
 	AuthHostDir    string            // host path for provider auth state
 	Environment    map[string]string // proxy-only env (e.g. CLAW_POD, provider keys)
 	PodName        string
+}
+
+type ClawctlConfig struct {
+	Image              string // e.g. ghcr.io/mostlydev/clawctl:latest
+	Addr               string // e.g. :8082
+	ManifestHostPath   string // host path to pod-manifest.json
+	DockerSockHostPath string // host path to docker socket
+	PodName            string
 }
 
 // EmitCompose generates a compose.generated.yml string from pod definition and
@@ -283,6 +293,55 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				"claw.pod":        proxy.PodName,
 				"claw.role":       "proxy",
 				"claw.proxy.type": proxy.ProxyType,
+				"claw.service":    serviceName,
+			},
+			Networks: []string{"claw-internal"},
+		}
+	}
+
+	if hasClaw && p.Clawctl != nil {
+		if strings.TrimSpace(p.Clawctl.Image) == "" {
+			return "", fmt.Errorf("clawctl image must not be empty")
+		}
+		if strings.TrimSpace(p.Clawctl.ManifestHostPath) == "" {
+			return "", fmt.Errorf("clawctl manifest host path must not be empty")
+		}
+
+		addr := strings.TrimSpace(p.Clawctl.Addr)
+		if addr == "" {
+			addr = ":8082"
+		}
+		port := clawctlPort(addr)
+		socketPath := strings.TrimSpace(p.Clawctl.DockerSockHostPath)
+		if socketPath == "" {
+			socketPath = "/var/run/docker.sock"
+		}
+
+		cf.Services["clawctl"] = &composeService{
+			Image:    p.Clawctl.Image,
+			Ports:    []string{fmt.Sprintf("%s:%s", port, port)},
+			ReadOnly: true,
+			Tmpfs:    []string{"/tmp"},
+			Volumes: []string{
+				fmt.Sprintf("%s:/claw/pod-manifest.json:ro", p.Clawctl.ManifestHostPath),
+				fmt.Sprintf("%s:/var/run/docker.sock:ro", socketPath),
+			},
+			Environment: map[string]string{
+				"CLAWCTL_ADDR":     addr,
+				"CLAWCTL_MANIFEST": "/claw/pod-manifest.json",
+				"CLAW_POD":         p.Clawctl.PodName,
+			},
+			Restart: "on-failure",
+			Healthcheck: &composeHealthcheck{
+				Test:     []string{"CMD", "/clawctl", "-healthcheck"},
+				Interval: "15s",
+				Timeout:  "5s",
+				Retries:  3,
+			},
+			Labels: map[string]string{
+				"claw.pod":     p.Clawctl.PodName,
+				"claw.role":    "dashboard",
+				"claw.service": "clawctl",
 			},
 			Networks: []string{"claw-internal"},
 		}
@@ -387,4 +446,22 @@ func surfaceAccessMode(surface driver.ResolvedSurface) (string, error) {
 	default:
 		return "", fmt.Errorf("surface %s://%s has unsupported access mode %q", surface.Scheme, surface.Target, surface.AccessMode)
 	}
+}
+
+func clawctlPort(addr string) string {
+	port := strings.TrimSpace(addr)
+	if strings.HasPrefix(addr, ":") {
+		port = strings.TrimPrefix(addr, ":")
+	}
+	if strings.Count(addr, ":") > 0 {
+		_, parsedPort, err := net.SplitHostPort(addr)
+		if err == nil && strings.TrimSpace(parsedPort) != "" {
+			port = parsedPort
+		}
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(port))
+	if err != nil || value < 1 || value > 65535 {
+		return "8082"
+	}
+	return strconv.Itoa(value)
 }
