@@ -1,0 +1,16 @@
+FROM alpine:3.20
+
+CLAW_TYPE nullclaw
+AGENT AGENTS.md
+
+MODEL primary anthropic/claude-sonnet-4
+
+HANDLE discord
+
+RUN apk add --no-cache curl jq tini
+COPY nullclaw /usr/local/bin/nullclaw
+RUN chmod +x /usr/local/bin/nullclaw
+COPY nullclaw-entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/sbin/tini", "--", "/app/entrypoint.sh"]
