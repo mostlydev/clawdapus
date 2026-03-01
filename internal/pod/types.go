@@ -6,6 +6,7 @@ import "github.com/mostlydev/clawdapus/internal/driver"
 type Pod struct {
 	Name     string
 	Services map[string]*Service
+	Clawctl  *ClawctlConfig // runtime-only dashboard sidecar config, injected by claw up
 }
 
 // Service represents a service in a claw-pod.yml.

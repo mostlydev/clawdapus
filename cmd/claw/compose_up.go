@@ -398,6 +398,20 @@ func runComposeUp(podFile string) error {
 			strings.Join(proxyTypes, ", "), strings.Join(cllamaAgents, ", "))
 	}
 
+	manifestPath, err := writePodManifest(runtimeDir, p, resolvedClaws, proxies)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("[claw] wrote %s\n", manifestPath)
+
+	p.Clawctl = &pod.ClawctlConfig{
+		Image:              "ghcr.io/mostlydev/clawctl:latest",
+		Addr:               envOrDefault("CLAWCTL_ADDR", ":8082"),
+		ManifestHostPath:   manifestPath,
+		DockerSockHostPath: "/var/run/docker.sock",
+		PodName:            p.Name,
+	}
+
 	// Pass 2: materialize after cllama tokens/context are resolved.
 	for _, name := range sortedResolvedClawNames(resolvedClaws) {
 		rc := resolvedClaws[name]
@@ -781,6 +795,14 @@ func shortContainerIDForPostApply(id string) string {
 		return id
 	}
 	return id[:12]
+}
+
+func envOrDefault(key, fallback string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 // resolveChannelID looks up a channel by name in the discord handle's guild topology.

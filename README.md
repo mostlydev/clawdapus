@@ -41,6 +41,8 @@ claw health -f claw-pod.yml    # both healthy
 
 Open **http://localhost:8081** — the cllama governance proxy dashboard. Watch every LLM call in real time: which agent, which model, token counts, cost.
 
+Open **http://localhost:8082** — the clawctl fleet dashboard. View live service health, topology wiring, and per-service drill-down status.
+
 Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
 
 See [`examples/quickstart/`](./examples/quickstart/) for the full walkthrough, Telegram/Slack alternatives, and migration from existing OpenClaw.

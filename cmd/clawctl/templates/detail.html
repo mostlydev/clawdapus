@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>clawctl - detail</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0c1017;
+      --bg-raised: #131a24;
+      --ink: #d4dce8;
+      --ink-bright: #edf2f7;
+      --muted: #5e7085;
+      --line: #1f2d3d;
+      --line-bright: #2a3a4d;
+      --amber: #f0a500;
+      --amber-dim: #a07000;
+      --cyan: #22d3ee;
+      --green: #34d399;
+      --red: #ef4444;
+      --purple: #a78bfa;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Outfit", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+      position: relative;
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.03) 2px,
+        rgba(0,0,0,0.03) 4px
+      );
+      z-index: 9999;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 48px;
+      background: var(--bg-raised);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .topbar-brand {
+      font-family: "Geist Mono", monospace;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 11px;
+      text-decoration: none;
+    }
+    .topbar-brand span { color: var(--cyan); }
+    .topbar-nav {
+      display: flex;
+      gap: 2px;
+    }
+    .topbar-nav a,
+    .topbar-nav span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 14px;
+      height: 48px;
+      color: var(--muted);
+      text-decoration: none;
+      border-bottom: 2px solid transparent;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .topbar-nav a:hover { color: var(--ink-bright); }
+    .topbar-nav a.active,
+    .topbar-nav span.active {
+      color: var(--ink-bright);
+      border-bottom-color: var(--amber);
+    }
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px 20px 40px;
+    }
+
+    .crumb {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    .crumb a { color: var(--cyan); text-decoration: none; }
+
+    .page-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .page-title {
+      margin: 0;
+      color: var(--ink-bright);
+      font-size: 24px;
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .service-meta {
+      font-family: "Geist Mono", monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .banner {
+      border: 1px solid var(--amber-dim);
+      background: rgba(240,165,0,0.10);
+      color: var(--amber);
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .panel {
+      background: var(--bg-raised);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+
+    details > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--line);
+      font-family: "Geist Mono", monospace;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    details > summary::after {
+      content: "+";
+      color: var(--muted);
+      font-size: 12px;
+    }
+    details[open] > summary::after { content: "-"; }
+
+    .panel-body {
+      padding: 14px 16px;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #0f1520;
+    }
+    .stat-label {
+      font-family: "Geist Mono", monospace;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+    .stat-value {
+      font-size: 13px;
+      color: var(--ink-bright);
+      word-break: break-word;
+    }
+
+    .status-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-family: "Geist Mono", monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+    }
+    .status-dot.status-healthy { background: var(--green); }
+    .status-dot.status-starting { background: var(--amber); }
+    .status-dot.status-unhealthy { background: var(--red); }
+    .status-dot.status-unknown { background: var(--muted); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      text-align: left;
+      font-family: "Geist Mono", monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      padding: 8px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    td {
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      color: var(--ink);
+      word-break: break-word;
+    }
+
+    .badge {
+      font-family: "Geist Mono", monospace;
+      border-radius: 999px;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      background: #0f1520;
+      color: var(--muted);
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    li { margin: 4px 0; }
+
+    .guild {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #0f1520;
+      font-size: 12px;
+    }
+    .guild-name {
+      font-family: "Geist Mono", monospace;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 5px;
+    }
+
+    .empty {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .noscript {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .noscript a { color: var(--cyan); }
+
+    @media (max-width: 740px) {
+      .topbar {
+        padding: 0 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="topbar-brand"><span>CLAWCTL</span> {{.PodName}}</a>
+    <nav class="topbar-nav" aria-label="Primary">
+      <a href="/"><span class="dot"></span>Fleet</a>
+      <a href="/topology"><span class="dot"></span>Topology</a>
+      <span class="active"><span class="dot"></span>Detail</span>
+    </nav>
+    <div style="width:112px"></div>
+  </header>
+
+  <main>
+    <div class="crumb"><a href="/">Fleet</a> / {{.ServiceName}}</div>
+    <div class="page-head">
+      <div>
+        <h1 class="page-title">{{.ServiceName}}</h1>
+        <div class="service-meta">image: {{if .ImageRef}}{{.ImageRef}}{{else}}-{{end}} {{if gt .Count 1}}| replicas: {{.Count}}{{end}}</div>
+      </div>
+      {{if .IsProxy}}
+        <span class="badge" style="color: var(--amber); border-color: var(--amber-dim);">proxy</span>
+      {{end}}
+    </div>
+
+    {{if .HasStatusErrors}}
+      <div class="banner">{{.StatusError}}</div>
+    {{end}}
+
+    <div class="panel">
+      <details open>
+        <summary>Status</summary>
+        <div class="panel-body">
+          <div class="status-grid">
+            <div class="stat">
+              <div class="stat-label">Health</div>
+              <div class="stat-value {{.StatusClass}}">
+                <span class="status-wrap">
+                  <span class="status-dot {{.StatusClass}}" data-status-dot="{{.ServiceName}}"></span>
+                  <span data-status-text="{{.ServiceName}}">{{statusLabel .Status.Status}}</span>
+                </span>
+              </div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Uptime</div>
+              <div class="stat-value" data-uptime-text="{{.ServiceName}}">{{.Status.Uptime}}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Container</div>
+              <div class="stat-value" data-container-id="{{.ServiceName}}">{{if .Status.ContainerID}}{{.Status.ContainerID}}{{else}}-{{end}}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Instances</div>
+              <div class="stat-value"><span data-instance-running="{{.ServiceName}}">{{.Status.Running}}</span> / <span data-instance-total="{{.ServiceName}}">{{.Status.Instances}}</span></div>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details>
+        <summary>Surfaces</summary>
+        <div class="panel-body">
+          {{if .Surfaces}}
+            <table>
+              <thead>
+                <tr><th>Scheme</th><th>Target</th><th>Access</th><th>Ports</th></tr>
+              </thead>
+              <tbody>
+                {{range .Surfaces}}
+                  <tr>
+                    <td>{{.Scheme}}</td>
+                    <td>{{.Target}}</td>
+                    <td>{{if .AccessMode}}{{.AccessMode}}{{else}}-{{end}}</td>
+                    <td>{{if .Ports}}{{join .Ports ", "}}{{else}}-{{end}}</td>
+                  </tr>
+                {{end}}
+              </tbody>
+            </table>
+          {{else}}
+            <div class="empty">No declared surfaces.</div>
+          {{end}}
+        </div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details>
+        <summary>Handles</summary>
+        <div class="panel-body">
+          {{if .Handles}}
+            <table>
+              <thead>
+                <tr><th>Platform</th><th>Username</th><th>ID</th><th>Guilds</th></tr>
+              </thead>
+              <tbody>
+                {{range .Handles}}
+                  <tr>
+                    <td>{{.Platform}}</td>
+                    <td>{{if .Username}}{{.Username}}{{else}}-{{end}}</td>
+                    <td>{{.ID}}</td>
+                    <td>
+                      {{if .Guilds}}
+                        {{range .Guilds}}
+                          <div class="guild">
+                            <div class="guild-name">{{if .Name}}{{.Name}}{{else}}guild{{end}} ({{.ID}})</div>
+                            <div>{{if .Channels}}{{range .Channels}}{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}} ({{.ID}})<br/>{{end}}{{else}}No channels{{end}}</div>
+                          </div>
+                        {{end}}
+                      {{else}}
+                        -
+                      {{end}}
+                    </td>
+                  </tr>
+                {{end}}
+              </tbody>
+            </table>
+          {{else}}
+            <div class="empty">No handle metadata for this service.</div>
+          {{end}}
+        </div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details>
+        <summary>Skills</summary>
+        <div class="panel-body">
+          {{if .Skills}}
+            <ul>
+              {{range .Skills}}
+                <li>{{.}}</li>
+              {{end}}
+            </ul>
+          {{else}}
+            <div class="empty">No skills declared.</div>
+          {{end}}
+        </div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details>
+        <summary>Invoke</summary>
+        <div class="panel-body">
+          {{if .Invocations}}
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Schedule</th><th>Message</th><th>To</th></tr>
+              </thead>
+              <tbody>
+                {{range .Invocations}}
+                  <tr>
+                    <td>{{if .Name}}{{.Name}}{{else}}-{{end}}</td>
+                    <td>{{if .Schedule}}{{.Schedule}}{{else}}-{{end}}</td>
+                    <td>{{if .Message}}{{truncate .Message 120}}{{else}}-{{end}}</td>
+                    <td>{{if .To}}{{.To}}{{else}}-{{end}}</td>
+                  </tr>
+                {{end}}
+              </tbody>
+            </table>
+          {{else}}
+            <div class="empty">No scheduled invocations.</div>
+          {{end}}
+        </div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details>
+        <summary>Models</summary>
+        <div class="panel-body">
+          {{if .Models}}
+            <table>
+              <thead>
+                <tr><th>Slot</th><th>Provider / Model</th></tr>
+              </thead>
+              <tbody>
+                {{range .Models}}
+                  <tr>
+                    <td>{{.Slot}}</td>
+                    <td>{{.Model}}</td>
+                  </tr>
+                {{end}}
+              </tbody>
+            </table>
+          {{else}}
+            <div class="empty">No model slots in manifest.</div>
+          {{end}}
+        </div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details>
+        <summary>Cllama</summary>
+        <div class="panel-body">
+          {{if .Cllama}}
+            <table>
+              <thead>
+                <tr><th>Proxy Type</th><th>Proxy Service</th><th>Token</th></tr>
+              </thead>
+              <tbody>
+                {{range .Cllama}}
+                  <tr>
+                    <td>{{.ProxyType}}</td>
+                    <td>{{.ServiceName}}</td>
+                    <td data-token-status="{{$.ServiceName}}">{{.TokenStatus}}</td>
+                  </tr>
+                {{end}}
+              </tbody>
+            </table>
+          {{else}}
+            <div class="empty">No cllama proxy wiring.</div>
+          {{end}}
+        </div>
+      </details>
+    </div>
+
+    <noscript>
+      <div class="noscript">Live updates are disabled because JavaScript is off. <a href="/detail/{{pathEscape .ServiceName}}">Refresh now</a>.</div>
+    </noscript>
+  </main>
+
+  <script>
+    (() => {
+      const service = {{printf "%q" .ServiceName}};
+      const classFor = (status) => {
+        if (status === 'healthy' || status === 'running') return 'status-healthy';
+        if (status === 'starting') return 'status-starting';
+        if (status === 'unhealthy' || status === 'stopped' || status === 'dead' || status === 'exited') return 'status-unhealthy';
+        return 'status-unknown';
+      };
+
+      const apply = (status) => {
+        const klass = classFor(status.status || 'unknown');
+        document.querySelectorAll(`[data-status-dot="${CSS.escape(service)}"]`).forEach((dot) => {
+          dot.classList.remove('status-healthy', 'status-starting', 'status-unhealthy', 'status-unknown');
+          dot.classList.add(klass);
+        });
+        document.querySelectorAll(`[data-status-text="${CSS.escape(service)}"]`).forEach((el) => {
+          el.textContent = status.status || 'unknown';
+        });
+        document.querySelectorAll(`[data-uptime-text="${CSS.escape(service)}"]`).forEach((el) => {
+          el.textContent = status.uptime || '-';
+        });
+        document.querySelectorAll(`[data-container-id="${CSS.escape(service)}"]`).forEach((el) => {
+          el.textContent = status.containerId || '-';
+        });
+        document.querySelectorAll(`[data-instance-running="${CSS.escape(service)}"]`).forEach((el) => {
+          el.textContent = String(status.running || 0);
+        });
+        document.querySelectorAll(`[data-instance-total="${CSS.escape(service)}"]`).forEach((el) => {
+          el.textContent = String(status.instances || 0);
+        });
+        const token = status.hasCllamaToken ? 'present' : 'absent';
+        document.querySelectorAll(`[data-token-status="${CSS.escape(service)}"]`).forEach((el) => {
+          el.textContent = token;
+        });
+      };
+
+      const refresh = async () => {
+        try {
+          const res = await fetch('/api/status', { cache: 'no-store' });
+          if (!res.ok) return;
+          const payload = await res.json();
+          if (!payload || !payload.services || !payload.services[service]) return;
+          apply(payload.services[service]);
+        } catch (_) {
+          // keep previous state
+        }
+      };
+
+      refresh();
+      setInterval(refresh, 15000);
+    })();
+  </script>
+</body>
+</html>
