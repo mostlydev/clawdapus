@@ -14,17 +14,40 @@ func TestInitScaffoldCreatesFiles(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, name := range []string{"Clawfile", "claw-pod.yml", "AGENTS.md", ".env.example"} {
+	for _, name := range []string{
+		"agents/assistant/Clawfile",
+		"agents/assistant/AGENTS.md",
+		"claw-pod.yml",
+		".env.example",
+		".gitignore",
+	} {
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Errorf("expected %s to exist", name)
 		}
 	}
+
+	podData, err := os.ReadFile(filepath.Join(dir, "claw-pod.yml"))
+	if err != nil {
+		t.Fatalf("read pod file: %v", err)
+	}
+	pod := string(podData)
+	if !strings.Contains(pod, "build:") || !strings.Contains(pod, "context: ./agents/assistant") {
+		t.Fatalf("expected pod scaffold to include build context; got:\n%s", pod)
+	}
+	if !strings.Contains(pod, "agent: ./agents/assistant/AGENTS.md") {
+		t.Fatalf("expected pod scaffold to include pod-root-relative agent path; got:\n%s", pod)
+	}
 }
 
 func TestInitScaffoldRefusesToOverwrite(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Clawfile"), []byte("existing"), 0644)
+	if err := os.MkdirAll(filepath.Join(dir, "agents", "assistant"), 0o755); err != nil {
+		t.Fatalf("create agent dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agents", "assistant", "Clawfile"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("seed existing Clawfile: %v", err)
+	}
 
 	err := runInit(dir, "")
 	if err == nil {
@@ -63,5 +86,27 @@ func TestInitFromOpenClawConfig(t *testing.T) {
 	}
 	if !strings.Contains(content, "HANDLE telegram") {
 		t.Error("expected Clawfile to contain HANDLE telegram")
+	}
+}
+
+func TestInitScaffoldAppendsGitignoreEntries(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules/\n"), 0o644); err != nil {
+		t.Fatalf("seed .gitignore: %v", err)
+	}
+
+	if err := runInit(dir, ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gitignoreData, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	gitignore := string(gitignoreData)
+	for _, expected := range []string{"node_modules/", ".env", "*.generated.*"} {
+		if !strings.Contains(gitignore, expected) {
+			t.Errorf("expected .gitignore to contain %q, got:\n%s", expected, gitignore)
+		}
 	}
 }

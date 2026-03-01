@@ -1,8 +1,12 @@
+x-claw:
+  pod: quickstart
 services:
   assistant:
-    image: quickstart-claw:latest
+    image: quickstart-assistant:latest
+    build:
+      context: ./agents/assistant
     x-claw:
-      agent: ./AGENTS.md
+      agent: ./agents/assistant/AGENTS.md
       cllama: passthrough
       cllama-env:
         OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"

@@ -31,7 +31,7 @@ cp .env.example .env
 
 # Build and launch
 source .env
-claw build -t quickstart-claw .
+claw build -t quickstart-assistant ./agents/assistant
 claw up -f claw-pod.yml -d
 
 # Verify
@@ -44,6 +44,20 @@ Open **http://localhost:8081** — the cllama governance proxy dashboard. Watch 
 Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
 
 See [`examples/quickstart/`](./examples/quickstart/) for the full walkthrough, Telegram/Slack alternatives, and migration from existing OpenClaw.
+
+Or scaffold from scratch:
+
+```bash
+claw init my-pod
+cd my-pod
+cp .env.example .env
+source .env
+claw build -t my-pod-assistant:latest ./agents/assistant
+claw up -d
+
+# add another agent later
+claw agent add researcher
+```
 
 ---
 
@@ -115,11 +129,15 @@ SKILL policy/risk-limits.md       # operator policy — mounted read-only into r
 **The Deployment (`claw-pod.yml`)** — an extended docker-compose.
 
 ```yaml
+x-claw:
+  pod: trading-desk
 services:
   tiverton:
-    image: trading-desk:latest
+    image: trading-desk-tiverton:latest
+    build:
+      context: ./agents/tiverton
     x-claw:
-      agent: ./agents/TIVERTON.md
+      agent: ./agents/tiverton/AGENTS.md
       cllama: passthrough
       cllama-env:
         OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
@@ -143,6 +161,8 @@ Clawdapus extends two formats you already know:
 
 | Clawdapus | Docker equivalent | Purpose |
 |-----------|------------------|---------|
+| `claw init` | `docker init` + project templating | Scaffold canonical project layout |
+| `claw agent add` | _(none)_ | Add agents and wire pod/service/env updates |
 | `Clawfile` | `Dockerfile` | Build an immutable agent image |
 | `claw-pod.yml` | `docker-compose.yml` | Run a governed agent fleet |
 | `claw build` | `docker build` | Transpile + build OCI image |
