@@ -614,11 +614,22 @@ func renderInitPod(cfg *initResolvedConfig) string {
 			b.WriteString("\"\n")
 		}
 		b.WriteString("    environment:\n")
-		b.WriteString("      ")
-		b.WriteString(platformTokenKey(cfg.Platform))
-		b.WriteString(": \"${")
-		b.WriteString(platformTokenKey(cfg.Platform))
-		b.WriteString("}\"\n")
+		tokenKey := platformTokenKey(cfg.Platform)
+		idKey := platformIDKey(cfg.Platform)
+		if tokenKey != "" {
+			b.WriteString("      ")
+			b.WriteString(tokenKey)
+			b.WriteString(": \"${")
+			b.WriteString(tokenKey)
+			b.WriteString("}\"\n")
+		}
+		if idKey != "" {
+			b.WriteString("      ")
+			b.WriteString(idKey)
+			b.WriteString(": \"${")
+			b.WriteString(idKey)
+			b.WriteString("}\"\n")
+		}
 	} else if cfg.VolumeName != "" {
 		b.WriteString("      surfaces:\n")
 		b.WriteString("        - \"volume://")
