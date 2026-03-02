@@ -18,6 +18,7 @@ import (
 	_ "github.com/mostlydev/clawdapus/internal/driver/nanoclaw"
 	_ "github.com/mostlydev/clawdapus/internal/driver/nullclaw"
 	_ "github.com/mostlydev/clawdapus/internal/driver/openclaw"
+	_ "github.com/mostlydev/clawdapus/internal/driver/picoclaw"
 )
 
 var composeHealthCmd = &cobra.Command{

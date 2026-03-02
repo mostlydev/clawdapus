@@ -153,10 +153,10 @@ func parseClawType(value string) (string, error) {
 	switch v {
 	case "":
 		return "", fmt.Errorf("claw type is required")
-	case "openclaw", "nanoclaw", "microclaw", "nullclaw", "generic":
+	case "openclaw", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic":
 		return v, nil
 	default:
-		return "", fmt.Errorf("invalid claw type %q (allowed: openclaw, nanoclaw, microclaw, nullclaw, generic)", value)
+		return "", fmt.Errorf("invalid claw type %q (allowed: openclaw, nanoclaw, microclaw, nullclaw, nanobot, picoclaw, generic)", value)
 	}
 }
 
@@ -170,6 +170,10 @@ func defaultBaseImageForClawType(clawType string) string {
 		return "node:22-slim"
 	case "nullclaw":
 		return "node:22-slim"
+	case "nanobot":
+		return "nanobot:latest"
+	case "picoclaw":
+		return "docker.io/sipeed/picoclaw:latest"
 	case "generic":
 		return "alpine:3.20"
 	default:

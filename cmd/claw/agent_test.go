@@ -162,32 +162,47 @@ func TestAgentAddRejectsAbsoluteContractPath(t *testing.T) {
 	}
 }
 
-func TestAgentAddGenericTypeUsesGenericBaseImage(t *testing.T) {
-	dir := t.TempDir()
-	podPath := seedCanonicalProject(t, dir)
-
-	opts := agentAddOptions{
-		AgentName: "genericone",
-		ClawType:  "generic",
-		Model:     defaultModel,
-		Cllama:    "no",
-		Platform:  "none",
-		AssumeYes: true,
-	}
-	if err := runAgentAdd(podPath, opts); err != nil {
-		t.Fatalf("runAgentAdd failed: %v", err)
+func TestAgentAddTypeDefaults(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentName string
+		clawType  string
+		baseImage string
+	}{
+		{name: "generic", agentName: "genericone", clawType: "generic", baseImage: "alpine:3.20"},
+		{name: "nanobot", agentName: "nanobotone", clawType: "nanobot", baseImage: "nanobot:latest"},
+		{name: "picoclaw", agentName: "picoclawone", clawType: "picoclaw", baseImage: "docker.io/sipeed/picoclaw:latest"},
 	}
 
-	clawfileData, err := os.ReadFile(filepath.Join(dir, "agents", "genericone", "Clawfile"))
-	if err != nil {
-		t.Fatalf("read generated Clawfile: %v", err)
-	}
-	clawfile := string(clawfileData)
-	if !strings.Contains(clawfile, "FROM alpine:3.20") {
-		t.Fatalf("expected generic agent Clawfile to use alpine base image, got:\n%s", clawfile)
-	}
-	if !strings.Contains(clawfile, "CLAW_TYPE generic") {
-		t.Fatalf("expected generic agent Clawfile to set CLAW_TYPE generic, got:\n%s", clawfile)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			podPath := seedCanonicalProject(t, dir)
+
+			opts := agentAddOptions{
+				AgentName: tc.agentName,
+				ClawType:  tc.clawType,
+				Model:     defaultModel,
+				Cllama:    "no",
+				Platform:  "none",
+				AssumeYes: true,
+			}
+			if err := runAgentAdd(podPath, opts); err != nil {
+				t.Fatalf("runAgentAdd failed: %v", err)
+			}
+
+			clawfileData, err := os.ReadFile(filepath.Join(dir, "agents", tc.agentName, "Clawfile"))
+			if err != nil {
+				t.Fatalf("read generated Clawfile: %v", err)
+			}
+			clawfile := string(clawfileData)
+			if !strings.Contains(clawfile, "FROM "+tc.baseImage) {
+				t.Fatalf("expected %s agent Clawfile to use %s base image, got:\n%s", tc.clawType, tc.baseImage, clawfile)
+			}
+			if !strings.Contains(clawfile, "CLAW_TYPE "+tc.clawType) {
+				t.Fatalf("expected agent Clawfile to set CLAW_TYPE %s, got:\n%s", tc.clawType, clawfile)
+			}
+		})
 	}
 }
 

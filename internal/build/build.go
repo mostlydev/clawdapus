@@ -14,6 +14,7 @@ import (
 	_ "github.com/mostlydev/clawdapus/internal/driver/nanoclaw"
 	_ "github.com/mostlydev/clawdapus/internal/driver/nullclaw"
 	_ "github.com/mostlydev/clawdapus/internal/driver/openclaw" // register built-in drivers for build-time validation
+	_ "github.com/mostlydev/clawdapus/internal/driver/picoclaw"
 )
 
 func Generate(clawfilePath string) (string, error) {

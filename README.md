@@ -186,7 +186,7 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 
 | Directive | Purpose |
 |---|---|
-| `CLAW_TYPE` | Selects the runtime driver (openclaw, nanoclaw, microclaw, nullclaw) |
+| `CLAW_TYPE` | Selects the runtime driver (openclaw, nanobot, picoclaw, nanoclaw, microclaw, nullclaw) |
 | `AGENT` | Names the behavioral contract file |
 | `MODEL` | Binds named model slots to providers |
 | `CLLAMA` | Declares governance proxy type(s) |
@@ -205,11 +205,13 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 | CLAW_TYPE | Runtime | Config | HANDLE | INVOKE | CLLAMA | Container | Health |
 |-----------|---------|--------|--------|--------|--------|-----------|--------|
 | `openclaw` | [OpenClaw](https://openclaw.ai) | JSON5 | Discord | jobs.json | Yes | read-only | `openclaw health --json` |
+| `nanobot` | [Nanobot](https://github.com/HKUDS/nanobot) | JSON | Discord, Telegram, Slack | `cron/jobs.json` | Yes | read-only | container running |
+| `picoclaw` | [PicoClaw](https://github.com/sipeed/picoclaw) | JSON (`model_list`) | Discord, Telegram, Slack (+ stable long-tail set) | `workspace/cron/jobs.json` | Yes | read-only | HTTP `/health` + `/ready` |
 | `nanoclaw` | Claude Agent SDK | CLAUDE.md | — | — | Yes | writable | `pgrep node` |
 | `microclaw` | MicroClaw | YAML | Discord, Telegram, Slack | — | Yes | writable | `pgrep microclaw` |
 | `nullclaw` | NullClaw | JSON | Discord, Telegram, Slack | CLI cron | Yes | read-only | HTTP `:3000/health` |
 
-`claw init` scaffolds `openclaw` (default) and `generic` (alpine:3.20, no driver enforcement) projects.
+`claw init` scaffolds `openclaw` (default), `nanobot`, `picoclaw`, and `generic` (alpine:3.20, no driver enforcement) projects.
 
 ---
 
@@ -315,6 +317,8 @@ $ claw skillmap crypto-crusher-0
 |---------|---------------|
 | [`examples/quickstart/`](./examples/quickstart/) | **Start here** — single governed agent with Discord, cllama proxy, and dashboard |
 | [`examples/openclaw/`](./examples/openclaw/) | Single OpenClaw agent with Discord handle, skill emit, and service surface |
+| [`examples/nanobot/`](./examples/nanobot/) | Minimal Nanobot driver project with generated config + Discord handle wiring |
+| [`examples/picoclaw/`](./examples/picoclaw/) | Minimal PicoClaw driver project with model-list config + Discord handle wiring |
 | [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
 | [`examples/trading-desk/`](./examples/trading-desk/) | Three agents coordinating via Discord with a mock trading API, scheduled invocations, and cllama governance proxy |
 

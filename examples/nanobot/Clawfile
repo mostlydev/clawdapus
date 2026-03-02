@@ -1,0 +1,9 @@
+FROM nanobot:latest
+
+CLAW_TYPE nanobot
+AGENT AGENTS.md
+
+MODEL primary openrouter/anthropic/claude-sonnet-4
+CLLAMA passthrough
+
+HANDLE discord

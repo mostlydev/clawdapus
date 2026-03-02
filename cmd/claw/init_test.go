@@ -119,21 +119,35 @@ func TestInitScaffoldAppendsGitignoreEntries(t *testing.T) {
 	}
 }
 
-func TestInitScaffoldGenericTypeUsesGenericBaseImage(t *testing.T) {
-	dir := t.TempDir()
-	if err := runInitWithOptions(dir, "", initScaffoldOptions{ClawType: "generic"}, false); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestInitScaffoldTypeDefaults(t *testing.T) {
+	tests := []struct {
+		name      string
+		clawType  string
+		baseImage string
+	}{
+		{name: "generic", clawType: "generic", baseImage: "alpine:3.20"},
+		{name: "nanobot", clawType: "nanobot", baseImage: "nanobot:latest"},
+		{name: "picoclaw", clawType: "picoclaw", baseImage: "docker.io/sipeed/picoclaw:latest"},
 	}
 
-	clawfileData, err := os.ReadFile(filepath.Join(dir, "agents", "assistant", "Clawfile"))
-	if err != nil {
-		t.Fatalf("read Clawfile: %v", err)
-	}
-	clawfile := string(clawfileData)
-	if !strings.Contains(clawfile, "FROM alpine:3.20") {
-		t.Fatalf("expected generic scaffold to use alpine base image, got:\n%s", clawfile)
-	}
-	if !strings.Contains(clawfile, "CLAW_TYPE generic") {
-		t.Fatalf("expected generic scaffold to set CLAW_TYPE generic, got:\n%s", clawfile)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := runInitWithOptions(dir, "", initScaffoldOptions{ClawType: tc.clawType}, false); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			clawfileData, err := os.ReadFile(filepath.Join(dir, "agents", "assistant", "Clawfile"))
+			if err != nil {
+				t.Fatalf("read Clawfile: %v", err)
+			}
+			clawfile := string(clawfileData)
+			if !strings.Contains(clawfile, "FROM "+tc.baseImage) {
+				t.Fatalf("expected %s scaffold to use %s base image, got:\n%s", tc.clawType, tc.baseImage, clawfile)
+			}
+			if !strings.Contains(clawfile, "CLAW_TYPE "+tc.clawType) {
+				t.Fatalf("expected scaffold to set CLAW_TYPE %s, got:\n%s", tc.clawType, clawfile)
+			}
+		})
 	}
 }

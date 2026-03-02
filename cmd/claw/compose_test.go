@@ -82,7 +82,7 @@ func TestResolveComposeGeneratedPathWithPodFileMissingGenerated(t *testing.T) {
 }
 
 func TestBuiltinDriversRegistered(t *testing.T) {
-	for _, clawType := range []string{"openclaw", "nanoclaw", "microclaw"} {
+	for _, clawType := range []string{"openclaw", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw"} {
 		if _, err := driver.Lookup(clawType); err != nil {
 			t.Fatalf("expected driver %q to be registered in CLI package: %v", clawType, err)
 		}

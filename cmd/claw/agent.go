@@ -623,7 +623,7 @@ func resolveAgentAddConfig(ctx *agentAddContext, opts agentAddOptions) (*agentAd
 
 	if cfg.ClawType == "" {
 		if promptMode {
-			value, err := promptSelect(reader, os.Stdout, "Claw type", []string{"openclaw", "generic"}, 0)
+			value, err := promptSelect(reader, os.Stdout, "Claw type", []string{"openclaw", "nanobot", "picoclaw", "generic"}, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -1013,7 +1013,7 @@ func rewireContracts(servicesNode *yaml.Node, sourcePath, targetPath string) int
 
 func init() {
 	agentAddCmd.Flags().StringVar(&agentNameFlag, "agent", "", "Agent name (service and directory name)")
-	agentAddCmd.Flags().StringVar(&agentTypeFlag, "type", "", "Claw type (openclaw, generic)")
+	agentAddCmd.Flags().StringVar(&agentTypeFlag, "type", "", "Claw type (openclaw, nanobot, picoclaw, generic)")
 	agentAddCmd.Flags().StringVar(&agentModelFlag, "model", "", "Primary model (provider/model)")
 	agentAddCmd.Flags().StringVar(&agentCllamaFlag, "cllama", "", "Use cllama proxy (yes/no/inherit)")
 	agentAddCmd.Flags().StringVar(&agentPlatformFlag, "platform", "", "Platform handle (discord, slack, telegram, none)")

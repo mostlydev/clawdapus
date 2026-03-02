@@ -1,0 +1,23 @@
+x-claw:
+  pod: nanobot-example
+
+services:
+  gateway:
+    image: nanobot-example:latest
+    build:
+      context: .
+      dockerfile: Clawfile
+    x-claw:
+      agent: ./AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "nanobot-bot"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+    environment:
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
