@@ -228,7 +228,9 @@ CLLAMA passthrough
 	var envLines []string
 	for _, ch := range channels {
 		tokenVar := strings.ToUpper(ch) + "_BOT_TOKEN"
+		idVar := strings.ToUpper(ch) + "_BOT_ID"
 		envLines = append(envLines, fmt.Sprintf("      %s: \"${%s}\"", tokenVar, tokenVar))
+		envLines = append(envLines, fmt.Sprintf("      %s: \"${%s}\"", idVar, idVar))
 	}
 
 	handlesSection := ""
@@ -347,7 +349,7 @@ func runInitScaffold(dir string, opts initScaffoldOptions, interactive bool) err
 	}
 
 	files := map[string]string{
-		clawfilePath:   renderAgentClawfile(cfg.ClawType, cfg.Model, cfg.Cllama, cfg.Platform),
+		clawfilePath:   renderAgentClawfile(cfg.ClawType, cfg.Model, cfg.Cllama, cfg.Platform, "AGENTS.md"),
 		agentsPath:     defaultAgentContract(),
 		podPath:        renderInitPod(cfg),
 		envExamplePath: renderInitEnvExample(cfg),
@@ -537,13 +539,20 @@ func resolveInitConfig(dir string, opts initScaffoldOptions, interactive bool) (
 	return cfg, nil
 }
 
-func renderAgentClawfile(clawType, model, cllama, platform string) string {
+func renderAgentClawfile(clawType, model, cllama, platform, agentDirective string) string {
 	var b strings.Builder
-	b.WriteString("FROM openclaw:latest\n\n")
+	b.WriteString("FROM ")
+	b.WriteString(defaultBaseImageForClawType(clawType))
+	b.WriteString("\n\n")
 	b.WriteString("CLAW_TYPE ")
 	b.WriteString(clawType)
 	b.WriteString("\n")
-	b.WriteString("AGENT AGENTS.md\n\n")
+	if strings.TrimSpace(agentDirective) == "" {
+		agentDirective = "AGENTS.md"
+	}
+	b.WriteString("AGENT ")
+	b.WriteString(agentDirective)
+	b.WriteString("\n\n")
 	b.WriteString("MODEL primary ")
 	b.WriteString(model)
 	b.WriteString("\n")

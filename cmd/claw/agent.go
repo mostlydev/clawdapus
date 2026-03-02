@@ -26,6 +26,12 @@ var (
 	agentDryRunFlag    bool
 	agentYesFlag       bool
 	agentSharedProfile string
+	agentLayoutFlag    string
+)
+
+const (
+	agentLayoutCanonical = "canonical"
+	agentLayoutFlat      = "flat"
 )
 
 type agentAddOptions struct {
@@ -39,12 +45,14 @@ type agentAddOptions struct {
 	DryRun        bool
 	AssumeYes     bool
 	SharedProfile string
+	Layout        string
 	InteractiveIO bool
 }
 
 type agentAddContext struct {
 	RootDir           string
 	PodName           string
+	Layout            string
 	HasCllama         bool
 	CllamaValue       string
 	CllamaEnv         map[string]string
@@ -52,6 +60,8 @@ type agentAddContext struct {
 	HandleTemplate    *platformTemplate
 	ExistingContracts []string
 	ExistingVolumes   []string
+	ExistingPrefixes  map[string][]string
+	ExistingEnvKeys   map[string]struct{}
 }
 
 type platformTemplate struct {
@@ -71,6 +81,10 @@ type agentAddResolvedConfig struct {
 	Cllama           string
 	Platform         string
 	ContractPath     string
+	AgentDirective   string
+	ClawfileRelPath  string
+	AgentFileRelPath string
+	SkillsDirRelPath string
 	CreateAgentFile  bool
 	CreateSharedFile bool
 	SharedFilePath   string
@@ -80,12 +94,15 @@ type agentAddResolvedConfig struct {
 	EnvExampleVars   []string
 	Image            string
 	BuildContext     string
+	BuildDockerfile  string
 	CllamaEnv        map[string]string
 	HandleTemplate   *platformTemplate
+	Warnings         []string
 }
 
 type scaffoldBuild struct {
-	Context string `yaml:"context"`
+	Context    string `yaml:"context"`
+	Dockerfile string `yaml:"dockerfile,omitempty"`
 }
 
 type scaffoldGuild struct {
@@ -152,6 +169,7 @@ var agentAddCmd = &cobra.Command{
 			DryRun:        agentDryRunFlag,
 			AssumeYes:     agentYesFlag,
 			SharedProfile: agentSharedProfile,
+			Layout:        agentLayoutFlag,
 			InteractiveIO: shouldPromptInteractively(),
 		}
 
@@ -195,9 +213,8 @@ func runAgentAdd(podFile string, opts agentAddOptions) error {
 		return fmt.Errorf("service %q already exists in %s", resolved.AgentName, filepath.Base(podFile))
 	}
 
-	agentDir := filepath.Join(podDir, "agents", resolved.AgentName)
-	clawfilePath := filepath.Join(agentDir, "Clawfile")
-	agentFilePath := filepath.Join(agentDir, "AGENTS.md")
+	clawfilePath := filepath.Join(podDir, filepath.FromSlash(resolved.ClawfileRelPath))
+	agentFilePath := filepath.Join(podDir, filepath.FromSlash(resolved.AgentFileRelPath))
 	envExamplePath := filepath.Join(podDir, ".env.example")
 
 	createFiles := make([]string, 0, 3)
@@ -247,9 +264,9 @@ func runAgentAdd(podFile string, opts agentAddOptions) error {
 	}
 
 	planned := make([]string, 0, 8)
-	planned = append(planned, fmt.Sprintf("+ create agents/%s/Clawfile", resolved.AgentName))
+	planned = append(planned, fmt.Sprintf("+ create %s", resolved.ClawfileRelPath))
 	if resolved.CreateAgentFile {
-		planned = append(planned, fmt.Sprintf("+ create agents/%s/AGENTS.md", resolved.AgentName))
+		planned = append(planned, fmt.Sprintf("+ create %s", resolved.AgentFileRelPath))
 	}
 	if resolved.CreateSharedFile {
 		planned = append(planned, fmt.Sprintf("+ create %s", strings.TrimPrefix(resolved.SharedFilePath, "./")))
@@ -265,6 +282,12 @@ func runAgentAdd(podFile string, opts agentAddOptions) error {
 	fmt.Println("[claw] planned changes:")
 	for _, line := range planned {
 		fmt.Println(" ", line)
+	}
+	if len(resolved.Warnings) > 0 {
+		fmt.Println("[claw] warnings:")
+		for _, line := range resolved.Warnings {
+			fmt.Println("  !", line)
+		}
 	}
 
 	if opts.DryRun {
@@ -284,10 +307,15 @@ func runAgentAdd(podFile string, opts agentAddOptions) error {
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Join(agentDir, "skills"), 0o755); err != nil {
-		return fmt.Errorf("create agent directory: %w", err)
+	if err := os.MkdirAll(filepath.Dir(clawfilePath), 0o755); err != nil {
+		return fmt.Errorf("create clawfile directory: %w", err)
 	}
-	if err := os.WriteFile(clawfilePath, []byte(renderAgentClawfile(resolved.ClawType, resolved.Model, resolved.Cllama, resolved.Platform)), 0o644); err != nil {
+	if resolved.SkillsDirRelPath != "" {
+		if err := os.MkdirAll(filepath.Join(podDir, filepath.FromSlash(resolved.SkillsDirRelPath)), 0o755); err != nil {
+			return fmt.Errorf("create agent skills directory: %w", err)
+		}
+	}
+	if err := os.WriteFile(clawfilePath, []byte(renderAgentClawfile(resolved.ClawType, resolved.Model, resolved.Cllama, resolved.Platform, resolved.AgentDirective)), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", clawfilePath, err)
 	}
 	if resolved.CreateAgentFile {
@@ -318,9 +346,9 @@ func runAgentAdd(podFile string, opts agentAddOptions) error {
 		}
 	}
 
-	fmt.Printf("[claw] created agents/%s/Clawfile\n", resolved.AgentName)
+	fmt.Printf("[claw] created %s\n", resolved.ClawfileRelPath)
 	if resolved.CreateAgentFile {
-		fmt.Printf("[claw] created agents/%s/AGENTS.md\n", resolved.AgentName)
+		fmt.Printf("[claw] created %s\n", resolved.AgentFileRelPath)
 	}
 	if resolved.CreateSharedFile {
 		fmt.Printf("[claw] created %s\n", strings.TrimPrefix(resolved.SharedFilePath, "./"))
@@ -336,9 +364,14 @@ func buildAgentAddContext(rootDir string, parsed *pod.Pod, root *yaml.Node) *age
 	ctx := &agentAddContext{
 		RootDir:           rootDir,
 		PodName:           parsed.Name,
+		Layout:            agentLayoutCanonical,
 		CllamaEnv:         map[string]string{},
 		ExistingContracts: make([]string, 0),
+		ExistingPrefixes:  map[string][]string{},
+		ExistingEnvKeys:   map[string]struct{}{},
 	}
+
+	ctx.Layout = detectAgentLayout(rootDir, root, parsed)
 
 	volumeNames := make([]string, 0)
 	if volumesNode := findMapValue(root, "volumes"); volumesNode != nil && volumesNode.Kind == yaml.MappingNode {
@@ -359,6 +392,8 @@ func buildAgentAddContext(rootDir string, parsed *pod.Pod, root *yaml.Node) *age
 		if svc == nil || svc.Claw == nil {
 			continue
 		}
+		prefix := envPrefixFromName(name)
+		ctx.ExistingPrefixes[prefix] = append(ctx.ExistingPrefixes[prefix], name)
 		if svc.Claw.Agent != "" {
 			ctx.ExistingContracts = append(ctx.ExistingContracts, normalizeContractPath(svc.Claw.Agent))
 		}
@@ -408,7 +443,154 @@ func buildAgentAddContext(rootDir string, parsed *pod.Pod, root *yaml.Node) *age
 		ctx.CllamaEnv["OPENROUTER_API_KEY"] = "${OPENROUTER_API_KEY}"
 	}
 
+	envExamplePath := filepath.Join(rootDir, ".env.example")
+	if data, err := os.ReadFile(envExamplePath); err == nil {
+		for _, line := range splitLines(string(data)) {
+			key := parseEnvExampleKey(line)
+			if key == "" {
+				continue
+			}
+			ctx.ExistingEnvKeys[key] = struct{}{}
+		}
+	}
+
 	return ctx
+}
+
+func detectAgentLayout(rootDir string, root *yaml.Node, parsed *pod.Pod) string {
+	canonicalHints := 0
+	flatHints := 0
+
+	servicesNode := findMapValue(root, "services")
+
+	for serviceName, svc := range parsed.Services {
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+
+		agentPath := normalizeContractPath(svc.Claw.Agent)
+		switch {
+		case strings.HasPrefix(agentPath, "./agents/"):
+			canonicalHints++
+		case isRootLevelPath(agentPath):
+			flatHints++
+		}
+
+		if servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+			continue
+		}
+		serviceNode := findMapValue(servicesNode, serviceName)
+		contextValue, dockerfileValue := readServiceBuild(serviceNode)
+		contextNorm := normalizeBuildContextHint(contextValue)
+		switch {
+		case strings.HasPrefix(contextNorm, "agents/"):
+			canonicalHints++
+		case contextNorm == ".":
+			flatHints++
+		}
+		if contextNorm == "." && strings.HasPrefix(strings.ToLower(strings.TrimSpace(dockerfileValue)), "clawfile") {
+			flatHints++
+		}
+	}
+
+	if canonicalHints == 0 && flatHints == 0 {
+		if info, err := os.Stat(filepath.Join(rootDir, "agents")); err == nil && info.IsDir() {
+			return agentLayoutCanonical
+		}
+		return agentLayoutFlat
+	}
+	if flatHints > canonicalHints {
+		return agentLayoutFlat
+	}
+	return agentLayoutCanonical
+}
+
+func readServiceBuild(serviceNode *yaml.Node) (contextValue string, dockerfileValue string) {
+	if serviceNode == nil || serviceNode.Kind != yaml.MappingNode {
+		return "", ""
+	}
+	buildNode := findMapValue(serviceNode, "build")
+	if buildNode == nil {
+		return "", ""
+	}
+	switch buildNode.Kind {
+	case yaml.ScalarNode:
+		return strings.TrimSpace(buildNode.Value), ""
+	case yaml.MappingNode:
+		contextNode := findMapValue(buildNode, "context")
+		if contextNode != nil && contextNode.Kind == yaml.ScalarNode {
+			contextValue = strings.TrimSpace(contextNode.Value)
+		}
+		dockerfileNode := findMapValue(buildNode, "dockerfile")
+		if dockerfileNode != nil && dockerfileNode.Kind == yaml.ScalarNode {
+			dockerfileValue = strings.TrimSpace(dockerfileNode.Value)
+		}
+	}
+	return contextValue, dockerfileValue
+}
+
+func normalizeBuildContextHint(value string) string {
+	v := strings.TrimSpace(filepath.ToSlash(value))
+	v = strings.TrimPrefix(v, "./")
+	if v == "" {
+		return "."
+	}
+	return v
+}
+
+func isRootLevelPath(path string) bool {
+	p := strings.TrimPrefix(normalizeContractPath(path), "./")
+	return p != "" && !strings.Contains(p, "/")
+}
+
+func defaultClawfileRelPath(layout, agentName string) string {
+	if layout == agentLayoutFlat {
+		return "Clawfile." + agentName
+	}
+	return filepath.ToSlash(filepath.Join("agents", agentName, "Clawfile"))
+}
+
+func defaultAgentContractRelPath(layout, agentName string) string {
+	if layout == agentLayoutFlat {
+		return "AGENTS-" + agentName + ".md"
+	}
+	return filepath.ToSlash(filepath.Join("agents", agentName, "AGENTS.md"))
+}
+
+func defaultAgentDirective(layout, agentName string) string {
+	if layout == agentLayoutFlat {
+		return "AGENTS-" + agentName + ".md"
+	}
+	return "AGENTS.md"
+}
+
+func defaultBuildContext(layout, agentName string) string {
+	if layout == agentLayoutFlat {
+		return "."
+	}
+	return normalizeContractPath(filepath.ToSlash(filepath.Join("agents", agentName)))
+}
+
+func defaultBuildDockerfile(layout, agentName string) string {
+	if layout == agentLayoutFlat {
+		return "Clawfile." + agentName
+	}
+	return ""
+}
+
+func resolveAgentLayout(detected, requested string) (string, error) {
+	req := strings.TrimSpace(strings.ToLower(requested))
+	switch req {
+	case "", "auto":
+		if detected == agentLayoutFlat || detected == agentLayoutCanonical {
+			return detected, nil
+		}
+		return agentLayoutCanonical, nil
+	case agentLayoutCanonical, agentLayoutFlat:
+		return req, nil
+	default:
+		return "", fmt.Errorf("invalid --layout %q (allowed: auto, canonical, flat)", requested)
+	}
 }
 
 func resolveAgentAddConfig(ctx *agentAddContext, opts agentAddOptions) (*agentAddResolvedConfig, error) {
@@ -424,6 +606,17 @@ func resolveAgentAddConfig(ctx *agentAddContext, opts agentAddOptions) (*agentAd
 		VolumeModes:    make(map[string]string),
 		CllamaEnv:      make(map[string]string),
 		HandleTemplate: ctx.HandleTemplate,
+	}
+
+	layout, err := resolveAgentLayout(ctx.Layout, opts.Layout)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ClawfileRelPath = defaultClawfileRelPath(layout, cfg.AgentName)
+	cfg.AgentFileRelPath = defaultAgentContractRelPath(layout, cfg.AgentName)
+	cfg.AgentDirective = defaultAgentDirective(layout, cfg.AgentName)
+	if layout == agentLayoutCanonical {
+		cfg.SkillsDirRelPath = filepath.ToSlash(filepath.Join("agents", cfg.AgentName, "skills"))
 	}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -547,7 +740,7 @@ func resolveAgentAddConfig(ctx *agentAddContext, opts agentAddOptions) (*agentAd
 
 			switch contractMode {
 			case "create new":
-				cfg.ContractPath = normalizeContractPath(filepath.ToSlash(filepath.Join("agents", cfg.AgentName, "AGENTS.md")))
+				cfg.ContractPath = normalizeContractPath(cfg.AgentFileRelPath)
 				cfg.CreateAgentFile = true
 			case "reuse existing":
 				selected, err := promptSelect(reader, os.Stdout, "Reuse contract", ctx.ExistingContracts, 0)
@@ -585,7 +778,7 @@ func resolveAgentAddConfig(ctx *agentAddContext, opts agentAddOptions) (*agentAd
 				return nil, fmt.Errorf("unsupported contract mode %q", contractMode)
 			}
 		} else {
-			cfg.ContractPath = normalizeContractPath(filepath.ToSlash(filepath.Join("agents", cfg.AgentName, "AGENTS.md")))
+			cfg.ContractPath = normalizeContractPath(cfg.AgentFileRelPath)
 			cfg.CreateAgentFile = true
 		}
 	}
@@ -597,7 +790,7 @@ func resolveAgentAddConfig(ctx *agentAddContext, opts agentAddOptions) (*agentAd
 	}
 
 	if cfg.ContractPath == "" {
-		cfg.ContractPath = normalizeContractPath(filepath.ToSlash(filepath.Join("agents", cfg.AgentName, "AGENTS.md")))
+		cfg.ContractPath = normalizeContractPath(cfg.AgentFileRelPath)
 		cfg.CreateAgentFile = true
 	}
 
@@ -636,10 +829,20 @@ func resolveAgentAddConfig(ctx *agentAddContext, opts agentAddOptions) (*agentAd
 			cfg.EnvExampleVars = append(cfg.EnvExampleVars, prefix+"_"+tokenKey, prefix+"_"+idKey)
 		}
 	}
+	if owners, ok := ctx.ExistingPrefixes[prefix]; ok && len(owners) > 0 {
+		cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("env prefix %s for agent %q matches existing service(s): %s", prefix, cfg.AgentName, strings.Join(uniqueSorted(owners), ", ")))
+	}
+	for _, key := range cfg.EnvExampleVars {
+		if _, ok := ctx.ExistingEnvKeys[key]; ok {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(".env.example already contains %s; %s will reuse that value", key, cfg.AgentName))
+		}
+	}
 
 	cfg.Image = fmt.Sprintf("%s-%s:latest", ctx.PodName, cfg.AgentName)
-	cfg.BuildContext = normalizeContractPath(filepath.ToSlash(filepath.Join("agents", cfg.AgentName)))
+	cfg.BuildContext = defaultBuildContext(layout, cfg.AgentName)
+	cfg.BuildDockerfile = defaultBuildDockerfile(layout, cfg.AgentName)
 	cfg.EnvExampleVars = uniqueSorted(cfg.EnvExampleVars)
+	cfg.Warnings = uniqueSorted(cfg.Warnings)
 	return cfg, nil
 }
 
@@ -661,6 +864,7 @@ func serviceNodeFromConfig(cfg *agentAddResolvedConfig) (*yaml.Node, error) {
 		idKey := platformIDKey(cfg.Platform)
 		if tokenKey != "" && idKey != "" {
 			env[tokenKey] = fmt.Sprintf("${%s_%s}", prefix, tokenKey)
+			env[idKey] = fmt.Sprintf("${%s_%s}", prefix, idKey)
 			handle := scaffoldHandle{
 				ID:       fmt.Sprintf("${%s_%s}", prefix, idKey),
 				Username: cfg.AgentName,
@@ -696,7 +900,10 @@ func serviceNodeFromConfig(cfg *agentAddResolvedConfig) (*yaml.Node, error) {
 
 	service := scaffoldService{
 		Image: cfg.Image,
-		Build: scaffoldBuild{Context: cfg.BuildContext},
+		Build: scaffoldBuild{
+			Context:    cfg.BuildContext,
+			Dockerfile: cfg.BuildDockerfile,
+		},
 		XClaw: xclaw,
 	}
 	if len(env) > 0 {
@@ -813,6 +1020,7 @@ func init() {
 	agentAddCmd.Flags().StringVar(&agentContractFlag, "contract", "", "Reuse an existing contract path (relative to pod root)")
 	agentAddCmd.Flags().StringSliceVar(&agentVolumesFlag, "volume", nil, "Volume access spec (<name>:<read-only|read-write>)")
 	agentAddCmd.Flags().StringVar(&agentSharedProfile, "shared-profile", "", "Default shared profile name when creating shared profile interactively")
+	agentAddCmd.Flags().StringVar(&agentLayoutFlag, "layout", "auto", "Scaffold layout style (auto, canonical, flat)")
 	agentAddCmd.Flags().BoolVar(&agentDryRunFlag, "dry-run", false, "Print planned changes without writing files")
 	agentAddCmd.Flags().BoolVar(&agentYesFlag, "yes", false, "Apply without interactive confirmation")
 

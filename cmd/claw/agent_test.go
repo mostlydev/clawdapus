@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,7 @@ func TestAgentAddCreatesFilesAndUpdatesPod(t *testing.T) {
 		"context: ./agents/westin",
 		"agent: ./agents/westin/AGENTS.md",
 		"DISCORD_BOT_TOKEN: ${WESTIN_DISCORD_BOT_TOKEN}",
+		"DISCORD_BOT_ID: ${WESTIN_DISCORD_BOT_ID}",
 		"volume://shared read-only",
 	} {
 		if !strings.Contains(podText, expect) {
@@ -160,6 +162,162 @@ func TestAgentAddRejectsAbsoluteContractPath(t *testing.T) {
 	}
 }
 
+func TestAgentAddGenericTypeUsesGenericBaseImage(t *testing.T) {
+	dir := t.TempDir()
+	podPath := seedCanonicalProject(t, dir)
+
+	opts := agentAddOptions{
+		AgentName: "genericone",
+		ClawType:  "generic",
+		Model:     defaultModel,
+		Cllama:    "no",
+		Platform:  "none",
+		AssumeYes: true,
+	}
+	if err := runAgentAdd(podPath, opts); err != nil {
+		t.Fatalf("runAgentAdd failed: %v", err)
+	}
+
+	clawfileData, err := os.ReadFile(filepath.Join(dir, "agents", "genericone", "Clawfile"))
+	if err != nil {
+		t.Fatalf("read generated Clawfile: %v", err)
+	}
+	clawfile := string(clawfileData)
+	if !strings.Contains(clawfile, "FROM alpine:3.20") {
+		t.Fatalf("expected generic agent Clawfile to use alpine base image, got:\n%s", clawfile)
+	}
+	if !strings.Contains(clawfile, "CLAW_TYPE generic") {
+		t.Fatalf("expected generic agent Clawfile to set CLAW_TYPE generic, got:\n%s", clawfile)
+	}
+}
+
+func TestAgentAddWarnsOnEnvPrefixCollision(t *testing.T) {
+	dir := t.TempDir()
+	podPath := seedPrefixCollisionProject(t, dir)
+
+	opts := agentAddOptions{
+		AgentName: "my_bot",
+		ClawType:  "openclaw",
+		Model:     defaultModel,
+		Cllama:    "inherit",
+		Platform:  "discord",
+		AssumeYes: true,
+	}
+	out, err := captureStdout(t, func() error {
+		return runAgentAdd(podPath, opts)
+	})
+	if err != nil {
+		t.Fatalf("runAgentAdd failed: %v", err)
+	}
+	for _, expected := range []string{
+		"[claw] warnings:",
+		"env prefix MY_BOT for agent \"my_bot\" matches existing service(s): my-bot",
+		".env.example already contains MY_BOT_DISCORD_BOT_TOKEN; my_bot will reuse that value",
+	} {
+		if !strings.Contains(out, expected) {
+			t.Fatalf("expected output to contain %q, got:\n%s", expected, out)
+		}
+	}
+}
+
+func TestAgentAddPreservesFlatProjectLayout(t *testing.T) {
+	dir := t.TempDir()
+	podPath := seedFlatProject(t, dir)
+
+	opts := agentAddOptions{
+		AgentName: "westin",
+		ClawType:  "openclaw",
+		Model:     defaultModel,
+		Cllama:    "inherit",
+		Platform:  "discord",
+		AssumeYes: true,
+	}
+	if err := runAgentAdd(podPath, opts); err != nil {
+		t.Fatalf("runAgentAdd failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "Clawfile.westin")); err != nil {
+		t.Fatalf("expected Clawfile.westin to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS-westin.md")); err != nil {
+		t.Fatalf("expected AGENTS-westin.md to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agents", "westin")); !os.IsNotExist(err) {
+		t.Fatalf("expected agents/westin not to be created for flat project")
+	}
+
+	clawfileData, err := os.ReadFile(filepath.Join(dir, "Clawfile.westin"))
+	if err != nil {
+		t.Fatalf("read Clawfile.westin: %v", err)
+	}
+	if !strings.Contains(string(clawfileData), "AGENT AGENTS-westin.md") {
+		t.Fatalf("expected flat Clawfile to reference AGENTS-westin.md, got:\n%s", string(clawfileData))
+	}
+
+	podData, err := os.ReadFile(podPath)
+	if err != nil {
+		t.Fatalf("read pod file: %v", err)
+	}
+	podText := string(podData)
+	for _, expected := range []string{
+		"westin:",
+		"context: .",
+		"dockerfile: Clawfile.westin",
+		"agent: ./AGENTS-westin.md",
+		"DISCORD_BOT_ID: ${WESTIN_DISCORD_BOT_ID}",
+	} {
+		if !strings.Contains(podText, expected) {
+			t.Fatalf("expected pod to contain %q, got:\n%s", expected, podText)
+		}
+	}
+}
+
+func TestAgentAddLayoutOverrideFlatOnCanonicalProject(t *testing.T) {
+	dir := t.TempDir()
+	podPath := seedCanonicalProject(t, dir)
+
+	opts := agentAddOptions{
+		AgentName: "analyst",
+		ClawType:  "openclaw",
+		Model:     defaultModel,
+		Cllama:    "inherit",
+		Platform:  "none",
+		Layout:    "flat",
+		AssumeYes: true,
+	}
+	if err := runAgentAdd(podPath, opts); err != nil {
+		t.Fatalf("runAgentAdd failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "Clawfile.analyst")); err != nil {
+		t.Fatalf("expected Clawfile.analyst to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS-analyst.md")); err != nil {
+		t.Fatalf("expected AGENTS-analyst.md to exist: %v", err)
+	}
+}
+
+func TestAgentAddRejectsInvalidLayoutOverride(t *testing.T) {
+	dir := t.TempDir()
+	podPath := seedCanonicalProject(t, dir)
+
+	err := runAgentAdd(podPath, agentAddOptions{
+		AgentName: "analyst",
+		ClawType:  "openclaw",
+		Model:     defaultModel,
+		Cllama:    "inherit",
+		Platform:  "none",
+		Layout:    "weird",
+		AssumeYes: true,
+	})
+	if err == nil {
+		t.Fatal("expected invalid --layout to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid --layout") {
+		t.Fatalf("expected invalid layout error, got: %v", err)
+	}
+}
+
 func seedCanonicalProject(t *testing.T, dir string) string {
 	t.Helper()
 
@@ -204,4 +362,108 @@ volumes:
 		t.Fatalf("write pod file: %v", err)
 	}
 	return podPath
+}
+
+func seedPrefixCollisionProject(t *testing.T, dir string) string {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Join(dir, "agents", "my-bot"), 0o755); err != nil {
+		t.Fatalf("create my-bot dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agents", "my-bot", "Clawfile"), []byte("FROM openclaw:latest\nCLAW_TYPE openclaw\nAGENT AGENTS.md\nMODEL primary "+defaultModel+"\n"), 0o644); err != nil {
+		t.Fatalf("write my-bot Clawfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agents", "my-bot", "AGENTS.md"), []byte("# My Bot"), 0o644); err != nil {
+		t.Fatalf("write my-bot AGENTS.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env.example"), []byte("MY_BOT_DISCORD_BOT_TOKEN=\nMY_BOT_DISCORD_BOT_ID=\n"), 0o644); err != nil {
+		t.Fatalf("write .env.example: %v", err)
+	}
+
+	podContent := `x-claw:
+  pod: desk
+services:
+  my-bot:
+    image: desk-my-bot:latest
+    build:
+      context: ./agents/my-bot
+    x-claw:
+      agent: ./agents/my-bot/AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      handles:
+        discord:
+          id: "${MY_BOT_DISCORD_BOT_ID}"
+          username: "my-bot"
+    environment:
+      DISCORD_BOT_TOKEN: "${MY_BOT_DISCORD_BOT_TOKEN}"
+`
+	podPath := filepath.Join(dir, "claw-pod.yml")
+	if err := os.WriteFile(podPath, []byte(podContent), 0o644); err != nil {
+		t.Fatalf("write pod file: %v", err)
+	}
+	return podPath
+}
+
+func seedFlatProject(t *testing.T, dir string) string {
+	t.Helper()
+
+	if err := os.WriteFile(filepath.Join(dir, "Clawfile"), []byte("FROM openclaw:latest\nCLAW_TYPE openclaw\nAGENT AGENTS.md\nMODEL primary "+defaultModel+"\n"), 0o644); err != nil {
+		t.Fatalf("write Clawfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# Assistant"), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env.example"), []byte("DISCORD_BOT_TOKEN=\nDISCORD_BOT_ID=\n"), 0o644); err != nil {
+		t.Fatalf("write .env.example: %v", err)
+	}
+
+	podContent := `x-claw:
+  pod: desk
+services:
+  assistant:
+    image: desk-assistant:latest
+    build:
+      context: .
+      dockerfile: Clawfile
+    x-claw:
+      agent: ./AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "assistant"
+    environment:
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+`
+	podPath := filepath.Join(dir, "claw-pod.yml")
+	if err := os.WriteFile(podPath, []byte(podContent), 0o644); err != nil {
+		t.Fatalf("write pod file: %v", err)
+	}
+	return podPath
+}
+
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	os.Stdout = w
+
+	runErr := fn()
+
+	_ = w.Close()
+	os.Stdout = old
+	data, readErr := io.ReadAll(r)
+	_ = r.Close()
+	if readErr != nil {
+		t.Fatalf("read captured stdout: %v", readErr)
+	}
+	return string(data), runErr
 }

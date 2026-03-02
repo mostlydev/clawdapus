@@ -118,3 +118,22 @@ func TestInitScaffoldAppendsGitignoreEntries(t *testing.T) {
 		}
 	}
 }
+
+func TestInitScaffoldGenericTypeUsesGenericBaseImage(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitWithOptions(dir, "", initScaffoldOptions{ClawType: "generic"}, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	clawfileData, err := os.ReadFile(filepath.Join(dir, "agents", "assistant", "Clawfile"))
+	if err != nil {
+		t.Fatalf("read Clawfile: %v", err)
+	}
+	clawfile := string(clawfileData)
+	if !strings.Contains(clawfile, "FROM alpine:3.20") {
+		t.Fatalf("expected generic scaffold to use alpine base image, got:\n%s", clawfile)
+	}
+	if !strings.Contains(clawfile, "CLAW_TYPE generic") {
+		t.Fatalf("expected generic scaffold to set CLAW_TYPE generic, got:\n%s", clawfile)
+	}
+}
