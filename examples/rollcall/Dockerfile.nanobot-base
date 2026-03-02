@@ -4,7 +4,7 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git jq tini \
+    ca-certificates curl git jq tini procps \
     && rm -rf /var/lib/apt/lists/*
 
 RUN uv pip install --system --no-cache nanobot-ai

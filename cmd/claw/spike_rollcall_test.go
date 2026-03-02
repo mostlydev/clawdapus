@@ -168,10 +168,15 @@ func TestSpikeRollCall(t *testing.T) {
 		spikeWaitHealthy(t, container, 120*time.Second)
 	}
 
-	// ── Send trigger message ────────────────────────────────────────────
-	triggerMsg := "Roll call! Each bot, introduce yourself and state what runtime you are running on."
-	rollcallSendDiscordMessage(t, botToken, channelID, triggerMsg)
-	t.Logf("sent roll-call trigger to channel %s", channelID)
+	// ── Send trigger message via webhook (non-bot author, so agents don't ignore as self-message) ──
+	botID := env["DISCORD_BOT_ID"]
+	webhookURL := env["DISCORD_WEBHOOK_URL"]
+	if webhookURL == "" {
+		t.Fatal("DISCORD_WEBHOOK_URL not set in rollcall/.env")
+	}
+	triggerMsg := fmt.Sprintf("<@%s> Roll call! Each bot, introduce yourself and state what runtime you are running on.", botID)
+	rollcallSendWebhookMessage(t, webhookURL, triggerMsg)
+	t.Logf("sent roll-call trigger to channel %s via webhook", channelID)
 
 	// ── Poll for responses ──────────────────────────────────────────────
 	runtimeKeywords := map[string]bool{
@@ -259,28 +264,6 @@ type rollcallDiscordAuthor struct {
 	Bot      bool   `json:"bot"`
 }
 
-func rollcallSendDiscordMessage(t *testing.T, token, channelID, content string) {
-	t.Helper()
-	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages", channelID)
-	body := fmt.Sprintf(`{"content":%q}`, content)
-	req, err := http.NewRequest("POST", url, strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("build Discord POST: %v", err)
-	}
-	req.Header.Set("Authorization", "Bot "+token)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("send Discord message: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("Discord POST failed: %d %s", resp.StatusCode, string(respBody))
-	}
-}
-
 func rollcallFetchMessages(t *testing.T, token, channelID string, limit int) []rollcallDiscordMessage {
 	t.Helper()
 	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages?limit=%d", channelID, limit)
@@ -310,4 +293,24 @@ func rollcallTruncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func rollcallSendWebhookMessage(t *testing.T, webhookURL, content string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"content":%q,"username":"Roll Call Master","allowed_mentions":{"parse":["users"]}}`, content)
+	req, err := http.NewRequest("POST", webhookURL, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build webhook POST: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("send webhook message: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("webhook POST failed: %d %s", resp.StatusCode, string(respBody))
+	}
 }

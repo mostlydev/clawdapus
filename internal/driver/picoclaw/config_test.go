@@ -78,8 +78,8 @@ func TestGenerateConfigModelListDirect(t *testing.T) {
 	if !ok {
 		t.Fatal("missing model_list entry for primary")
 	}
-	if primary["protocol"] != "openrouter/anthropic/claude-sonnet-4" {
-		t.Fatalf("unexpected primary protocol: %v", primary["protocol"])
+	if primary["model"] != "openrouter/anthropic/claude-sonnet-4" {
+		t.Fatalf("unexpected primary model: %v", primary["model"])
 	}
 	if primary["api_key"] != "or-key" {
 		t.Fatalf("unexpected primary api_key: %v", primary["api_key"])
@@ -89,8 +89,8 @@ func TestGenerateConfigModelListDirect(t *testing.T) {
 	if !ok {
 		t.Fatal("missing model_list entry for fallback")
 	}
-	if fallback["protocol"] != "anthropic/claude-3-5-haiku" {
-		t.Fatalf("unexpected fallback protocol: %v", fallback["protocol"])
+	if fallback["model"] != "anthropic/claude-3-5-haiku" {
+		t.Fatalf("unexpected fallback model: %v", fallback["model"])
 	}
 	if fallback["api_key"] != "anthropic-key" {
 		t.Fatalf("unexpected fallback api_key: %v", fallback["api_key"])
@@ -120,8 +120,8 @@ func TestGenerateConfigCllamaRewrite(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing model_list entry for %s", slot)
 		}
-		if entry["protocol"] != expectedProtocol {
-			t.Fatalf("unexpected protocol for %s: %v", slot, entry["protocol"])
+		if entry["model"] != expectedProtocol {
+			t.Fatalf("unexpected model for %s: %v", slot, entry["model"])
 		}
 		if entry["api_base"] != "http://cllama:8080/v1" {
 			t.Fatalf("unexpected api_base for %s: %v", slot, entry["api_base"])

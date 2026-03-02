@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	healthURL = "http://localhost:8080/health"
-	readyURL  = "http://localhost:8080/ready"
+	healthURL = "http://localhost:18790/health"
+	readyURL  = "http://localhost:18790/ready"
 )
 
 type Driver struct{}

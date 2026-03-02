@@ -3,15 +3,15 @@
 #
 # Multi-stage: build from source, then copy binary to alpine runtime.
 
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 RUN apk add --no-cache git make
 
 WORKDIR /src
 RUN git clone --depth 1 https://github.com/sipeed/picoclaw.git .
-RUN make build
+RUN mkdir -p workspace && make build VERSION=dev
 
-FROM alpine:3.20
+FROM alpine:3.23
 
 RUN apk add --no-cache ca-certificates tzdata curl wget
 
