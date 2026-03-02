@@ -23,7 +23,7 @@ type InvokeEntry struct {
 	Schedule string // 5-field cron expression
 	Message  string // agent task payload
 	Name     string // optional human-readable job name
-	To       string // channel name (resolved to channel ID from handles at compose-up time)
+	To       string // delivery target (name or ID; optional platform prefix "platform:target")
 }
 
 // ClawBlock represents the x-claw extension on a service.

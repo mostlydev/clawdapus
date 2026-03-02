@@ -216,17 +216,18 @@ func runComposeUp(podFile string) error {
 			})
 		}
 
-		// Merge pod-level invocations (x-claw.invoke), resolving channel name → ID
+		// Merge pod-level invocations (x-claw.invoke), resolving platform/name targets to IDs when possible.
 		for _, podInv := range svc.Claw.Invoke {
 			inv := driver.Invocation{
 				Schedule: podInv.Schedule,
 				Message:  podInv.Message,
 				Name:     podInv.Name,
 			}
-			if podInv.To != "" {
-				inv.To = resolveChannelID(svc.Claw.Handles, podInv.To)
-				if inv.To == "" {
-					fmt.Printf("[claw] warning: service %q: invoke channel %q not found in handles; delivery will use last channel\n", name, podInv.To)
+			if strings.TrimSpace(podInv.To) != "" {
+				resolved := resolveInvocationTarget(svc.Claw.Handles, podInv.To)
+				inv.To = resolved.To
+				if resolved.Warning != "" {
+					fmt.Printf("[claw] warning: service %q: %s\n", name, resolved.Warning)
 				}
 			}
 			rc.Invocations = append(rc.Invocations, inv)
@@ -820,22 +821,146 @@ func firstIf(ok bool, value string) string {
 	return ""
 }
 
-// resolveChannelID looks up a channel by name in the discord handle's guild topology.
-// Returns the channel ID if found, empty string otherwise.
-// Searches all guilds in the discord handle.
-func resolveChannelID(handles map[string]*driver.HandleInfo, channelName string) string {
-	h, ok := handles["discord"]
-	if !ok || h == nil {
-		return ""
+type invokeTargetResolution struct {
+	To      string
+	Warning string
+}
+
+type invokeChannelMatch struct {
+	Platform string
+	Name     string
+	ID       string
+}
+
+// resolveInvocationTarget resolves x-claw.invoke[].to in a platform-aware way.
+//
+// Supported forms:
+//   - "target"           (infer across all platforms)
+//   - "platform:target"  (explicit platform)
+//
+// Resolution rules:
+//   - If target matches a known channel ID, keep that ID.
+//   - If target matches a unique channel name, rewrite to that channel ID.
+//   - If target is unknown, preserve it verbatim (safe raw-ID/name fallback).
+//   - If name lookup is ambiguous, preserve the raw target and emit a warning.
+func resolveInvocationTarget(handles map[string]*driver.HandleInfo, raw string) invokeTargetResolution {
+	target := strings.TrimSpace(raw)
+	if target == "" {
+		return invokeTargetResolution{}
 	}
-	for _, g := range h.Guilds {
-		for _, ch := range g.Channels {
-			if ch.Name == channelName {
-				return ch.ID
+
+	platform, scopedTarget, explicitPlatform := splitInvocationTarget(target)
+	if explicitPlatform {
+		return resolveInvocationTargetForPlatform(handles, platform, scopedTarget)
+	}
+
+	if idMatches := findInvokeChannelMatches(handles, "", target, true); len(idMatches) > 0 {
+		return invokeTargetResolution{To: idMatches[0].ID}
+	}
+
+	nameMatches := findInvokeChannelMatches(handles, "", target, false)
+	return finalizeInvocationNameResolution(target, nameMatches, false)
+}
+
+func resolveInvocationTargetForPlatform(handles map[string]*driver.HandleInfo, platform, target string) invokeTargetResolution {
+	if idMatches := findInvokeChannelMatches(handles, platform, target, true); len(idMatches) > 0 {
+		return invokeTargetResolution{To: idMatches[0].ID}
+	}
+
+	nameMatches := findInvokeChannelMatches(handles, platform, target, false)
+	return finalizeInvocationNameResolution(target, nameMatches, true)
+}
+
+func finalizeInvocationNameResolution(rawTarget string, matches []invokeChannelMatch, platformScoped bool) invokeTargetResolution {
+	if len(matches) == 0 {
+		return invokeTargetResolution{To: rawTarget}
+	}
+
+	ids := make(map[string]struct{}, len(matches))
+	for _, m := range matches {
+		ids[m.ID] = struct{}{}
+	}
+	if len(ids) == 1 {
+		for id := range ids {
+			return invokeTargetResolution{To: id}
+		}
+	}
+
+	hint := "use platform:target to disambiguate"
+	if platformScoped {
+		hint = "use a channel ID to disambiguate"
+	}
+	return invokeTargetResolution{
+		To:      rawTarget,
+		Warning: fmt.Sprintf("invoke target %q is ambiguous (%s); %s", rawTarget, formatInvokeChannelMatches(matches), hint),
+	}
+}
+
+func splitInvocationTarget(target string) (platform string, scopedTarget string, ok bool) {
+	idx := strings.Index(target, ":")
+	if idx <= 0 || idx >= len(target)-1 {
+		return "", target, false
+	}
+	platform = strings.ToLower(strings.TrimSpace(target[:idx]))
+	scopedTarget = strings.TrimSpace(target[idx+1:])
+	if platform == "" || scopedTarget == "" || strings.Contains(platform, " ") {
+		return "", target, false
+	}
+	return platform, scopedTarget, true
+}
+
+func findInvokeChannelMatches(handles map[string]*driver.HandleInfo, platform, target string, byID bool) []invokeChannelMatch {
+	target = strings.TrimSpace(target)
+	if target == "" || len(handles) == 0 {
+		return nil
+	}
+
+	platforms := make([]string, 0, len(handles))
+	if platform != "" {
+		p := strings.ToLower(strings.TrimSpace(platform))
+		if _, ok := handles[p]; !ok {
+			return nil
+		}
+		platforms = append(platforms, p)
+	} else {
+		for p := range handles {
+			platforms = append(platforms, p)
+		}
+		sort.Strings(platforms)
+	}
+
+	matches := make([]invokeChannelMatch, 0)
+	for _, p := range platforms {
+		h := handles[p]
+		if h == nil {
+			continue
+		}
+		for _, g := range h.Guilds {
+			for _, ch := range g.Channels {
+				if byID && ch.ID == target {
+					matches = append(matches, invokeChannelMatch{Platform: p, Name: ch.Name, ID: ch.ID})
+					continue
+				}
+				if !byID && ch.Name == target {
+					matches = append(matches, invokeChannelMatch{Platform: p, Name: ch.Name, ID: ch.ID})
+				}
 			}
 		}
 	}
-	return ""
+	return matches
+}
+
+func formatInvokeChannelMatches(matches []invokeChannelMatch) string {
+	formatted := make([]string, 0, len(matches))
+	for _, m := range matches {
+		label := fmt.Sprintf("%s:%s", m.Platform, m.Name)
+		if m.Name == "" {
+			label = fmt.Sprintf("%s:<unnamed>", m.Platform)
+		}
+		formatted = append(formatted, fmt.Sprintf("%s (%s)", label, m.ID))
+	}
+	sort.Strings(formatted)
+	return strings.Join(formatted, ", ")
 }
 
 // ensureInfraImages checks that cllama proxy and clawdash images exist locally,

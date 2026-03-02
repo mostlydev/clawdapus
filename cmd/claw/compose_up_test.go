@@ -178,65 +178,145 @@ func TestResolveServiceGeneratedSkills(t *testing.T) {
 	}
 }
 
-func TestResolveChannelIDFound(t *testing.T) {
-	handles := map[string]*driver.HandleInfo{
+func testInvokeHandles() map[string]*driver.HandleInfo {
+	return map[string]*driver.HandleInfo{
 		"discord": {
-			ID:       "123456789",
-			Username: "tiverton",
+			ID: "bot-discord",
 			Guilds: []driver.GuildInfo{
 				{
-					ID:   "999888777",
-					Name: "Trading Floor",
+					ID: "d-guild-1",
 					Channels: []driver.ChannelInfo{
-						{ID: "111222333", Name: "trading-floor"},
-						{ID: "444555666", Name: "infra"},
+						{ID: "d-alerts-1", Name: "alerts"},
+						{ID: "d-trading-floor", Name: "trading-floor"},
+					},
+				},
+				{
+					ID: "d-guild-2",
+					Channels: []driver.ChannelInfo{
+						{ID: "d-alerts-2", Name: "alerts"},
+					},
+				},
+			},
+		},
+		"slack": {
+			ID: "bot-slack",
+			Guilds: []driver.GuildInfo{
+				{
+					ID: "s-workspace-1",
+					Channels: []driver.ChannelInfo{
+						{ID: "s-alerts", Name: "alerts"},
+						{ID: "s-infra", Name: "infra"},
+					},
+				},
+			},
+		},
+		"telegram": {
+			ID: "bot-telegram",
+			Guilds: []driver.GuildInfo{
+				{
+					ID: "tg-1",
+					Channels: []driver.ChannelInfo{
+						{ID: "-100777", Name: "ops"},
 					},
 				},
 			},
 		},
 	}
+}
 
-	if id := resolveChannelID(handles, "trading-floor"); id != "111222333" {
-		t.Errorf("expected trading-floor ID=111222333, got %q", id)
+func TestResolveInvocationTargetByName(t *testing.T) {
+	got := resolveInvocationTarget(testInvokeHandles(), "infra")
+	if got.To != "s-infra" {
+		t.Fatalf("expected infra to resolve to s-infra, got %q", got.To)
 	}
-	if id := resolveChannelID(handles, "infra"); id != "444555666" {
-		t.Errorf("expected infra ID=444555666, got %q", id)
+	if got.Warning != "" {
+		t.Fatalf("expected no warning for unique name lookup, got %q", got.Warning)
 	}
 }
 
-func TestResolveChannelIDNotFound(t *testing.T) {
-	handles := map[string]*driver.HandleInfo{
-		"discord": {
-			ID: "123456789",
-			Guilds: []driver.GuildInfo{
-				{ID: "999", Channels: []driver.ChannelInfo{{ID: "111", Name: "general"}}},
-			},
-		},
+func TestResolveInvocationTargetByID(t *testing.T) {
+	got := resolveInvocationTarget(testInvokeHandles(), "s-infra")
+	if got.To != "s-infra" {
+		t.Fatalf("expected raw channel ID to be preserved, got %q", got.To)
 	}
-	if id := resolveChannelID(handles, "nonexistent"); id != "" {
-		t.Errorf("expected empty string for unknown channel, got %q", id)
+	if got.Warning != "" {
+		t.Fatalf("expected no warning for ID lookup, got %q", got.Warning)
 	}
 }
 
-func TestResolveChannelIDNoDiscord(t *testing.T) {
-	handles := map[string]*driver.HandleInfo{}
-	if id := resolveChannelID(handles, "trading-floor"); id != "" {
-		t.Errorf("expected empty string with no discord handle, got %q", id)
+func TestResolveInvocationTargetExplicitPlatformName(t *testing.T) {
+	got := resolveInvocationTarget(testInvokeHandles(), "discord:trading-floor")
+	if got.To != "d-trading-floor" {
+		t.Fatalf("expected discord:trading-floor -> d-trading-floor, got %q", got.To)
+	}
+	if got.Warning != "" {
+		t.Fatalf("expected no warning for explicit unique platform target, got %q", got.Warning)
 	}
 }
 
-func TestResolveChannelIDMultipleGuilds(t *testing.T) {
-	handles := map[string]*driver.HandleInfo{
-		"discord": {
-			ID: "123456789",
-			Guilds: []driver.GuildInfo{
-				{ID: "aaa", Channels: []driver.ChannelInfo{{ID: "111", Name: "general"}}},
-				{ID: "bbb", Channels: []driver.ChannelInfo{{ID: "222", Name: "trading-floor"}}},
-			},
-		},
+func TestResolveInvocationTargetExplicitPlatformID(t *testing.T) {
+	got := resolveInvocationTarget(testInvokeHandles(), "telegram:-100777")
+	if got.To != "-100777" {
+		t.Fatalf("expected explicit telegram ID to be preserved, got %q", got.To)
 	}
-	if id := resolveChannelID(handles, "trading-floor"); id != "222" {
-		t.Errorf("expected trading-floor ID=222 from second guild, got %q", id)
+	if got.Warning != "" {
+		t.Fatalf("expected no warning for explicit ID, got %q", got.Warning)
+	}
+}
+
+func TestResolveInvocationTargetUnknownTargetFallsBackToRaw(t *testing.T) {
+	got := resolveInvocationTarget(testInvokeHandles(), "C123RAW")
+	if got.To != "C123RAW" {
+		t.Fatalf("expected unknown target to pass through, got %q", got.To)
+	}
+	if got.Warning != "" {
+		t.Fatalf("expected no warning for raw fallback, got %q", got.Warning)
+	}
+}
+
+func TestResolveInvocationTargetUnknownPlatformFallsBackToScopedRaw(t *testing.T) {
+	got := resolveInvocationTarget(testInvokeHandles(), "mattermost:town-square")
+	if got.To != "town-square" {
+		t.Fatalf("expected unknown platform target to pass through scoped value, got %q", got.To)
+	}
+	if got.Warning != "" {
+		t.Fatalf("expected no warning for unknown platform fallback, got %q", got.Warning)
+	}
+}
+
+func TestResolveInvocationTargetNoHandlesStillSupportsPlatformPrefix(t *testing.T) {
+	got := resolveInvocationTarget(nil, "telegram:-100999")
+	if got.To != "-100999" {
+		t.Fatalf("expected explicit target with no handles to preserve scoped value, got %q", got.To)
+	}
+	if got.Warning != "" {
+		t.Fatalf("expected no warning with empty handles map, got %q", got.Warning)
+	}
+}
+
+func TestResolveInvocationTargetAmbiguousAcrossPlatforms(t *testing.T) {
+	got := resolveInvocationTarget(testInvokeHandles(), "alerts")
+	if got.To != "alerts" {
+		t.Fatalf("expected ambiguous target to keep raw value, got %q", got.To)
+	}
+	if !strings.Contains(got.Warning, "ambiguous") {
+		t.Fatalf("expected ambiguity warning, got %q", got.Warning)
+	}
+	if !strings.Contains(got.Warning, "platform:target") {
+		t.Fatalf("expected platform disambiguation hint, got %q", got.Warning)
+	}
+}
+
+func TestResolveInvocationTargetAmbiguousWithinPlatform(t *testing.T) {
+	got := resolveInvocationTarget(testInvokeHandles(), "discord:alerts")
+	if got.To != "alerts" {
+		t.Fatalf("expected ambiguous platform-scoped target to keep raw value, got %q", got.To)
+	}
+	if !strings.Contains(got.Warning, "ambiguous") {
+		t.Fatalf("expected ambiguity warning, got %q", got.Warning)
+	}
+	if !strings.Contains(got.Warning, "channel ID") {
+		t.Fatalf("expected channel ID disambiguation hint, got %q", got.Warning)
 	}
 }
 

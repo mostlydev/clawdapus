@@ -19,7 +19,7 @@ type BaseImageProvider interface {
 type Invocation struct {
 	Schedule string // 5-field cron expression (e.g., "15 8 * * 1-5")
 	Message  string // agent task payload (agentTurn message)
-	To       string // Discord channel ID for delivery (empty = openclaw uses last channel)
+	To       string // platform delivery target (channel/chat ID; empty = driver default behavior)
 	Name     string // human-readable job name (optional, derived from message if empty)
 }
 
