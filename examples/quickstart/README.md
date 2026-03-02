@@ -40,9 +40,9 @@ claw ps -f claw-pod.yml       # assistant + cllama both running
 claw health -f claw-pod.yml   # both healthy
 ```
 
-Open **http://localhost:8181** — the cllama governance proxy dashboard. This shows every LLM call in real time: which agent, which model, token counts, estimated cost, latency.
+Open **http://localhost:8181** — the cllama governance proxy dashboard. Every LLM call in real time: which agent, which model, token counts, cost.
 
-Open **http://localhost:8082** — the Clawdapus Dash fleet dashboard (services, topology, detail view, integrated costs when available).
+Open **http://localhost:8082** — the Clawdapus Dash fleet dashboard. Live service health, topology wiring, and per-service drill-down.
 
 ## 5. Talk to your bot
 
@@ -70,6 +70,17 @@ Replace the Discord configuration:
 **Telegram:** Change `HANDLE discord` to `HANDLE telegram` in `agents/assistant/Clawfile`. In `claw-pod.yml`, replace the `handles:` block with `telegram: {id: "${TELEGRAM_BOT_ID}", username: "mybot"}` and set `TELEGRAM_BOT_TOKEN` in `environment:`.
 
 **Slack:** Same pattern — `HANDLE slack`, swap the handles block, use `SLACK_BOT_TOKEN`.
+
+## Add another agent
+
+From this quickstart (canonical) layout:
+
+```bash
+claw agent add researcher
+```
+
+This creates `agents/researcher/` and updates `claw-pod.yml` + `.env.example`.
+In flat projects, `claw agent add` preserves flat style by default (`Clawfile.<name>`, `AGENTS-<name>.md`).
 
 ## Migrate from existing OpenClaw
 

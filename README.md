@@ -67,20 +67,6 @@ claw agent add researcher
 
 Use `--layout canonical` or `--layout flat` to override auto-detection.
 
-## Clawdapus Dash
-
-Fleet overview — 5 agents, cllama proxy, infrastructure services, live cost tracking:
-
-![Fleet Overview](docs/screenshots/clawdash-fleet.png)
-
-Topology — channels, agents, proxies, services, and volumes with health markers:
-
-![Topology](docs/screenshots/clawdash-topology.png)
-
-Service detail — surfaces, handles, skills, scheduled invocations, model slots, cllama wiring:
-
-![Service Detail](docs/screenshots/clawdash-detail.png)
-
 ---
 
 ## Install
