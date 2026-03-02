@@ -237,6 +237,41 @@ First target: migrate channel surface config translation (Phase 3 Slice 3, Task 
 
 ---
 
+## Phase 4.7: Nanobot + PicoClaw Drivers (Driver Parity)
+
+**Plan:** `docs/plans/2026-03-01-driver-parity-matrix.md`
+**Status:** DONE
+**Executed by:** Codex
+
+| # | Task | Status | Commit | Notes |
+|---|------|--------|--------|-------|
+| 1 | Shared model/platform helpers | DONE | `30c21da` | `SplitModelRef`, `CollectProviders`, `PlatformTokenVar` (14 platforms) |
+| 2 | Nanobot driver (validate, materialize, health, config) | DONE | `30c21da` | `/root/.nanobot` mounts, JSON config, container-running health |
+| 3 | Nanobot config generation (direct + cllama) | DONE | `30c21da` | HANDLE discord/telegram/slack, CONFIGURE override, INVOKE cron |
+| 4 | Nanobot unit tests (12 tests) | DONE | `30c21da` | Registration, validation failures, config gen, cron store |
+| 5 | PicoClaw driver (validate, materialize, health, config) | DONE | `d8ebb23` | Non-root `/home/picoclaw/.picoclaw`, HTTP `/health`+`/ready` |
+| 6 | PicoClaw config generation (model_list + cllama) | DONE | `d8ebb23` | `model_list[]` schema, `openai/<ref>` protocol, 13 platforms |
+| 7 | PicoClaw unit tests (15 tests) | DONE | `d8ebb23` | Registration, validation, config gen, health probe parsing |
+| 8 | Build + health command registration | DONE | `30c21da` | Blank imports in `build.go` + `compose_health.go` |
+| 9 | CLI scaffold (init, agent add) | DONE | `d8ebb23` | `parseClawType`, `defaultBaseImageForClawType` updated |
+| 10 | Examples (nanobot + picoclaw) | DONE | `d8ebb23` | Minimal Clawfile + pod + .env.example + README |
+| 11 | Integration test | DONE | `d8ebb23` | `driver_newtypes_integration_test.go` (206 lines) |
+| 12 | Regression tests (scaffold + build) | DONE | `85303e0` | Type validation, base image defaults, build label acceptance |
+
+### Design decisions (Phase 4.7)
+
+- Nanobot mounts at `/root/.nanobot` (upstream runs as root); PicoClaw at `/home/picoclaw/.picoclaw` (upstream non-root user)
+- PicoClaw uses model-centric config (`model_list[]` + `agents.defaults.model_name`), not legacy provider-only shape
+- PicoClaw CLLAMA emits `openai/<provider/model>` protocol for HTTP proxy compatibility
+- PicoClaw requires at least one supported HANDLE (fail-closed, matching upstream `no channels enabled` behavior)
+- Both drivers validate CONFIGURE DSL with driver-specific prefix (`nanobot config set` / `picoclaw config set`)
+- INVOKE limited to 5-field cron only; `at`/`every` deferred
+- Shared helpers extracted to `internal/driver/shared/` to reduce duplication across drivers
+
+**Completed:** 2026-03-02
+
+---
+
 ## Key Decisions Made During Execution
 
 - CONFIGURE directives now emitted as `claw.configure.N` labels (Task 1)

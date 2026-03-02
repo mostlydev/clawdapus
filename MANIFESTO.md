@@ -47,7 +47,7 @@ Clawdapus is infrastructure for bots the way Docker is infrastructure for applic
 
 A running Claw bifurcates cognition into two independent layers: internal execution and external governance. Every Claw is built from four mandatory or optional components:
 
-1. **The Runner (Internal Execution)** — The application code (e.g. OpenClaw, Nanobot, Claude Code, or a custom python script) that implements the agent loop: receive input, assemble context, call a model, execute tools.
+1. **The Runner (Internal Execution)** — The application code (e.g. OpenClaw, Nanobot, PicoClaw, Claude Code, or a custom script) that implements the agent loop: receive input, assemble context, call a model, execute tools.
 2. **The Behavioral Contract (The Law)** — A read-only file defining the bot's purpose and strict rules.
 3. **The Persona (The History)** — A mutable workspace of identity, memory, knowledge, style, and accumulated interaction history.
 4. **cllama (The Governance Proxy)** — *(Optional)* An independent, intercepting proxy that governs what the runner is allowed to ask the LLM, and amends what the LLM is allowed to reply.

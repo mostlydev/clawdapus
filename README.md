@@ -190,7 +190,7 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 | `AGENT` | Names the behavioral contract file |
 | `MODEL` | Binds named model slots to providers |
 | `CLLAMA` | Declares governance proxy type(s) |
-| `HANDLE` | Declares platform identity (discord, telegram, slack) |
+| `HANDLE` | Declares platform identity (discord, telegram, slack, and others per driver) |
 | `INVOKE` | Scheduled invocations via cron |
 | `SURFACE` | Declared in pod YAML — volumes, services, channels |
 | `SKILL` | Operator policy files mounted read-only |
@@ -202,16 +202,24 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 
 ## Claw Type Support
 
-| CLAW_TYPE | Runtime | Config | HANDLE | INVOKE | CLLAMA | Container | Health |
-|-----------|---------|--------|--------|--------|--------|-----------|--------|
-| `openclaw` | [OpenClaw](https://openclaw.ai) | JSON5 | Discord | jobs.json | Yes | read-only | `openclaw health --json` |
-| `nanobot` | [Nanobot](https://github.com/HKUDS/nanobot) | JSON | Discord, Telegram, Slack | `cron/jobs.json` | Yes | read-only | container running |
-| `picoclaw` | [PicoClaw](https://github.com/sipeed/picoclaw) | JSON (`model_list`) | Discord, Telegram, Slack (+ stable long-tail set) | `workspace/cron/jobs.json` | Yes | read-only | HTTP `/health` + `/ready` |
-| `nanoclaw` | Claude Agent SDK | CLAUDE.md | — | — | Yes | writable | `pgrep node` |
-| `microclaw` | MicroClaw | YAML | Discord, Telegram, Slack | — | Yes | writable | `pgrep microclaw` |
-| `nullclaw` | NullClaw | JSON | Discord, Telegram, Slack | CLI cron | Yes | read-only | HTTP `:3000/health` |
+Pick a driver based on what you need. All drivers support `MODEL`, `AGENT`, `CLLAMA`, and `CONFIGURE`.
 
-`claw init` scaffolds `openclaw` (default), `nanobot`, `picoclaw`, and `generic` (alpine:3.20, no driver enforcement) projects.
+| | `openclaw` | `nanobot` | `picoclaw` | `nanoclaw` | `microclaw` | `nullclaw` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Runtime** | [OpenClaw](https://openclaw.ai) | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | Claude Agent SDK | MicroClaw | NullClaw |
+| `claw init` scaffold | ✅ | ✅ | ✅ | — | — | — |
+| HANDLE: Discord | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| HANDLE: Telegram | — | ✅ | ✅ | — | ✅ | ✅ |
+| HANDLE: Slack | — | ✅ | ✅ | — | ✅ | ✅ |
+| HANDLE: long-tail ¹ | — | — | ✅ | — | — | — |
+| INVOKE (cron) | ✅ | ✅ | ✅ | — | — | ✅ |
+| Structured health | ✅ | — | ✅ | — | — | ✅ |
+| Read-only rootfs | ✅ | ✅ | ✅ | — | — | ✅ |
+| Non-root container | — | — | ✅ | — | — | — |
+
+¹ PicoClaw long-tail: WhatsApp, Feishu, LINE, QQ, DingTalk, OneBot, WeCom, WeCom App, Pico, MaixCam.
+
+`claw init` also scaffolds `generic` (alpine:3.20, no driver enforcement) for custom runtimes.
 
 ---
 
@@ -402,6 +410,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 3.8 — Channel surface bindings | Done |
 | Phase 4 — Shared governance proxy integration + credential starvation | Done |
 | Phase 4.5 — Interactive claw init & claw agent add (canonical layout) | Done |
+| Phase 4.7 — Nanobot + PicoClaw drivers, shared helpers, scaffold parity | Done |
 | Phase 4.6 — Unified worker architecture (config, provision, diagnostic) | Design |
 | Phase 5 — Drift scoring + fleet governance | Planned |
 | Phase 6 — Recipe promotion + worker mode | Planned |

@@ -35,12 +35,15 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - `internal/clawfile/` — Clawfile parser + Dockerfile emitter (Phase 1)
 - `internal/driver/` — Driver interface, registry, enforcement ops, OpenClaw + generic drivers
 - `internal/driver/openclaw/` — JSON5-aware config injection, CLAWDAPUS.md generation, skill generation
+- `internal/driver/nanobot/` — Nanobot driver: JSON config, `/root/.nanobot` mounts, container-running health
+- `internal/driver/picoclaw/` — PicoClaw driver: `model_list[]` config, non-root mounts, HTTP `/health` probing
+- `internal/driver/shared/` — Shared model/provider helpers, platform token mapping, CLAWDAPUS.md + handle skill generation
 - `internal/pod/` — claw-pod.yml parser, compose emitter
 - `internal/inspect/` — label parsing from built images
 - `internal/runtime/` — Docker SDK wrapper (read-only only)
 - `cmd/claw/compose_up.go` — main orchestration for `claw up`
 
-## Implementation Status (as of 2026-02-27)
+## Implementation Status (as of 2026-03-02)
 
 | Phase | Status |
 |-------|--------|
@@ -56,6 +59,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 | Phase 4 Slice 1 — cllama standalone proxy (in-repo) | DONE |
 | Phase 4 Task 3.4 — doc fixes (CLLAMA_SPEC, ADRs) | DONE |
 | Phase 4.5 — Interactive claw init & claw agent add (canonical layout) | DONE |
+| Phase 4.7 — Nanobot + PicoClaw drivers, shared helpers, scaffold parity | DONE |
 | Phase 4.6 — Unified worker architecture (config, provision, diagnostic) | DESIGN |
 | Phase 5 — Drift scoring | NOT STARTED |
 | Phase 6 — Recipe promotion | NOT STARTED |
@@ -94,6 +98,10 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - **`x-claw.models` (deferred)**: Pod-level per-service model override is not yet supported. Currently models come from Clawfile `MODEL` labels only. Natural extension of existing override pattern but deferred — touches the model resolution path that cllama provider wiring depends on. Candidate for Phase 4.5 or early Phase 5
 - **`compose_up.go` two-pass loop**: Pass 1 inspect+resolve all services, then cllama wiring (detection, tokens, preflight, credential starvation, context gen, proxy config), then Pass 2 materialize. Enables pre-materialize token injection
 - **Image-baked env preflight**: `inspectImageEnv` via `docker image inspect` checks for provider API keys baked into the image ENV layer — fails fast if found for cllama-enabled agents. Cached per image ref
+- **Nanobot driver**: Config at `/root/.nanobot/config.json`, workspace at `/root/.nanobot/workspace`, cron at `/root/.nanobot/cron/jobs.json`. CONFIGURE DSL: `nanobot config set <path> <value>`. Container-running health only (no HTTP endpoint). MVP channels: discord, telegram, slack
+- **PicoClaw driver**: Non-root user (`USER picoclaw`); mounts at `/home/picoclaw/.picoclaw` with `PICOCLAW_HOME`/`PICOCLAW_CONFIG` env overrides. Model-centric config: `model_list[]` + `agents.defaults.model_name`. CLLAMA emits `openai/<provider/model>` protocol. HTTP `/health` + `/ready` structured probing. Requires at least one supported HANDLE (fail-closed, matching upstream). 13 supported platforms including long-tail set
+- **Shared driver helpers** (`internal/driver/shared/`): `SplitModelRef`, `CollectProviders`, `NormalizeProvider`, `ResolveProviderAPIKey` extracted from microclaw/nullclaw duplication. `PlatformTokenVar` maps 14 platforms to env var names. `GenerateClawdapusMD` and `GenerateHandleSkill` shared across all drivers
+- **INVOKE 5-field cron only**: Both nanobot and picoclaw drivers validate and reject non-5-field cron expressions. `at`/`every` syntaxes deferred to future Clawfile parser extension
 
 ## Conventions
 
