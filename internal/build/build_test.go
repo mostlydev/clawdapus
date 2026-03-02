@@ -98,3 +98,59 @@ MODEL primary anthropic/claude-sonnet-4
 		t.Fatal("missing claw.type=microclaw label in generated output")
 	}
 }
+
+func TestGenerateAcceptsNanobotType(t *testing.T) {
+	dir := t.TempDir()
+	clawfilePath := filepath.Join(dir, "Clawfile")
+
+	input := `FROM alpine:latest
+
+CLAW_TYPE nanobot
+AGENT AGENTS.md
+MODEL primary openrouter/anthropic/claude-sonnet-4
+`
+	if err := os.WriteFile(clawfilePath, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	generatedPath, err := Generate(clawfilePath)
+	if err != nil {
+		t.Fatalf("expected nanobot CLAW_TYPE to be accepted, got error: %v", err)
+	}
+
+	content, err := os.ReadFile(generatedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), `LABEL claw.type="nanobot"`) {
+		t.Fatal("missing claw.type=nanobot label in generated output")
+	}
+}
+
+func TestGenerateAcceptsPicoclawType(t *testing.T) {
+	dir := t.TempDir()
+	clawfilePath := filepath.Join(dir, "Clawfile")
+
+	input := `FROM alpine:latest
+
+CLAW_TYPE picoclaw
+AGENT AGENTS.md
+MODEL primary openrouter/anthropic/claude-sonnet-4
+`
+	if err := os.WriteFile(clawfilePath, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	generatedPath, err := Generate(clawfilePath)
+	if err != nil {
+		t.Fatalf("expected picoclaw CLAW_TYPE to be accepted, got error: %v", err)
+	}
+
+	content, err := os.ReadFile(generatedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), `LABEL claw.type="picoclaw"`) {
+		t.Fatal("missing claw.type=picoclaw label in generated output")
+	}
+}
