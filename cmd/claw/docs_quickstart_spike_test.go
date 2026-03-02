@@ -308,8 +308,8 @@ func runQuickstartDocCommandsInContainer(t *testing.T, repoRoot, linuxClaw strin
 		"service_container() { svc=\"$1\"; project=\"$(compose_project)\"; docker ps --filter \"label=com.docker.compose.project=${project}\" --filter \"label=com.docker.compose.service=${svc}\" --format '{{.ID}}' | head -n1; }",
 		"service_health() { svc=\"$1\"; cid=\"$(service_container \"$svc\")\"; if [ -z \"$cid\" ]; then echo missing; return 0; fi; docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \"$cid\" 2>/dev/null || echo inspect-error; }",
 		"cleanup() { if [ -d \"$RUN_DIR\" ]; then (cd \"$RUN_DIR\" && claw down -f claw-pod.yml >/dev/null 2>&1 || true); fi; if [ -d \"$RUN_DIR/my-pod\" ]; then (cd \"$RUN_DIR/my-pod\" && claw down -f claw-pod.yml >/dev/null 2>&1 || true); fi; }",
-		"wait_for_health() { i=0; while [ \"$i\" -lt 60 ]; do assistant=\"$(service_health assistant)\"; cllama=\"$(service_health cllama-passthrough)\"; if [ \"$assistant\" = healthy ] && [ \"$cllama\" = healthy ]; then echo \"assistant=$assistant\"; echo \"cllama-passthrough=$cllama\"; return 0; fi; i=$((i+1)); sleep 2; done; echo \"assistant_docker_health=$(service_health assistant)\"; echo \"cllama_docker_health=$(service_health cllama-passthrough)\"; return 1; }",
-		"assert_runtime_signals() { c=\"$(service_container cllama-passthrough)\"; [ -n \"$c\" ] || { echo missing cllama-passthrough container; return 1; }; clog=\"$(docker logs --tail 120 \"$c\" 2>&1 || true)\"; printf '%s\\n' \"$clog\" | grep -q 'api listening on :8080' || { echo \"missing cllama api listening signal\"; printf '%s\\n' \"$clog\"; return 1; }; printf '%s\\n' \"$clog\" | grep -q 'ui listening on :8081' || { echo \"missing cllama ui listening signal\"; printf '%s\\n' \"$clog\"; return 1; }; a=\"$(service_container assistant)\"; [ -n \"$a\" ] || { echo missing assistant container; return 1; }; alog=\"$(docker logs --tail 200 \"$a\" 2>&1 || true)\"; if printf '%s\\n' \"$alog\" | grep -q 'Missing env var'; then echo 'assistant has unresolved env vars'; printf '%s\\n' \"$alog\"; return 1; fi; }",
+		"wait_for_health() { i=0; while [ \"$i\" -lt 60 ]; do assistant=\"$(service_health assistant)\"; cllama=\"$(service_health cllama)\"; if [ \"$assistant\" = healthy ] && [ \"$cllama\" = healthy ]; then echo \"assistant=$assistant\"; echo \"cllama=$cllama\"; return 0; fi; i=$((i+1)); sleep 2; done; echo \"assistant_docker_health=$(service_health assistant)\"; echo \"cllama_docker_health=$(service_health cllama)\"; return 1; }",
+		"assert_runtime_signals() { c=\"$(service_container cllama)\"; [ -n \"$c\" ] || { echo missing cllama container; return 1; }; clog=\"$(docker logs --tail 120 \"$c\" 2>&1 || true)\"; printf '%s\\n' \"$clog\" | grep -q 'api listening on :8080' || { echo \"missing cllama api listening signal\"; printf '%s\\n' \"$clog\"; return 1; }; printf '%s\\n' \"$clog\" | grep -q 'ui listening on :8081' || { echo \"missing cllama ui listening signal\"; printf '%s\\n' \"$clog\"; return 1; }; a=\"$(service_container assistant)\"; [ -n \"$a\" ] || { echo missing assistant container; return 1; }; alog=\"$(docker logs --tail 200 \"$a\" 2>&1 || true)\"; if printf '%s\\n' \"$alog\" | grep -q 'Missing env var'; then echo 'assistant has unresolved env vars'; printf '%s\\n' \"$alog\"; return 1; fi; }",
 		"rm -rf \"$RUN_DIR\"",
 		"mkdir -p \"$RUN_DIR\"",
 		"cp -R ./examples/quickstart/. \"$RUN_DIR/\"",
@@ -346,8 +346,8 @@ func runQuickstartDocCommandsInContainer(t *testing.T, repoRoot, linuxClaw strin
 	if !strings.Contains(output, "assistant") {
 		t.Fatalf("quickstart output did not include assistant service details:\n%s", output)
 	}
-	if !strings.Contains(output, "cllama-passthrough") {
-		t.Fatalf("quickstart output did not include cllama-passthrough service details:\n%s", output)
+	if !strings.Contains(output, "cllama") {
+		t.Fatalf("quickstart output did not include cllama service details:\n%s", output)
 	}
 	if strings.Contains(output, "unhealthy") || strings.Contains(output, "missing cllama") || strings.Contains(output, "assistant has unresolved env vars") {
 		t.Fatalf("quickstart runtime did not stabilize as healthy:\n%s", output)

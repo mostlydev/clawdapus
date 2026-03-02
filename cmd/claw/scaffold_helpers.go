@@ -153,10 +153,27 @@ func parseClawType(value string) (string, error) {
 	switch v {
 	case "":
 		return "", fmt.Errorf("claw type is required")
-	case "openclaw", "generic":
+	case "openclaw", "nanoclaw", "microclaw", "nullclaw", "generic":
 		return v, nil
 	default:
-		return "", fmt.Errorf("invalid claw type %q (allowed: openclaw, generic)", value)
+		return "", fmt.Errorf("invalid claw type %q (allowed: openclaw, nanoclaw, microclaw, nullclaw, generic)", value)
+	}
+}
+
+func defaultBaseImageForClawType(clawType string) string {
+	switch strings.TrimSpace(strings.ToLower(clawType)) {
+	case "openclaw":
+		return "openclaw:latest"
+	case "nanoclaw":
+		return "node:22-slim"
+	case "microclaw":
+		return "node:22-slim"
+	case "nullclaw":
+		return "node:22-slim"
+	case "generic":
+		return "alpine:3.20"
+	default:
+		return "alpine:3.20"
 	}
 }
 

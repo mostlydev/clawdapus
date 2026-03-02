@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mostlydev/clawdapus/internal/build"
 	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
@@ -467,6 +468,10 @@ func runComposeUp(podFile string) error {
 	}
 	fmt.Printf("[claw] wrote %s\n", generatedPath)
 
+	if err := ensureInfraImages(cllamaEnabled, proxies, p.Clawdash); err != nil {
+		return err
+	}
+
 	if len(drivers) == 0 {
 		fmt.Println("[claw] warning: no x-claw services found; running plain docker compose lifecycle")
 	}
@@ -831,6 +836,80 @@ func resolveChannelID(handles map[string]*driver.HandleInfo, channelName string)
 		}
 	}
 	return ""
+}
+
+// ensureInfraImages checks that cllama proxy and clawdash images exist locally,
+// building them from source when missing.
+func ensureInfraImages(cllamaEnabled bool, proxies []pod.CllamaProxyConfig, dash *pod.ClawdashConfig) error {
+	if cllamaEnabled {
+		for _, proxy := range proxies {
+			if err := ensureImage(proxy.Image, "cllama", "cllama/Dockerfile", "cllama"); err != nil {
+				return err
+			}
+		}
+	}
+	if dash != nil {
+		if err := ensureImage(dash.Image, "clawdash", "dockerfiles/clawdash/Dockerfile", "."); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureImage builds a Docker image if it doesn't exist locally.
+// It tries: local build from repo source, then git URL build, then errors.
+func ensureImage(imageRef, name, dockerfilePath, contextDir string) error {
+	if build.ImageExistsLocally(imageRef) {
+		return nil
+	}
+
+	fmt.Printf("[claw] building %s image (first time only)\n", name)
+
+	repoRoot, found := findRepoRoot()
+	if found {
+		df := filepath.Join(repoRoot, dockerfilePath)
+		ctx := filepath.Join(repoRoot, contextDir)
+		if _, err := os.Stat(df); err == nil {
+			cmd := exec.Command("docker", "build", "-t", imageRef, "-f", df, ctx)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("build %s image from local source: %w", name, err)
+			}
+			return nil
+		}
+	}
+
+	// Fallback: build from git URL.
+	gitURL := fmt.Sprintf("https://github.com/mostlydev/clawdapus.git#master:%s", contextDir)
+	cmd := exec.Command("docker", "build", "-t", imageRef, gitURL)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("could not build %s image; run 'docker build -t %s -f %s %s' from the repo root", name, imageRef, dockerfilePath, contextDir)
+	}
+	return nil
+}
+
+// findRepoRoot walks up from cwd looking for go.mod with the clawdapus module.
+func findRepoRoot() (string, bool) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	for {
+		modPath := filepath.Join(dir, "go.mod")
+		if data, err := os.ReadFile(modPath); err == nil {
+			if strings.Contains(string(data), "module github.com/mostlydev/clawdapus") {
+				return dir, true
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
 
 func init() {

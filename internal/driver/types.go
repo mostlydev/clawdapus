@@ -9,6 +9,12 @@ type Driver interface {
 	HealthProbe(ref ContainerRef) (*Health, error)
 }
 
+// BaseImageProvider is optionally implemented by drivers that can auto-build
+// their base image when it's not available locally.
+type BaseImageProvider interface {
+	BaseImage() (tag string, dockerfile string)
+}
+
 // Invocation is a scheduled agent task resolved from image labels or pod x-claw.invoke.
 type Invocation struct {
 	Schedule string // 5-field cron expression (e.g., "15 8 * * 1-5")

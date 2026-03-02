@@ -39,9 +39,9 @@ claw ps -f claw-pod.yml        # assistant + cllama both running
 claw health -f claw-pod.yml    # both healthy
 ```
 
-Open **http://localhost:8181** — the cllama governance proxy dashboard. Watch every LLM call in real time: which agent, which model, token counts, cost.
+The cllama governance proxy dashboard runs on port **8181** — every LLM call in real time: which agent, which model, token counts, cost.
 
-Open **http://localhost:8082** — the Clawdapus Dash fleet dashboard. View live service health, topology wiring, and per-service drill-down status.
+The Clawdapus Dash fleet dashboard runs on port **8082** — live service health, topology wiring, and per-service drill-down.
 
 Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
 
@@ -61,28 +61,25 @@ claw up -d
 claw agent add researcher
 ```
 
-## Dashboard Screenshots
-
-Fleet view with integrated costs status:
-
-![Clawdapus Dash Fleet](docs/screenshots/clawdash-fleet-costs.png)
-
-If a cllama build does not emit `GET /costs/api`, Clawdapus Dash surfaces an explicit "cost emission not available yet" state instead of linking to a dead page.
-API data is authoritative; log-derived cost estimation is opt-in via `CLAWDASH_COST_LOG_FALLBACK=1`.
-
-Topology view:
-
-![Clawdapus Dash Topology](docs/screenshots/clawdash-topology.png)
-
-Service detail view:
-
-![Clawdapus Dash Detail](docs/screenshots/clawdash-detail.png)
-
 `claw agent add` preserves the project's existing layout by default:
 - Canonical project: adds `agents/<name>/Clawfile` + `agents/<name>/AGENTS.md`
 - Flat project: adds `Clawfile.<name>` + `AGENTS-<name>.md`
 
 Use `--layout canonical` or `--layout flat` to override auto-detection.
+
+## Clawdapus Dash
+
+Fleet overview — 5 agents, cllama proxy, infrastructure services, live cost tracking:
+
+![Fleet Overview](docs/screenshots/clawdash-fleet.png)
+
+Topology — channels, agents, proxies, services, and volumes with health markers:
+
+![Topology](docs/screenshots/clawdash-topology.png)
+
+Service detail — surfaces, handles, skills, scheduled invocations, model slots, cllama wiring:
+
+![Service Detail](docs/screenshots/clawdash-detail.png)
 
 ---
 
@@ -203,7 +200,7 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 
 | Directive | Purpose |
 |---|---|
-| `CLAW_TYPE` | Selects the runtime driver (openclaw, nanoclaw, generic) |
+| `CLAW_TYPE` | Selects the runtime driver (openclaw, nanoclaw, microclaw, nullclaw) |
 | `AGENT` | Names the behavioral contract file |
 | `MODEL` | Binds named model slots to providers |
 | `CLLAMA` | Declares governance proxy type(s) |
@@ -214,6 +211,19 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 | `CONFIGURE` | Runner-specific config mutations at init |
 | `TRACK` | Wraps package managers to log mutations |
 | `PRIVILEGE` | Drops container privileges |
+
+---
+
+## Claw Type Support
+
+| CLAW_TYPE | Runtime | Config | HANDLE | INVOKE | CLLAMA | Container | Health |
+|-----------|---------|--------|--------|--------|--------|-----------|--------|
+| `openclaw` | [OpenClaw](https://openclaw.ai) | JSON5 | Discord | jobs.json | Yes | read-only | `openclaw health --json` |
+| `nanoclaw` | Claude Agent SDK | CLAUDE.md | — | — | Yes | writable | `pgrep node` |
+| `microclaw` | MicroClaw | YAML | Discord, Telegram, Slack | — | Yes | writable | `pgrep microclaw` |
+| `nullclaw` | NullClaw | JSON | Discord, Telegram, Slack | CLI cron | Yes | read-only | HTTP `:3000/health` |
+
+`claw init` scaffolds `openclaw` (default) and `generic` (alpine:3.20, no driver enforcement) projects.
 
 ---
 

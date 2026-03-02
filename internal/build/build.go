@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/clawfile"
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -25,8 +26,14 @@ func Generate(clawfilePath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse clawfile %s: %w", clawfilePath, err)
 	}
-	if _, err := driver.Lookup(parsed.Config.ClawType); err != nil {
+
+	d, err := driver.Lookup(parsed.Config.ClawType)
+	if err != nil {
 		return "", fmt.Errorf("validate CLAW_TYPE %q: %w", parsed.Config.ClawType, err)
+	}
+
+	if err := ensureBaseImage(parsed, d); err != nil {
+		return "", err
 	}
 
 	rendered, err := clawfile.Emit(parsed)
@@ -40,6 +47,37 @@ func Generate(clawfilePath string) (string, error) {
 	}
 
 	return generatedPath, nil
+}
+
+// ensureBaseImage checks whether the FROM image exists locally. If it's missing
+// and the driver implements BaseImageProvider, auto-builds the base image.
+func ensureBaseImage(parsed *clawfile.ParseResult, d driver.Driver) error {
+	fromImage := extractFROMImage(parsed)
+	if fromImage == "" {
+		return nil
+	}
+
+	if ImageExistsLocally(fromImage) {
+		return nil
+	}
+
+	provider, ok := d.(driver.BaseImageProvider)
+	if !ok {
+		return nil
+	}
+
+	tag, dockerfile := provider.BaseImage()
+	if tag == "" || dockerfile == "" {
+		return nil
+	}
+
+	// Only auto-build if the missing FROM matches the driver's declared base image.
+	if fromImage != tag {
+		return nil
+	}
+
+	fmt.Printf("[claw] building base image %s (first time only)\n", tag)
+	return BuildFromDockerfileContent(tag, dockerfile)
 }
 
 func BuildFromGenerated(generatedPath string, tag string) error {
@@ -60,4 +98,46 @@ func BuildFromGenerated(generatedPath string, tag string) error {
 	}
 
 	return nil
+}
+
+// ImageExistsLocally returns true if the given image tag is available in the
+// local Docker daemon.
+func ImageExistsLocally(tag string) bool {
+	cmd := exec.Command("docker", "image", "inspect", tag)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	return cmd.Run() == nil
+}
+
+// BuildFromDockerfileContent writes a Dockerfile string to a temp dir and builds it.
+func BuildFromDockerfileContent(tag, dockerfile string) error {
+	tmpDir, err := os.MkdirTemp("", "claw-base-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir for base image build: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0o644); err != nil {
+		return fmt.Errorf("write base image Dockerfile: %w", err)
+	}
+
+	cmd := exec.Command("docker", "build", "-t", tag, tmpDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build base image %s: %w", tag, err)
+	}
+	return nil
+}
+
+// extractFROMImage returns the image name from the first FROM instruction in
+// the parsed Clawfile's Docker nodes.
+func extractFROMImage(parsed *clawfile.ParseResult) string {
+	for _, node := range parsed.DockerNodes {
+		if strings.EqualFold(node.Value, "from") && node.Next != nil {
+			return node.Next.Value
+		}
+	}
+	return ""
 }
