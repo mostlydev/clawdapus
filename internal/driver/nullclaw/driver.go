@@ -39,15 +39,15 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	for platform := range rc.Handles {
 		switch strings.ToLower(platform) {
 		case "discord":
-			if resolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN") == "" {
+			if shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN") == "" {
 				return fmt.Errorf("nullclaw driver: HANDLE discord requires DISCORD_BOT_TOKEN in service environment")
 			}
 		case "telegram":
-			if resolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN") == "" {
+			if shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN") == "" {
 				return fmt.Errorf("nullclaw driver: HANDLE telegram requires TELEGRAM_BOT_TOKEN in service environment")
 			}
 		case "slack":
-			if resolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN") == "" {
+			if shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN") == "" {
 				return fmt.Errorf("nullclaw driver: HANDLE slack requires SLACK_BOT_TOKEN in service environment")
 			}
 		default:

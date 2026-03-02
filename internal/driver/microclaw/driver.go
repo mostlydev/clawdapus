@@ -36,7 +36,7 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	if err != nil {
 		return err
 	}
-	provider, _, ok := splitModelRef(modelRef)
+	provider, _, ok := shared.SplitModelRef(modelRef)
 	if !ok {
 		return fmt.Errorf("microclaw driver: invalid MODEL primary %q (expected provider/model)", modelRef)
 	}
@@ -52,15 +52,15 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	for platform := range rc.Handles {
 		switch platform {
 		case "discord":
-			if resolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN") == "" {
+			if shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN") == "" {
 				return fmt.Errorf("microclaw driver: HANDLE discord requires DISCORD_BOT_TOKEN in service environment")
 			}
 		case "telegram":
-			if resolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN") == "" {
+			if shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN") == "" {
 				return fmt.Errorf("microclaw driver: HANDLE telegram requires TELEGRAM_BOT_TOKEN in service environment")
 			}
 		case "slack":
-			if resolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN") == "" || resolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN") == "" {
+			if shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN") == "" || shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN") == "" {
 				return fmt.Errorf("microclaw driver: HANDLE slack requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN in service environment")
 			}
 		default:
@@ -69,10 +69,10 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	}
 
 	if len(rc.Cllama) == 0 {
-		llmProvider := normalizeProvider(provider)
-		if !providerAllowsEmptyAPIKey(llmProvider) {
-			if key := resolveProviderAPIKey(llmProvider, rc.Environment); key == "" {
-				expected := strings.Join(expectedProviderKeys(llmProvider), ", ")
+		llmProvider := shared.NormalizeProvider(provider)
+		if !shared.ProviderAllowsEmptyAPIKey(llmProvider) {
+			if key := shared.ResolveProviderAPIKey(llmProvider, rc.Environment); key == "" {
+				expected := strings.Join(shared.ExpectedProviderKeys(llmProvider), ", ")
 				return fmt.Errorf("microclaw driver: no API key found for provider %q (checked: %s)", llmProvider, expected)
 			}
 		}
@@ -230,7 +230,7 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	provider, modelID, ok := splitModelRef(modelRef)
+	provider, modelID, ok := shared.SplitModelRef(modelRef)
 	if !ok {
 		return nil, fmt.Errorf("microclaw driver: invalid MODEL primary %q (expected provider/model)", modelRef)
 	}
@@ -258,7 +258,7 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 		cfg["llm_base_url"] = firstProxy
 		cfg["api_key"] = rc.CllamaToken
 
-		if normalizeProvider(provider) == "anthropic" {
+		if shared.NormalizeProvider(provider) == "anthropic" {
 			cfg["llm_provider"] = "anthropic"
 			cfg["model"] = modelID
 		} else {
@@ -266,10 +266,10 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 			cfg["model"] = provider + "/" + modelID
 		}
 	} else {
-		llmProvider := normalizeProvider(provider)
+		llmProvider := shared.NormalizeProvider(provider)
 		cfg["llm_provider"] = llmProvider
 		cfg["model"] = modelID
-		apiKey := resolveProviderAPIKey(llmProvider, rc.Environment)
+		apiKey := shared.ResolveProviderAPIKey(llmProvider, rc.Environment)
 		if apiKey != "" {
 			cfg["api_key"] = apiKey
 		} else {
@@ -288,7 +288,7 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 		switch platform {
 		case "discord":
 			discord := map[string]interface{}{"enabled": true}
-			if token := resolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN"); token != "" {
+			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN"); token != "" {
 				discord["bot_token"] = token
 			}
 			if h != nil && strings.TrimSpace(h.Username) != "" {
@@ -300,7 +300,7 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 			channels["discord"] = discord
 		case "telegram":
 			telegram := map[string]interface{}{"enabled": true}
-			if token := resolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN"); token != "" {
+			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN"); token != "" {
 				telegram["bot_token"] = token
 			}
 			if h != nil && strings.TrimSpace(h.Username) != "" {
@@ -312,10 +312,10 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 			channels["telegram"] = telegram
 		case "slack":
 			slack := map[string]interface{}{"enabled": true}
-			if bot := resolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN"); bot != "" {
+			if bot := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN"); bot != "" {
 				slack["bot_token"] = bot
 			}
-			if app := resolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN"); app != "" {
+			if app := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN"); app != "" {
 				slack["app_token"] = app
 			}
 			if allowed := slackAllowedChannels(h); len(allowed) > 0 {
@@ -337,131 +337,6 @@ func primaryModelRef(models map[string]string) (string, error) {
 		return primary, nil
 	}
 	return "", fmt.Errorf("microclaw driver: missing MODEL primary (set `MODEL primary <provider/model>` in Clawfile)")
-}
-
-func splitModelRef(ref string) (string, string, bool) {
-	trimmed := strings.TrimSpace(ref)
-	if trimmed == "" {
-		return "", "", false
-	}
-
-	parts := strings.SplitN(trimmed, "/", 2)
-	if len(parts) == 1 {
-		return "anthropic", parts[0], true
-	}
-	provider := strings.ToLower(strings.TrimSpace(parts[0]))
-	model := strings.TrimSpace(parts[1])
-	if provider == "" || model == "" {
-		return "", "", false
-	}
-	return provider, model, true
-}
-
-func normalizeProvider(provider string) string {
-	normalized := strings.ToLower(strings.TrimSpace(provider))
-	if normalized == "" {
-		return "openai"
-	}
-	return normalized
-}
-
-func providerAllowsEmptyAPIKey(provider string) bool {
-	switch normalizeProvider(provider) {
-	case "ollama":
-		return true
-	default:
-		return false
-	}
-}
-
-func expectedProviderKeys(provider string) []string {
-	p := normalizeProvider(provider)
-	sanitized := sanitizeProviderEnvSuffix(p)
-
-	out := []string{fmt.Sprintf("%s_API_KEY", sanitized)}
-	out = append(out, fmt.Sprintf("PROVIDER_API_KEY_%s", sanitized))
-	out = append(out, "PROVIDER_API_KEY")
-	if p != "anthropic" {
-		out = append(out, "OPENAI_API_KEY")
-	}
-	return dedupStrings(out)
-}
-
-func resolveProviderAPIKey(provider string, env map[string]string) string {
-	for _, key := range expectedProviderKeys(provider) {
-		if token := resolveEnvTokenFromMap(env, key); token != "" {
-			return token
-		}
-	}
-	return ""
-}
-
-func resolveEnvTokenFromMap(env map[string]string, key string) string {
-	if env == nil {
-		return ""
-	}
-	return resolveEnvToken(env[key])
-}
-
-func resolveEnvToken(raw string) string {
-	v := strings.TrimSpace(raw)
-	if v == "" {
-		return ""
-	}
-
-	if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
-		name := strings.TrimSpace(v[2 : len(v)-1])
-		if name == "" {
-			return ""
-		}
-		return strings.TrimSpace(os.Getenv(name))
-	}
-	if strings.HasPrefix(v, "$") {
-		name := strings.TrimSpace(strings.TrimPrefix(v, "$"))
-		if isEnvVarName(name) {
-			return strings.TrimSpace(os.Getenv(name))
-		}
-	}
-	return v
-}
-
-func isEnvVarName(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i, r := range s {
-		if i == 0 && !(r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')) {
-			return false
-		}
-		if !(r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
-			return false
-		}
-	}
-	return true
-}
-
-func sanitizeProviderEnvSuffix(provider string) string {
-	if provider == "" {
-		return "OPENAI"
-	}
-	s := strings.ToUpper(provider)
-	s = strings.ReplaceAll(s, "-", "_")
-	s = strings.ReplaceAll(s, ".", "_")
-	s = strings.ReplaceAll(s, "/", "_")
-	return s
-}
-
-func dedupStrings(in []string) []string {
-	seen := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, v := range in {
-		if _, ok := seen[v]; ok {
-			continue
-		}
-		seen[v] = struct{}{}
-		out = append(out, v)
-	}
-	return out
 }
 
 func discordAllowedChannels(h *driver.HandleInfo) []uint64 {

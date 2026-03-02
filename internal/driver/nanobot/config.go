@@ -1,57 +1,38 @@
-package nullclaw
+package nanobot
 
 import (
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
 
-// GenerateConfig builds a nullclaw JSON config from resolved Claw directives.
-// Output is deterministic because map keys are sorted by encoding/json.
+// GenerateConfig builds a nanobot JSON config from resolved Claw directives.
 func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 	config := make(map[string]interface{})
 
-	// Conservative gateway defaults: keep local bind + pairing requirement.
-	if err := setPath(config, "gateway.port", 3000); err != nil {
-		return nil, fmt.Errorf("config generation: %w", err)
-	}
-	if err := setPath(config, "gateway.host", "127.0.0.1"); err != nil {
-		return nil, fmt.Errorf("config generation: %w", err)
-	}
-	if err := setPath(config, "gateway.require_pairing", true); err != nil {
-		return nil, fmt.Errorf("config generation: %w", err)
+	modelRef, err := primaryModelRef(rc.Models)
+	if err != nil {
+		return nil, err
 	}
 
-	// Safety defaults.
-	if err := setPath(config, "autonomy.level", "supervised"); err != nil {
+	if err := setPath(config, "agents.defaults.model", modelRef); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
-	if err := setPath(config, "autonomy.workspace_only", true); err != nil {
+	if err := setPath(config, "agents.defaults.workspace", "/root/.nanobot/workspace"); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
-	}
-
-	for slot, model := range rc.Models {
-		if slot == "fallback" {
-			if err := setPath(config, "reliability.fallback_providers", []string{model}); err != nil {
-				return nil, fmt.Errorf("config generation: %w", err)
-			}
-			continue
-		}
-		if err := setPath(config, "agents.defaults.model."+slot, model); err != nil {
-			return nil, fmt.Errorf("config generation: %w", err)
-		}
 	}
 
 	if len(rc.Cllama) > 0 {
 		if strings.TrimSpace(rc.CllamaToken) == "" {
 			return nil, fmt.Errorf("config generation: CLLAMA is enabled but token is empty")
 		}
-		firstProxy := fmt.Sprintf("http://cllama-%s:8080/v1", rc.Cllama[0])
+		firstProxy := cllama.ProxyBaseURL(rc.Cllama[0])
 		for _, provider := range shared.CollectProviders(rc.Models) {
-			base := "models.providers." + provider
+			base := "providers." + provider
 			if err := setPath(config, base+".base_url", firstProxy); err != nil {
 				return nil, fmt.Errorf("config generation: cllama provider %q base_url: %w", provider, err)
 			}
@@ -59,14 +40,24 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 				return nil, fmt.Errorf("config generation: cllama provider %q api_key: %w", provider, err)
 			}
 		}
+	} else {
+		for _, provider := range shared.CollectProviders(rc.Models) {
+			if token := shared.ResolveProviderAPIKey(provider, rc.Environment); token != "" {
+				if err := setPath(config, "providers."+provider+".api_key", token); err != nil {
+					return nil, fmt.Errorf("config generation: provider %q api_key: %w", provider, err)
+				}
+			}
+		}
 	}
 
-	// HANDLE defaults first. CONFIGURE runs last and overrides these values.
 	for platform, h := range rc.Handles {
 		switch strings.ToLower(platform) {
 		case "discord":
+			if err := setPath(config, "channels.discord.enabled", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
+			}
 			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN"); token != "" {
-				if err := setPath(config, "channels.discord.accounts.main.token", token); err != nil {
+				if err := setPath(config, "channels.discord.token", token); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 				}
 			}
@@ -76,49 +67,46 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 					if gid == "" {
 						continue
 					}
-					if err := setPath(config, "channels.discord.accounts.main.guild_id", gid); err != nil {
+					if err := setPath(config, "channels.discord.guild_id", gid); err != nil {
 						return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 					}
 					break
 				}
 			}
 		case "telegram":
+			if err := setPath(config, "channels.telegram.enabled", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
+			}
 			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN"); token != "" {
-				if err := setPath(config, "channels.telegram.accounts.main.bot_token", token); err != nil {
+				if err := setPath(config, "channels.telegram.bot_token", token); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
 				}
 			}
 		case "slack":
+			if err := setPath(config, "channels.slack.enabled", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
+			}
 			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN"); token != "" {
-				if err := setPath(config, "channels.slack.accounts.main.bot_token", token); err != nil {
+				if err := setPath(config, "channels.slack.bot_token", token); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 				}
 			}
-			appToken := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN")
-			if appToken != "" {
-				if err := setPath(config, "channels.slack.accounts.main.app_token", appToken); err != nil {
-					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
-				}
-				if err := setPath(config, "channels.slack.accounts.main.mode", "socket"); err != nil {
+			if appToken := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN"); appToken != "" {
+				if err := setPath(config, "channels.slack.app_token", appToken); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 				}
 			}
-			signingSecret := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_SIGNING_SECRET")
-			if signingSecret != "" {
-				if err := setPath(config, "channels.slack.accounts.main.signing_secret", signingSecret); err != nil {
+			if signingSecret := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_SIGNING_SECRET"); signingSecret != "" {
+				if err := setPath(config, "channels.slack.signing_secret", signingSecret); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
-				}
-				if appToken == "" {
-					if err := setPath(config, "channels.slack.accounts.main.mode", "http"); err != nil {
-						return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
-					}
 				}
 			}
 		default:
-			fmt.Printf("[claw] warning: nullclaw driver has no config mapping for HANDLE platform %q; skipping channel enablement\n", platform)
+			fmt.Printf("[claw] warning: nanobot driver has no config mapping for HANDLE platform %q; skipping channel enablement\n", platform)
 		}
 	}
 
+	// Apply CONFIGURE directives last so operator settings override defaults.
 	for _, cmd := range rc.Configures {
 		path, value, err := parseConfigSetCommand(cmd)
 		if err != nil {
@@ -134,8 +122,8 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 
 func parseConfigSetCommand(cmd string) (string, interface{}, error) {
 	parts := strings.Fields(cmd)
-	if len(parts) < 5 || parts[0] != "nullclaw" || parts[1] != "config" || parts[2] != "set" {
-		return "", nil, fmt.Errorf("unrecognized CONFIGURE command: %q (expected 'nullclaw config set <path> <value>')", cmd)
+	if len(parts) < 5 || parts[0] != "nanobot" || parts[1] != "config" || parts[2] != "set" {
+		return "", nil, fmt.Errorf("unrecognized CONFIGURE command: %q (expected 'nanobot config set <path> <value>')", cmd)
 	}
 	path := strings.TrimSpace(parts[3])
 	if path == "" {
@@ -152,6 +140,16 @@ func parseConfigSetCommand(cmd string) (string, interface{}, error) {
 		return path, typed, nil
 	}
 	return path, valueText, nil
+}
+
+func primaryModelRef(models map[string]string) (string, error) {
+	if models == nil {
+		return "", fmt.Errorf("nanobot driver: missing MODEL primary (set `MODEL primary <provider/model>` in Clawfile)")
+	}
+	if primary := strings.TrimSpace(models["primary"]); primary != "" {
+		return primary, nil
+	}
+	return "", fmt.Errorf("nanobot driver: missing MODEL primary (set `MODEL primary <provider/model>` in Clawfile)")
 }
 
 func setPath(obj map[string]interface{}, path string, value interface{}) error {
