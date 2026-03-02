@@ -1,0 +1,133 @@
+x-claw:
+  pod: rollcall
+
+services:
+  oc-roll:
+    image: rollcall-openclaw:latest
+    build:
+      context: .
+      dockerfile: agents/oc-roll/Clawfile
+    x-claw:
+      agent: ./agents/oc-roll/AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "oc-roll"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Roll Call"
+              channels:
+                - id: "${ROLLCALL_CHANNEL_ID}"
+                  name: roll-call
+    environment:
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+
+  nc-roll:
+    image: trading-desk-nullclaw:latest
+    x-claw:
+      agent: ./agents/nc-roll/AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "nc-roll"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Roll Call"
+              channels:
+                - id: "${ROLLCALL_CHANNEL_ID}"
+                  name: roll-call
+    environment:
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+
+  mc-roll:
+    image: trading-desk-microclaw:latest
+    x-claw:
+      agent: ./agents/mc-roll/AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "mc-roll"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Roll Call"
+              channels:
+                - id: "${ROLLCALL_CHANNEL_ID}"
+                  name: roll-call
+    environment:
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+
+  nano-roll:
+    image: trading-desk-nanoclaw:latest
+    x-claw:
+      agent: ./agents/nano-roll/AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "nano-roll"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Roll Call"
+              channels:
+                - id: "${ROLLCALL_CHANNEL_ID}"
+                  name: roll-call
+    environment:
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+
+  nb-roll:
+    image: rollcall-nanobot:latest
+    build:
+      context: .
+      dockerfile: agents/nb-roll/Clawfile
+    x-claw:
+      agent: ./agents/nb-roll/AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "nb-roll"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Roll Call"
+              channels:
+                - id: "${ROLLCALL_CHANNEL_ID}"
+                  name: roll-call
+    environment:
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+
+  pc-roll:
+    image: rollcall-picoclaw:latest
+    build:
+      context: .
+      dockerfile: agents/pc-roll/Clawfile
+    x-claw:
+      agent: ./agents/pc-roll/AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "pc-roll"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Roll Call"
+              channels:
+                - id: "${ROLLCALL_CHANNEL_ID}"
+                  name: roll-call
+    environment:
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"

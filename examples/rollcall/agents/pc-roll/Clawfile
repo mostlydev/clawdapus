@@ -1,0 +1,6 @@
+FROM docker.io/sipeed/picoclaw:latest
+
+CLAW_TYPE picoclaw
+AGENT AGENTS.md
+MODEL primary openrouter/anthropic/claude-sonnet-4
+HANDLE discord

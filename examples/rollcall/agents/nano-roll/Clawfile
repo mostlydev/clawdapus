@@ -1,0 +1,6 @@
+FROM trading-desk-nanoclaw:latest
+
+CLAW_TYPE nanoclaw
+AGENT AGENTS.md
+MODEL primary anthropic/claude-sonnet-4-6
+HANDLE discord
