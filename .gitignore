@@ -41,3 +41,4 @@ testdata/*
 !testdata/openclaw-stub/
 !testdata/microclaw-stub/
 *-notes.md
+.claude/settings.local.json
