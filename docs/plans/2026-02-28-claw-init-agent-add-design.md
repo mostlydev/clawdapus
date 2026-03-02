@@ -1,14 +1,62 @@
 # Design: `claw init` + `claw agent add` — Interactive Scaffolding
 
 **Date:** 2026-02-28
-**Status:** Draft (Codex-reviewed, findings addressed)
+**Status:** Implemented (core shipped) with follow-ups
 **Scope:** New interactive scaffolding workflow for `claw init` and `claw agent add`
 
 ## Summary
 
-Transform `claw init` from a static template dumper into an interactive scaffolder that produces a fully working single-agent project. Add `claw agent add` as a context-aware command that adds agents to an existing project, creating agent directories and auto-updating the pod file.
+Transform `claw init` from a static template dumper into an interactive scaffolder that produces a fully working single-agent project. Add `claw agent add` as a context-aware command that adds agents to an existing project, creating layout-appropriate agent files and auto-updating the pod file.
 
-**Philosophy:** The scaffolder is opinionated, the runtime is not. `claw init` and `claw agent add` produce the canonical layout. `claw build` and `claw up` follow whatever the pod file points at — flat, nested, or anything else.
+**Philosophy:** The scaffolder is opinionated, the runtime is not. `claw init` produces the canonical layout. `claw agent add` preserves the existing project layout by default (`--layout auto`) while still allowing explicit `--layout canonical|flat`. `claw build` and `claw up` follow whatever the pod file points at — flat, nested, or anything else.
+
+## Implementation Status (2026-03-01)
+
+### Progress Update (2026-03-01, later pass)
+
+- ✅ Implemented layout-preserving `claw agent add` with auto-detection and explicit `--layout` override.
+- ✅ Added regression tests for flat-layout preservation and `--layout` validation/override.
+- ✅ Implemented `--type generic` base image parameterization in scaffolds.
+- ✅ Implemented env-prefix collision/reuse warnings for `.env.example` additions.
+- ✅ Reconciled README + quickstart + ADR wording with canonical-by-default and non-forcing behavior.
+- ✅ Fixed quickstart/runtime startup defaults: scaffolded services now inject both platform token + ID env vars; Discord default DM policy now uses `pairing` (with legacy `denylist` normalized to `open` + wildcard allowFrom where needed) so startup is valid out-of-the-box.
+
+### Completed
+
+- ✅ `claw init` implemented as canonical scaffold generator:
+  - creates `agents/<name>/Clawfile`, `agents/<name>/AGENTS.md`, `claw-pod.yml`, `.env.example`
+  - emits both `image:` and `build.context:` in pod service
+  - appends required `.gitignore` entries (`.env`, `*.generated.*`) instead of refusing
+  - supports interactive prompts with flag overrides (`--project`, `--agent`, `--type`, `--model`, `--cllama`, `--platform`, `--volume`)
+- ✅ `claw init --from` preserved as legacy flat migration output intentionally (non-forcing transition)
+- ✅ `claw agent add` command added:
+  - creates layout-appropriate Clawfile + contract files (canonical or flat)
+  - updates `claw-pod.yml` by YAML AST mutation
+  - appends prefixed env vars to `.env.example`
+  - supports `--dry-run` and `--yes`
+  - supports `--layout auto|canonical|flat` (default `auto`)
+  - supports contract reuse and shared profile creation flow
+  - preserves existing project layout style: canonical projects stay canonical; flat projects get flat additions (`Clawfile.<agent>`, `AGENTS-<agent>.md`, `build.context: .` + `build.dockerfile`)
+- ✅ Mutation safety behavior implemented:
+  - no implicit deletes
+  - planned change summary printed before write
+  - shared-profile rewiring requires explicit opt-in
+- ✅ Contract safety hardening implemented:
+  - absolute `--contract` paths are rejected (pod-root-relative only)
+- ✅ Generic claw scaffold base image parameterized:
+  - `--type generic` emits `FROM alpine:3.20` instead of `FROM openclaw:latest`
+- ✅ Env prefix collision warnings implemented:
+  - warns on service-prefix collisions (`my-bot` vs `my_bot`)
+  - warns when target `.env.example` keys already exist and will be reused
+- ✅ ADR-011 added at `docs/decisions/011-canonical-project-layout.md`
+- ✅ README + quickstart reconciled to canonical defaults and layout-preserving `agent add`
+- ✅ Test coverage added for init + agent add flows; full suite passing (`go test ./...`)
+- ✅ Added doc smoke test (`spike` tag) that extracts quickstart shell blocks from root `README.md` + `examples/quickstart/README.md` and executes them in a fresh Docker CLI container against the local repo, asserting a working claw startup flow
+
+### Deferred / Follow-ups
+
+- ⏳ Optional: add canonical variants of `examples/multi-claw` and `examples/trading-desk` (current examples intentionally remain hand-authored layouts)
+- ⏳ Replace current simple interactive prompts with a TUI prompt library (`survey`/`huh`) if desired
 
 ## Codex Review Findings (addressed)
 
@@ -16,13 +64,13 @@ Transform `claw init` from a static template dumper into an interactive scaffold
 2. **x-claw.agent path** — `x-claw.agent` is resolved relative to pod root, not build context. Generated path: `./agents/<name>/AGENTS.md`.
 3. **shared-profile path** — Shared profiles are referenced via `x-claw.agent` in the pod file (pod-root-relative: `./shared/<profile>/AGENTS.md`), not via Clawfile `AGENT` directive. The Clawfile `AGENT AGENTS.md` remains as a baked image fallback; the pod override takes precedence.
 4. **canonical rule conflict** — Softened: agent directories always have a Clawfile; AGENTS.md is required for unique contracts and optional when a shared profile is used (it may remain as an unused local fallback).
-5. **env var mapping** — Multi-agent pods use explicit mapping: `.env` has `WESTIN_DISCORD_BOT_TOKEN`, pod file maps `DISCORD_BOT_TOKEN: "${WESTIN_DISCORD_BOT_TOKEN}"` per service.
+5. **env var mapping** — Multi-agent pods use explicit mapping: `.env` has `WESTIN_DISCORD_BOT_TOKEN` + `WESTIN_DISCORD_BOT_ID`, pod file maps canonical runtime keys per service (`DISCORD_BOT_TOKEN`, `DISCORD_BOT_ID`).
 6. **conflict policy** — `.gitignore` is appended to if it exists (adds missing entries). Core files (Clawfile, claw-pod.yml, AGENTS.md) still refuse to overwrite.
 7. **flag naming** — `--project` for project name, `--agent` for agent name. Unambiguous.
 
 ## ADR-011: Canonical Project Layout
 
-**Decision:** Every clawdapus project scaffolded by the CLI converges on a predictable directory layout. This layout is enforced by `claw init` and `claw agent add`, documented as an Architecture Decision Record, and assumed by documentation and examples.
+**Decision:** `claw init` scaffolds a predictable canonical directory layout by default. `claw agent add` preserves the existing project layout by default (`--layout auto`) and supports explicit override (`--layout canonical|flat`).
 
 **Motivation:** "Docker on Rails" — you should be able to `cd` into any clawdapus project and immediately know where everything is.
 
@@ -63,7 +111,7 @@ my-project/
 - Generated artifacts (`Dockerfile.generated`, `compose.generated.yml`) appear next to their source and are gitignored
 - The `shared/` directory is only created when something shared exists
 
-**Non-requirement:** The canonical layout is what the scaffolder produces. The runtime (`claw build`, `claw up`) does not enforce it. A single Clawfile at the project root with a flat claw-pod.yml works fine — the pod file is the source of truth for where things are.
+**Non-requirement:** The canonical layout is the default scaffold output from `claw init`. The runtime (`claw build`, `claw up`) does not enforce layout. `claw agent add` defaults to preserving the existing layout (`--layout auto`), so a flat project remains flat unless explicitly overridden.
 
 ## Command: `claw init`
 
@@ -188,6 +236,7 @@ services:
         - "volume://shared read-write"
     environment:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
 
 volumes:
   shared: {}
@@ -222,7 +271,7 @@ Core files (`claw-pod.yml`, Clawfile, AGENTS.md): if any target already exists, 
 
 ### Purpose
 
-Adds an agent to an existing clawdapus project. Reads the current `claw-pod.yml` to understand project context (existing volumes, cllama config, platforms). Creates the agent directory and auto-updates the pod file.
+Adds an agent to an existing clawdapus project. Reads the current `claw-pod.yml` to understand project context (existing volumes, cllama config, platforms). Creates layout-appropriate agent files (canonical or flat) and auto-updates the pod file.
 
 ### Prerequisite
 
@@ -268,6 +317,8 @@ Shared volumes:
 ✔ Updated .env.example (added WESTIN_DISCORD_BOT_TOKEN, WESTIN_DISCORD_BOT_ID)
 ```
 
+Note: the example above shows canonical layout output. In flat projects, `claw agent add` (default `--layout auto`) emits flat additions (`Clawfile.<name>`, `AGENTS-<name>.md`) and uses `build.context: .` + `build.dockerfile`.
+
 ### Context-Aware Behavior
 
 | Concern | Behavior |
@@ -275,8 +326,9 @@ Shared volumes:
 | **cllama** | If the pod already uses cllama, prompt defaults to inherit (`yes`). Operator can still choose `no`. |
 | **Platform** | If existing agents use discord, offers "discord (same as tiverton)" — pre-fills guild config, only needs new bot credentials. |
 | **AGENTS.md** | Offers: create new, reuse an existing agent's contract, or create a shared profile (copies to `shared/<profile>/AGENTS.md`; optional rewiring of existing agents only with explicit confirmation). |
+| **Layout** | Default `--layout auto` detects current project style and preserves it: canonical projects add `agents/<name>/...`; flat projects add `Clawfile.<name>` + `AGENTS-<name>.md` with `build.context: .` + `build.dockerfile`. |
 | **Shared volumes** | Lists existing volumes from the pod file with access mode selection per volume. Default is `none` (no implicit access grant). |
-| **.env.example** | Appends new vars prefixed with agent name: `WESTIN_DISCORD_BOT_TOKEN`, `WESTIN_DISCORD_BOT_ID`. Pod file maps these to canonical names per service: `DISCORD_BOT_TOKEN: "${WESTIN_DISCORD_BOT_TOKEN}"`. Append-only: no deletion/renaming of existing keys. |
+| **.env.example** | Appends new vars prefixed with agent name: `WESTIN_DISCORD_BOT_TOKEN`, `WESTIN_DISCORD_BOT_ID`. Pod file maps these to canonical names per service (`DISCORD_BOT_TOKEN`, `DISCORD_BOT_ID`). Append-only: no deletion/renaming of existing keys. |
 
 ### "Create shared profile" Flow
 
@@ -304,17 +356,19 @@ The CLI parses the existing `claw-pod.yml`, adds the new service block, and writ
 
 ### Flag Overrides
 
-Same pattern as `claw init`: `--type`, `--model`, `--platform`, `--contract <path>`, `--volume <name>:<mode>`, plus safety flags `--dry-run` and `--yes`.
+Same pattern as `claw init`: `--type`, `--model`, `--platform`, `--contract <path>`, `--volume <name>:<mode>`, `--layout <auto|canonical|flat>`, plus safety flags `--dry-run` and `--yes`.
 
 ## Scope
 
 ### In Scope
 
-- Evolve `claw init` from static scaffolder to interactive (preserve `--from` migration)
-- New `claw agent add` command
-- ADR-011: Canonical Project Layout
-- Update existing examples (quickstart, multi-claw, trading-desk) to follow canonical layout
-- Verify `claw build` and `claw up` work with `agents/<name>/` build contexts
+- ✅ Evolve `claw init` from static scaffolder to interactive (preserve `--from` migration)
+- ✅ New `claw agent add` command
+- ✅ ADR-011: Canonical Project Layout
+- ✅ Reconcile examples policy with non-forcing layout support
+  - quickstart: canonical scaffold example
+  - multi-claw/trading-desk: intentionally left as hand-authored layouts (no forced migration)
+- ✅ Verify `claw build` and `claw up` work with `agents/<name>/` build contexts
 
 ### Out of Scope (Future Work)
 
@@ -340,10 +394,10 @@ When `claw agent add` modifies `claw-pod.yml`, it must preserve existing comment
 
 Two distinct path contexts:
 
-- **Clawfile `AGENT` directive** — relative to build context. `AGENT AGENTS.md` in `agents/tiverton/Clawfile` resolves to `agents/tiverton/AGENTS.md`. Baked into image labels at build time. Serves as fallback.
+- **Clawfile `AGENT` directive** — relative to build context. Canonical example: `AGENT AGENTS.md` in `agents/tiverton/Clawfile` resolves to `agents/tiverton/AGENTS.md`. Flat example: `AGENT AGENTS-westin.md` in `Clawfile.westin` resolves to `AGENTS-westin.md` at pod root. Baked into image labels at build time. Serves as fallback.
 - **`x-claw.agent` in pod file** — relative to pod file directory (project root). `./agents/tiverton/AGENTS.md` or `./shared/trader/AGENTS.md`. This is the runtime source of truth and overrides the image label.
 
-For the canonical layout, both paths point to the same file (`agents/<name>/AGENTS.md`). For shared profiles, only `x-claw.agent` is updated; the Clawfile `AGENT` directive remains as a stale-but-harmless image label.
+For canonical and flat layouts, scaffolded defaults keep these paths aligned. For shared profiles, only `x-claw.agent` is updated; the Clawfile `AGENT` directive remains as a stale-but-harmless image label.
 
 ### Source of Truth for Contract Path
 
