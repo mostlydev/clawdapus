@@ -1,4 +1,4 @@
-FROM trading-desk-nanoclaw:latest
+FROM nanoclaw-orchestrator:latest
 
 CLAW_TYPE nanoclaw
 AGENT AGENTS.md

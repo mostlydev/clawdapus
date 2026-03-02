@@ -1,0 +1,17 @@
+# Base image for nanobot agents.
+# Usage: docker build -t nanobot:latest -f Dockerfile.nanobot-base .
+
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git jq tini \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN uv pip install --system --no-cache nanobot-ai
+
+RUN mkdir -p /root/.nanobot
+
+EXPOSE 18790
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["nanobot", "gateway"]

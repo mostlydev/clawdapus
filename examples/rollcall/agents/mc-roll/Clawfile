@@ -1,4 +1,4 @@
-FROM trading-desk-microclaw:latest
+FROM microclaw:latest
 
 CLAW_TYPE microclaw
 AGENT AGENTS.md

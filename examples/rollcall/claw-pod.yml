@@ -27,7 +27,10 @@ services:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
 
   nc-roll:
-    image: trading-desk-nullclaw:latest
+    image: rollcall-nullclaw:latest
+    build:
+      context: .
+      dockerfile: agents/nc-roll/Clawfile
     x-claw:
       agent: ./agents/nc-roll/AGENTS.md
       cllama: passthrough
@@ -47,7 +50,10 @@ services:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
 
   mc-roll:
-    image: trading-desk-microclaw:latest
+    image: rollcall-microclaw:latest
+    build:
+      context: .
+      dockerfile: agents/mc-roll/Clawfile
     x-claw:
       agent: ./agents/mc-roll/AGENTS.md
       cllama: passthrough
@@ -67,7 +73,10 @@ services:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
 
   nano-roll:
-    image: trading-desk-nanoclaw:latest
+    image: rollcall-nanoclaw:latest
+    build:
+      context: .
+      dockerfile: agents/nano-roll/Clawfile
     x-claw:
       agent: ./agents/nano-roll/AGENTS.md
       cllama: passthrough

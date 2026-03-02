@@ -62,35 +62,38 @@ func TestSpikeRollCall(t *testing.T) {
 	channelID := env["ROLLCALL_CHANNEL_ID"]
 	botToken := env["DISCORD_BOT_TOKEN"]
 
-	// ── Verify pre-built images exist ───────────────────────────────────
-	prebuilt := []string{
-		"trading-desk-nullclaw:latest",
-		"trading-desk-microclaw:latest",
-		"trading-desk-nanoclaw:latest",
+	// ── Build base images (each type has its own Dockerfile) ────────────
+	baseImages := []struct {
+		tag        string
+		dockerfile string
+	}{
+		{"openclaw:latest", "Dockerfile.openclaw-base"},
+		{"nullclaw:latest", "Dockerfile.nullclaw-base"},
+		{"microclaw:latest", "Dockerfile.microclaw-base"},
+		{"nanoclaw-orchestrator:latest", "Dockerfile.nanoclaw-base"},
+		{"nanobot:latest", "Dockerfile.nanobot-base"},
+		{"picoclaw:latest", "Dockerfile.picoclaw-base"},
 	}
-	for _, img := range prebuilt {
-		if !spikeImageExists(img) {
-			t.Skipf("%s not found — run TestSpikeComposeUp first to build trading-desk images", img)
+	for _, b := range baseImages {
+		if !spikeImageExists(b.tag) {
+			spikeBuildImage(t, dir, b.tag, b.dockerfile)
 		}
-	}
-
-	// ── Build images ────────────────────────────────────────────────────
-	if !spikeImageExists("openclaw:latest") {
-		infraDir := filepath.Join(repoRoot, "examples", "trading-desk")
-		spikeBuildImage(t, infraDir, "openclaw:latest", "Dockerfile.openclaw-base")
 	}
 	spikeEnsureCllamaPassthroughImage(t)
 
-	// Only agents with build: blocks need building
-	buildAgents := []struct {
+	// Build agent images (Clawfile on top of base)
+	agentImages := []struct {
 		image      string
 		dockerfile string
 	}{
 		{"rollcall-openclaw:latest", "agents/oc-roll/Clawfile"},
+		{"rollcall-nullclaw:latest", "agents/nc-roll/Clawfile"},
+		{"rollcall-microclaw:latest", "agents/mc-roll/Clawfile"},
+		{"rollcall-nanoclaw:latest", "agents/nano-roll/Clawfile"},
 		{"rollcall-nanobot:latest", "agents/nb-roll/Clawfile"},
 		{"rollcall-picoclaw:latest", "agents/pc-roll/Clawfile"},
 	}
-	for _, a := range buildAgents {
+	for _, a := range agentImages {
 		spikeBuildImage(t, dir, a.image, a.dockerfile)
 	}
 

@@ -1,0 +1,31 @@
+# Base image for picoclaw agents.
+# Usage: docker build -t picoclaw:latest -f Dockerfile.picoclaw-base .
+#
+# Multi-stage: build from source, then copy binary to alpine runtime.
+
+FROM golang:1.24-alpine AS builder
+
+RUN apk add --no-cache git make
+
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/sipeed/picoclaw.git .
+RUN make build
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata curl wget
+
+RUN adduser -D -u 1000 picoclaw
+USER picoclaw
+
+COPY --from=builder /src/build/picoclaw /usr/local/bin/picoclaw
+
+RUN picoclaw onboard 2>/dev/null || true
+
+EXPOSE 18790
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD wget -q --spider http://localhost:18790/health || exit 1
+
+ENTRYPOINT ["picoclaw"]
+CMD ["gateway"]
