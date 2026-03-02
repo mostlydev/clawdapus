@@ -154,3 +154,17 @@ func TestInitScaffoldTypeDefaults(t *testing.T) {
 		})
 	}
 }
+
+func TestInitTypeFlagUsageListsAllScaffoldTypes(t *testing.T) {
+	flag := initCmd.Flags().Lookup("type")
+	if flag == nil {
+		t.Fatal("expected init --type flag to exist")
+	}
+
+	usage := flag.Usage
+	for _, typ := range []string{"openclaw", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic"} {
+		if !strings.Contains(usage, typ) {
+			t.Fatalf("expected init --type usage to include %q, got: %s", typ, usage)
+		}
+	}
+}

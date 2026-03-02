@@ -209,6 +209,20 @@ func TestAgentAddTypeDefaults(t *testing.T) {
 	}
 }
 
+func TestAgentAddTypeFlagUsageListsAllScaffoldTypes(t *testing.T) {
+	flag := agentAddCmd.Flags().Lookup("type")
+	if flag == nil {
+		t.Fatal("expected agent add --type flag to exist")
+	}
+
+	usage := flag.Usage
+	for _, typ := range []string{"openclaw", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic"} {
+		if !strings.Contains(usage, typ) {
+			t.Fatalf("expected agent add --type usage to include %q, got: %s", typ, usage)
+		}
+	}
+}
+
 func TestAgentAddWarnsOnEnvPrefixCollision(t *testing.T) {
 	dir := t.TempDir()
 	podPath := seedPrefixCollisionProject(t, dir)

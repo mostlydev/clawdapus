@@ -47,6 +47,9 @@ func TestDefaultBaseImageForClawType(t *testing.T) {
 		want     string
 	}{
 		{name: "openclaw", clawType: "openclaw", want: "openclaw:latest"},
+		{name: "nanoclaw", clawType: "nanoclaw", want: "node:22-slim"},
+		{name: "microclaw", clawType: "microclaw", want: "node:22-slim"},
+		{name: "nullclaw", clawType: "nullclaw", want: "node:22-slim"},
 		{name: "nanobot", clawType: "nanobot", want: "nanobot:latest"},
 		{name: "picoclaw", clawType: "picoclaw", want: "docker.io/sipeed/picoclaw:latest"},
 		{name: "generic", clawType: "generic", want: "alpine:3.20"},
