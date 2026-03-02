@@ -431,7 +431,7 @@ func resolveInitConfig(dir string, opts initScaffoldOptions, interactive bool) (
 
 	if cfg.ClawType == "" {
 		if interactive {
-			v, err := promptSelect(reader, os.Stdout, "Claw type", []string{"openclaw", "nanobot", "picoclaw", "generic"}, 0)
+			v, err := promptSelect(reader, os.Stdout, "Claw type", []string{"openclaw", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic"}, 0)
 			if err != nil {
 				return nil, fmt.Errorf("prompt claw type: %w", err)
 			}
@@ -695,7 +695,7 @@ func init() {
 	initCmd.Flags().StringVar(&initFromPath, "from", "", "Path to existing OpenClaw config directory to migrate from")
 	initCmd.Flags().StringVar(&initProject, "project", "", "Project name used for x-claw.pod and image prefix")
 	initCmd.Flags().StringVar(&initAgent, "agent", "", "Primary agent name (service + directory name)")
-	initCmd.Flags().StringVar(&initType, "type", "", "Claw type (openclaw, nanobot, picoclaw, generic)")
+	initCmd.Flags().StringVar(&initType, "type", "", "Claw type (openclaw, nanoclaw, microclaw, nullclaw, nanobot, picoclaw, generic)")
 	initCmd.Flags().StringVar(&initModel, "model", "", "Primary model (provider/model)")
 	initCmd.Flags().StringVar(&initCllama, "cllama", "", "Use cllama proxy (yes/no)")
 	initCmd.Flags().StringVar(&initPlatform, "platform", "", "Platform handle (discord, slack, telegram, none)")

@@ -126,6 +126,9 @@ func TestInitScaffoldTypeDefaults(t *testing.T) {
 		baseImage string
 	}{
 		{name: "generic", clawType: "generic", baseImage: "alpine:3.20"},
+		{name: "nanoclaw", clawType: "nanoclaw", baseImage: "node:22-slim"},
+		{name: "microclaw", clawType: "microclaw", baseImage: "node:22-slim"},
+		{name: "nullclaw", clawType: "nullclaw", baseImage: "node:22-slim"},
 		{name: "nanobot", clawType: "nanobot", baseImage: "nanobot:latest"},
 		{name: "picoclaw", clawType: "picoclaw", baseImage: "docker.io/sipeed/picoclaw:latest"},
 	}

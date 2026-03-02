@@ -170,6 +170,9 @@ func TestAgentAddTypeDefaults(t *testing.T) {
 		baseImage string
 	}{
 		{name: "generic", agentName: "genericone", clawType: "generic", baseImage: "alpine:3.20"},
+		{name: "nanoclaw", agentName: "nanoclawone", clawType: "nanoclaw", baseImage: "node:22-slim"},
+		{name: "microclaw", agentName: "microclawone", clawType: "microclaw", baseImage: "node:22-slim"},
+		{name: "nullclaw", agentName: "nullclawone", clawType: "nullclaw", baseImage: "node:22-slim"},
 		{name: "nanobot", agentName: "nanobotone", clawType: "nanobot", baseImage: "nanobot:latest"},
 		{name: "picoclaw", agentName: "picoclawone", clawType: "picoclaw", baseImage: "docker.io/sipeed/picoclaw:latest"},
 	}

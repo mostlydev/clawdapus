@@ -207,7 +207,7 @@ Pick a driver based on what you need. All drivers support `MODEL`, `AGENT`, `CLL
 | | `openclaw` | `nanobot` | `picoclaw` | `nanoclaw` | `microclaw` | `nullclaw` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | **Runtime** | [OpenClaw](https://openclaw.ai) | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | Claude Agent SDK | MicroClaw | NullClaw |
-| `claw init` scaffold | ✅ | ✅ | ✅ | — | — | — |
+| `claw init` scaffold | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | HANDLE: Discord | ✅ | ✅ | ✅ | — | ✅ | ✅ |
 | HANDLE: Telegram | — | ✅ | ✅ | — | ✅ | ✅ |
 | HANDLE: Slack | — | ✅ | ✅ | — | ✅ | ✅ |
