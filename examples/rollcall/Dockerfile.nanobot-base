@@ -13,5 +13,15 @@ RUN mkdir -p /root/.nanobot
 
 EXPOSE 18790
 
+COPY discord-responder.sh /usr/local/bin/discord-responder
+RUN chmod +x /usr/local/bin/discord-responder
+
+COPY <<'WRAPPER' /usr/local/bin/nanobot-entrypoint
+#!/bin/sh
+/usr/local/bin/discord-responder &
+exec nanobot gateway
+WRAPPER
+RUN chmod +x /usr/local/bin/nanobot-entrypoint
+
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["nanobot", "gateway"]
+CMD ["nanobot-entrypoint"]

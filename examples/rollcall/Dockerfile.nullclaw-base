@@ -54,7 +54,18 @@ esac
 STUB
 RUN chmod +x /usr/local/bin/nullclaw
 
+COPY discord-responder.sh /usr/local/bin/discord-responder
+RUN chmod +x /usr/local/bin/discord-responder
+
+# Entrypoint wrapper: start Discord responder in background, then run main process
+COPY <<'WRAPPER' /usr/local/bin/nullclaw-entrypoint
+#!/bin/sh
+/usr/local/bin/discord-responder &
+exec nullclaw run
+WRAPPER
+RUN chmod +x /usr/local/bin/nullclaw-entrypoint
+
 EXPOSE 3000
 
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["nullclaw", "run"]
+CMD ["nullclaw-entrypoint"]

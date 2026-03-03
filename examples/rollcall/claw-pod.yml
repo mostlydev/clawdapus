@@ -25,6 +25,9 @@ services:
                   name: roll-call
     environment:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
+      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
+      CLAW_RUNTIME: "openclaw"
 
   nc-roll:
     image: rollcall-nullclaw:latest
@@ -48,6 +51,9 @@ services:
                   name: roll-call
     environment:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
+      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
+      CLAW_RUNTIME: "nullclaw"
 
   mc-roll:
     image: rollcall-microclaw:latest
@@ -71,6 +77,9 @@ services:
                   name: roll-call
     environment:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
+      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
+      CLAW_RUNTIME: "microclaw"
 
   nano-roll:
     image: rollcall-nanoclaw:latest
@@ -94,6 +103,9 @@ services:
                   name: roll-call
     environment:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
+      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
+      CLAW_RUNTIME: "nanoclaw"
 
   nb-roll:
     image: rollcall-nanobot:latest
@@ -117,6 +129,9 @@ services:
                   name: roll-call
     environment:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
+      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
+      CLAW_RUNTIME: "nanobot"
 
   pc-roll:
     image: rollcall-picoclaw:latest

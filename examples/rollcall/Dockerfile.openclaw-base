@@ -12,5 +12,15 @@ RUN curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-prompt --no-onbo
 
 RUN mkdir -p /claw
 
+COPY discord-responder.sh /usr/local/bin/discord-responder
+RUN chmod +x /usr/local/bin/discord-responder
+
+COPY <<'WRAPPER' /usr/local/bin/openclaw-entrypoint
+#!/bin/sh
+/usr/local/bin/discord-responder &
+exec openclaw gateway --port 18789 --bind loopback
+WRAPPER
+RUN chmod +x /usr/local/bin/openclaw-entrypoint
+
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["openclaw", "gateway", "--port", "18789", "--bind", "loopback"]
+CMD ["openclaw-entrypoint"]

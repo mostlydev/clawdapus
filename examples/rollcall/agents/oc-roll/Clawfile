@@ -4,3 +4,4 @@ CLAW_TYPE openclaw
 AGENT AGENTS.md
 MODEL primary openrouter/anthropic/claude-sonnet-4
 HANDLE discord
+CONFIGURE openclaw config set channels.discord.groupPolicy "open"
