@@ -33,6 +33,7 @@ err.txt
 out.txt
 .DS_Store
 packages/
+cmd/clawdash/node_modules/
 
 # Clawdapus specific
 *.generated.yml
