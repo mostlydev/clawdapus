@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -25,6 +26,11 @@ var composeUpDetach bool
 var (
 	extractServiceSkillFromImage = runtime.ExtractServiceSkill
 	writeRuntimeFile             = os.WriteFile
+	inspectClawImage             = inspect.Inspect
+	imageExistsLocally           = build.ImageExistsLocally
+	generateClawDockerfile       = build.Generate
+	buildGeneratedImage          = build.BuildFromGenerated
+	dockerBuildTaggedImage       = dockerBuildTaggedImageDefault
 )
 
 var composeUpCmd = &cobra.Command{
@@ -87,13 +93,18 @@ func runComposeUp(podFile string) error {
 			continue
 		}
 
-		info, err := inspect.Inspect(svc.Image)
+		imageRef, err := resolveManagedServiceImage(podDir, p, name, svc)
 		if err != nil {
-			return fmt.Errorf("inspect image %q for service %q: %w", svc.Image, name, err)
+			return err
+		}
+
+		info, err := inspectClawImage(imageRef)
+		if err != nil {
+			return fmt.Errorf("inspect image %q for service %q: %w", imageRef, name, err)
 		}
 
 		if info.ClawType == "" {
-			return fmt.Errorf("service %q: image %q has no claw.type label", name, svc.Image)
+			return fmt.Errorf("service %q: image %q has no claw.type label", name, imageRef)
 		}
 
 		// Resolve agent contract
@@ -961,6 +972,317 @@ func formatInvokeChannelMatches(matches []invokeChannelMatch) string {
 	}
 	sort.Strings(formatted)
 	return strings.Join(formatted, ", ")
+}
+
+type serviceBuildConfig struct {
+	Context    string
+	Dockerfile string
+	Args       map[string]string
+	Target     string
+}
+
+func resolveManagedServiceImage(podDir string, p *pod.Pod, serviceName string, svc *pod.Service) (string, error) {
+	imageRef := strings.TrimSpace(svc.Image)
+	if imageRef != "" && imageExistsLocally(imageRef) {
+		return imageRef, nil
+	}
+
+	cfg, err := parseServiceBuildConfig(svc.Compose["build"])
+	if err != nil {
+		return "", fmt.Errorf("service %q: parse build: %w", serviceName, err)
+	}
+
+	if cfg == nil {
+		if imageRef == "" {
+			return "", fmt.Errorf("service %q: claw-managed services require image: or build:", serviceName)
+		}
+		return "", fmt.Errorf("service %q: image %q not found locally and no build config declared", serviceName, imageRef)
+	}
+
+	if imageRef == "" {
+		imageRef = managedServiceImageRef(p.Name, serviceName)
+		svc.Image = imageRef
+		if svc.Compose == nil {
+			svc.Compose = make(map[string]interface{})
+		}
+		svc.Compose["image"] = imageRef
+	}
+
+	if imageExistsLocally(imageRef) {
+		return imageRef, nil
+	}
+
+	fmt.Printf("[claw] %s: building image %s for inspection\n", serviceName, imageRef)
+	if err := buildManagedServiceImage(podDir, imageRef, cfg); err != nil {
+		return "", fmt.Errorf("service %q: %w", serviceName, err)
+	}
+
+	svc.Image = imageRef
+	if svc.Compose == nil {
+		svc.Compose = make(map[string]interface{})
+	}
+	svc.Compose["image"] = imageRef
+	return imageRef, nil
+}
+
+func parseServiceBuildConfig(raw interface{}) (*serviceBuildConfig, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	cfg := &serviceBuildConfig{}
+	switch v := raw.(type) {
+	case string:
+		cfg.Context = strings.TrimSpace(v)
+	case map[string]interface{}:
+		for key, value := range v {
+			switch key {
+			case "context":
+				s, err := buildScalarString(value)
+				if err != nil {
+					return nil, fmt.Errorf("context: %w", err)
+				}
+				cfg.Context = strings.TrimSpace(s)
+			case "dockerfile":
+				s, err := buildScalarString(value)
+				if err != nil {
+					return nil, fmt.Errorf("dockerfile: %w", err)
+				}
+				cfg.Dockerfile = strings.TrimSpace(s)
+			case "target":
+				s, err := buildScalarString(value)
+				if err != nil {
+					return nil, fmt.Errorf("target: %w", err)
+				}
+				cfg.Target = strings.TrimSpace(s)
+			case "args":
+				args, err := parseBuildArgs(value)
+				if err != nil {
+					return nil, fmt.Errorf("args: %w", err)
+				}
+				cfg.Args = args
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unsupported build value type %T", raw)
+	}
+
+	if cfg.Context == "" {
+		cfg.Context = "."
+	}
+	return cfg, nil
+}
+
+func parseBuildArgs(raw interface{}) (map[string]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	switch v := raw.(type) {
+	case map[string]string:
+		out := make(map[string]string, len(v))
+		for k, value := range v {
+			out[k] = value
+		}
+		return out, nil
+	case map[string]interface{}:
+		out := make(map[string]string, len(v))
+		for k, value := range v {
+			s, err := buildScalarString(value)
+			if err != nil {
+				return nil, fmt.Errorf("key %q: %w", k, err)
+			}
+			out[k] = s
+		}
+		return out, nil
+	case []string:
+		return parseBuildArgList(v)
+	case []interface{}:
+		items := make([]string, 0, len(v))
+		for i, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("entry %d: expected string, got %T", i, item)
+			}
+			items = append(items, s)
+		}
+		return parseBuildArgList(items)
+	default:
+		return nil, fmt.Errorf("unsupported build args type %T", raw)
+	}
+}
+
+func parseBuildArgList(items []string) (map[string]string, error) {
+	out := make(map[string]string, len(items))
+	for i, item := range items {
+		key := item
+		value := ""
+		if idx := strings.Index(item, "="); idx >= 0 {
+			key = item[:idx]
+			value = item[idx+1:]
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, fmt.Errorf("entry %d: build arg key must not be empty", i)
+		}
+		out[key] = value
+	}
+	return out, nil
+}
+
+func buildManagedServiceImage(podDir, imageRef string, cfg *serviceBuildConfig) error {
+	contextDir := cfg.Context
+	if !filepath.IsAbs(contextDir) {
+		contextDir = filepath.Join(podDir, contextDir)
+	}
+	contextDir, err := filepath.Abs(contextDir)
+	if err != nil {
+		return fmt.Errorf("resolve build context %q: %w", cfg.Context, err)
+	}
+
+	dockerfilePath, err := resolveBuildDockerfilePath(contextDir, cfg.Dockerfile)
+	if err != nil {
+		return err
+	}
+
+	if isClawBuildFile(dockerfilePath) {
+		generatedPath, err := generateClawDockerfile(dockerfilePath)
+		if err != nil {
+			return fmt.Errorf("generate Dockerfile from %q: %w", dockerfilePath, err)
+		}
+		if err := buildGeneratedImage(generatedPath, imageRef); err != nil {
+			return fmt.Errorf("build image %q from %q: %w", imageRef, generatedPath, err)
+		}
+		return nil
+	}
+
+	if err := dockerBuildTaggedImage(imageRef, dockerfilePath, contextDir, cfg.Args, cfg.Target); err != nil {
+		return fmt.Errorf("docker build %q: %w", imageRef, err)
+	}
+	return nil
+}
+
+func resolveBuildDockerfilePath(contextDir, dockerfile string) (string, error) {
+	if strings.TrimSpace(dockerfile) != "" {
+		path := strings.TrimSpace(dockerfile)
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(contextDir, path)
+		}
+		if _, err := os.Stat(path); err != nil {
+			return "", fmt.Errorf("build dockerfile %q: %w", path, err)
+		}
+		return path, nil
+	}
+
+	clawfile := filepath.Join(contextDir, "Clawfile")
+	if _, err := os.Stat(clawfile); err == nil {
+		return clawfile, nil
+	}
+
+	dockerfilePath := filepath.Join(contextDir, "Dockerfile")
+	if _, err := os.Stat(dockerfilePath); err != nil {
+		return "", fmt.Errorf("build dockerfile %q: %w", dockerfilePath, err)
+	}
+	return dockerfilePath, nil
+}
+
+func isClawBuildFile(path string) bool {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, "Clawfile") {
+		return true
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	src := string(data)
+	return strings.Contains(src, "CLAW_TYPE ") || strings.Contains(src, "\nCLAW_TYPE ") || strings.Contains(src, "\nAGENT ")
+}
+
+func managedServiceImageRef(podName, serviceName string) string {
+	podPart := sanitizeImageComponent(podName)
+	if podPart == "" {
+		podPart = "pod"
+	}
+	servicePart := sanitizeImageComponent(serviceName)
+	if servicePart == "" {
+		servicePart = "service"
+	}
+	return fmt.Sprintf("claw-local/%s-%s:latest", podPart, servicePart)
+}
+
+func sanitizeImageComponent(in string) string {
+	in = strings.ToLower(strings.TrimSpace(in))
+	if in == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range in {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		case r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+			lastDash = r == '-'
+		default:
+			if !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-._")
+}
+
+func buildScalarString(v interface{}) (string, error) {
+	switch tv := v.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return tv, nil
+	case int:
+		return strconv.Itoa(tv), nil
+	case int64:
+		return strconv.FormatInt(tv, 10), nil
+	case uint64:
+		return strconv.FormatUint(tv, 10), nil
+	case float64:
+		return strconv.FormatFloat(tv, 'f', -1, 64), nil
+	case bool:
+		if tv {
+			return "true", nil
+		}
+		return "false", nil
+	default:
+		return "", fmt.Errorf("unsupported scalar type %T", v)
+	}
+}
+
+func dockerBuildTaggedImageDefault(imageRef, dockerfilePath, contextDir string, args map[string]string, target string) error {
+	cmdArgs := []string{"build", "-t", imageRef, "-f", dockerfilePath}
+	if strings.TrimSpace(target) != "" {
+		cmdArgs = append(cmdArgs, "--target", strings.TrimSpace(target))
+	}
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		cmdArgs = append(cmdArgs, "--build-arg", key+"="+args[key])
+	}
+	cmdArgs = append(cmdArgs, contextDir)
+
+	cmd := exec.Command("docker", cmdArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ensureInfraImages checks that cllama proxy and clawdash images exist locally,
