@@ -95,17 +95,20 @@ func TestFleetPageRenders(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, "Fleet Overview") {
+	if !strings.Contains(body, "Fleet Command") {
 		t.Fatalf("expected fleet heading in body")
 	}
 	if !strings.Contains(body, "bot") {
 		t.Fatalf("expected service name in body")
 	}
-	if !strings.Contains(body, "Costs") {
-		t.Fatalf("expected costs panel in body")
+	if !strings.Contains(body, "Cllama rollup") {
+		t.Fatalf("expected cost rollup panel in body")
 	}
 	if !strings.Contains(body, "Cost emission not available yet") {
 		t.Fatalf("expected costs emission warning in body")
+	}
+	if !strings.Contains(body, "Priority queue") {
+		t.Fatalf("expected attention section in body")
 	}
 	if strings.Contains(body, "Open cllama dashboard") {
 		t.Fatalf("expected costs link to be hidden when /costs/api is unavailable")
@@ -157,8 +160,12 @@ func TestTopologyPageRenders(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "Topology") {
+	body := w.Body.String()
+	if !strings.Contains(body, "System Wiring") {
 		t.Fatalf("expected topology title in body")
+	}
+	if !strings.Contains(body, `href="/detail/bot"`) {
+		t.Fatalf("expected service detail link in topology body")
 	}
 }
 

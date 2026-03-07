@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,8 +28,8 @@ import (
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
-//go:embed templates/*.html
-var templateFS embed.FS
+//go:embed templates/*.html static/*
+var assetFS embed.FS
 
 type statusSource interface {
 	Snapshot(ctx context.Context, serviceNames []string) (map[string]serviceStatus, error)
@@ -41,6 +42,7 @@ type handler struct {
 	costLogFallback bool
 	httpClient      *http.Client
 	tpl             *template.Template
+	static          http.Handler
 }
 
 func newHandler(manifest *manifestpkg.PodManifest, source statusSource, cllamaCostsURL string, costLogFallback bool) http.Handler {
@@ -53,7 +55,11 @@ func newHandler(manifest *manifestpkg.PodManifest, source statusSource, cllamaCo
 		"statusLabel":   statusLabel,
 		"hasStatusData": hasStatusData,
 	}
-	tpl := template.Must(template.New("clawdash").Funcs(funcs).ParseFS(templateFS, "templates/*.html"))
+	tpl := template.Must(template.New("clawdash").Funcs(funcs).ParseFS(assetFS, "templates/*.html"))
+	staticFS, err := fs.Sub(assetFS, "static")
+	if err != nil {
+		panic(err)
+	}
 	return &handler{
 		manifest:        manifest,
 		statusSource:    source,
@@ -62,12 +68,16 @@ func newHandler(manifest *manifestpkg.PodManifest, source statusSource, cllamaCo
 		httpClient: &http.Client{
 			Timeout: 2 * time.Second,
 		},
-		tpl: tpl,
+		tpl:    tpl,
+		static: http.StripPrefix("/static/", http.FileServerFS(staticFS)),
 	}
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/static/"):
+		h.static.ServeHTTP(w, r)
+		return
 	case r.Method == http.MethodGet && r.URL.Path == "/":
 		h.renderFleet(w, r)
 		return
@@ -93,6 +103,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type fleetPageData struct {
 	PodName         string
 	ActiveTab       string
+	Summary         []dashStat
+	Attention       []dashAlert
+	HasAttention    bool
 	Agents          []fleetCard
 	Proxies         []fleetCard
 	Infrastructure  []fleetCard
@@ -113,6 +126,22 @@ type cllamaCostSummary struct {
 	Source       string
 }
 
+type dashStat struct {
+	Label string
+	Value string
+	Hint  string
+	Tone  string
+}
+
+type dashAlert struct {
+	Severity     string
+	SeverityTone string
+	Title        string
+	Summary      string
+	ServiceName  string
+	DetailPath   string
+}
+
 type fleetCard struct {
 	ServiceName  string
 	DetailPath   string
@@ -124,6 +153,8 @@ type fleetCard struct {
 	Uptime       string
 	Model        string
 	Handles      []handleRow
+	SurfaceCount int
+	InvokeCount  int
 	ProxyType    string
 	Count        int
 	RunningCount int
@@ -161,6 +192,8 @@ func (h *handler) buildFleetPageData(ctx context.Context, statuses map[string]se
 			Uptime:       status.Uptime,
 			Model:        primaryModel(svc.Models),
 			Handles:      sortedHandles(svc.Handles),
+			SurfaceCount: len(svc.Surfaces),
+			InvokeCount:  len(svc.Invocations),
 			Count:        svc.Count,
 			RunningCount: status.Running,
 		}
@@ -208,10 +241,15 @@ func (h *handler) buildFleetPageData(ctx context.Context, statuses map[string]se
 	sort.Slice(proxies, func(i, j int) bool { return proxies[i].ServiceName < proxies[j].ServiceName })
 
 	costSummary, costErr := h.fetchCllamaCostSummary(ctx)
+	summary := buildFleetSummary(h.manifest, statuses)
+	attention := buildFleetAttention(h.manifest, statuses)
 
 	return fleetPageData{
 		PodName:         h.manifest.PodName,
 		ActiveTab:       "fleet",
+		Summary:         summary,
+		Attention:       attention,
+		HasAttention:    len(attention) > 0,
 		Agents:          agents,
 		Proxies:         proxies,
 		Infrastructure:  infra,
@@ -230,6 +268,13 @@ type detailPageData struct {
 	PodName         string
 	ActiveTab       string
 	ServiceName     string
+	RoleBadge       string
+	RoleClass       string
+	AgentPath       string
+	PrimaryModel    string
+	Summary         []dashStat
+	Attention       []dashAlert
+	HasAttention    bool
 	ImageRef        string
 	Count           int
 	IsProxy         bool
@@ -352,10 +397,31 @@ func (h *handler) buildDetailPageData(name string, statuses map[string]serviceSt
 		status = unknownStatus(name)
 	}
 
+	roleBadge := "native"
+	roleClass := "badge-green"
+	if svc.ClawType != "" {
+		roleBadge = svc.ClawType
+		roleClass = "badge-cyan"
+	} else if isProxy {
+		roleBadge = "proxy"
+		roleClass = "badge-amber"
+	}
+
+	primary := primaryModel(svc.Models)
+	summary := buildDetailSummary(svc, status, proxyInfo, isProxy)
+	attention := buildDetailAttention(name, svc, status, isProxy)
+
 	return detailPageData{
 		PodName:         h.manifest.PodName,
 		ActiveTab:       "detail",
 		ServiceName:     name,
+		RoleBadge:       roleBadge,
+		RoleClass:       roleClass,
+		AgentPath:       svc.Agent,
+		PrimaryModel:    primary,
+		Summary:         summary,
+		Attention:       attention,
+		HasAttention:    len(attention) > 0,
 		ImageRef:        firstNonEmpty(svc.ImageRef, proxyInfo.Image),
 		Count:           svc.Count,
 		IsProxy:         isProxy,
@@ -505,6 +571,350 @@ func primaryModel(models map[string]string) string {
 		}
 	}
 	return ""
+}
+
+func buildFleetSummary(manifest *manifestpkg.PodManifest, statuses map[string]serviceStatus) []dashStat {
+	totalServices := len(manifest.Services) + len(manifest.Proxies)
+	healthyServices := 0
+	attentionServices := 0
+	protectedAgents := 0
+	totalAgents := 0
+	handleCount := 0
+	invocationCount := 0
+	surfaceCount := 0
+
+	for name, svc := range manifest.Services {
+		status := statuses[name]
+		if isHealthyStatus(status.Status) {
+			healthyServices++
+		}
+		if needsAttentionStatus(status.Status) {
+			attentionServices++
+		}
+		if svc.ClawType != "" {
+			totalAgents++
+			if len(svc.Cllama) > 0 {
+				protectedAgents++
+			}
+		}
+		handleCount += len(svc.Handles)
+		invocationCount += len(svc.Invocations)
+		surfaceCount += len(svc.Surfaces)
+	}
+
+	for _, proxy := range manifest.Proxies {
+		status := statuses[proxy.ServiceName]
+		if isHealthyStatus(status.Status) {
+			healthyServices++
+		}
+		if needsAttentionStatus(status.Status) {
+			attentionServices++
+		}
+	}
+
+	return []dashStat{
+		{
+			Label: "Runtime",
+			Value: strconv.Itoa(totalServices),
+			Hint:  fmt.Sprintf("%d agents, %d proxies, %d infrastructure", totalAgents, len(manifest.Proxies), len(manifest.Services)-totalAgents),
+			Tone:  "neutral",
+		},
+		{
+			Label: "Healthy",
+			Value: fmt.Sprintf("%d/%d", healthyServices, max(totalServices, 1)),
+			Hint:  "services currently healthy or running",
+			Tone:  toneFromRatio(healthyServices, max(totalServices, 1)),
+		},
+		{
+			Label: "Attention",
+			Value: strconv.Itoa(attentionServices),
+			Hint:  "services starting, stopped, unhealthy, or unknown",
+			Tone:  toneForAttentionCount(attentionServices),
+		},
+		{
+			Label: "Governed",
+			Value: fmt.Sprintf("%d/%d", protectedAgents, max(totalAgents, 1)),
+			Hint:  "agents routed through cllama",
+			Tone:  toneFromRatio(protectedAgents, max(totalAgents, 1)),
+		},
+		{
+			Label: "Handles",
+			Value: strconv.Itoa(handleCount),
+			Hint:  "declared bot identities across the pod",
+			Tone:  "neutral",
+		},
+		{
+			Label: "Surfaces",
+			Value: fmt.Sprintf("%d / %d", surfaceCount, invocationCount),
+			Hint:  "surfaces / scheduled invocations",
+			Tone:  "neutral",
+		},
+	}
+}
+
+func buildFleetAttention(manifest *manifestpkg.PodManifest, statuses map[string]serviceStatus) []dashAlert {
+	alerts := make([]dashAlert, 0)
+
+	for _, name := range sortedServiceNames(manifest.Services) {
+		svc := manifest.Services[name]
+		status := statuses[name]
+
+		if desired := max(svc.Count, 1); desired > 1 && status.Running < desired {
+			alerts = append(alerts, dashAlert{
+				Severity:     "critical",
+				SeverityTone: "tone-critical",
+				Title:        "Replica shortfall",
+				Summary:      fmt.Sprintf("%s has %d/%d live replicas.", name, status.Running, desired),
+				ServiceName:  name,
+				DetailPath:   "/detail/" + url.PathEscape(name),
+			})
+			continue
+		}
+
+		if svc.ClawType != "" && len(svc.Cllama) > 0 && !status.HasCllamaToken {
+			alerts = append(alerts, dashAlert{
+				Severity:     "critical",
+				SeverityTone: "tone-critical",
+				Title:        "Governance token missing",
+				Summary:      fmt.Sprintf("%s is declared behind %s but no CLLAMA_TOKEN was detected.", name, joinNonEmpty(svc.Cllama, ", ")),
+				ServiceName:  name,
+				DetailPath:   "/detail/" + url.PathEscape(name),
+			})
+			continue
+		}
+
+		switch strings.ToLower(strings.TrimSpace(status.Status)) {
+		case "unhealthy", "stopped", "dead", "exited":
+			alerts = append(alerts, dashAlert{
+				Severity:     "critical",
+				SeverityTone: "tone-critical",
+				Title:        "Service degraded",
+				Summary:      fmt.Sprintf("%s is %s with uptime %s.", name, statusLabel(status.Status), firstNonEmpty(status.Uptime, "-")),
+				ServiceName:  name,
+				DetailPath:   "/detail/" + url.PathEscape(name),
+			})
+		case "starting", "unknown":
+			alerts = append(alerts, dashAlert{
+				Severity:     "warning",
+				SeverityTone: "tone-warning",
+				Title:        "Service not settled",
+				Summary:      fmt.Sprintf("%s is %s.", name, statusLabel(status.Status)),
+				ServiceName:  name,
+				DetailPath:   "/detail/" + url.PathEscape(name),
+			})
+		case "healthy", "running":
+			if svc.ClawType != "" && strings.TrimSpace(primaryModel(svc.Models)) == "" {
+				alerts = append(alerts, dashAlert{
+					Severity:     "warning",
+					SeverityTone: "tone-warning",
+					Title:        "Model not resolved",
+					Summary:      fmt.Sprintf("%s has no resolved primary model in the manifest.", name),
+					ServiceName:  name,
+					DetailPath:   "/detail/" + url.PathEscape(name),
+				})
+			}
+		}
+	}
+
+	sort.SliceStable(alerts, func(i, j int) bool {
+		left := alertRank(alerts[i].Severity)
+		right := alertRank(alerts[j].Severity)
+		if left != right {
+			return left < right
+		}
+		return alerts[i].ServiceName < alerts[j].ServiceName
+	})
+	if len(alerts) > 8 {
+		return alerts[:8]
+	}
+	return alerts
+}
+
+func buildDetailSummary(svc manifestpkg.ServiceManifest, status serviceStatus, proxyInfo manifestpkg.ProxyManifest, isProxy bool) []dashStat {
+	role := "native service"
+	if svc.ClawType != "" {
+		role = svc.ClawType
+	} else if isProxy {
+		role = firstNonEmpty(proxyInfo.ProxyType, "proxy")
+	}
+
+	controlPlane := "direct"
+	if isProxy {
+		controlPlane = "proxy"
+	} else if len(svc.Cllama) > 0 {
+		controlPlane = joinNonEmpty(svc.Cllama, ", ")
+	}
+
+	return []dashStat{
+		{
+			Label: "Role",
+			Value: role,
+			Hint:  "service class in this pod",
+			Tone:  toneForStatus(status.Status),
+		},
+		{
+			Label: "Runtime",
+			Value: fmt.Sprintf("%d/%d", status.Running, max(svc.Count, 1)),
+			Hint:  "live replicas / desired replicas",
+			Tone:  toneFromRatio(status.Running, max(svc.Count, 1)),
+		},
+		{
+			Label: "Model",
+			Value: firstNonEmpty(primaryModel(svc.Models), "none"),
+			Hint:  "primary model selection",
+			Tone:  "neutral",
+		},
+		{
+			Label: "Control",
+			Value: controlPlane,
+			Hint:  "cllama path or direct execution",
+			Tone:  "neutral",
+		},
+		{
+			Label: "Identity",
+			Value: strconv.Itoa(len(svc.Handles)),
+			Hint:  "declared handles",
+			Tone:  "neutral",
+		},
+		{
+			Label: "Workload",
+			Value: fmt.Sprintf("%d / %d", len(svc.Surfaces), len(svc.Invocations)),
+			Hint:  "surfaces / scheduled invocations",
+			Tone:  "neutral",
+		},
+	}
+}
+
+func buildDetailAttention(name string, svc manifestpkg.ServiceManifest, status serviceStatus, isProxy bool) []dashAlert {
+	alerts := make([]dashAlert, 0, 3)
+
+	if desired := max(svc.Count, 1); desired > 1 && status.Running < desired {
+		alerts = append(alerts, dashAlert{
+			Severity:     "critical",
+			SeverityTone: "tone-critical",
+			Title:        "Replica shortfall",
+			Summary:      fmt.Sprintf("%d of %d replicas are live.", status.Running, desired),
+			ServiceName:  name,
+		})
+	}
+
+	if svc.ClawType != "" && len(svc.Cllama) > 0 && !status.HasCllamaToken {
+		alerts = append(alerts, dashAlert{
+			Severity:     "critical",
+			SeverityTone: "tone-critical",
+			Title:        "Governance token missing",
+			Summary:      fmt.Sprintf("Expected cllama token for %s, but none was detected in the container env.", joinNonEmpty(svc.Cllama, ", ")),
+			ServiceName:  name,
+		})
+	}
+
+	switch strings.ToLower(strings.TrimSpace(status.Status)) {
+	case "unhealthy", "stopped", "dead", "exited":
+		alerts = append(alerts, dashAlert{
+			Severity:     "critical",
+			SeverityTone: "tone-critical",
+			Title:        "Service degraded",
+			Summary:      fmt.Sprintf("Current live status is %s.", statusLabel(status.Status)),
+			ServiceName:  name,
+		})
+	case "starting", "unknown":
+		alerts = append(alerts, dashAlert{
+			Severity:     "warning",
+			SeverityTone: "tone-warning",
+			Title:        "Service not settled",
+			Summary:      fmt.Sprintf("Current live status is %s.", statusLabel(status.Status)),
+			ServiceName:  name,
+		})
+	}
+
+	if svc.ClawType != "" && strings.TrimSpace(primaryModel(svc.Models)) == "" {
+		alerts = append(alerts, dashAlert{
+			Severity:     "warning",
+			SeverityTone: "tone-warning",
+			Title:        "Model not resolved",
+			Summary:      "No primary model was resolved into the dashboard manifest.",
+			ServiceName:  name,
+		})
+	}
+
+	if isProxy && status.Status == "healthy" {
+		return alerts
+	}
+
+	sort.SliceStable(alerts, func(i, j int) bool {
+		left := alertRank(alerts[i].Severity)
+		right := alertRank(alerts[j].Severity)
+		if left != right {
+			return left < right
+		}
+		return alerts[i].Title < alerts[j].Title
+	})
+	return alerts
+}
+
+func toneForStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "healthy", "running":
+		return "tone-good"
+	case "starting":
+		return "tone-warning"
+	case "unhealthy", "stopped", "dead", "exited":
+		return "tone-critical"
+	default:
+		return "tone-muted"
+	}
+}
+
+func toneFromRatio(current, total int) string {
+	if total <= 0 {
+		return "tone-muted"
+	}
+	if current >= total {
+		return "tone-good"
+	}
+	if current > 0 {
+		return "tone-warning"
+	}
+	return "tone-critical"
+}
+
+func toneForAttentionCount(count int) string {
+	if count <= 0 {
+		return "tone-good"
+	}
+	if count == 1 {
+		return "tone-warning"
+	}
+	return "tone-critical"
+}
+
+func alertRank(severity string) int {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "critical":
+		return 0
+	case "warning":
+		return 1
+	default:
+		return 2
+	}
+}
+
+func isHealthyStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "healthy", "running":
+		return true
+	default:
+		return false
+	}
+}
+
+func needsAttentionStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "healthy", "running":
+		return false
+	default:
+		return true
+	}
 }
 
 func statusClass(status string) string {

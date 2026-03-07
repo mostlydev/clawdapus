@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 type topologyPageData struct {
 	PodName         string
 	ActiveTab       string
+	Summary         []dashStat
 	Lanes           []topologyLane
 	CanvasWidth     int
 	CanvasHeight    int
@@ -33,6 +35,7 @@ type topologyNode struct {
 	Label       string
 	Lane        string
 	ServiceName string
+	DetailPath  string
 	X           int
 	Y           int
 	Width       int
@@ -215,6 +218,7 @@ func buildTopologyPageData(manifest *manifestpkg.PodManifest, statuses map[strin
 				Label:       name,
 				Lane:        lane.lane,
 				ServiceName: serviceName,
+				DetailPath:  detailPathForService(serviceName),
 				X:           laneX[lane.lane],
 				Y:           yStart + row*rowGap,
 				Width:       nodeW,
@@ -278,8 +282,16 @@ func buildTopologyPageData(manifest *manifestpkg.PodManifest, statuses map[strin
 	}
 
 	return topologyPageData{
-		PodName:         manifest.PodName,
-		ActiveTab:       "topology",
+		PodName:   manifest.PodName,
+		ActiveTab: "topology",
+		Summary: []dashStat{
+			{Label: "Channels", Value: fmt.Sprintf("%d", len(channels)), Hint: "external routes into the pod", Tone: "neutral"},
+			{Label: "Agents", Value: fmt.Sprintf("%d", len(agentNames)), Hint: "claw-managed services", Tone: "neutral"},
+			{Label: "Proxies", Value: fmt.Sprintf("%d", len(proxyNames)), Hint: "cllama hops in the graph", Tone: "neutral"},
+			{Label: "Services", Value: fmt.Sprintf("%d", len(services)), Hint: "native service dependencies", Tone: "neutral"},
+			{Label: "Storage", Value: fmt.Sprintf("%d", len(volumes)), Hint: "volume and host bindings", Tone: "neutral"},
+			{Label: "Links", Value: fmt.Sprintf("%d", len(edges)), Hint: "rendered graph edges", Tone: "neutral"},
+		},
 		Lanes:           lanesMeta,
 		CanvasWidth:     canvasWidth,
 		CanvasHeight:    canvasHeight,
@@ -337,4 +349,12 @@ func uniqueSorted(items []string) []string {
 		set[item] = struct{}{}
 	}
 	return sortedSet(set)
+}
+
+func detailPathForService(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	return "/detail/" + url.PathEscape(name)
 }
