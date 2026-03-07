@@ -87,6 +87,13 @@ func TestGenerateConfigCllamaRewritesProviderBaseURL(t *testing.T) {
 	if !ok || len(modelEntries) == 0 {
 		t.Fatalf("expected models.providers.anthropic.models entries, got %T %v", anthropic["models"], anthropic["models"])
 	}
+	entry, ok := modelEntries[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected first anthropic model entry object, got %T", modelEntries[0])
+	}
+	if entry["id"] != "anthropic/claude-sonnet-4" {
+		t.Fatalf("expected anthropic model id to stay provider-prefixed for cllama, got %v", entry["id"])
+	}
 }
 
 func TestGenerateConfigNoCllamaNoProviderRewrite(t *testing.T) {
@@ -165,6 +172,30 @@ func TestGenerateConfigCllamaRewritesAllModelProviders(t *testing.T) {
 		if entry["apiKey"] != "westin:abc123hex" {
 			t.Fatalf("provider %s apiKey mismatch: %v", provider, entry["apiKey"])
 		}
+	}
+
+	openrouterModels, ok := providers["openrouter"].(map[string]interface{})["models"].([]interface{})
+	if !ok || len(openrouterModels) != 1 {
+		t.Fatalf("expected one openrouter model entry, got %T %v", providers["openrouter"].(map[string]interface{})["models"], providers["openrouter"].(map[string]interface{})["models"])
+	}
+	openrouterEntry, ok := openrouterModels[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected openrouter model entry object, got %T", openrouterModels[0])
+	}
+	if openrouterEntry["id"] != "openrouter/moonshotai/kimi-k2.5" {
+		t.Fatalf("expected openrouter model id to stay provider-prefixed for cllama, got %v", openrouterEntry["id"])
+	}
+
+	anthropicModels, ok := providers["anthropic"].(map[string]interface{})["models"].([]interface{})
+	if !ok || len(anthropicModels) != 1 {
+		t.Fatalf("expected one anthropic model entry, got %T %v", providers["anthropic"].(map[string]interface{})["models"], providers["anthropic"].(map[string]interface{})["models"])
+	}
+	anthropicEntry, ok := anthropicModels[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected anthropic model entry object, got %T", anthropicModels[0])
+	}
+	if anthropicEntry["id"] != "anthropic/claude-sonnet-4-6" {
+		t.Fatalf("expected anthropic model id to stay provider-prefixed for cllama, got %v", anthropicEntry["id"])
 	}
 }
 

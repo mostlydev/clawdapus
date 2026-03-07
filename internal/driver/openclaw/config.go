@@ -386,14 +386,14 @@ func containsString(values []string, target string) bool {
 func collectCllamaProviderModels(models map[string]string) map[string][]string {
 	byProvider := make(map[string]map[string]struct{})
 	for _, rawRef := range models {
-		provider, modelID, ok := splitModelRef(rawRef)
+		provider, modelRef, ok := cllamaProviderModelRef(rawRef)
 		if !ok {
 			continue
 		}
 		if _, exists := byProvider[provider]; !exists {
 			byProvider[provider] = make(map[string]struct{})
 		}
-		byProvider[provider][modelID] = struct{}{}
+		byProvider[provider][modelRef] = struct{}{}
 	}
 
 	out := make(map[string][]string, len(byProvider))
@@ -406,6 +406,14 @@ func collectCllamaProviderModels(models map[string]string) map[string][]string {
 		out[provider] = modelIDs
 	}
 	return out
+}
+
+func cllamaProviderModelRef(ref string) (string, string, bool) {
+	provider, modelID, ok := splitModelRef(ref)
+	if !ok {
+		return "", "", false
+	}
+	return provider, provider + "/" + modelID, true
 }
 
 func splitModelRef(ref string) (string, string, bool) {
