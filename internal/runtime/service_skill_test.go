@@ -8,6 +8,12 @@ import (
 func TestGenerateServiceSkillFallbackWithPorts(t *testing.T) {
 	result := GenerateServiceSkillFallback("api-server", []string{"8080", "9090"})
 
+	if !strings.Contains(result, "name: \"surface-api-server\"") {
+		t.Error("expected skill frontmatter name")
+	}
+	if !strings.Contains(result, "description: \"Connection details for the api-server service surface.\"") {
+		t.Error("expected skill frontmatter description")
+	}
 	if !strings.Contains(result, "# api-server (service surface)") {
 		t.Error("expected header with target name")
 	}
@@ -28,6 +34,9 @@ func TestGenerateServiceSkillFallbackWithPorts(t *testing.T) {
 func TestGenerateServiceSkillFallbackNoPorts(t *testing.T) {
 	result := GenerateServiceSkillFallback("fleet-master", nil)
 
+	if !strings.Contains(result, "name: \"surface-fleet-master\"") {
+		t.Error("expected skill frontmatter name")
+	}
 	if !strings.Contains(result, "# fleet-master (service surface)") {
 		t.Error("expected header with target name")
 	}
