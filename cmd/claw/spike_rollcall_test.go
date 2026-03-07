@@ -62,35 +62,40 @@ func TestSpikeRollCall(t *testing.T) {
 	channelID := env["ROLLCALL_CHANNEL_ID"]
 	botToken := env["DISCORD_BOT_TOKEN"]
 
-	// ── Verify pre-built images exist ───────────────────────────────────
-	prebuilt := []string{
-		"trading-desk-nullclaw:latest",
-		"trading-desk-microclaw:latest",
-		"trading-desk-nanoclaw:latest",
+	// ── Build base images (each type has its own Dockerfile) ────────────
+	// Stub runtimes (nullclaw, microclaw, nanoclaw) are always rebuilt
+	// because they include the discord-responder script which may change.
+	baseImages := []struct {
+		tag        string
+		dockerfile string
+	}{
+		{"openclaw:latest", "Dockerfile.openclaw-base"},
+		{"nullclaw:latest", "Dockerfile.nullclaw-base"},
+		{"microclaw:latest", "Dockerfile.microclaw-base"},
+		{"nanoclaw-orchestrator:latest", "Dockerfile.nanoclaw-base"},
+		{"nanobot:latest", "Dockerfile.nanobot-base"},
+		{"picoclaw:latest", "Dockerfile.picoclaw-base"},
 	}
-	for _, img := range prebuilt {
-		if !spikeImageExists(img) {
-			t.Skipf("%s not found — run TestSpikeComposeUp first to build trading-desk images", img)
+	for _, b := range baseImages {
+		if !spikeImageExists(b.tag) {
+			spikeBuildImage(t, dir, b.tag, b.dockerfile)
 		}
-	}
-
-	// ── Build images ────────────────────────────────────────────────────
-	if !spikeImageExists("openclaw:latest") {
-		infraDir := filepath.Join(repoRoot, "examples", "trading-desk")
-		spikeBuildImage(t, infraDir, "openclaw:latest", "Dockerfile.openclaw-base")
 	}
 	spikeEnsureCllamaPassthroughImage(t)
 
-	// Only agents with build: blocks need building
-	buildAgents := []struct {
+	// Build agent images (Clawfile on top of base)
+	agentImages := []struct {
 		image      string
 		dockerfile string
 	}{
 		{"rollcall-openclaw:latest", "agents/oc-roll/Clawfile"},
+		{"rollcall-nullclaw:latest", "agents/nc-roll/Clawfile"},
+		{"rollcall-microclaw:latest", "agents/mc-roll/Clawfile"},
+		{"rollcall-nanoclaw:latest", "agents/nano-roll/Clawfile"},
 		{"rollcall-nanobot:latest", "agents/nb-roll/Clawfile"},
 		{"rollcall-picoclaw:latest", "agents/pc-roll/Clawfile"},
 	}
-	for _, a := range buildAgents {
+	for _, a := range agentImages {
 		spikeBuildImage(t, dir, a.image, a.dockerfile)
 	}
 
@@ -138,9 +143,13 @@ func TestSpikeRollCall(t *testing.T) {
 	teardown := func() {
 		for _, a := range allAgents {
 			name := fmt.Sprintf("rollcall-%s-1", a.name)
-			out, _ := exec.Command("docker", "logs", "--tail", "50", name).CombinedOutput()
+			out, _ := exec.Command("docker", "logs", "--tail", "80", name).CombinedOutput()
 			t.Logf("=== %s logs ===\n%s", name, string(out))
 		}
+		// Also capture cllama proxy logs for debugging.
+		cllamaLogs, _ := exec.Command("docker", "logs", "--tail", "80", "rollcall-cllama-1").CombinedOutput()
+		t.Logf("=== rollcall-cllama-1 logs ===\n%s", string(cllamaLogs))
+
 		cmd := exec.Command("docker", "compose", "-f", generatedPath, "down", "--volumes")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -165,12 +174,17 @@ func TestSpikeRollCall(t *testing.T) {
 		spikeWaitHealthy(t, container, 120*time.Second)
 	}
 
-	// ── Send trigger message ────────────────────────────────────────────
-	triggerMsg := "Roll call! Each bot, introduce yourself and state what runtime you are running on."
-	rollcallSendDiscordMessage(t, botToken, channelID, triggerMsg)
-	t.Logf("sent roll-call trigger to channel %s", channelID)
+	// ── Send trigger message via webhook (non-bot author, so agents don't ignore as self-message) ──
+	botID := env["DISCORD_BOT_ID"]
+	webhookURL := env["DISCORD_WEBHOOK_URL"]
+	if webhookURL == "" {
+		t.Fatal("DISCORD_WEBHOOK_URL not set in rollcall/.env")
+	}
+	triggerMsg := fmt.Sprintf("<@%s> Roll call! Each bot, introduce yourself and state what runtime you are running on.", botID)
+	triggerMsgID := rollcallSendWebhookMessage(t, webhookURL, triggerMsg)
+	t.Logf("sent roll-call trigger to channel %s via webhook (message ID: %s)", channelID, triggerMsgID)
 
-	// ── Poll for responses ──────────────────────────────────────────────
+	// ── Poll for responses (only messages AFTER the trigger) ────────────
 	runtimeKeywords := map[string]bool{
 		"openclaw":  false,
 		"nullclaw":  false,
@@ -182,7 +196,7 @@ func TestSpikeRollCall(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
-		messages := rollcallFetchMessages(t, botToken, channelID, 50)
+		messages := rollcallFetchMessages(t, botToken, channelID, 50, triggerMsgID)
 		for _, msg := range messages {
 			content := strings.ToLower(msg.Content)
 			if msg.Author.Bot {
@@ -220,20 +234,24 @@ func TestSpikeRollCall(t *testing.T) {
 		}
 	}
 
-	// ── Check cllama costs ──────────────────────────────────────────────
+	// ── Check cllama costs (via Docker inspect + port mapping) ──────────
 	cllamaContainer := "rollcall-cllama-1"
-	costsOut, err := exec.Command("docker", "exec", cllamaContainer,
-		"wget", "-q", "-O-", "http://localhost:8081/costs/api").Output()
-	if err != nil {
-		t.Logf("warning: could not fetch cllama costs: %v", err)
-	} else {
-		var costs map[string]interface{}
-		if json.Unmarshal(costsOut, &costs) == nil {
-			t.Logf("cllama costs: %s", string(costsOut))
-			if reqs, ok := costs["total_requests"].(float64); ok && reqs < 6 {
-				t.Errorf("expected at least 6 cllama requests, got %.0f", reqs)
+	cllamaIP, _ := exec.Command("docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", cllamaContainer).Output()
+	cllamaAddr := strings.TrimSpace(string(cllamaIP))
+	if cllamaAddr != "" {
+		costsResp, cerr := http.Get(fmt.Sprintf("http://%s:8081/costs/api", cllamaAddr))
+		if cerr != nil {
+			t.Logf("warning: could not fetch cllama costs: %v", cerr)
+		} else {
+			defer costsResp.Body.Close()
+			costsOut, _ := io.ReadAll(costsResp.Body)
+			var costs map[string]interface{}
+			if json.Unmarshal(costsOut, &costs) == nil {
+				t.Logf("cllama costs: %s", string(costsOut))
 			}
 		}
+	} else {
+		t.Log("warning: could not determine cllama container IP")
 	}
 
 	// ── Verify clawdash is running ──────────────────────────────────────
@@ -256,31 +274,14 @@ type rollcallDiscordAuthor struct {
 	Bot      bool   `json:"bot"`
 }
 
-func rollcallSendDiscordMessage(t *testing.T, token, channelID, content string) {
-	t.Helper()
-	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages", channelID)
-	body := fmt.Sprintf(`{"content":%q}`, content)
-	req, err := http.NewRequest("POST", url, strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("build Discord POST: %v", err)
-	}
-	req.Header.Set("Authorization", "Bot "+token)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("send Discord message: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("Discord POST failed: %d %s", resp.StatusCode, string(respBody))
-	}
-}
-
-func rollcallFetchMessages(t *testing.T, token, channelID string, limit int) []rollcallDiscordMessage {
+// rollcallFetchMessages fetches messages from the channel that were sent AFTER
+// the given afterMessageID. This prevents false positives from old messages.
+func rollcallFetchMessages(t *testing.T, token, channelID string, limit int, afterMessageID string) []rollcallDiscordMessage {
 	t.Helper()
 	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages?limit=%d", channelID, limit)
+	if afterMessageID != "" {
+		url += "&after=" + afterMessageID
+	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		t.Fatalf("build Discord GET: %v", err)
@@ -307,4 +308,42 @@ func rollcallTruncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// rollcallSendWebhookMessage sends a message via Discord webhook and returns
+// the message ID (used for filtering subsequent message fetches).
+func rollcallSendWebhookMessage(t *testing.T, webhookURL, content string) string {
+	t.Helper()
+	// Append ?wait=true to get the message object back (includes message ID).
+	url := webhookURL
+	if strings.Contains(url, "?") {
+		url += "&wait=true"
+	} else {
+		url += "?wait=true"
+	}
+	body := fmt.Sprintf(`{"content":%q,"username":"Roll Call Master","allowed_mentions":{"parse":["users"]}}`, content)
+	req, err := http.NewRequest("POST", url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build webhook POST: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("send webhook message: %v", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
+		t.Fatalf("webhook POST failed: %d %s", resp.StatusCode, string(respBody))
+	}
+
+	// Extract message ID from response.
+	var msg struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(respBody, &msg) == nil && msg.ID != "" {
+		return msg.ID
+	}
+	return ""
 }

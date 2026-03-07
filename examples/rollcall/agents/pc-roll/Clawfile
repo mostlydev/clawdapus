@@ -1,4 +1,4 @@
-FROM docker.io/sipeed/picoclaw:latest
+FROM picoclaw:latest
 
 CLAW_TYPE picoclaw
 AGENT AGENTS.md

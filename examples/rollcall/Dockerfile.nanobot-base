@@ -1,0 +1,27 @@
+# Base image for nanobot agents.
+# Usage: docker build -t nanobot:latest -f Dockerfile.nanobot-base .
+
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git jq tini procps \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN uv pip install --system --no-cache nanobot-ai
+
+RUN mkdir -p /root/.nanobot
+
+EXPOSE 18790
+
+COPY discord-responder.sh /usr/local/bin/discord-responder
+RUN chmod +x /usr/local/bin/discord-responder
+
+COPY <<'WRAPPER' /usr/local/bin/nanobot-entrypoint
+#!/bin/sh
+/usr/local/bin/discord-responder &
+exec nanobot gateway
+WRAPPER
+RUN chmod +x /usr/local/bin/nanobot-entrypoint
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["nanobot-entrypoint"]

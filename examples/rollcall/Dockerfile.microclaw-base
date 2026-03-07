@@ -1,0 +1,31 @@
+# Base image for microclaw agents (test stub).
+# Usage: docker build -t microclaw:latest -f Dockerfile.microclaw-base .
+#
+# MicroClaw is a fictional test runtime. This stub provides a long-running
+# process named "microclaw" so the driver healthcheck (pgrep) passes.
+
+FROM alpine:3.20
+
+RUN apk add --no-cache bash curl jq procps tini
+
+# Stub binary: long-running process with "microclaw" in its name
+COPY <<'STUB' /usr/local/bin/microclaw
+#!/bin/sh
+echo "microclaw spike stub running (pid $$)" >&2
+while true; do sleep 3600; done
+STUB
+RUN chmod +x /usr/local/bin/microclaw
+
+COPY discord-responder.sh /usr/local/bin/discord-responder
+RUN chmod +x /usr/local/bin/discord-responder
+
+# Entrypoint wrapper: start Discord responder in background, then run main process
+COPY <<'WRAPPER' /usr/local/bin/microclaw-entrypoint
+#!/bin/sh
+/usr/local/bin/discord-responder &
+exec microclaw
+WRAPPER
+RUN chmod +x /usr/local/bin/microclaw-entrypoint
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["microclaw-entrypoint"]

@@ -1,4 +1,4 @@
-FROM trading-desk-nullclaw:latest
+FROM nullclaw:latest
 
 CLAW_TYPE nullclaw
 AGENT AGENTS.md

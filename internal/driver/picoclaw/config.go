@@ -172,11 +172,11 @@ func buildModelList(rc *driver.ResolvedClaw) ([]map[string]interface{}, error) {
 
 		entry := map[string]interface{}{
 			"model_name": slot,
-			"protocol":   provider + "/" + modelID,
+			"model":   provider + "/" + modelID,
 		}
 
 		if len(rc.Cllama) > 0 {
-			entry["protocol"] = "openai/" + ref
+			entry["model"] = "openai/" + ref
 			entry["api_base"] = firstProxy
 			entry["api_key"] = rc.CllamaToken
 		} else {
