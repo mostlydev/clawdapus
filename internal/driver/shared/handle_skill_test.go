@@ -11,6 +11,12 @@ func TestGenerateHandleSkillIDOnly(t *testing.T) {
 	info := &driver.HandleInfo{ID: "123456789"}
 	out := GenerateHandleSkill("discord", info)
 
+	if !strings.Contains(out, "name: \"handle-discord\"") {
+		t.Error("expected skill frontmatter name")
+	}
+	if !strings.Contains(out, "description: \"Identity and membership details for the Discord handle.\"") {
+		t.Error("expected skill frontmatter description")
+	}
 	if !strings.Contains(out, "# Discord Handle") {
 		t.Error("expected title with capitalized platform name")
 	}
@@ -52,6 +58,9 @@ func TestGenerateHandleSkillWithGuilds(t *testing.T) {
 func TestGenerateHandleSkillEmptyPlatformDoesNotPanic(t *testing.T) {
 	info := &driver.HandleInfo{ID: "123456789"}
 	out := GenerateHandleSkill("", info)
+	if !strings.Contains(out, "name: \"handle-unknown\"") {
+		t.Errorf("expected fallback skill name, got: %s", out)
+	}
 	if !strings.Contains(out, "# Unknown Handle") {
 		t.Errorf("expected fallback title, got: %s", out)
 	}

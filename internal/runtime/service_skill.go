@@ -9,6 +9,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/mostlydev/clawdapus/internal/skillmd"
 )
 
 // GenerateServiceSkillFallback produces a markdown skill file describing
@@ -28,7 +29,15 @@ func GenerateServiceSkillFallback(target string, ports []string) string {
 	b.WriteString(fmt.Sprintf("Use the hostname `%s` to connect.\n", target))
 	b.WriteString("Credentials, if required, are provided via environment variables.\n")
 
-	return b.String()
+	skillID := strings.TrimSpace(strings.ReplaceAll(target, "/", "-"))
+	if skillID == "" {
+		skillID = "unknown"
+	}
+	return skillmd.Format(
+		fmt.Sprintf("surface-%s", skillID),
+		fmt.Sprintf("Connection details for the %s service surface.", target),
+		b.String(),
+	)
 }
 
 // ExtractServiceSkill extracts a skill file from a service image using Docker.

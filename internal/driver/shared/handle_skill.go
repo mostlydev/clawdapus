@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/skillmd"
 )
 
 // GenerateHandleSkill produces a skill file describing a claw's identity and
@@ -57,5 +58,13 @@ func GenerateHandleSkill(platform string, info *driver.HandleInfo) string {
 		b.WriteString("- Other agents in this pod know your ID via the `CLAW_HANDLE_*` environment variables.\n")
 	}
 
-	return b.String()
+	skillID := strings.TrimSpace(platform)
+	if skillID == "" {
+		skillID = "unknown"
+	}
+	return skillmd.Format(
+		fmt.Sprintf("handle-%s", skillID),
+		fmt.Sprintf("Identity and membership details for the %s handle.", title),
+		b.String(),
+	)
 }

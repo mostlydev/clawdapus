@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/skillmd"
 )
 
 // GenerateChannelSkill produces a markdown skill file for a channel surface.
@@ -63,7 +64,15 @@ func GenerateChannelSkill(surface driver.ResolvedSurface) string {
 		b.WriteString("Only reply to users matching the configured policy.\n")
 	}
 
-	return b.String()
+	skillID := strings.TrimSpace(surface.Target)
+	if skillID == "" {
+		skillID = "unknown"
+	}
+	return skillmd.Format(
+		fmt.Sprintf("surface-%s", skillID),
+		fmt.Sprintf("Routing, access, and token details for the %s channel surface.", platformTitle),
+		b.String(),
+	)
 }
 
 func titleCasePlatform(platform string) string {

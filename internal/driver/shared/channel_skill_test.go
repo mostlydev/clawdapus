@@ -13,6 +13,12 @@ func TestGenerateChannelSkillSimple(t *testing.T) {
 		Target: "discord",
 	}
 	skill := GenerateChannelSkill(surface)
+	if !strings.Contains(skill, "name: \"surface-discord\"") {
+		t.Error("expected skill frontmatter name")
+	}
+	if !strings.Contains(skill, "description: \"Routing, access, and token details for the Discord channel surface.\"") {
+		t.Error("expected skill frontmatter description")
+	}
 	if !strings.Contains(skill, "Discord") {
 		t.Error("expected platform name Discord in skill")
 	}
@@ -84,6 +90,9 @@ func TestGenerateChannelSkillSlack(t *testing.T) {
 func TestGenerateChannelSkillEmptyTargetDoesNotPanic(t *testing.T) {
 	surface := driver.ResolvedSurface{Scheme: "channel", Target: ""}
 	skill := GenerateChannelSkill(surface)
+	if !strings.Contains(skill, "name: \"surface-unknown\"") {
+		t.Errorf("expected fallback skill name, got: %s", skill)
+	}
 	if !strings.Contains(skill, "Unknown Channel Surface") {
 		t.Errorf("expected fallback platform title, got: %s", skill)
 	}
