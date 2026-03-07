@@ -113,6 +113,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	return &driver.MaterializeResult{
 		Mounts: mounts,
 		Tmpfs: []string{
+			// /claw is the runner workspace. Keep it writable so agent turns can persist
+			// workspace artifacts like SOUL.md while read-only file mounts (AGENTS.md,
+			// CLAWDAPUS.md, skills) still layer on top of the tmpfs.
+			"/claw",
 			"/tmp",
 			"/run",
 			// /app/state covers all openclaw state subdirs (identity, logs, memory, agents, etc.).
