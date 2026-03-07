@@ -23,11 +23,11 @@ type rawPodClaw struct {
 }
 
 type rawService struct {
-	Image       string            `yaml:"image"`
-	XClaw       *rawClawBlock     `yaml:"x-claw"`
-	Environment map[string]string `yaml:"environment"`
-	Expose      []interface{}     `yaml:"expose"`
-	Ports       []interface{}     `yaml:"ports"`
+	Image       string        `yaml:"image"`
+	XClaw       *rawClawBlock `yaml:"x-claw"`
+	Environment interface{}   `yaml:"environment"`
+	Expose      interface{}   `yaml:"expose"`
+	Ports       interface{}   `yaml:"ports"`
 }
 
 type rawInvokeEntry struct {
@@ -51,18 +51,47 @@ type rawClawBlock struct {
 
 // Parse reads a claw-pod.yml from the given reader.
 func Parse(r io.Reader) (*Pod, error) {
+	src, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read claw-pod.yml: %w", err)
+	}
+
 	var raw rawPod
-	decoder := yaml.NewDecoder(r)
-	if err := decoder.Decode(&raw); err != nil {
+	if err := yaml.Unmarshal(src, &raw); err != nil {
 		return nil, fmt.Errorf("parse claw-pod.yml: %w", err)
 	}
+
+	var root map[string]interface{}
+	if err := yaml.Unmarshal(src, &root); err != nil {
+		return nil, fmt.Errorf("parse claw-pod.yml: %w", err)
+	}
+
+	preservedRoot := deepCopyMap(root)
+	delete(preservedRoot, "x-claw")
+	delete(preservedRoot, "services")
 
 	pod := &Pod{
 		Name:     raw.XClaw.Pod,
 		Services: make(map[string]*Service, len(raw.Services)),
+		Compose:  preservedRoot,
+	}
+
+	rawServices, err := mapStringAny(root["services"])
+	if err != nil {
+		return nil, fmt.Errorf("parse claw-pod.yml: services: %w", err)
 	}
 
 	for name, svc := range raw.Services {
+		serviceCompose := make(map[string]interface{})
+		if rawServices != nil {
+			rawServiceMap, err := mapStringAny(rawServices[name])
+			if err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
+			}
+			serviceCompose = deepCopyMap(rawServiceMap)
+			delete(serviceCompose, "x-claw")
+		}
+
 		expose, err := parseExpose(svc.Expose)
 		if err != nil {
 			return nil, fmt.Errorf("service %q: parse expose: %w", name, err)
@@ -77,9 +106,15 @@ func Parse(r io.Reader) (*Pod, error) {
 		if ports == nil {
 			ports = make([]string, 0)
 		}
+		environment, err := parseEnvironment(svc.Environment)
+		if err != nil {
+			return nil, fmt.Errorf("service %q: parse environment: %w", name, err)
+		}
+
 		service := &Service{
 			Image:       svc.Image,
-			Environment: svc.Environment,
+			Compose:     serviceCompose,
+			Environment: environment,
 			Expose:      expose,
 			Ports:       ports,
 		}
@@ -377,12 +412,16 @@ func parseChannelEntry(val interface{}) (driver.ChannelInfo, error) {
 // Supports string form ("8080:80", "80", "127.0.0.1:8080:80/tcp"),
 // integer form, and map form ({target: 80, published: 8080}).
 // Only the container (target) port is returned — what other containers reach.
-func parsePorts(raw []interface{}) ([]string, error) {
+func parsePorts(raw interface{}) ([]string, error) {
 	if raw == nil {
 		return nil, nil
 	}
-	out := make([]string, 0, len(raw))
-	for i, entry := range raw {
+	entries, err := interfaceSlice(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(entries))
+	for i, entry := range entries {
 		switch v := entry.(type) {
 		case string:
 			port := containerPortFromString(v)
@@ -433,13 +472,18 @@ func containerPortFromString(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func parseExpose(raw []interface{}) ([]string, error) {
+func parseExpose(raw interface{}) ([]string, error) {
 	if raw == nil {
 		return nil, nil
 	}
 
-	out := make([]string, 0, len(raw))
-	for i, port := range raw {
+	entries, err := interfaceSlice(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]string, 0, len(entries))
+	for i, port := range entries {
 		switch v := port.(type) {
 		case string:
 			out = append(out, v)

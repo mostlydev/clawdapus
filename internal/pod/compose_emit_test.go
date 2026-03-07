@@ -561,6 +561,130 @@ func TestEmitComposeIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestEmitComposePreservesStandardComposeFields(t *testing.T) {
+	const podYAML = `
+x-claw:
+  pod: preserved-pod
+name: preserved-project
+volumes:
+  cache: {}
+networks:
+  front: {}
+services:
+  api:
+    image: nginx:alpine
+    command:
+      - nginx
+      - -g
+      - daemon off;
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
+  bot:
+    image: ghcr.io/example/bot:latest
+    build:
+      context: .
+      dockerfile: Clawfile
+    command:
+      - bot
+      - serve
+    depends_on:
+      - api
+    volumes:
+      - cache:/cache
+    networks:
+      - front
+    x-claw:
+      agent: ./AGENTS.md
+      surfaces:
+        - "volume://shared-cache read-write"
+`
+	p, err := Parse(strings.NewReader(podYAML))
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"bot": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+		},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	var cf struct {
+		Name     string                 `yaml:"name"`
+		Volumes  map[string]interface{} `yaml:"volumes"`
+		Networks map[string]interface{} `yaml:"networks"`
+		Services map[string]struct {
+			Build     map[string]interface{} `yaml:"build"`
+			Command   []string               `yaml:"command"`
+			DependsOn []string               `yaml:"depends_on"`
+			Ports     []string               `yaml:"ports"`
+			Volumes   []string               `yaml:"volumes"`
+			Networks  []string               `yaml:"networks"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
+		t.Fatalf("failed to parse compose output: %v", err)
+	}
+
+	if cf.Name != "preserved-project" {
+		t.Fatalf("expected top-level compose name to round-trip, got %q", cf.Name)
+	}
+	if _, ok := cf.Volumes["cache"]; !ok {
+		t.Fatal("expected original top-level volume to be preserved")
+	}
+	if _, ok := cf.Volumes["shared-cache"]; !ok {
+		t.Fatal("expected generated claw volume to be added")
+	}
+	if _, ok := cf.Networks["front"]; !ok {
+		t.Fatal("expected original top-level network to be preserved")
+	}
+	if _, ok := cf.Networks["claw-internal"]; !ok {
+		t.Fatal("expected claw-internal network to be added")
+	}
+
+	api := cf.Services["api"]
+	if len(api.Command) != 3 || api.Command[0] != "nginx" {
+		t.Fatalf("expected api command to round-trip, got %v", api.Command)
+	}
+	if len(api.Ports) != 1 || api.Ports[0] != "8080:80" {
+		t.Fatalf("expected api ports to round-trip, got %v", api.Ports)
+	}
+	if len(api.DependsOn) != 1 || api.DependsOn[0] != "db" {
+		t.Fatalf("expected api depends_on to round-trip, got %v", api.DependsOn)
+	}
+
+	bot := cf.Services["bot"]
+	if bot.Build["context"] != "." {
+		t.Fatalf("expected bot build context to round-trip, got %v", bot.Build)
+	}
+	if len(bot.Command) != 2 || bot.Command[0] != "bot" {
+		t.Fatalf("expected bot command to round-trip, got %v", bot.Command)
+	}
+	if len(bot.DependsOn) != 1 || bot.DependsOn[0] != "api" {
+		t.Fatalf("expected bot depends_on to round-trip, got %v", bot.DependsOn)
+	}
+	if !containsString(bot.Volumes, "cache:/cache") {
+		t.Fatalf("expected original bot volume to be preserved, got %v", bot.Volumes)
+	}
+	if !containsString(bot.Volumes, "shared-cache:/mnt/shared-cache:rw") {
+		t.Fatalf("expected generated claw volume mount to be added, got %v", bot.Volumes)
+	}
+	if !containsString(bot.Networks, "front") {
+		t.Fatalf("expected original bot network to be preserved, got %v", bot.Networks)
+	}
+	if !containsString(bot.Networks, "claw-internal") {
+		t.Fatalf("expected claw-internal network to be added, got %v", bot.Networks)
+	}
+}
+
 func TestEmitComposeWithCllamaProxy(t *testing.T) {
 	p := &Pod{
 		Name: "test-pod",
@@ -772,4 +896,13 @@ func TestEmitComposeCllamaTokenPerOrdinalOverride(t *testing.T) {
 	if !strings.Contains(out, "CLLAMA_TOKEN: bot-1:token") {
 		t.Error("expected bot-1 token override")
 	}
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }

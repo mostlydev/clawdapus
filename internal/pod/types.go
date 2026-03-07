@@ -6,12 +6,14 @@ import "github.com/mostlydev/clawdapus/internal/driver"
 type Pod struct {
 	Name     string
 	Services map[string]*Service
-	Clawdash *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
+	Compose  map[string]interface{} // preserved top-level compose keys except x-claw and services
+	Clawdash *ClawdashConfig        // runtime-only dashboard sidecar config, injected by claw up
 }
 
 // Service represents a service in a claw-pod.yml.
 type Service struct {
 	Image       string
+	Compose     map[string]interface{} // preserved compose service keys except x-claw
 	Claw        *ClawBlock
 	Environment map[string]string
 	Expose      []string // ports exposed to other containers (from compose expose:)

@@ -13,33 +13,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// composeFile is the YAML serialization target for compose.generated.yml.
-type composeFile struct {
-	Services map[string]*composeService `yaml:"services"`
-	Volumes  map[string]interface{}     `yaml:"volumes,omitempty"`
-	Networks map[string]interface{}     `yaml:"networks,omitempty"`
-}
-
-type composeService struct {
-	Image       string              `yaml:"image"`
-	Ports       []string            `yaml:"ports,omitempty"`
-	ReadOnly    bool                `yaml:"read_only,omitempty"`
-	Tmpfs       []string            `yaml:"tmpfs,omitempty"`
-	Volumes     []string            `yaml:"volumes,omitempty"`
-	Environment map[string]string   `yaml:"environment,omitempty"`
-	Restart     string              `yaml:"restart,omitempty"`
-	Healthcheck *composeHealthcheck `yaml:"healthcheck,omitempty"`
-	Labels      map[string]string   `yaml:"labels,omitempty"`
-	Networks    []string            `yaml:"networks,omitempty"`
-}
-
-type composeHealthcheck struct {
-	Test     []string `yaml:"test"`
-	Interval string   `yaml:"interval"`
-	Timeout  string   `yaml:"timeout"`
-	Retries  int      `yaml:"retries"`
-}
-
 type CllamaProxyConfig struct {
 	ProxyType      string            // e.g. "passthrough", "policy"
 	Image          string            // e.g. ghcr.io/mostlydev/cllama:latest
@@ -62,10 +35,9 @@ type ClawdashConfig struct {
 // EmitCompose generates a compose.generated.yml string from pod definition and
 // driver materialization results. Output is deterministic (sorted service names).
 func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies ...CllamaProxyConfig) (string, error) {
-	cf := &composeFile{
-		Services: make(map[string]*composeService),
-		Volumes:  make(map[string]interface{}),
-	}
+	root := deepCopyMap(p.Compose)
+	rootServices := make(map[string]interface{})
+	addedVolumes := make(map[string]interface{})
 
 	// Track whether any claw service exists to conditionally add network
 	hasClaw := false
@@ -94,6 +66,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		svc := p.Services[name]
 		isClaw := svc.Claw != nil
 		result := results[name]
+		explicitResult := result != nil
 		if result == nil {
 			// Fail-closed defaults apply only to Claw-managed services.
 			if isClaw {
@@ -114,9 +87,14 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		if svc.Claw != nil && svc.Claw.Count > 0 {
 			count = svc.Claw.Count
 		}
+		if count > 1 {
+			if _, hasContainerName := svc.Compose["container_name"]; hasContainerName {
+				return "", fmt.Errorf("service %q: x-claw.count > 1 is incompatible with compose container_name", name)
+			}
+		}
 
 		// Collect volume surfaces for this service
-		var volumeMounts []string
+		var volumeMounts []interface{}
 		if svc.Claw != nil {
 			for _, surface := range svc.Claw.Surfaces {
 				surfaceURI := surface.Scheme + "://" + surface.Target
@@ -131,7 +109,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 					if volName == "" {
 						return "", fmt.Errorf("service %q: volume surface %q is missing target", name, surfaceURI)
 					}
-					cf.Volumes[volName] = nil // top-level volume declaration
+					addedVolumes[volName] = nil // top-level volume declaration
 					volumeMounts = append(volumeMounts, fmt.Sprintf("%s:/mnt/%s:%s", volName, volName, accessMode))
 
 				case "host":
@@ -177,34 +155,51 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				serviceName = fmt.Sprintf("%s-%d", name, ordinal)
 			}
 
-			cs := &composeService{
-				Image:    svc.Image,
-				ReadOnly: result.ReadOnly,
-				Restart:  result.Restart,
-				Labels: map[string]string{
-					"claw.pod":     p.Name,
-					"claw.service": name,
-				},
+			serviceOut := deepCopyMap(svc.Compose)
+			if svc.Image != "" {
+				serviceOut["image"] = svc.Image
 			}
 
+			serviceLabels := map[string]string{
+				"claw.pod":     p.Name,
+				"claw.service": name,
+			}
 			if count > 1 {
-				cs.Labels["claw.ordinal"] = fmt.Sprintf("%d", ordinal)
+				serviceLabels["claw.ordinal"] = fmt.Sprintf("%d", ordinal)
+			}
+			labels, err := mergedLabels(serviceOut["labels"], serviceLabels)
+			if err != nil {
+				return "", fmt.Errorf("service %q: labels: %w", serviceName, err)
+			}
+			if len(labels) > 0 {
+				serviceOut["labels"] = labels
 			}
 
+			attachClawInternal := isClaw
 			if isClaw {
-				cs.Networks = []string{"claw-internal"}
+				hasClaw = true
 			} else if _, isTarget := serviceSurfaceTargets[name]; isTarget {
-				cs.Networks = []string{"claw-internal"}
+				attachClawInternal = true
+			}
+			if attachClawInternal {
+				networks, err := mergedNetworks(serviceOut["networks"], "claw-internal")
+				if err != nil {
+					return "", fmt.Errorf("service %q: networks: %w", serviceName, err)
+				}
+				serviceOut["networks"] = networks
 			}
 
 			// Tmpfs
 			if len(result.Tmpfs) > 0 {
-				cs.Tmpfs = make([]string, len(result.Tmpfs))
-				copy(cs.Tmpfs, result.Tmpfs)
+				tmpfs, err := appendedSequence(serviceOut["tmpfs"], stringsToInterfaces(result.Tmpfs))
+				if err != nil {
+					return "", fmt.Errorf("service %q: tmpfs: %w", serviceName, err)
+				}
+				serviceOut["tmpfs"] = tmpfs
 			}
 
 			// Mounts from driver
-			var mounts []string
+			var mounts []interface{}
 			for _, m := range result.Mounts {
 				mode := "rw"
 				if m.ReadOnly {
@@ -214,19 +209,17 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 			}
 			mounts = append(mounts, volumeMounts...)
 			if len(mounts) > 0 {
-				cs.Volumes = mounts
+				volumes, err := appendedSequence(serviceOut["volumes"], mounts)
+				if err != nil {
+					return "", fmt.Errorf("service %q: volumes: %w", serviceName, err)
+				}
+				serviceOut["volumes"] = volumes
 			}
 
 			// Environment: handle envs (lowest) < pod env < driver env (highest).
-			env := make(map[string]string)
-			for k, v := range handleEnvs {
-				env[k] = v
-			}
-			for k, v := range svc.Environment {
-				env[k] = v
-			}
-			for k, v := range result.Environment {
-				env[k] = v
+			env, err := mergedEnvironment(nil, handleEnvs, svc.Environment, result.Environment)
+			if err != nil {
+				return "", fmt.Errorf("service %q: environment: %w", serviceName, err)
 			}
 			if isClaw && svc.Claw != nil && len(svc.Claw.CllamaTokens) > 0 {
 				if tok, ok := svc.Claw.CllamaTokens[serviceName]; ok && strings.TrimSpace(tok) != "" {
@@ -236,20 +229,27 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				}
 			}
 			if len(env) > 0 {
-				cs.Environment = env
+				serviceOut["environment"] = env
+			}
+
+			if isClaw || explicitResult {
+				serviceOut["read_only"] = result.ReadOnly
+			}
+			if result.Restart != "" {
+				serviceOut["restart"] = result.Restart
 			}
 
 			// Healthcheck
 			if result.Healthcheck != nil {
-				cs.Healthcheck = &composeHealthcheck{
-					Test:     result.Healthcheck.Test,
-					Interval: result.Healthcheck.Interval,
-					Timeout:  result.Healthcheck.Timeout,
-					Retries:  result.Healthcheck.Retries,
+				serviceOut["healthcheck"] = map[string]interface{}{
+					"test":     result.Healthcheck.Test,
+					"interval": result.Healthcheck.Interval,
+					"timeout":  result.Healthcheck.Timeout,
+					"retries":  result.Healthcheck.Retries,
 				}
 			}
 
-			cf.Services[serviceName] = cs
+			rootServices[serviceName] = serviceOut
 		}
 	}
 
@@ -278,28 +278,28 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 			env[k] = v
 		}
 
-		cf.Services[serviceName] = &composeService{
-			Image: proxy.Image,
-			Ports: []string{fmt.Sprintf("%s:8081", dashboardPort)}, // operator dashboard
-			Volumes: []string{
+		rootServices[serviceName] = map[string]interface{}{
+			"image": proxy.Image,
+			"ports": []string{fmt.Sprintf("%s:8081", dashboardPort)}, // operator dashboard
+			"volumes": []string{
 				fmt.Sprintf("%s:/claw/context:ro", proxy.ContextHostDir),
 				fmt.Sprintf("%s:/claw/auth:rw", proxy.AuthHostDir),
 			},
-			Environment: env,
-			Restart:     "on-failure",
-			Healthcheck: &composeHealthcheck{
-				Test:     []string{"CMD", cllama.ProxyHealthcheckBinary(proxy.ProxyType), "-healthcheck"},
-				Interval: "15s",
-				Timeout:  "5s",
-				Retries:  3,
+			"environment": env,
+			"restart":     "on-failure",
+			"healthcheck": map[string]interface{}{
+				"test":     []string{"CMD", cllama.ProxyHealthcheckBinary(proxy.ProxyType), "-healthcheck"},
+				"interval": "15s",
+				"timeout":  "5s",
+				"retries":  3,
 			},
-			Labels: map[string]string{
+			"labels": map[string]string{
 				"claw.pod":        proxy.PodName,
 				"claw.role":       "proxy",
 				"claw.proxy.type": proxy.ProxyType,
 				"claw.service":    serviceName,
 			},
-			Networks: []string{"claw-internal"},
+			"networks": []string{"claw-internal"},
 		}
 	}
 
@@ -321,42 +321,49 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 			socketPath = "/var/run/docker.sock"
 		}
 
-		cf.Services["clawdash"] = &composeService{
-			Image:    p.Clawdash.Image,
-			Ports:    []string{fmt.Sprintf("%s:%s", port, port)},
-			ReadOnly: true,
-			Tmpfs:    []string{"/tmp"},
-			Volumes: []string{
+		env := map[string]string{
+			"CLAWDASH_ADDR":     addr,
+			"CLAWDASH_MANIFEST": "/claw/pod-manifest.json",
+			"CLAW_POD":          p.Clawdash.PodName,
+		}
+		if strings.TrimSpace(p.Clawdash.CllamaCostsURL) != "" {
+			env["CLAWDASH_CLLAMA_COSTS_URL"] = p.Clawdash.CllamaCostsURL
+		}
+
+		rootServices["clawdash"] = map[string]interface{}{
+			"image":     p.Clawdash.Image,
+			"ports":     []string{fmt.Sprintf("%s:%s", port, port)},
+			"read_only": true,
+			"tmpfs":     []string{"/tmp"},
+			"volumes": []string{
 				fmt.Sprintf("%s:/claw/pod-manifest.json:ro", p.Clawdash.ManifestHostPath),
 				fmt.Sprintf("%s:/var/run/docker.sock:ro", socketPath),
 			},
-			Environment: map[string]string{
-				"CLAWDASH_ADDR":     addr,
-				"CLAWDASH_MANIFEST": "/claw/pod-manifest.json",
-				"CLAW_POD":          p.Clawdash.PodName,
+			"environment": env,
+			"restart":     "on-failure",
+			"healthcheck": map[string]interface{}{
+				"test":     []string{"CMD", "/clawdash", "-healthcheck"},
+				"interval": "15s",
+				"timeout":  "5s",
+				"retries":  3,
 			},
-			Restart: "on-failure",
-			Healthcheck: &composeHealthcheck{
-				Test:     []string{"CMD", "/clawdash", "-healthcheck"},
-				Interval: "15s",
-				Timeout:  "5s",
-				Retries:  3,
-			},
-			Labels: map[string]string{
+			"labels": map[string]string{
 				"claw.pod":     p.Clawdash.PodName,
 				"claw.role":    "dashboard",
 				"claw.service": "clawdash",
 			},
-			Networks: []string{"claw-internal"},
-		}
-		if strings.TrimSpace(p.Clawdash.CllamaCostsURL) != "" {
-			cf.Services["clawdash"].Environment["CLAWDASH_CLLAMA_COSTS_URL"] = p.Clawdash.CllamaCostsURL
+			"networks": []string{"claw-internal"},
 		}
 	}
 
-	// Remove empty volumes map
-	if len(cf.Volumes) == 0 {
-		cf.Volumes = nil
+	root["services"] = rootServices
+
+	if len(addedVolumes) > 0 {
+		volumes, err := mergedNamedMap(root["volumes"], addedVolumes)
+		if err != nil {
+			return "", fmt.Errorf("emit compose: volumes: %w", err)
+		}
+		root["volumes"] = volumes
 	}
 
 	// Add claw-internal network if any claw services exist.
@@ -364,12 +371,16 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 	// Service isolation is still achieved — only explicitly-attached containers can
 	// communicate on this network.
 	if hasClaw {
-		cf.Networks = map[string]interface{}{
+		networks, err := mergedNamedMap(root["networks"], map[string]interface{}{
 			"claw-internal": map[string]interface{}{},
+		})
+		if err != nil {
+			return "", fmt.Errorf("emit compose: networks: %w", err)
 		}
+		root["networks"] = networks
 	}
 
-	data, err := yaml.Marshal(cf)
+	data, err := yaml.Marshal(root)
 	if err != nil {
 		return "", fmt.Errorf("emit compose: %w", err)
 	}

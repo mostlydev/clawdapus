@@ -139,6 +139,91 @@ func TestParsePodExtractsEnvironment(t *testing.T) {
 	}
 }
 
+func TestParsePodPreservesComposeFields(t *testing.T) {
+	const yaml = `
+x-claw:
+  pod: preserve-pod
+name: preserved-project
+volumes:
+  shared-cache: {}
+networks:
+  front: {}
+services:
+  bot:
+    image: ghcr.io/example/bot:latest
+    build:
+      context: .
+      dockerfile: Clawfile
+    command:
+      - bot
+      - serve
+    depends_on:
+      - api
+    volumes:
+      - shared-cache:/cache
+    x-claw:
+      agent: ./AGENTS.md
+  api:
+    image: nginx:alpine
+`
+	pod, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pod.Compose["name"] != "preserved-project" {
+		t.Fatalf("expected top-level name to be preserved, got %v", pod.Compose["name"])
+	}
+	if _, ok := pod.Compose["volumes"]; !ok {
+		t.Fatal("expected top-level volumes to be preserved")
+	}
+	if _, ok := pod.Compose["networks"]; !ok {
+		t.Fatal("expected top-level networks to be preserved")
+	}
+	bot := pod.Services["bot"]
+	if bot == nil {
+		t.Fatal("expected bot service")
+	}
+	if _, ok := bot.Compose["build"]; !ok {
+		t.Fatal("expected build to be preserved on service")
+	}
+	if _, ok := bot.Compose["command"]; !ok {
+		t.Fatal("expected command to be preserved on service")
+	}
+	if _, ok := bot.Compose["depends_on"]; !ok {
+		t.Fatal("expected depends_on to be preserved on service")
+	}
+	if _, ok := bot.Compose["volumes"]; !ok {
+		t.Fatal("expected volumes to be preserved on service")
+	}
+	if _, ok := bot.Compose["x-claw"]; ok {
+		t.Fatal("did not expect x-claw in preserved compose service map")
+	}
+}
+
+func TestParsePodEnvironmentList(t *testing.T) {
+	const yaml = `
+x-claw:
+  pod: env-pod
+services:
+  bot:
+    image: ghcr.io/example/bot:latest
+    environment:
+      - LOG_LEVEL=debug
+      - EMPTY_VALUE
+`
+	pod, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	env := pod.Services["bot"].Environment
+	if env["LOG_LEVEL"] != "debug" {
+		t.Fatalf("expected LOG_LEVEL=debug, got %q", env["LOG_LEVEL"])
+	}
+	if env["EMPTY_VALUE"] != "" {
+		t.Fatalf("expected EMPTY_VALUE to parse as empty string, got %q", env["EMPTY_VALUE"])
+	}
+}
+
 func TestParsePodCllamaStringCoercesToList(t *testing.T) {
 	yaml := `
 x-claw:
