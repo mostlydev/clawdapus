@@ -28,6 +28,9 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 	if err := setPath(config, "agents.defaults.workspace", "/claw"); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
+	if err := setPath(config, "hooks.bootstrap-extra-files.paths", []interface{}{"CLAWDAPUS.md"}); err != nil {
+		return nil, fmt.Errorf("config generation: %w", err)
+	}
 
 	// Apply MODEL directives. openclaw uses "fallbacks" ([]string), not "fallback" (string).
 	for slot, model := range rc.Models {

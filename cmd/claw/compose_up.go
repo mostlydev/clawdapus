@@ -89,6 +89,8 @@ func runComposeUp(podFile string) error {
 	drivers := make(map[string]driver.Driver)
 	resolvedClaws := make(map[string]*driver.ResolvedClaw)
 	serviceRuntimeDirs := make(map[string]string)
+	serviceImageRefs := make(map[string]string)
+	serviceInfos := make(map[string]*inspect.ClawInfo)
 
 	// Pre-collect all pod handles so each service can reference its peers.
 	// This is a cheap pass over the already-parsed pod YAML — no image inspection needed.
@@ -185,9 +187,9 @@ func runComposeUp(podFile string) error {
 				imageSkills = append(imageSkills, *emitSkill)
 			}
 		}
-		generatedSkills, err := resolveServiceGeneratedSkills(svcRuntimeDir, surfaces)
+		surfaces, generatedSkills, err := resolveServiceSurfaceSkills(podDir, svcRuntimeDir, p, surfaces, serviceImageRefs, serviceInfos)
 		if err != nil {
-			return fmt.Errorf("service %q: resolve generated service skills: %w", name, err)
+			return fmt.Errorf("service %q: resolve service surface skills: %w", name, err)
 		}
 		// Add channel surface skills (surface-discord.md etc.)
 		channelSkills, err := resolveChannelGeneratedSkills(svcRuntimeDir, surfaces)
@@ -1016,20 +1018,44 @@ func resolveSkillEmit(serviceName, runtimeDir, imageRef, emitPath string) (*driv
 	}, nil
 }
 
-func resolveServiceGeneratedSkills(runtimeDir string, surfaces []driver.ResolvedSurface) ([]driver.ResolvedSkill, error) {
+func resolveServiceSurfaceSkills(podDir, runtimeDir string, p *pod.Pod, surfaces []driver.ResolvedSurface, imageRefs map[string]string, infos map[string]*inspect.ClawInfo) ([]driver.ResolvedSurface, []driver.ResolvedSkill, error) {
 	surfaceSkillsDir := filepath.Join(runtimeDir, "skills")
+	resolvedSurfaces := append([]driver.ResolvedSurface(nil), surfaces...)
 	generated := make([]driver.ResolvedSkill, 0)
 	seen := make(map[string]struct{}, len(surfaces))
 
-	for _, surface := range surfaces {
+	for i, surface := range resolvedSurfaces {
 		if surface.Scheme != "service" {
 			continue
 		}
 
-		name := fmt.Sprintf("surface-%s.md", strings.TrimSpace(strings.ReplaceAll(surface.Target, "/", "-")))
+		name := surfaceFallbackSkillName(surface.Target)
 		if name == "surface-.md" {
-			return nil, fmt.Errorf("invalid service target for generated skill: %q", surface.Target)
+			return nil, nil, fmt.Errorf("invalid service target for generated skill: %q", surface.Target)
 		}
+
+		if targetSvc, ok := p.Services[surface.Target]; ok {
+			imageRef, info, err := resolveServiceInspection(podDir, p, surface.Target, targetSvc, imageRefs, infos)
+			if err != nil {
+				return nil, nil, fmt.Errorf("inspect target service %q: %w", surface.Target, err)
+			}
+			if info != nil && strings.TrimSpace(info.SkillEmit) != "" {
+				emitSkill, err := resolveSkillEmit(surface.Target, runtimeDir, imageRef, info.SkillEmit)
+				if err != nil {
+					return nil, nil, fmt.Errorf("extract emitted skill for target service %q: %w", surface.Target, err)
+				}
+				if emitSkill != nil {
+					resolvedSurfaces[i].SkillName = emitSkill.Name
+					if _, exists := seen[emitSkill.Name]; !exists {
+						seen[emitSkill.Name] = struct{}{}
+						generated = append(generated, *emitSkill)
+					}
+					continue
+				}
+			}
+		}
+
+		resolvedSurfaces[i].SkillName = name
 		if _, exists := seen[name]; exists {
 			continue
 		}
@@ -1037,11 +1063,11 @@ func resolveServiceGeneratedSkills(runtimeDir string, surfaces []driver.Resolved
 
 		skillPath := filepath.Join(surfaceSkillsDir, name)
 		if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
-			return nil, fmt.Errorf("create generated skill dir: %w", err)
+			return nil, nil, fmt.Errorf("create generated skill dir: %w", err)
 		}
 		content := runtime.GenerateServiceSkillFallback(surface.Target, surface.Ports)
 		if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
-			return nil, fmt.Errorf("write generated service skill %q: %w", name, err)
+			return nil, nil, fmt.Errorf("write generated service skill %q: %w", name, err)
 		}
 		generated = append(generated, driver.ResolvedSkill{
 			Name:     name,
@@ -1049,7 +1075,29 @@ func resolveServiceGeneratedSkills(runtimeDir string, surfaces []driver.Resolved
 		})
 	}
 
-	return generated, nil
+	return resolvedSurfaces, generated, nil
+}
+
+func surfaceFallbackSkillName(target string) string {
+	return fmt.Sprintf("surface-%s.md", strings.TrimSpace(strings.ReplaceAll(target, "/", "-")))
+}
+
+func resolveServiceInspection(podDir string, p *pod.Pod, serviceName string, svc *pod.Service, imageRefs map[string]string, infos map[string]*inspect.ClawInfo) (string, *inspect.ClawInfo, error) {
+	if imageRef, ok := imageRefs[serviceName]; ok {
+		return imageRef, infos[serviceName], nil
+	}
+
+	imageRef, err := resolveManagedServiceImage(podDir, p, serviceName, svc)
+	if err != nil {
+		return "", nil, err
+	}
+	info, err := inspectClawImage(imageRef)
+	if err != nil {
+		return "", nil, err
+	}
+	imageRefs[serviceName] = imageRef
+	infos[serviceName] = info
+	return imageRef, info, nil
 }
 
 // resolveChannelGeneratedSkills generates surface-<platform>.md skill files for

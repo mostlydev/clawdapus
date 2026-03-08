@@ -71,9 +71,7 @@ func TestGenerateConfigParsesNumericAndBooleanValues(t *testing.T) {
 	}
 }
 
-func TestGenerateConfigNoHooksKeyByDefault(t *testing.T) {
-	// openclaw rejects unknown keys in the hooks section. The driver must not
-	// emit any hooks config unless the operator explicitly sets one via CONFIGURE.
+func TestGenerateConfigBootstrapsClawdapusMD(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:     map[string]string{"primary": "test/model"},
 		Configures: []string{},
@@ -89,8 +87,20 @@ func TestGenerateConfigNoHooksKeyByDefault(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
-	if _, exists := config["hooks"]; exists {
-		t.Error("expected no 'hooks' key in default config (openclaw rejects unknown hook keys)")
+	hooks, ok := config["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected hooks config")
+	}
+	bootstrap, ok := hooks["bootstrap-extra-files"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected bootstrap-extra-files hook")
+	}
+	paths, ok := bootstrap["paths"].([]interface{})
+	if !ok || len(paths) != 1 {
+		t.Fatalf("expected one bootstrap-extra-files path, got %#v", bootstrap["paths"])
+	}
+	if paths[0] != "CLAWDAPUS.md" {
+		t.Fatalf("expected CLAWDAPUS.md bootstrap path, got %#v", paths[0])
 	}
 }
 

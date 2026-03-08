@@ -53,12 +53,12 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 				b.WriteString(fmt.Sprintf("- **Mount path:** /mnt/%s\n", s.Target))
 			case "service":
 				b.WriteString(fmt.Sprintf("- **Host:** %s\n", s.Target))
-				b.WriteString(fmt.Sprintf("- **Skill:** `skills/surface-%s.md`\n", s.Target))
+				b.WriteString(fmt.Sprintf("- **Skill:** `skills/%s`\n", surfaceSkillName(s)))
 			case "channel":
 				if tokenVar := PlatformTokenVar(s.Target); tokenVar != "" {
 					b.WriteString(fmt.Sprintf("- **Token:** `%s` (env)\n", tokenVar))
 				}
-				b.WriteString(fmt.Sprintf("- **Skill:** `skills/surface-%s.md`\n", s.Target))
+				b.WriteString(fmt.Sprintf("- **Skill:** `skills/%s`\n", surfaceSkillName(s)))
 			}
 			b.WriteString("\n")
 		}
@@ -139,9 +139,9 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 	for _, s := range rc.Surfaces {
 		switch s.Scheme {
 		case "service":
-			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/surface-%s.md` — %s service surface", s.Target, s.Target))
+			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/%s` — %s service surface", surfaceSkillName(s), s.Target))
 		case "channel":
-			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/surface-%s.md` — %s channel surface", s.Target, s.Target))
+			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/%s` — %s channel surface", surfaceSkillName(s), s.Target))
 		}
 	}
 
@@ -183,4 +183,21 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 	}
 
 	return b.String()
+}
+
+func surfaceSkillName(surface driver.ResolvedSurface) string {
+	if strings.TrimSpace(surface.SkillName) != "" {
+		return surface.SkillName
+	}
+
+	switch surface.Scheme {
+	case "service", "channel":
+		target := strings.TrimSpace(strings.ReplaceAll(surface.Target, "/", "-"))
+		if target == "" {
+			target = "unknown"
+		}
+		return fmt.Sprintf("surface-%s.md", target)
+	default:
+		return ""
+	}
 }

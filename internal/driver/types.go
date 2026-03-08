@@ -107,6 +107,7 @@ type ResolvedSurface struct {
 	Target        string         // discord, fleet-master, shared-cache, etc.
 	AccessMode    string         // read-only, read-write (for volume/host surfaces)
 	Ports         []string       // exposed ports from service definition (service surfaces only)
+	SkillName     string         // mounted skill filename for this surface when one exists
 	ChannelConfig *ChannelConfig // non-nil only for map-form channel surfaces
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/openclaw"
+	"github.com/mostlydev/clawdapus/internal/inspect"
 	"github.com/mostlydev/clawdapus/internal/pod"
 )
 
@@ -628,7 +629,19 @@ func TestEnsureImageFallsBackToRemoteBuildWithoutRepoRoot(t *testing.T) {
 	}
 }
 
-func TestResolveServiceGeneratedSkills(t *testing.T) {
+func TestResolveServiceSurfaceSkillsFallsBackWhenNoEmitExists(t *testing.T) {
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	defer func() {
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+	}()
+
+	imageExistsLocally = func(string) bool { return true }
+	inspectClawImage = func(string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{}, nil
+	}
+
 	tmpDir := t.TempDir()
 	surfaces := []driver.ResolvedSurface{
 		{
@@ -646,12 +659,25 @@ func TestResolveServiceGeneratedSkills(t *testing.T) {
 		},
 	}
 
-	skills, err := resolveServiceGeneratedSkills(tmpDir, surfaces)
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"api-server": {Image: "example/api"},
+			"db":         {Image: "example/db"},
+		},
+	}
+
+	updatedSurfaces, skills, err := resolveServiceSurfaceSkills(t.TempDir(), tmpDir, p, surfaces, map[string]string{}, map[string]*inspect.ClawInfo{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(skills) != 2 {
 		t.Fatalf("expected 2 generated skills, got %d", len(skills))
+	}
+	if updatedSurfaces[0].SkillName != "surface-api-server.md" {
+		t.Fatalf("expected api-server fallback skill name, got %q", updatedSurfaces[0].SkillName)
+	}
+	if updatedSurfaces[1].SkillName != "surface-db.md" {
+		t.Fatalf("expected db fallback skill name, got %q", updatedSurfaces[1].SkillName)
 	}
 
 	if skills[0].Name != "surface-api-server.md" && skills[1].Name != "surface-api-server.md" {
@@ -659,6 +685,60 @@ func TestResolveServiceGeneratedSkills(t *testing.T) {
 	}
 	if skills[0].Name != "surface-db.md" && skills[1].Name != "surface-db.md" {
 		t.Fatalf("expected generated skill for db, got %v", []string{skills[0].Name, skills[1].Name})
+	}
+}
+
+func TestResolveServiceSurfaceSkillsPrefersTargetEmit(t *testing.T) {
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevExtract := extractServiceSkillFromImage
+	defer func() {
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		extractServiceSkillFromImage = prevExtract
+	}()
+
+	imageExistsLocally = func(string) bool { return true }
+	inspectClawImage = func(imageRef string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{SkillEmit: "/app/skills/trade.md"}, nil
+	}
+	extractServiceSkillFromImage = func(imageRef string, skillEmitPath string) ([]byte, error) {
+		if imageRef != "example/trading-api:latest" {
+			t.Fatalf("unexpected image ref: %q", imageRef)
+		}
+		if skillEmitPath != "/app/skills/trade.md" {
+			t.Fatalf("unexpected emit path: %q", skillEmitPath)
+		}
+		return []byte("# trade\n"), nil
+	}
+
+	runtimeDir := t.TempDir()
+	surfaces := []driver.ResolvedSurface{{Scheme: "service", Target: "trading-api", Ports: []string{"4000"}}}
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"trading-api": {Image: "example/trading-api:latest"},
+		},
+	}
+
+	updatedSurfaces, skills, err := resolveServiceSurfaceSkills(t.TempDir(), runtimeDir, p, surfaces, map[string]string{}, map[string]*inspect.ClawInfo{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected one resolved skill, got %d", len(skills))
+	}
+	if updatedSurfaces[0].SkillName != "trade.md" {
+		t.Fatalf("expected emitted service skill name, got %q", updatedSurfaces[0].SkillName)
+	}
+	if skills[0].Name != "trade.md" {
+		t.Fatalf("expected extracted emitted skill to be mounted as trade.md, got %q", skills[0].Name)
+	}
+	data, err := os.ReadFile(skills[0].HostPath)
+	if err != nil {
+		t.Fatalf("read emitted skill: %v", err)
+	}
+	if string(data) != "# trade\n" {
+		t.Fatalf("unexpected emitted skill content: %q", data)
 	}
 }
 

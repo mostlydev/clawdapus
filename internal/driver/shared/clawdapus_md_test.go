@@ -14,7 +14,7 @@ func TestGenerateClawdapusMD(t *testing.T) {
 		Surfaces: []driver.ResolvedSurface{
 			{Scheme: "volume", Target: "research-cache", AccessMode: "read-write"},
 			{Scheme: "channel", Target: "discord", AccessMode: ""},
-			{Scheme: "service", Target: "fleet-master", AccessMode: ""},
+			{Scheme: "service", Target: "fleet-master", AccessMode: "", SkillName: "fleet-manual.md"},
 		},
 	}
 
@@ -32,7 +32,7 @@ func TestGenerateClawdapusMD(t *testing.T) {
 	if !strings.Contains(md, "DISCORD_BOT_TOKEN") {
 		t.Error("expected token env var hint for channel surface")
 	}
-	if !strings.Contains(md, "skills/surface-fleet-master.md") {
+	if !strings.Contains(md, "skills/fleet-manual.md") {
 		t.Error("service surface should reference its companion skill file")
 	}
 }
