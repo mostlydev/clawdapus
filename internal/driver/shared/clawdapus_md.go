@@ -134,7 +134,7 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 
 	// Operator-provided skills (exclude auto-generated handle-* and surface-* files)
 	for _, sk := range rc.Skills {
-		if strings.HasPrefix(sk.Name, "handle-") || strings.HasPrefix(sk.Name, "surface-") {
+		if strings.HasPrefix(sk.Name, "handle-") || strings.HasPrefix(sk.Name, "surface-") || strings.HasPrefix(sk.Name, "include-") {
 			continue
 		}
 		skillEntries = append(skillEntries, fmt.Sprintf("- `skills/%s` — operator-provided skill", sk.Name))
@@ -145,6 +145,27 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 	} else {
 		for _, entry := range skillEntries {
 			b.WriteString(entry + "\n")
+		}
+	}
+
+	if len(rc.Includes) > 0 {
+		b.WriteString("\n## Included Context\n\n")
+		for _, include := range rc.Includes {
+			b.WriteString(fmt.Sprintf("### %s (%s)\n", include.ID, include.Mode))
+			if include.Description != "" {
+				b.WriteString(fmt.Sprintf("- **Description:** %s\n", include.Description))
+			}
+			switch include.Mode {
+			case "reference":
+				skillPath := "skills/" + include.SkillName
+				if include.SkillName == "" {
+					skillPath = "skills/"
+				}
+				b.WriteString(fmt.Sprintf("- **Mount:** `%s`\n", skillPath))
+			default:
+				b.WriteString("- **Contract:** inlined into `/claw/AGENTS.md`\n")
+			}
+			b.WriteString(fmt.Sprintf("- **Source:** `%s`\n\n", include.HostPath))
 		}
 	}
 

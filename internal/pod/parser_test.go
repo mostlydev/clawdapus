@@ -268,6 +268,40 @@ services:
 	}
 }
 
+func TestParseIncludeEntries(t *testing.T) {
+	src := `
+services:
+  bot:
+    image: bot:latest
+    x-claw:
+      agent: ./AGENTS.md
+      include:
+        - id: risk_limits
+          file: ./governance/risk-limits.md
+          mode: enforce
+          description: Hard constraints
+        - id: strategy_notes
+          file: ./playbooks/strategy.md
+          mode: reference
+`
+
+	pod, err := Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	include := pod.Services["bot"].Claw.Include
+	if len(include) != 2 {
+		t.Fatalf("expected 2 include entries, got %d", len(include))
+	}
+	if include[0].ID != "risk_limits" || include[0].Mode != "enforce" {
+		t.Fatalf("unexpected first include: %+v", include[0])
+	}
+	if include[1].Description != "" {
+		t.Fatalf("expected empty description for omitted value, got %q", include[1].Description)
+	}
+}
+
 func TestParseCllamaEnvBlock(t *testing.T) {
 	yaml := `
 x-claw:

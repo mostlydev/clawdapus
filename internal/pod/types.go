@@ -37,7 +37,15 @@ type ClawBlock struct {
 	CllamaTokens map[string]string // runtime-only: expanded service name -> token
 	Count        int
 	Handles      map[string]*driver.HandleInfo // platform → contact card
+	Include      []IncludeEntry
 	Surfaces     []driver.ResolvedSurface
 	Skills       []string
 	Invoke       []InvokeEntry
+}
+
+type IncludeEntry struct {
+	ID          string
+	File        string
+	Mode        string
+	Description string
 }

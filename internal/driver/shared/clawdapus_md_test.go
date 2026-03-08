@@ -108,3 +108,39 @@ func TestGenerateClawdapusMDHandlesSection(t *testing.T) {
 		t.Error("expected handle ID")
 	}
 }
+
+func TestGenerateClawdapusMDIncludesContextComposition(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "bot",
+		ClawType:    "openclaw",
+		Includes: []driver.ResolvedInclude{
+			{
+				ID:          "risk_limits",
+				Mode:        "enforce",
+				Description: "Hard constraints",
+				HostPath:    "/workspace/governance/risk-limits.md",
+			},
+			{
+				ID:          "strategy_notes",
+				Mode:        "reference",
+				Description: "Desk playbook",
+				HostPath:    "/workspace/playbooks/strategy.md",
+				SkillName:   "include-strategy_notes.md",
+			},
+		},
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+	if !strings.Contains(md, "## Included Context") {
+		t.Fatal("expected Included Context section")
+	}
+	if !strings.Contains(md, "risk_limits (enforce)") {
+		t.Fatal("expected enforce include heading")
+	}
+	if !strings.Contains(md, "inlined into `/claw/AGENTS.md`") {
+		t.Fatal("expected enforce include to note inline contract placement")
+	}
+	if !strings.Contains(md, "skills/include-strategy_notes.md") {
+		t.Fatal("expected reference include skill mount")
+	}
+}
