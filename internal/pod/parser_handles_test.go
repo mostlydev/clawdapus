@@ -80,6 +80,48 @@ services:
       agent: ./AGENTS.md
 `
 
+const podWithHandleDefaults = `
+x-claw:
+  pod: test-pod
+  handles-defaults:
+    discord:
+      guilds:
+        - id: "111222333"
+          name: "Trading Floor"
+          channels:
+            - id: "987654321"
+              name: "trading-floor"
+
+services:
+  bot:
+    image: openclaw:latest
+    x-claw:
+      agent: ./AGENTS.md
+      handles:
+        discord:
+          id: "123456789"
+          username: "tiverton"
+`
+
+const podWithHandleDefaultsAndStringOverride = `
+x-claw:
+  pod: test-pod
+  handles-defaults:
+    discord:
+      username: "default-name"
+      guilds:
+        - id: "111222333"
+          name: "Trading Floor"
+
+services:
+  bot:
+    image: openclaw:latest
+    x-claw:
+      agent: ./AGENTS.md
+      handles:
+        discord: "123456789"
+`
+
 func TestParseHandlesStringShorthand(t *testing.T) {
 	p, err := Parse(strings.NewReader(podWithStringHandle))
 	if err != nil {
@@ -204,6 +246,54 @@ func TestParseHandlesAbsentMeansNil(t *testing.T) {
 	bot := p.Services["bot"]
 	if bot.Claw.Handles != nil {
 		t.Errorf("expected nil handles when not declared, got %v", bot.Claw.Handles)
+	}
+}
+
+func TestParseHandlesDefaultsMergeGuildTopology(t *testing.T) {
+	p, err := Parse(strings.NewReader(podWithHandleDefaults))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	info := p.Services["bot"].Claw.Handles["discord"]
+	if info == nil {
+		t.Fatal("expected discord handle")
+	}
+	if info.ID != "123456789" {
+		t.Fatalf("expected service ID override, got %q", info.ID)
+	}
+	if info.Username != "tiverton" {
+		t.Fatalf("expected service username override, got %q", info.Username)
+	}
+	if len(info.Guilds) != 1 {
+		t.Fatalf("expected 1 inherited guild, got %d", len(info.Guilds))
+	}
+	if info.Guilds[0].ID != "111222333" {
+		t.Fatalf("expected inherited guild id, got %q", info.Guilds[0].ID)
+	}
+	if len(info.Guilds[0].Channels) != 1 || info.Guilds[0].Channels[0].Name != "trading-floor" {
+		t.Fatalf("expected inherited channel topology, got %+v", info.Guilds[0].Channels)
+	}
+}
+
+func TestParseHandlesDefaultsMergeStringHandleIntoMap(t *testing.T) {
+	p, err := Parse(strings.NewReader(podWithHandleDefaultsAndStringOverride))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	info := p.Services["bot"].Claw.Handles["discord"]
+	if info == nil {
+		t.Fatal("expected discord handle")
+	}
+	if info.ID != "123456789" {
+		t.Fatalf("expected string shorthand ID override, got %q", info.ID)
+	}
+	if info.Username != "default-name" {
+		t.Fatalf("expected default username to be inherited, got %q", info.Username)
+	}
+	if len(info.Guilds) != 1 || info.Guilds[0].Name != "Trading Floor" {
+		t.Fatalf("expected inherited default guilds, got %+v", info.Guilds)
 	}
 }
 

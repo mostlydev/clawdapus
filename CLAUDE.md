@@ -38,12 +38,13 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - `internal/driver/nanobot/` — Nanobot driver: JSON config, `/root/.nanobot` mounts, container-running health
 - `internal/driver/picoclaw/` — PicoClaw driver: `model_list[]` config, non-root mounts, HTTP `/health` probing
 - `internal/driver/shared/` — Shared model/provider helpers, platform token mapping, CLAWDAPUS.md + handle skill generation
-- `internal/pod/` — claw-pod.yml parser, compose emitter
+- `internal/persona/` — Persona materialization: local copy + OCI pull via oras-go
+- `internal/pod/` — claw-pod.yml parser, compose emitter (includes x-claw.include composition)
 - `internal/inspect/` — label parsing from built images
 - `internal/runtime/` — Docker SDK wrapper (read-only only)
 - `cmd/claw/compose_up.go` — main orchestration for `claw up`
 
-## Implementation Status (as of 2026-03-02)
+## Implementation Status (as of 2026-03-08)
 
 | Phase | Status |
 |-------|--------|
@@ -55,13 +56,12 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 | Phase 3 Slice 3 — INVOKE scheduling + Discord config wiring | DONE |
 | Phase 3 Slice 4 — Social topology: mentionPatterns, allowBots, peer handle users | DONE |
 | Phase 3 Slice 5 — Channel surface bindings: ChannelConfig, applyDiscordChannelSurface, surface-discord.md | DONE |
-| Phase 4 Slices 2+3 — cllama wiring in clawdapus repo | DONE |
-| Phase 4 Slice 1 — cllama standalone proxy (in-repo) | DONE |
-| Phase 4 Task 3.4 — doc fixes (CLLAMA_SPEC, ADRs) | DONE |
+| Phase 4 — cllama sidecar proxy (standalone + wiring + cost tracking + dashboard) | DONE |
 | Phase 4.5 — Interactive claw init & claw agent add (canonical layout) | DONE |
 | Phase 4.7 — Nanobot + PicoClaw drivers, shared helpers, scaffold parity | DONE |
+| v0.2.0 — PERSONA runtime materialization + x-claw.include contract composition | DONE |
 | Phase 4.6 — Unified worker architecture (config, provision, diagnostic) | DESIGN |
-| Phase 5 — Drift scoring | NOT STARTED |
+| Phase 5 — Drift scoring + cllama policy pipeline | NOT STARTED |
 | Phase 6 — Recipe promotion | NOT STARTED |
 
 ## Important Implementation Decisions (settled)
@@ -102,6 +102,8 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - **PicoClaw driver**: Non-root user (`USER picoclaw`); mounts at `/home/picoclaw/.picoclaw` with `PICOCLAW_HOME`/`PICOCLAW_CONFIG` env overrides. Model-centric config: `model_list[]` with `model` field (e.g. `openai/<ref>` under cllama) + `agents.defaults.model_name`. HTTP `/health` + `/ready` on port 18790. Requires at least one supported HANDLE (fail-closed, matching upstream). 13 supported platforms including long-tail set
 - **Shared driver helpers** (`internal/driver/shared/`): `SplitModelRef`, `CollectProviders`, `NormalizeProvider`, `ResolveProviderAPIKey` extracted from microclaw/nullclaw duplication. `PlatformTokenVar` maps 14 platforms to env var names. `GenerateClawdapusMD` and `GenerateHandleSkill` shared across all drivers
 - **INVOKE 5-field cron only**: Both nanobot and picoclaw drivers validate and reject non-5-field cron expressions. `at`/`every` syntaxes deferred to future Clawfile parser extension
+- **PERSONA runtime materialization**: `PERSONA <ref>` in Clawfile emits `claw.persona.default` label; `x-claw.persona` overrides at pod level. Local paths (relative, absolute, `file://`) are copied with path-traversal + symlink checks. Non-local refs pulled as OCI artifacts via oras-go. Mounted writable into runner; `CLAW_PERSONA_DIR` env set only when persona is present. Currently a deploy-time mount mechanism — not yet a complete identity system (no memory restoration, no snapshotting, no registry round-trips)
+- **x-claw.include contract composition**: `include` array in x-claw block modularizes the behavioral contract. Modes: `enforce` (hard rules, inlined), `guide` (recommendations, inlined), `reference` (informational, mounted as read-only skill files). ADR-009
 
 ## Conventions
 

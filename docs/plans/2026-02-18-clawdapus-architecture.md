@@ -18,10 +18,12 @@
 | Phase 3 — Service surface skills | Slice 2: claw.skill.emit + fallback generation | **DONE** |
 | Phase 3.5 — HANDLE directive + social topology | — | **DONE** |
 | Phase 3 — Channel surface bindings | Slice 3: driver-mediated channel config | **DONE** |
-| Phase 4 — cllama sidecar + policy pipeline | — | **IN PROGRESS** — sidecar contract/wiring shipped; policy pipeline deferred |
-| Phase 4.5 — Interactive claw init & agent add | — | **DONE** — `docs/plans/2026-02-28-claw-init-agent-add-design.md` |
+| Phase 4 — cllama sidecar + cost tracking + dashboard | — | **DONE** — standalone proxy, pod wiring, credential starvation, cost hooks, SSE dashboard; policy pipeline deferred to Phase 5 |
+| Phase 4.5 — Interactive claw init & claw agent add | — | **DONE** — canonical layout, layout auto-detection |
+| Phase 4.7 — Nanobot + PicoClaw drivers, scaffold parity | — | **DONE** — 6 driver types, shared helpers, rollcall spike |
+| v0.2.0 — PERSONA + x-claw.include | — | **DONE** — persona materialization (local + OCI), contract composition (enforce/guide/reference) |
 | Phase 4.6 — Unified worker architecture | — | **DESIGN** — `docs/plans/2026-02-27-worker-architecture-unified.md` |
-| Phase 5 — Drift scoring + fleet governance | — | NOT STARTED |
+| Phase 5 — Drift scoring + cllama policy pipeline | — | NOT STARTED |
 | Phase 6 — Recipe promotion + worker mode | — | NOT STARTED |
 
 Progress tracker: `docs/plans/phase2-progress.md`

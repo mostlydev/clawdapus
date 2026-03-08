@@ -70,10 +70,12 @@ A planning file can be deleted when:
 
 ---
 
-## Current planning file status
+## Current planning file status (as of 2026-03-08)
 
 | File | Status | Action |
 |------|--------|--------|
 | `2026-02-18-clawdapus-architecture.md` | Reference — all phases listed | Keep; update phase statuses |
 | `phase2-progress.md` | Active tracker | Keep; update as phases complete |
-| `2026-03-01-driver-parity-matrix.md` | Implemented (Phase 4.7) | Keep until verified in production; progress tracked in `phase2-progress.md` |
+| `2026-02-26-phase4-cllama-sidecar.md` | Shipped scope DONE; policy pipeline deferred to Phase 5 | Keep as reference for deferred policy work |
+| `2026-02-27-worker-architecture-unified.md` | Phase 4.6 DESIGN | Keep; implement next |
+| `2026-03-01-driver-parity-matrix.md` | Implemented (Phase 4.7) | Keep until verified in production |

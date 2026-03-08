@@ -18,8 +18,9 @@ type rawPod struct {
 }
 
 type rawPodClaw struct {
-	Pod    string `yaml:"pod"`
-	Master string `yaml:"master"`
+	Pod             string                 `yaml:"pod"`
+	Master          string                 `yaml:"master"`
+	HandlesDefaults map[string]interface{} `yaml:"handles-defaults"`
 }
 
 type rawService struct {
@@ -158,7 +159,7 @@ func Parse(r io.Reader) (*Pod, error) {
 			if skills == nil {
 				skills = make([]string, 0)
 			}
-			handles, err := parseHandles(svc.XClaw.Handles)
+			handles, err := parseHandles(mergeHandleDefaults(raw.XClaw.HandlesDefaults, svc.XClaw.Handles))
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse handles: %w", name, err)
 			}
@@ -233,6 +234,68 @@ func parseStringOrList(raw interface{}) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("expected string or list, got %T", raw)
 	}
+}
+
+func mergeHandleDefaults(defaults, service map[string]interface{}) map[string]interface{} {
+	if len(defaults) == 0 {
+		return service
+	}
+	if len(service) == 0 {
+		return deepCopyMap(defaults)
+	}
+
+	merged := deepCopyMap(defaults)
+	for platform, serviceVal := range service {
+		if defaultVal, ok := merged[platform]; ok {
+			merged[platform] = mergeHandleValue(defaultVal, serviceVal)
+			continue
+		}
+		merged[platform] = deepCopyValue(serviceVal)
+	}
+	return merged
+}
+
+func mergeHandleValue(defaultVal, serviceVal interface{}) interface{} {
+	defaultMap, defaultOK := canonicalHandleValue(defaultVal)
+	serviceMap, serviceOK := canonicalHandleValue(serviceVal)
+	if defaultOK && serviceOK {
+		return mergeStringMap(defaultMap, serviceMap)
+	}
+	return deepCopyValue(serviceVal)
+}
+
+func canonicalHandleValue(raw interface{}) (map[string]interface{}, bool) {
+	switch v := raw.(type) {
+	case string:
+		return map[string]interface{}{"id": v}, true
+	case int:
+		return map[string]interface{}{"id": strconv.Itoa(v)}, true
+	case int64:
+		return map[string]interface{}{"id": strconv.FormatInt(v, 10)}, true
+	case uint64:
+		return map[string]interface{}{"id": strconv.FormatUint(v, 10)}, true
+	case map[string]interface{}:
+		return deepCopyMap(v), true
+	default:
+		return nil, false
+	}
+}
+
+func mergeStringMap(base, override map[string]interface{}) map[string]interface{} {
+	if len(base) == 0 {
+		return deepCopyMap(override)
+	}
+	out := deepCopyMap(base)
+	for k, v := range override {
+		if baseMap, ok := out[k].(map[string]interface{}); ok {
+			if overrideMap, ok := v.(map[string]interface{}); ok {
+				out[k] = mergeStringMap(baseMap, overrideMap)
+				continue
+			}
+		}
+		out[k] = deepCopyValue(v)
+	}
+	return out
 }
 
 // parseHandles converts a raw x-claw handles map into typed HandleInfo structs.

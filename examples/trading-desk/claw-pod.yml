@@ -1,5 +1,13 @@
 x-claw:
   pod: trading-desk
+  handles-defaults:
+    discord:
+      guilds:
+        - id: "${DISCORD_GUILD_ID}"
+          name: "Trading Floor"
+          channels:
+            - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+              name: trading-floor
 
 x-trading-desk:
   cllama-agent: &cllama_agent
@@ -7,12 +15,6 @@ x-trading-desk:
   proxy-env: &proxy_env
     OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
     ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
-  trading-floor-guilds: &trading_floor_guilds
-    - id: "${DISCORD_GUILD_ID}"
-      name: "Trading Floor"
-      channels:
-        - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-          name: trading-floor
   shared-trading-surfaces: &shared_trading_surfaces
     - "service://trading-api"
     - "volume://clawd-shared read-write"
@@ -82,7 +84,6 @@ services:
         discord:
           id: "${TIVERTON_DISCORD_ID}"
           username: "tiverton"
-          guilds: *trading_floor_guilds
       surfaces:
         - "service://trading-api"
         - "volume://clawd-shared read-write"
@@ -121,7 +122,6 @@ services:
         discord:
           id: "${WESTIN_DISCORD_ID}"
           username: "westin"
-          guilds: *trading_floor_guilds
       surfaces: *shared_trading_surfaces
       skills: *trader_risk_skills
       invoke:
@@ -148,7 +148,6 @@ services:
         discord:
           id: "${ALLEN_DISCORD_ID}"
           username: "allen"
-          guilds: *trading_floor_guilds
       surfaces: *shared_trading_surfaces
     environment:
       DISCORD_BOT_TOKEN: "${ALLEN_BOT_TOKEN}"
@@ -167,7 +166,6 @@ services:
         discord:
           id: "${LOGAN_DISCORD_ID}"
           username: "logan"
-          guilds: *trading_floor_guilds
       surfaces: *shared_trading_surfaces
       skills: *trader_risk_skills
     environment:
@@ -189,7 +187,6 @@ services:
         discord:
           id: "${MICRO_DISCORD_ID}"
           username: "micro"
-          guilds: *trading_floor_guilds
       surfaces: *shared_trading_surfaces
     environment:
       DISCORD_BOT_TOKEN: "${MICRO_BOT_TOKEN}"

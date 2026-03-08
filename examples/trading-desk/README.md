@@ -51,7 +51,7 @@ OPENROUTER_API_KEY=...
 ANTHROPIC_API_KEY=...
 ```
 
-`claw up` reads this pod-local `.env` file when resolving `${...}` placeholders inside `x-claw` metadata before generating runtime config such as `openclaw.json`. Keep Discord identity and topology values in `x-claw.handles`; only runtime process env like bot tokens need to be duplicated under a service `environment:` block.
+`claw up` reads this pod-local `.env` file when resolving `${...}` placeholders inside `x-claw` metadata before generating runtime config such as `openclaw.json`. This example keeps the shared Discord guild/channel topology in pod-level `x-claw.handles-defaults`, while each service's `x-claw.handles.discord` only declares its own bot ID and username. Only runtime process env like bot tokens need to be duplicated under a service `environment:` block.
 
 ## Running
 
