@@ -399,7 +399,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 
 ## Status
 
-**v0.1.0 released** — [download](https://github.com/mostlydev/clawdapus/releases/tag/v0.1.0)
+**v0.2.0 released** — [download](https://github.com/mostlydev/clawdapus/releases/tag/v0.2.0)
 
 | Phase | Status |
 |-------|--------|
