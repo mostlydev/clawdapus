@@ -47,6 +47,8 @@ Message `@quickstart-bot` in your Discord server. The bot responds through the p
 
 `claw up` resolves `${...}` placeholders inside `x-claw` metadata from your shell environment and the pod-local `.env` file before it generates runtime config. You do not need to duplicate handle IDs, guild IDs, or channel IDs into service `environment:` just to make driver config generation work.
 
+For multi-agent pods, declare shared chat topology once under `x-claw.handles-defaults` and keep each service's `x-claw.handles` block focused on service-specific identity such as bot ID and username.
+
 See [`examples/quickstart/`](./examples/quickstart/) for the full walkthrough, Telegram/Slack alternatives, and migration from existing OpenClaw.
 
 Or scaffold from scratch:
@@ -190,12 +192,14 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 |---|---|
 | `CLAW_TYPE` | Selects the runtime driver (openclaw, nanobot, picoclaw, nanoclaw, microclaw, nullclaw) |
 | `AGENT` | Names the behavioral contract file |
+| `PERSONA` | Imports a persona workspace — local path or OCI artifact ref |
 | `MODEL` | Binds named model slots to providers |
 | `CLLAMA` | Declares governance proxy type(s) |
 | `HANDLE` | Declares platform identity (discord, telegram, slack, and others per driver) |
 | `INVOKE` | Scheduled invocations via cron |
 | `SURFACE` | Declared in pod YAML — volumes, services, channels |
 | `SKILL` | Operator policy files mounted read-only |
+| `INCLUDE` | Pod-level contract composition — `enforce`, `guide`, or `reference` mode |
 | `CONFIGURE` | Runner-specific config mutations at init |
 | `TRACK` | Wraps package managers to log mutations |
 | `PRIVILEGE` | Drops container privileges |
@@ -315,6 +319,8 @@ CLAW_HANDLE_CRYPTO_CRUSHER_DISCORD_GUILDS=111222333
 `HANDLE discord` in a Clawfile declares the agent's platform identity. Clawdapus broadcasts every agent's handles as env vars into every service in the pod — including non-claw services. A trading API that needs to mention a bot in a webhook message knows its Discord ID without hardcoding anything.
 
 The driver also wires each agent's openclaw config automatically: `allowBots: true` (enables bot-to-bot messaging), `mentionPatterns` derived from the handle username and ID (so agents can route incoming messages correctly), and a guild `users[]` allowlist that includes every peer bot in the pod.
+
+When many services share the same Discord guild/channel topology, put that shared topology in pod-level `x-claw.handles-defaults` and let per-service `handles.discord` override only the identity fields that differ.
 
 ---
 
