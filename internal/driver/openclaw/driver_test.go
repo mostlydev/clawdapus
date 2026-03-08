@@ -3,6 +3,7 @@ package openclaw
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -103,6 +104,75 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 
 	if result.Restart != "on-failure" {
 		t.Errorf("expected restart=on-failure, got %q", result.Restart)
+	}
+}
+
+func TestMaterializeInlinesClawdapusContextIntoMountedContract(t *testing.T) {
+	dir := t.TempDir()
+	agentFile := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agentFile, []byte("# Contract\n\nFollow the workflow.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Driver{}
+	rc := &driver.ResolvedClaw{
+		ServiceName:   "weston",
+		ClawType:      "openclaw",
+		Agent:         "AGENTS.md",
+		AgentHostPath: agentFile,
+		Models:        map[string]string{"primary": "anthropic/claude-sonnet-4"},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {
+				ID:       "1234",
+				Username: "weston",
+			},
+		},
+	}
+
+	result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: dir, PodName: "trading-desk"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var agentMount *driver.Mount
+	var clawdapusMount *driver.Mount
+	for i := range result.Mounts {
+		switch result.Mounts[i].ContainerPath {
+		case "/claw/AGENTS.md":
+			agentMount = &result.Mounts[i]
+		case "/claw/CLAWDAPUS.md":
+			clawdapusMount = &result.Mounts[i]
+		}
+	}
+	if agentMount == nil {
+		t.Fatal("expected /claw/AGENTS.md mount")
+	}
+	if clawdapusMount == nil {
+		t.Fatal("expected /claw/CLAWDAPUS.md mount")
+	}
+	if agentMount.HostPath == agentFile {
+		t.Fatal("expected /claw/AGENTS.md to mount the generated effective contract")
+	}
+
+	effective, err := os.ReadFile(agentMount.HostPath)
+	if err != nil {
+		t.Fatalf("read effective contract: %v", err)
+	}
+	text := string(effective)
+	if !strings.Contains(text, "# Contract") {
+		t.Fatal("expected original agent contract content in effective contract")
+	}
+	if !strings.Contains(text, "--- BEGIN: infrastructure_context (guide) ---") {
+		t.Fatal("expected infrastructure guide block in effective contract")
+	}
+	if !strings.Contains(text, "## Identity") {
+		t.Fatal("expected inlined CLAWDAPUS identity section in effective contract")
+	}
+	if !strings.Contains(text, "- **Pod:** trading-desk") {
+		t.Fatal("expected pod name in inlined CLAWDAPUS context")
+	}
+	if !strings.Contains(text, "- **Service:** weston") {
+		t.Fatal("expected service name in inlined CLAWDAPUS context")
 	}
 }
 
