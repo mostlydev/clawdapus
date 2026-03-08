@@ -635,7 +635,7 @@ func TestE2EPhase3MultiClawContextAndHooks(t *testing.T) {
 	}
 
 	for _, svc := range []string{"researcher", "analyst"} {
-		cfgPath := filepath.Join(workDir, ".claw-runtime", svc, "openclaw.json")
+		cfgPath := filepath.Join(workDir, ".claw-runtime", svc, "config", "openclaw.json")
 		cfgData, err := os.ReadFile(cfgPath)
 		if err != nil {
 			t.Fatalf("read openclaw config for %s: %v", svc, err)
@@ -644,20 +644,10 @@ func TestE2EPhase3MultiClawContextAndHooks(t *testing.T) {
 		if err := json.Unmarshal(cfgData, &cfg); err != nil {
 			t.Fatalf("unmarshal openclaw config for %s: %v", svc, err)
 		}
-		hooks, ok := cfg["hooks"].(map[string]interface{})
-		if !ok {
-			t.Fatalf("expected hooks for %s", svc)
-		}
-		bef, ok := hooks["bootstrap-extra-files"].(map[string]interface{})
-		if !ok {
-			t.Fatalf("expected bootstrap-extra-files for %s", svc)
-		}
-		paths, ok := bef["paths"].([]interface{})
-		if !ok || len(paths) == 0 {
-			t.Fatalf("expected bootstrap-extra-files.paths for %s", svc)
-		}
-		if paths[0] != "CLAWDAPUS.md" {
-			t.Fatalf("expected CLAWDAPUS.md in bootstrap paths for %s, got %v", svc, paths)
+		if hooks, ok := cfg["hooks"].(map[string]interface{}); ok {
+			if _, ok := hooks["bootstrap-extra-files"]; ok {
+				t.Fatalf("did not expect bootstrap-extra-files hook for %s", svc)
+			}
 		}
 	}
 

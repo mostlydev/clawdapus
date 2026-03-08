@@ -221,6 +221,10 @@ func runComposeUp(podFile string) error {
 			// Pod and image skills override generated defaults.
 			skills = mergeResolvedSkills(generatedSkills, skills)
 		}
+		agentHostPath, err = materializeServiceSurfaceGuides(svcRuntimeDir, agentHostPath, surfaces, skills)
+		if err != nil {
+			return fmt.Errorf("service %q: materialize service surface guides: %w", name, err)
+		}
 
 		// Build peer handles: all other claw services' handles, keyed by service name.
 		peerHandles := make(map[string]map[string]*driver.HandleInfo)
@@ -828,6 +832,102 @@ func materializeContractIncludes(baseDir, runtimeDir, agentHostPath string, incl
 	}
 
 	return resolved, skills, nil
+}
+
+func materializeServiceSurfaceGuides(runtimeDir, agentHostPath string, surfaces []driver.ResolvedSurface, skills []driver.ResolvedSkill) (string, error) {
+	if agentHostPath == "" || len(surfaces) == 0 || len(skills) == 0 {
+		return agentHostPath, nil
+	}
+
+	skillPaths := make(map[string]string, len(skills))
+	for _, skill := range skills {
+		if strings.TrimSpace(skill.Name) == "" || strings.TrimSpace(skill.HostPath) == "" {
+			continue
+		}
+		skillPaths[skill.Name] = skill.HostPath
+	}
+
+	type serviceGuide struct {
+		target    string
+		skillName string
+		hostPath  string
+	}
+
+	guides := make([]serviceGuide, 0)
+	seen := make(map[string]struct{})
+	for _, surface := range surfaces {
+		if surface.Scheme != "service" {
+			continue
+		}
+
+		skillName := strings.TrimSpace(surface.SkillName)
+		if skillName == "" || skillName == surfaceFallbackSkillName(surface.Target) {
+			continue
+		}
+		if _, exists := seen[skillName]; exists {
+			continue
+		}
+
+		hostPath, ok := skillPaths[skillName]
+		if !ok {
+			return "", fmt.Errorf("service surface %q references skill %q but no resolved skill was found", surface.Target, skillName)
+		}
+
+		guides = append(guides, serviceGuide{
+			target:    surface.Target,
+			skillName: skillName,
+			hostPath:  hostPath,
+		})
+		seen[skillName] = struct{}{}
+	}
+
+	if len(guides) == 0 {
+		return agentHostPath, nil
+	}
+
+	baseContract, err := os.ReadFile(agentHostPath)
+	if err != nil {
+		return "", fmt.Errorf("read agent contract: %w", err)
+	}
+
+	var compiled strings.Builder
+	compiled.WriteString(strings.TrimRight(string(baseContract), "\n"))
+
+	for _, guide := range guides {
+		content, err := os.ReadFile(guide.hostPath)
+		if err != nil {
+			return "", fmt.Errorf("read service guide %q: %w", guide.skillName, err)
+		}
+
+		compiled.WriteString("\n\n")
+		compiled.WriteString(fmt.Sprintf("--- BEGIN: service_manual %s (guide) ---\n\n", guide.target))
+		compiled.WriteString(fmt.Sprintf("This service manual was injected automatically because you declared `service://%s`.\n", guide.target))
+		compiled.WriteString("Treat it as the authoritative workflow for acting through that service.\n\n")
+		compiled.WriteString(strings.TrimRight(stripSkillFrontmatter(string(content)), "\n"))
+		compiled.WriteString("\n\n")
+		compiled.WriteString(fmt.Sprintf("--- END: service_manual %s (guide) ---", guide.target))
+	}
+
+	generatedPath := filepath.Join(runtimeDir, "AGENTS.generated.md")
+	if err := writeRuntimeFile(generatedPath, []byte(compiled.String()+"\n"), 0644); err != nil {
+		return "", fmt.Errorf("write generated AGENTS.md: %w", err)
+	}
+
+	return generatedPath, nil
+}
+
+func stripSkillFrontmatter(content string) string {
+	if !strings.HasPrefix(content, "---\n") {
+		return content
+	}
+
+	rest := strings.TrimPrefix(content, "---\n")
+	end := strings.Index(rest, "\n---\n")
+	if end < 0 {
+		return content
+	}
+
+	return strings.TrimLeft(rest[end+5:], "\n")
 }
 
 func resolveRuntimeScopedFile(baseDir, relPath string) (string, error) {

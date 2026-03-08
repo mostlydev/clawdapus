@@ -326,7 +326,7 @@ When many services share the same Discord guild/channel topology, put that share
 
 ## Surfaces, Skills, and CLAWDAPUS.md
 
-Every Claw receives a generated `CLAWDAPUS.md` — always in context — listing its surfaces, mount paths, and available skills. Services self-describe via MCP listings, OpenAPI specs, or `LABEL claw.skill.emit=/path/to/SKILL.md` in their image. Add a service, the skill map updates. No code changes.
+Every Claw receives a generated `CLAWDAPUS.md` — always in context — listing its surfaces, mount paths, and available skills. Services self-describe via MCP listings, OpenAPI specs, or `LABEL claw.skill.emit=/path/to/SKILL.md` in their image. Custom service-emitted manuals are also compiled into the effective agent contract automatically, so workflow-critical API docs are available in prompt context without extra pod YAML. Add a service, the skill map updates. No code changes.
 
 ```bash
 $ claw skillmap crypto-crusher-0

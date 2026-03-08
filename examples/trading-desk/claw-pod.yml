@@ -9,6 +9,21 @@ x-claw:
             - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
               name: trading-floor
 
+x-trading-desk:
+  cllama-agent: &cllama_agent
+    cllama: passthrough
+  proxy-env: &proxy_env
+    OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+    ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+  shared-trading-surfaces: &shared_trading_surfaces
+    - "service://trading-api"
+    - "volume://clawd-shared read-write"
+  trader-risk-skills: &trader_risk_skills
+    - ./policy/risk-limits.md
+  compliance-skills: &compliance_skills
+    - ./policy/risk-limits.md
+    - ./policy/approval-workflow.md
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Trading Desk Pod (tiverton + westin + allen + logan + micro)
 #
@@ -61,12 +76,10 @@ services:
       context: .
       dockerfile: Clawfile
     x-claw:
+      <<: *cllama_agent
       agent: ./agents/TIVERTON.md
-      cllama: passthrough
-      # Provider keys for cllama only. These never enter agent service env.
-      cllama-env:
-        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
-        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      # Provider keys are collected once for the shared pod-level cllama proxy.
+      cllama-env: *proxy_env
       handles:
         discord:
           id: "${TIVERTON_DISCORD_ID}"
@@ -80,9 +93,7 @@ services:
               policy: allowlist
               allow_from:
                 - "${OPERATOR_DISCORD_ID}"
-      skills:
-        - ./policy/risk-limits.md
-        - ./policy/approval-workflow.md
+      skills: *compliance_skills
       invoke:
         - schedule: "15 8 * * 1-5"
           name: "Pre-market synthesis"
@@ -105,17 +116,14 @@ services:
       context: .
       dockerfile: Clawfile
     x-claw:
+      <<: *cllama_agent
       agent: ./agents/WESTIN.md
-      cllama: passthrough
       handles:
         discord:
           id: "${WESTIN_DISCORD_ID}"
           username: "westin"
-      surfaces:
-        - "service://trading-api"
-        - "volume://clawd-shared read-write"
-      skills:
-        - ./policy/risk-limits.md
+      surfaces: *shared_trading_surfaces
+      skills: *trader_risk_skills
       invoke:
         - schedule: "0 * * * *"
           name: "Momentum check"
@@ -134,19 +142,13 @@ services:
       context: .
       dockerfile: Clawfile.nanoclaw
     x-claw:
+      <<: *cllama_agent
       agent: ./agents/ALLEN.md
-      cllama: passthrough
-      cllama-env:
-        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
       handles:
         discord:
           id: "${ALLEN_DISCORD_ID}"
           username: "allen"
-      surfaces:
-        - "service://trading-api"
-        - "volume://clawd-shared read-write"
-      skills:
-        - ./policy/risk-limits.md
+      surfaces: *shared_trading_surfaces
     environment:
       DISCORD_BOT_TOKEN: "${ALLEN_BOT_TOKEN}"
 
@@ -158,19 +160,14 @@ services:
       context: .
       dockerfile: Clawfile.nullclaw
     x-claw:
+      <<: *cllama_agent
       agent: ./agents/LOGAN.md
-      cllama: passthrough
-      cllama-env:
-        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
       handles:
         discord:
           id: "${LOGAN_DISCORD_ID}"
           username: "logan"
-      surfaces:
-        - "service://trading-api"
-        - "volume://clawd-shared read-write"
-      skills:
-        - ./policy/risk-limits.md
+      surfaces: *shared_trading_surfaces
+      skills: *trader_risk_skills
     environment:
       DISCORD_BOT_TOKEN: "${LOGAN_BOT_TOKEN}"
       CLAW_GREETING_CHANNEL: "${DISCORD_TRADING_FLOOR_CHANNEL}"
@@ -184,19 +181,13 @@ services:
       context: .
       dockerfile: Clawfile.microclaw
     x-claw:
+      <<: *cllama_agent
       agent: ./agents/MICRO.md
-      cllama: passthrough
-      cllama-env:
-        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
       handles:
         discord:
           id: "${MICRO_DISCORD_ID}"
           username: "micro"
-      surfaces:
-        - "service://trading-api"
-        - "volume://clawd-shared read-write"
-      skills:
-        - ./policy/risk-limits.md
+      surfaces: *shared_trading_surfaces
     environment:
       DISCORD_BOT_TOKEN: "${MICRO_BOT_TOKEN}"
       CLAW_GREETING_CHANNEL: "${DISCORD_TRADING_FLOOR_CHANNEL}"
