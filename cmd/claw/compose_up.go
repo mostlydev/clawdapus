@@ -38,6 +38,7 @@ var (
 	dockerBuildTaggedImage       = dockerBuildTaggedImageDefault
 	findClawdapusRepoRoot        = findRepoRoot
 	runInfraDockerCommand        = runInfraDockerCommandDefault
+	runComposeDockerCommand      = runComposeDockerCommandDefault
 )
 
 var composeUpCmd = &cobra.Command{
@@ -528,11 +529,16 @@ func runComposeUp(podFile string) error {
 		composeArgs = append(composeArgs, "-d")
 	}
 
-	dockerCmd := exec.Command("docker", composeArgs...)
-	dockerCmd.Stdout = os.Stdout
-	dockerCmd.Stderr = os.Stderr
-	if err := dockerCmd.Run(); err != nil {
+	if err := runComposeDockerCommand(composeArgs...); err != nil {
 		return fmt.Errorf("docker compose up failed: %w", err)
+	}
+
+	runtimeConsumers := runtimeConsumerServices(resolvedClaws, proxies, p.Clawdash)
+	if composeUpDetach && len(runtimeConsumers) > 0 {
+		recreateArgs := append([]string{"compose", "-f", generatedPath, "up", "-d", "--force-recreate"}, runtimeConsumers...)
+		if err := runComposeDockerCommand(recreateArgs...); err != nil {
+			return fmt.Errorf("docker compose force-recreate failed: %w", err)
+		}
 	}
 
 	// PostApply: verify every generated service container.
@@ -561,6 +567,43 @@ func resetRuntimeDir(path string) error {
 		return err
 	}
 	return os.MkdirAll(path, 0o700)
+}
+
+func runtimeConsumerServices(resolvedClaws map[string]*driver.ResolvedClaw, proxies []pod.CllamaProxyConfig, dash *pod.ClawdashConfig) []string {
+	seen := make(map[string]struct{})
+	names := make([]string, 0, len(resolvedClaws)+len(proxies)+1)
+
+	for name, rc := range resolvedClaws {
+		count := 1
+		if rc != nil && rc.Count > 0 {
+			count = rc.Count
+		}
+		for _, generated := range expandedServiceNames(name, count) {
+			if _, ok := seen[generated]; ok {
+				continue
+			}
+			seen[generated] = struct{}{}
+			names = append(names, generated)
+		}
+	}
+
+	for _, proxy := range proxies {
+		serviceName := cllama.ProxyServiceName(proxy.ProxyType)
+		if _, ok := seen[serviceName]; ok {
+			continue
+		}
+		seen[serviceName] = struct{}{}
+		names = append(names, serviceName)
+	}
+
+	if dash != nil {
+		if _, ok := seen["clawdash"]; !ok {
+			names = append(names, "clawdash")
+		}
+	}
+
+	sort.Strings(names)
+	return names
 }
 
 func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
@@ -1643,6 +1686,13 @@ func ensureImage(imageRef, name, dockerfilePath, contextDir string) error {
 }
 
 func runInfraDockerCommandDefault(args ...string) error {
+	cmd := exec.Command("docker", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func runComposeDockerCommandDefault(args ...string) error {
 	cmd := exec.Command("docker", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

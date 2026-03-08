@@ -2,6 +2,7 @@ package openclaw
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -117,21 +118,12 @@ func TestGenerateConfigChannelSurfaceGuildPolicy(t *testing.T) {
 			},
 		},
 	}
-	data, err := GenerateConfig(rc)
-	if err != nil {
+	_, err := GenerateConfig(rc)
+	if err == nil {
+		t.Fatal("expected guild policy to fail early until OpenClaw supports it")
+	}
+	if got := err.Error(); !strings.Contains(got, "guild policy is not supported") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	var config map[string]interface{}
-	if err := json.Unmarshal(data, &config); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	discord := config["channels"].(map[string]interface{})["discord"].(map[string]interface{})
-	guild := discord["guilds"].(map[string]interface{})["GUILD1"].(map[string]interface{})
-	if guild["policy"] != "allowlist" {
-		t.Errorf("expected guild policy=allowlist, got %v", guild["policy"])
-	}
-	if guild["requireMention"] != true {
-		t.Errorf("expected guild requireMention=true, got %v", guild["requireMention"])
 	}
 }
 

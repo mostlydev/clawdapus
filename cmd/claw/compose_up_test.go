@@ -293,6 +293,38 @@ func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
 	}
 }
 
+func TestRuntimeConsumerServicesIncludesManagedServicesAndInfra(t *testing.T) {
+	services := runtimeConsumerServices(
+		map[string]*driver.ResolvedClaw{
+			"assistant": {Count: 1},
+			"worker":    {Count: 2},
+		},
+		[]pod.CllamaProxyConfig{{ProxyType: "passthrough"}},
+		&pod.ClawdashConfig{},
+	)
+
+	want := []string{"assistant", "clawdash", "cllama", "worker-0", "worker-1"}
+	if !slices.Equal(services, want) {
+		t.Fatalf("unexpected runtime consumer services: got %v want %v", services, want)
+	}
+}
+
+func TestRuntimeConsumerServicesDeduplicatesAndSorts(t *testing.T) {
+	services := runtimeConsumerServices(
+		map[string]*driver.ResolvedClaw{
+			"zeta":  {Count: 1},
+			"alpha": nil,
+		},
+		[]pod.CllamaProxyConfig{{ProxyType: "passthrough"}, {ProxyType: "passthrough"}},
+		nil,
+	)
+
+	want := []string{"alpha", "cllama", "zeta"}
+	if !slices.Equal(services, want) {
+		t.Fatalf("unexpected runtime consumer services: got %v want %v", services, want)
+	}
+}
+
 func TestMergedPortsDeduplication(t *testing.T) {
 	expose := []string{"80", "443"}
 	ports := []string{"443", "8080"}

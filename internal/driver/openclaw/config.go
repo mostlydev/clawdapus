@@ -343,9 +343,7 @@ func applyDiscordChannelSurface(config map[string]interface{}, cc *driver.Channe
 	for guildID, guildCfg := range cc.Guilds {
 		base := fmt.Sprintf("channels.discord.guilds.%s", guildID)
 		if guildCfg.Policy != "" {
-			if err := setPath(config, base+".policy", guildCfg.Policy); err != nil {
-				return err
-			}
+			return fmt.Errorf("guild policy is not supported by the current OpenClaw runtime for guild %q; remove channel://discord guild policy until runtime support lands", guildID)
 		}
 		if guildCfg.RequireMention {
 			if err := setPath(config, base+".requireMention", true); err != nil {
