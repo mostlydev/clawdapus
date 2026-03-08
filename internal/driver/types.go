@@ -98,8 +98,10 @@ type ChannelDMConfig struct {
 // ChannelConfig is the full routing config declared in a map-form channel surface.
 // Non-nil only when the pod declares map form (channel://discord: {...}).
 type ChannelConfig struct {
-	Guilds map[string]ChannelGuildConfig // guild ID → routing config
-	DM     ChannelDMConfig
+	Guilds            map[string]ChannelGuildConfig // guild ID → routing config
+	DM                ChannelDMConfig
+	AllowFromHandles  bool     // append all declared platform handles to each guild users[] allowlist
+	AllowFromServices []string // append Discord bot IDs derived from these pod service envs
 }
 
 type ResolvedSurface struct {

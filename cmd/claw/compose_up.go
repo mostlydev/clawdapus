@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -673,6 +674,11 @@ func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
 			svc.Claw.Surfaces[i].Target = expand(svc.Claw.Surfaces[i].Target)
 			svc.Claw.Surfaces[i].AccessMode = expand(svc.Claw.Surfaces[i].AccessMode)
 			if cc := svc.Claw.Surfaces[i].ChannelConfig; cc != nil {
+				services := make([]string, len(cc.AllowFromServices))
+				for j, value := range cc.AllowFromServices {
+					services[j] = expand(value)
+				}
+				cc.AllowFromServices = services
 				cc.DM.Policy = expand(cc.DM.Policy)
 				for j, value := range cc.DM.AllowFrom {
 					cc.DM.AllowFrom[j] = expand(value)
@@ -688,10 +694,157 @@ func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
 					expandedGuilds[expand(guildID)] = guildCfg
 				}
 				cc.Guilds = expandedGuilds
+				if svc.Claw.Surfaces[i].Target == "discord" {
+					if err := expandDiscordChannelAdmission(p, cc); err != nil {
+						return err
+					}
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func expandDiscordChannelAdmission(p *pod.Pod, cc *driver.ChannelConfig) error {
+	if cc == nil || (!cc.AllowFromHandles && len(cc.AllowFromServices) == 0) {
+		return nil
+	}
+
+	derived := make([]string, 0)
+	if cc.AllowFromHandles {
+		derived = append(derived, discordHandleIDsFromPod(p)...)
+	}
+
+	serviceIDs, err := discordServiceUserIDs(p, cc.AllowFromServices)
+	if err != nil {
+		return err
+	}
+	derived = append(derived, serviceIDs...)
+	derived = uniqueSortedStrings(derived)
+	if len(derived) == 0 {
+		return nil
+	}
+
+	for guildID, guildCfg := range cc.Guilds {
+		guildCfg.Users = mergeUniqueStrings(guildCfg.Users, derived)
+		cc.Guilds[guildID] = guildCfg
+	}
+	return nil
+}
+
+func discordHandleIDsFromPod(p *pod.Pod) []string {
+	ids := make([]string, 0)
+	for _, svc := range p.Services {
+		if svc.Claw == nil {
+			continue
+		}
+		handle := svc.Claw.Handles["discord"]
+		if handle == nil || handle.ID == "" {
+			continue
+		}
+		ids = append(ids, handle.ID)
+	}
+	return uniqueSortedStrings(ids)
+}
+
+func discordServiceUserIDs(p *pod.Pod, serviceNames []string) ([]string, error) {
+	ids := make([]string, 0, len(serviceNames))
+	for _, name := range serviceNames {
+		svc, ok := p.Services[name]
+		if !ok {
+			return nil, fmt.Errorf("channel://discord allow_from_services references unknown service %q", name)
+		}
+		id := discordUserIDFromService(svc)
+		if id == "" {
+			return nil, fmt.Errorf("channel://discord allow_from_services service %q has no Discord bot identity; expected DISCORD_BOT_TOKEN or DISCORD_TRADING_API_BOT_TOKEN", name)
+		}
+		ids = append(ids, id)
+	}
+	return uniqueSortedStrings(ids), nil
+}
+
+func discordUserIDFromService(svc *pod.Service) string {
+	if svc == nil {
+		return ""
+	}
+	for _, key := range []string{"DISCORD_BOT_TOKEN", "DISCORD_TRADING_API_BOT_TOKEN"} {
+		if token := strings.TrimSpace(svc.Environment[key]); token != "" {
+			if id := discordIDFromToken(token); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+func discordIDFromToken(token string) string {
+	parts := strings.SplitN(strings.TrimSpace(token), ".", 2)
+	if len(parts) == 0 || parts[0] == "" {
+		return ""
+	}
+	segment := parts[0]
+	data, err := base64.RawURLEncoding.DecodeString(segment)
+	if err != nil {
+		return ""
+	}
+	id := strings.TrimSpace(string(data))
+	if id == "" {
+		return ""
+	}
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return id
+}
+
+func uniqueSortedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func mergeUniqueStrings(base []string, extra []string) []string {
+	if len(extra) == 0 {
+		return base
+	}
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	out := make([]string, 0, len(base)+len(extra))
+	for _, value := range base {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	for _, value := range extra {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func loadRuntimeEnv(podDir string) (map[string]string, error) {
