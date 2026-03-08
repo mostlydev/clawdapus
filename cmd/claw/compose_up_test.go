@@ -1,13 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/openclaw"
 	"github.com/mostlydev/clawdapus/internal/pod"
 )
 
@@ -111,6 +114,112 @@ func TestResolveSkillEmitFallsBackOnExtractionError(t *testing.T) {
 	}
 	if skill != nil {
 		t.Errorf("expected nil skill on extraction failure, got %+v", skill)
+	}
+}
+
+func TestResolveRuntimePlaceholdersUsesDotEnvForHandleTopology(t *testing.T) {
+	tmpDir := t.TempDir()
+	dotEnv := strings.Join([]string{
+		"BOT_ID=123456789",
+		"GUILD_ID=999888777",
+		"CHANNEL_ID=111222333",
+		"BOT_USERNAME=tiverton",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte(dotEnv), 0o644); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"bot": {
+				Claw: &pod.ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							ID:       "${BOT_ID}",
+							Username: "${BOT_USERNAME}",
+							Guilds: []driver.GuildInfo{{
+								ID: "${GUILD_ID}",
+								Channels: []driver.ChannelInfo{{
+									ID:   "${CHANNEL_ID}",
+									Name: "trading-floor",
+								}},
+							}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := resolveRuntimePlaceholders(tmpDir, p); err != nil {
+		t.Fatalf("resolveRuntimePlaceholders: %v", err)
+	}
+
+	handle := p.Services["bot"].Claw.Handles["discord"]
+	if handle.ID != "123456789" {
+		t.Fatalf("expected expanded handle ID, got %q", handle.ID)
+	}
+	if handle.Username != "tiverton" {
+		t.Fatalf("expected expanded username, got %q", handle.Username)
+	}
+	if handle.Guilds[0].ID != "999888777" {
+		t.Fatalf("expected expanded guild ID, got %q", handle.Guilds[0].ID)
+	}
+	if handle.Guilds[0].Channels[0].ID != "111222333" {
+		t.Fatalf("expected expanded channel ID, got %q", handle.Guilds[0].Channels[0].ID)
+	}
+
+	configJSON, err := openclaw.GenerateConfig(&driver.ResolvedClaw{
+		ServiceName: "bot",
+		Handles:     map[string]*driver.HandleInfo{"discord": handle},
+		Models:      map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("GenerateConfig: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(configJSON, &config); err != nil {
+		t.Fatalf("unmarshal generated config: %v", err)
+	}
+	guilds := config["channels"].(map[string]interface{})["discord"].(map[string]interface{})["guilds"].(map[string]interface{})
+	if _, ok := guilds["999888777"]; !ok {
+		t.Fatalf("expected concrete guild ID key in generated config, got %v", guilds)
+	}
+	if _, ok := guilds["${GUILD_ID}"]; ok {
+		t.Fatalf("did not expect unresolved placeholder key in generated config")
+	}
+}
+
+func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
+	tmpDir := t.TempDir()
+	runtimeDir := filepath.Join(tmpDir, ".claw-runtime")
+	staleDir := filepath.Join(runtimeDir, "nb-roll", "skills", "handle-discord.md")
+	if err := os.MkdirAll(staleDir, 0o755); err != nil {
+		t.Fatalf("create stale dir: %v", err)
+	}
+	staleFile := filepath.Join(runtimeDir, "stale.txt")
+	if err := os.WriteFile(staleFile, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write stale file: %v", err)
+	}
+
+	if err := resetRuntimeDir(runtimeDir); err != nil {
+		t.Fatalf("reset runtime dir: %v", err)
+	}
+
+	info, err := os.Stat(runtimeDir)
+	if err != nil {
+		t.Fatalf("stat runtime dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected runtime dir to exist as directory")
+	}
+	if _, err := os.Stat(staleDir); !os.IsNotExist(err) {
+		t.Fatalf("expected stale dir to be removed, got err=%v", err)
+	}
+	if _, err := os.Stat(staleFile); !os.IsNotExist(err) {
+		t.Fatalf("expected stale file to be removed, got err=%v", err)
 	}
 }
 
@@ -303,6 +412,117 @@ func TestResolveManagedServiceImageRequiresImageOrBuild(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "require image: or build:") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestEnsureImagePullsBeforeTryingLocalBuild(t *testing.T) {
+	prevExists := imageExistsLocally
+	prevFindRepoRoot := findClawdapusRepoRoot
+	prevRunInfra := runInfraDockerCommand
+	defer func() {
+		imageExistsLocally = prevExists
+		findClawdapusRepoRoot = prevFindRepoRoot
+		runInfraDockerCommand = prevRunInfra
+	}()
+
+	imageExistsLocally = func(string) bool { return false }
+	findClawdapusRepoRoot = func() (string, bool) {
+		t.Fatal("unexpected repo-root lookup after successful pull")
+		return "", false
+	}
+
+	var calls [][]string
+	runInfraDockerCommand = func(args ...string) error {
+		calls = append(calls, append([]string(nil), args...))
+		return nil
+	}
+
+	if err := ensureImage("ghcr.io/mostlydev/cllama:latest", "cllama", "cllama/Dockerfile", "cllama"); err != nil {
+		t.Fatalf("ensureImage: %v", err)
+	}
+
+	want := [][]string{{"pull", "ghcr.io/mostlydev/cllama:latest"}}
+	if !slices.EqualFunc(calls, want, func(a, b []string) bool { return slices.Equal(a, b) }) {
+		t.Fatalf("unexpected docker calls: got %v want %v", calls, want)
+	}
+}
+
+func TestEnsureImageFallsBackToLocalBuildAfterPullFailure(t *testing.T) {
+	prevExists := imageExistsLocally
+	prevFindRepoRoot := findClawdapusRepoRoot
+	prevRunInfra := runInfraDockerCommand
+	defer func() {
+		imageExistsLocally = prevExists
+		findClawdapusRepoRoot = prevFindRepoRoot
+		runInfraDockerCommand = prevRunInfra
+	}()
+
+	repoRoot := t.TempDir()
+	dockerfilePath := filepath.Join(repoRoot, "cllama", "Dockerfile")
+	if err := os.MkdirAll(filepath.Dir(dockerfilePath), 0o755); err != nil {
+		t.Fatalf("mkdir dockerfile dir: %v", err)
+	}
+	if err := os.WriteFile(dockerfilePath, []byte("FROM alpine\n"), 0o644); err != nil {
+		t.Fatalf("write dockerfile: %v", err)
+	}
+
+	imageExistsLocally = func(string) bool { return false }
+	findClawdapusRepoRoot = func() (string, bool) { return repoRoot, true }
+
+	var calls [][]string
+	runInfraDockerCommand = func(args ...string) error {
+		calls = append(calls, append([]string(nil), args...))
+		if len(args) > 0 && args[0] == "pull" {
+			return fmt.Errorf("pull failed")
+		}
+		return nil
+	}
+
+	if err := ensureImage("ghcr.io/mostlydev/cllama:latest", "cllama", "cllama/Dockerfile", "cllama"); err != nil {
+		t.Fatalf("ensureImage: %v", err)
+	}
+
+	want := [][]string{
+		{"pull", "ghcr.io/mostlydev/cllama:latest"},
+		{"build", "-t", "ghcr.io/mostlydev/cllama:latest", "-f", dockerfilePath, filepath.Join(repoRoot, "cllama")},
+	}
+	if !slices.EqualFunc(calls, want, func(a, b []string) bool { return slices.Equal(a, b) }) {
+		t.Fatalf("unexpected docker calls: got %v want %v", calls, want)
+	}
+}
+
+func TestEnsureImageFallsBackToRemoteBuildWithoutRepoRoot(t *testing.T) {
+	prevExists := imageExistsLocally
+	prevFindRepoRoot := findClawdapusRepoRoot
+	prevRunInfra := runInfraDockerCommand
+	defer func() {
+		imageExistsLocally = prevExists
+		findClawdapusRepoRoot = prevFindRepoRoot
+		runInfraDockerCommand = prevRunInfra
+	}()
+
+	imageExistsLocally = func(string) bool { return false }
+	findClawdapusRepoRoot = func() (string, bool) { return "", false }
+
+	var calls [][]string
+	runInfraDockerCommand = func(args ...string) error {
+		calls = append(calls, append([]string(nil), args...))
+		if len(args) > 0 && args[0] == "pull" {
+			return fmt.Errorf("pull failed")
+		}
+		return nil
+	}
+
+	if err := ensureImage("ghcr.io/mostlydev/clawdash:latest", "clawdash", "dockerfiles/clawdash/Dockerfile", "."); err != nil {
+		t.Fatalf("ensureImage: %v", err)
+	}
+
+	want := [][]string{
+		{"pull", "ghcr.io/mostlydev/clawdash:latest"},
+		{"build", "-t", "ghcr.io/mostlydev/clawdash:latest", "https://github.com/mostlydev/clawdapus.git#master:."},
+	}
+	if !slices.EqualFunc(calls, want, func(a, b []string) bool { return slices.Equal(a, b) }) {
+		t.Fatalf("unexpected docker calls: got %v want %v", calls, want)
 	}
 }
 

@@ -13,6 +13,8 @@ x-claw:
 #   TIVERTON_DISCORD_ID, WESTIN_DISCORD_ID, ALLEN_DISCORD_ID, LOGAN_DISCORD_ID, MICRO_DISCORD_ID
 #   DISCORD_GUILD_ID, DISCORD_TRADING_FLOOR_CHANNEL
 #   OPENROUTER_API_KEY, ANTHROPIC_API_KEY (proxy-side provider keys for cllama)
+# Note: claw resolves ${...} in x-claw metadata from the pod-local .env before
+# generating runtime config. Bot tokens still belong in service environment.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +25,8 @@ import (
 
 var composeUpDetach bool
 
+var envVarPattern = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
+
 var (
 	extractServiceSkillFromImage = runtime.ExtractServiceSkill
 	writeRuntimeFile             = os.WriteFile
@@ -31,6 +35,8 @@ var (
 	generateClawDockerfile       = build.Generate
 	buildGeneratedImage          = build.BuildFromGenerated
 	dockerBuildTaggedImage       = dockerBuildTaggedImageDefault
+	findClawdapusRepoRoot        = findRepoRoot
+	runInfraDockerCommand        = runInfraDockerCommandDefault
 )
 
 var composeUpCmd = &cobra.Command{
@@ -69,9 +75,12 @@ func runComposeUp(podFile string) error {
 	if err != nil {
 		return fmt.Errorf("resolve pod directory: %w", err)
 	}
+	if err := resolveRuntimePlaceholders(podDir, p); err != nil {
+		return fmt.Errorf("resolve x-claw runtime placeholders: %w", err)
+	}
 	runtimeDir := filepath.Join(podDir, ".claw-runtime")
-	if err := os.MkdirAll(runtimeDir, 0700); err != nil {
-		return fmt.Errorf("create runtime dir: %w", err)
+	if err := resetRuntimeDir(runtimeDir); err != nil {
+		return fmt.Errorf("reset runtime dir: %w", err)
 	}
 
 	results := make(map[string]*driver.MaterializeResult)
@@ -523,6 +532,139 @@ func runComposeUp(podFile string) error {
 
 	fmt.Println("[claw] pod is up")
 	return nil
+}
+
+func resetRuntimeDir(path string) error {
+	if err := os.RemoveAll(path); err != nil {
+		return err
+	}
+	return os.MkdirAll(path, 0o700)
+}
+
+func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
+	env, err := loadRuntimeEnv(podDir)
+	if err != nil {
+		return err
+	}
+	expand := func(value string) string {
+		return envVarPattern.ReplaceAllStringFunc(value, func(match string) string {
+			key := match[2 : len(match)-1]
+			if v, ok := env[key]; ok {
+				return v
+			}
+			return match
+		})
+	}
+
+	for _, svc := range p.Services {
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		svc.Claw.Agent = expand(svc.Claw.Agent)
+		svc.Claw.Persona = expand(svc.Claw.Persona)
+		for i, value := range svc.Claw.Cllama {
+			svc.Claw.Cllama[i] = expand(value)
+		}
+		for key, value := range svc.Claw.CllamaEnv {
+			svc.Claw.CllamaEnv[key] = expand(value)
+		}
+		for i, value := range svc.Claw.Skills {
+			svc.Claw.Skills[i] = expand(value)
+		}
+		for i := range svc.Claw.Invoke {
+			svc.Claw.Invoke[i].Schedule = expand(svc.Claw.Invoke[i].Schedule)
+			svc.Claw.Invoke[i].Message = expand(svc.Claw.Invoke[i].Message)
+			svc.Claw.Invoke[i].Name = expand(svc.Claw.Invoke[i].Name)
+			svc.Claw.Invoke[i].To = expand(svc.Claw.Invoke[i].To)
+		}
+		for _, handle := range svc.Claw.Handles {
+			if handle == nil {
+				continue
+			}
+			handle.ID = expand(handle.ID)
+			handle.Username = expand(handle.Username)
+			for gi := range handle.Guilds {
+				handle.Guilds[gi].ID = expand(handle.Guilds[gi].ID)
+				handle.Guilds[gi].Name = expand(handle.Guilds[gi].Name)
+				for ci := range handle.Guilds[gi].Channels {
+					handle.Guilds[gi].Channels[ci].ID = expand(handle.Guilds[gi].Channels[ci].ID)
+					handle.Guilds[gi].Channels[ci].Name = expand(handle.Guilds[gi].Channels[ci].Name)
+				}
+			}
+		}
+		for i := range svc.Claw.Surfaces {
+			svc.Claw.Surfaces[i].Target = expand(svc.Claw.Surfaces[i].Target)
+			svc.Claw.Surfaces[i].AccessMode = expand(svc.Claw.Surfaces[i].AccessMode)
+			if cc := svc.Claw.Surfaces[i].ChannelConfig; cc != nil {
+				cc.DM.Policy = expand(cc.DM.Policy)
+				for j, value := range cc.DM.AllowFrom {
+					cc.DM.AllowFrom[j] = expand(value)
+				}
+				expandedGuilds := make(map[string]driver.ChannelGuildConfig, len(cc.Guilds))
+				for guildID, guildCfg := range cc.Guilds {
+					guildCfg.Policy = expand(guildCfg.Policy)
+					users := make([]string, len(guildCfg.Users))
+					for j, value := range guildCfg.Users {
+						users[j] = expand(value)
+					}
+					guildCfg.Users = users
+					expandedGuilds[expand(guildID)] = guildCfg
+				}
+				cc.Guilds = expandedGuilds
+			}
+		}
+	}
+	return nil
+}
+
+func loadRuntimeEnv(podDir string) (map[string]string, error) {
+	env := make(map[string]string)
+	dotEnvPath := filepath.Join(podDir, ".env")
+	if fileEnv, err := readDotEnvFile(dotEnvPath); err == nil {
+		for key, value := range fileEnv {
+			env[key] = value
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	for _, entry := range os.Environ() {
+		eq := strings.IndexByte(entry, '=')
+		if eq < 0 {
+			continue
+		}
+		env[entry[:eq]] = entry[eq+1:]
+	}
+	return env, nil
+}
+
+func readDotEnvFile(path string) (map[string]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	out := make(map[string]string)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		eq := strings.IndexByte(line, '=')
+		if eq < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:eq])
+		value := strings.TrimSpace(line[eq+1:])
+		value = strings.Trim(value, `"'`)
+		out[key] = value
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func mergeResolvedSkills(imageSkills, podSkills []driver.ResolvedSkill) []driver.ResolvedSkill {
@@ -1304,23 +1446,25 @@ func ensureInfraImages(cllamaEnabled bool, proxies []pod.CllamaProxyConfig, dash
 }
 
 // ensureImage builds a Docker image if it doesn't exist locally.
-// It tries: local build from repo source, then git URL build, then errors.
+// It tries: local image, docker pull, local build from repo source, git URL build,
+// then errors with explicit manual-build guidance.
 func ensureImage(imageRef, name, dockerfilePath, contextDir string) error {
-	if build.ImageExistsLocally(imageRef) {
+	if imageExistsLocally(imageRef) {
 		return nil
 	}
 
 	fmt.Printf("[claw] building %s image (first time only)\n", name)
 
-	repoRoot, found := findRepoRoot()
+	if err := runInfraDockerCommand("pull", imageRef); err == nil {
+		return nil
+	}
+
+	repoRoot, found := findClawdapusRepoRoot()
 	if found {
 		df := filepath.Join(repoRoot, dockerfilePath)
 		ctx := filepath.Join(repoRoot, contextDir)
 		if _, err := os.Stat(df); err == nil {
-			cmd := exec.Command("docker", "build", "-t", imageRef, "-f", df, ctx)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
+			if err := runInfraDockerCommand("build", "-t", imageRef, "-f", df, ctx); err != nil {
 				return fmt.Errorf("build %s image from local source: %w", name, err)
 			}
 			return nil
@@ -1329,13 +1473,17 @@ func ensureImage(imageRef, name, dockerfilePath, contextDir string) error {
 
 	// Fallback: build from git URL.
 	gitURL := fmt.Sprintf("https://github.com/mostlydev/clawdapus.git#master:%s", contextDir)
-	cmd := exec.Command("docker", "build", "-t", imageRef, gitURL)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := runInfraDockerCommand("build", "-t", imageRef, gitURL); err != nil {
 		return fmt.Errorf("could not build %s image; run 'docker build -t %s -f %s %s' from the repo root", name, imageRef, dockerfilePath, contextDir)
 	}
 	return nil
+}
+
+func runInfraDockerCommandDefault(args ...string) error {
+	cmd := exec.Command("docker", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // findRepoRoot walks up from cwd looking for go.mod with the clawdapus module.

@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-prompt --no-onboard --method npm
 
-RUN mkdir -p /claw && cat > /claw/entrypoint.sh <<'ENTRYPOINT_EOF'
+RUN mkdir -p /claw /usr/local/bin && cat > /usr/local/bin/openclaw-entrypoint.sh <<'ENTRYPOINT_EOF'
 #!/bin/sh
 set -e
 
@@ -64,9 +64,9 @@ fi
 # Hand off — wait for the gateway process to exit.
 wait "$GATEWAY_PID"
 ENTRYPOINT_EOF
-RUN chmod +x /claw/entrypoint.sh
+RUN chmod +x /usr/local/bin/openclaw-entrypoint.sh
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/claw/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/openclaw-entrypoint.sh"]
 `
 
 // BaseImage implements driver.BaseImageProvider for the openclaw driver.

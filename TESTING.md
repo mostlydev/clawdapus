@@ -28,14 +28,111 @@ go test -tags e2e -v ./...
 
 ---
 
-## Spike Test (live Discord + Docker required)
+## Spike Tests (live Discord + Docker required)
 
-The spike test (`TestSpikeComposeUp`) is the primary end-to-end validation instrument
-for the trading-desk example. It builds images, runs `claw up`, verifies all
-generated artifacts, starts containers, and confirms live Discord activity.
+Spike tests are the live end-to-end validation layer. They require real credentials,
+Docker, and a real Discord server. They are not CI tests.
 
-**It is not a CI test.** It requires real credentials and a real Discord server.
-Run it when implementing or validating new driver behavior end-to-end.
+There are currently two spike paths:
+
+- `TestSpikeRollCall`: the broad driver-parity validation path. Boots all 6 driver
+  types plus `cllama` passthrough and `clawdash`, sends a Discord roll call, and
+  verifies runtime-specific responses.
+- `TestSpikeComposeUp`: the deeper trading-desk validation path. Focuses on artifact
+  generation, startup wiring, and Discord activity for the richer multi-service example.
+
+Run a spike test when implementing or validating driver/runtime behavior end to end.
+
+### Rollcall Driver Parity Spike
+
+The rollcall spike (`TestSpikeRollCall`) is the best single validation path for
+cross-driver support. It uses [`examples/rollcall/`](./examples/rollcall/) and
+exercises:
+
+- `openclaw`
+- `nullclaw`
+- `microclaw`
+- `nanoclaw`
+- `nanobot`
+- `picoclaw`
+- `cllama` passthrough
+- `clawdash`
+
+### What it validates
+
+- Base images build for all 6 driver families
+- Agent images build from their `Clawfile`s
+- `claw up` succeeds on the rollcall pod
+- All agent containers converge to healthy/running state
+- A Discord trigger message causes each runtime to post an AI-generated
+  self-identification response
+- `cllama` exposes cost data after traffic flows through the proxy
+
+### Prerequisites
+
+- Docker running
+- Go toolchain
+- A Discord server with:
+  - One bot application token with permission to read and post in the target channel
+  - A text channel for the roll call
+  - An incoming webhook URL for posting the non-bot trigger message
+- At least one LLM provider key:
+  - `OPENROUTER_API_KEY` or
+  - `ANTHROPIC_API_KEY`
+
+### Setup
+
+```bash
+cd examples/rollcall
+cp .env.example .env
+# Edit .env with real values
+```
+
+Required `.env` values:
+
+| Variable | What it is |
+|----------|------------|
+| `DISCORD_BOT_TOKEN` | Bot token used by all rollcall services |
+| `DISCORD_BOT_ID` | Discord application/user ID for that bot |
+| `DISCORD_GUILD_ID` | Discord server (guild) ID |
+| `ROLLCALL_CHANNEL_ID` | Channel ID used for the roll call |
+| `DISCORD_WEBHOOK_URL` | Incoming webhook URL used to post the trigger message |
+| `OPENROUTER_API_KEY` | Optional, used by OpenRouter-backed passthrough services |
+| `ANTHROPIC_API_KEY` | Optional, used by Anthropic-backed passthrough services |
+
+### Running
+
+```bash
+go test -tags spike -v -run TestSpikeRollCall ./cmd/claw/...
+```
+
+Expected duration: 3-10 minutes depending on Docker cache warmth, image build time,
+Discord gateway connection, and LLM latency.
+
+### Output
+
+The test logs:
+
+- Image builds and compose startup progress
+- Health convergence for each rollcall container
+- Matching Discord responses for each runtime name
+- Recent container logs on teardown or failure
+- `cllama` health/cost endpoint checks
+
+### Cleanup
+
+Containers are torn down automatically on success, failure, or Ctrl-C.
+
+If a run is killed hard, clean up manually:
+
+```bash
+docker compose -p rollcall down --volumes --remove-orphans
+```
+
+## Trading-Desk Spike
+
+The trading-desk spike (`TestSpikeComposeUp`) remains the deeper artifact and
+workflow validation instrument for the richer `examples/trading-desk/` example.
 
 ### What it validates
 
