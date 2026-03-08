@@ -44,9 +44,17 @@ type rawClawBlock struct {
 	CllamaEnv map[string]string      `yaml:"cllama-env"`
 	Count     int                    `yaml:"count"`
 	Handles   map[string]interface{} `yaml:"handles"`
+	Include   []rawIncludeEntry      `yaml:"include"`
 	Surfaces  []interface{}          `yaml:"surfaces"`
 	Skills    []string               `yaml:"skills"`
 	Invoke    []rawInvokeEntry       `yaml:"invoke"`
+}
+
+type rawIncludeEntry struct {
+	ID          string `yaml:"id"`
+	File        string `yaml:"file"`
+	Mode        string `yaml:"mode"`
+	Description string `yaml:"description"`
 }
 
 // Parse reads a claw-pod.yml from the given reader.
@@ -154,6 +162,10 @@ func Parse(r io.Reader) (*Pod, error) {
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse handles: %w", name, err)
 			}
+			include, err := parseIncludes(svc.XClaw.Include)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: parse include: %w", name, err)
+			}
 			invoke := make([]InvokeEntry, 0, len(svc.XClaw.Invoke))
 			for _, rawInv := range svc.XClaw.Invoke {
 				if rawInv.Schedule == "" || rawInv.Message == "" {
@@ -173,6 +185,7 @@ func Parse(r io.Reader) (*Pod, error) {
 				CllamaEnv: svc.XClaw.CllamaEnv,
 				Count:     count,
 				Handles:   handles,
+				Include:   include,
 				Surfaces:  parsedSurfaces,
 				Skills:    skills,
 				Invoke:    invoke,
@@ -311,6 +324,45 @@ func parseHandleMap(m map[string]interface{}) (*driver.HandleInfo, error) {
 	}
 
 	return info, nil
+}
+
+func parseIncludes(raw []rawIncludeEntry) ([]IncludeEntry, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]IncludeEntry, 0, len(raw))
+	for i, item := range raw {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			return nil, fmt.Errorf("entry %d: include id must not be empty", i)
+		}
+		if _, exists := seen[id]; exists {
+			return nil, fmt.Errorf("entry %d: duplicate include id %q", i, id)
+		}
+		seen[id] = struct{}{}
+
+		file := strings.TrimSpace(item.File)
+		if file == "" {
+			return nil, fmt.Errorf("entry %d (%s): include file must not be empty", i, id)
+		}
+		mode := strings.ToLower(strings.TrimSpace(item.Mode))
+		switch mode {
+		case "enforce", "guide", "reference":
+		default:
+			return nil, fmt.Errorf("entry %d (%s): unsupported include mode %q", i, id, item.Mode)
+		}
+
+		out = append(out, IncludeEntry{
+			ID:          id,
+			File:        file,
+			Mode:        mode,
+			Description: strings.TrimSpace(item.Description),
+		})
+	}
+
+	return out, nil
 }
 
 func parseGuildEntry(val interface{}) (driver.GuildInfo, error) {

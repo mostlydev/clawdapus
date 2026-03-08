@@ -30,9 +30,11 @@ type ResolvedClaw struct {
 	ClawType      string
 	Agent         string                            // filename from image labels (e.g., "AGENTS.md")
 	AgentHostPath string                            // resolved host path for bind mount
+	Persona       string                            // runtime persona ref from x-claw or image metadata
 	Models        map[string]string                 // slot -> provider/model
 	Handles       map[string]*HandleInfo            // platform -> contact card (from x-claw handles block)
 	PeerHandles   map[string]map[string]*HandleInfo // service name -> platform -> HandleInfo for sibling services
+	Includes      []ResolvedInclude                 // composed contract fragments from x-claw.include
 	Surfaces      []ResolvedSurface
 	Skills        []ResolvedSkill
 	Privileges    map[string]string
@@ -68,6 +70,14 @@ type ChannelInfo struct {
 type ResolvedSkill struct {
 	Name     string // basename (e.g., "custom-workflow.md")
 	HostPath string // resolved absolute host path
+}
+
+type ResolvedInclude struct {
+	ID          string
+	Mode        string
+	Description string
+	HostPath    string
+	SkillName   string // set for reference includes mounted into the skill directory
 }
 
 // ChannelGuildConfig is the routing config for one guild in a channel surface.

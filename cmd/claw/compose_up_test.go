@@ -192,6 +192,76 @@ func TestResolveRuntimePlaceholdersUsesDotEnvForHandleTopology(t *testing.T) {
 	}
 }
 
+func TestMaterializeContractIncludesBuildsGeneratedContractAndReferenceSkill(t *testing.T) {
+	baseDir := t.TempDir()
+	runtimeDir := filepath.Join(baseDir, ".claw-runtime", "bot")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+
+	agentPath := filepath.Join(baseDir, "AGENTS.md")
+	enforcePath := filepath.Join(baseDir, "governance", "risk-limits.md")
+	referencePath := filepath.Join(baseDir, "playbooks", "strategy.md")
+	if err := os.MkdirAll(filepath.Dir(enforcePath), 0o755); err != nil {
+		t.Fatalf("mkdir governance dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(referencePath), 0o755); err != nil {
+		t.Fatalf("mkdir playbooks dir: %v", err)
+	}
+	if err := os.WriteFile(agentPath, []byte("# Base Contract\n"), 0o644); err != nil {
+		t.Fatalf("write base contract: %v", err)
+	}
+	if err := os.WriteFile(enforcePath, []byte("No unauthorized trades.\n"), 0o644); err != nil {
+		t.Fatalf("write enforce include: %v", err)
+	}
+	if err := os.WriteFile(referencePath, []byte("# Strategy Notes\n"), 0o644); err != nil {
+		t.Fatalf("write reference include: %v", err)
+	}
+
+	includes := []pod.IncludeEntry{
+		{ID: "risk_limits", File: "./governance/risk-limits.md", Mode: "enforce", Description: "Hard trading rules"},
+		{ID: "strategy_notes", File: "./playbooks/strategy.md", Mode: "reference", Description: "Desk playbook"},
+	}
+
+	resolved, skills, err := materializeContractIncludes(baseDir, runtimeDir, agentPath, includes)
+	if err != nil {
+		t.Fatalf("materializeContractIncludes: %v", err)
+	}
+	if len(resolved) != 2 {
+		t.Fatalf("expected 2 resolved includes, got %d", len(resolved))
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 generated reference skill, got %d", len(skills))
+	}
+	if skills[0].Name != "include-strategy_notes.md" {
+		t.Fatalf("unexpected generated skill name: %q", skills[0].Name)
+	}
+
+	generatedPath := filepath.Join(runtimeDir, "AGENTS.generated.md")
+	generated, err := os.ReadFile(generatedPath)
+	if err != nil {
+		t.Fatalf("read generated contract: %v", err)
+	}
+	text := string(generated)
+	if !strings.Contains(text, "# Base Contract") {
+		t.Fatalf("expected base contract in generated output")
+	}
+	if !strings.Contains(text, "--- BEGIN: risk_limits (enforce) ---") {
+		t.Fatalf("expected enforce include marker in generated contract:\n%s", text)
+	}
+	if !strings.Contains(text, "No unauthorized trades.") {
+		t.Fatalf("expected enforce include content in generated contract:\n%s", text)
+	}
+
+	referenceSkill, err := os.ReadFile(skills[0].HostPath)
+	if err != nil {
+		t.Fatalf("read generated reference skill: %v", err)
+	}
+	if string(referenceSkill) != "# Strategy Notes\n" {
+		t.Fatalf("unexpected reference skill content: %q", string(referenceSkill))
+	}
+}
+
 func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
 	tmpDir := t.TempDir()
 	runtimeDir := filepath.Join(tmpDir, ".claw-runtime")

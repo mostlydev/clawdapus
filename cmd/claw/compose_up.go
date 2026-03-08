@@ -156,6 +156,14 @@ func runComposeUp(podFile string) error {
 			return fmt.Errorf("service %q: create service runtime dir: %w", name, err)
 		}
 
+		resolvedIncludes, includeSkills, err := materializeContractIncludes(podDir, svcRuntimeDir, agentHostPath, svc.Claw.Include)
+		if err != nil {
+			return fmt.Errorf("service %q: materialize contract includes: %w", name, err)
+		}
+		if len(resolvedIncludes) > 0 {
+			agentHostPath = filepath.Join(svcRuntimeDir, "AGENTS.generated.md")
+		}
+
 		// Merge skills: image-level (from labels) + pod-level (from x-claw)
 		imageSkills, err := runtime.ResolveSkills(podDir, info.Skills)
 		if err != nil {
@@ -181,6 +189,9 @@ func runComposeUp(podFile string) error {
 		}
 		if len(channelSkills) > 0 {
 			generatedSkills = mergeResolvedSkills(generatedSkills, channelSkills)
+		}
+		if len(includeSkills) > 0 {
+			generatedSkills = mergeResolvedSkills(generatedSkills, includeSkills)
 		}
 		handleSkills, err := resolveHandleSkills(svcRuntimeDir, svc.Claw.Handles)
 		if err != nil {
@@ -216,9 +227,11 @@ func runComposeUp(podFile string) error {
 			ClawType:      info.ClawType,
 			Agent:         agentFile,
 			AgentHostPath: agentHostPath,
+			Persona:       firstNonEmpty(svc.Claw.Persona, info.Persona),
 			Models:        info.Models,
 			Handles:       svc.Claw.Handles,
 			PeerHandles:   peerHandles,
+			Includes:      resolvedIncludes,
 			Configures:    info.Configures,
 			Privileges:    info.Privileges,
 			Count:         svc.Claw.Count,
@@ -571,6 +584,12 @@ func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
 		for i, value := range svc.Claw.Skills {
 			svc.Claw.Skills[i] = expand(value)
 		}
+		for i := range svc.Claw.Include {
+			svc.Claw.Include[i].ID = expand(svc.Claw.Include[i].ID)
+			svc.Claw.Include[i].File = expand(svc.Claw.Include[i].File)
+			svc.Claw.Include[i].Mode = expand(svc.Claw.Include[i].Mode)
+			svc.Claw.Include[i].Description = expand(svc.Claw.Include[i].Description)
+		}
 		for i := range svc.Claw.Invoke {
 			svc.Claw.Invoke[i].Schedule = expand(svc.Claw.Invoke[i].Schedule)
 			svc.Claw.Invoke[i].Message = expand(svc.Claw.Invoke[i].Message)
@@ -686,6 +705,141 @@ func mergeResolvedSkills(imageSkills, podSkills []driver.ResolvedSkill) []driver
 	}
 
 	return merged
+}
+
+func materializeContractIncludes(baseDir, runtimeDir, agentHostPath string, includes []pod.IncludeEntry) ([]driver.ResolvedInclude, []driver.ResolvedSkill, error) {
+	if len(includes) == 0 {
+		return nil, nil, nil
+	}
+	if agentHostPath == "" {
+		return nil, nil, fmt.Errorf("x-claw.include requires a base agent contract")
+	}
+
+	baseContract, err := os.ReadFile(agentHostPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read base agent contract: %w", err)
+	}
+
+	resolved := make([]driver.ResolvedInclude, 0, len(includes))
+	skills := make([]driver.ResolvedSkill, 0)
+
+	var compiled strings.Builder
+	compiled.WriteString(strings.TrimRight(string(baseContract), "\n"))
+
+	for _, include := range includes {
+		hostPath, err := resolveRuntimeScopedFile(baseDir, include.File)
+		if err != nil {
+			return nil, nil, fmt.Errorf("include %q: %w", include.ID, err)
+		}
+		content, err := os.ReadFile(hostPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("include %q: read file: %w", include.ID, err)
+		}
+
+		ri := driver.ResolvedInclude{
+			ID:          include.ID,
+			Mode:        include.Mode,
+			Description: include.Description,
+			HostPath:    hostPath,
+		}
+
+		switch include.Mode {
+		case "enforce", "guide":
+			compiled.WriteString("\n\n")
+			compiled.WriteString(fmt.Sprintf("--- BEGIN: %s (%s) ---\n\n", include.ID, include.Mode))
+			compiled.WriteString(strings.TrimRight(string(content), "\n"))
+			compiled.WriteString("\n\n")
+			compiled.WriteString(fmt.Sprintf("--- END: %s (%s) ---", include.ID, include.Mode))
+		case "reference":
+			skillName := includeSkillName(include.ID, hostPath)
+			skillPath := filepath.Join(runtimeDir, "skills", skillName)
+			if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
+				return nil, nil, fmt.Errorf("include %q: create skill dir: %w", include.ID, err)
+			}
+			if err := writeRuntimeFile(skillPath, content, 0644); err != nil {
+				return nil, nil, fmt.Errorf("include %q: write reference skill: %w", include.ID, err)
+			}
+			ri.SkillName = skillName
+			skills = append(skills, driver.ResolvedSkill{Name: skillName, HostPath: skillPath})
+		default:
+			return nil, nil, fmt.Errorf("include %q: unsupported mode %q", include.ID, include.Mode)
+		}
+
+		resolved = append(resolved, ri)
+	}
+
+	generatedPath := filepath.Join(runtimeDir, "AGENTS.generated.md")
+	if err := writeRuntimeFile(generatedPath, []byte(compiled.String()+"\n"), 0644); err != nil {
+		return nil, nil, fmt.Errorf("write generated AGENTS.md: %w", err)
+	}
+
+	return resolved, skills, nil
+}
+
+func resolveRuntimeScopedFile(baseDir, relPath string) (string, error) {
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve base dir %q: %w", baseDir, err)
+	}
+	realBase, err := filepath.EvalSymlinks(absBase)
+	if err != nil {
+		return "", fmt.Errorf("resolve real base dir %q: %w", baseDir, err)
+	}
+
+	hostPath, err := filepath.Abs(filepath.Join(baseDir, relPath))
+	if err != nil {
+		return "", fmt.Errorf("resolve path %q: %w", relPath, err)
+	}
+	if !strings.HasPrefix(hostPath, absBase+string(filepath.Separator)) && hostPath != absBase {
+		return "", fmt.Errorf("path %q escapes base directory %q", relPath, baseDir)
+	}
+
+	info, err := os.Stat(hostPath)
+	if err != nil {
+		return "", fmt.Errorf("file %q not found: %w", hostPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%q is not a regular file", relPath)
+	}
+
+	realHostPath, err := filepath.EvalSymlinks(hostPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve real path for %q: %w", relPath, err)
+	}
+	if !strings.HasPrefix(realHostPath, realBase+string(filepath.Separator)) && realHostPath != realBase {
+		return "", fmt.Errorf("path %q escapes base directory %q", relPath, baseDir)
+	}
+
+	return realHostPath, nil
+}
+
+func includeSkillName(id, hostPath string) string {
+	safeID := make([]rune, 0, len(id))
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			safeID = append(safeID, r)
+			continue
+		}
+		safeID = append(safeID, '_')
+	}
+	if len(safeID) == 0 {
+		safeID = []rune("include")
+	}
+
+	ext := filepath.Ext(hostPath)
+	if ext == "" {
+		ext = ".md"
+	}
+	return "include-" + string(safeID) + ext
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func resolveCllama(imageLevel, podLevel []string) []string {
