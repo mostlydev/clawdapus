@@ -117,6 +117,15 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		ReadOnly:      true,
 	})
 
+	env := map[string]string{
+		"CLAW_MANAGED":         "true",
+		"OPENCLAW_CONFIG_PATH": "/app/config/openclaw.json",
+		"OPENCLAW_STATE_DIR":   "/app/state",
+	}
+	if rc.PersonaHostPath != "" {
+		env["CLAW_PERSONA_DIR"] = "/claw/persona"
+	}
+
 	return &driver.MaterializeResult{
 		Mounts: mounts,
 		Tmpfs: []string{
@@ -140,12 +149,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			Timeout:  "10s",
 			Retries:  3,
 		},
-		Environment: map[string]string{
-			"CLAW_MANAGED":         "true",
-			"CLAW_PERSONA_DIR":     "/claw/persona",
-			"OPENCLAW_CONFIG_PATH": "/app/config/openclaw.json",
-			"OPENCLAW_STATE_DIR":   "/app/state",
-		},
+		Environment: env,
 	}, nil
 }
 

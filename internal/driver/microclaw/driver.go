@@ -163,6 +163,14 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		})
 	}
 
+	env := map[string]string{
+		"CLAW_MANAGED":     "true",
+		"MICROCLAW_CONFIG": "/app/config/microclaw.config.yaml",
+	}
+	if rc.PersonaHostPath != "" {
+		env["CLAW_PERSONA_DIR"] = "/claw-data/persona"
+	}
+
 	return &driver.MaterializeResult{
 		Mounts:      mounts,
 		Tmpfs:       []string{"/tmp"},
@@ -176,11 +184,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			Timeout:  "10s",
 			Retries:  3,
 		},
-		Environment: map[string]string{
-			"CLAW_MANAGED":     "true",
-			"CLAW_PERSONA_DIR": "/claw-data/persona",
-			"MICROCLAW_CONFIG": "/app/config/microclaw.config.yaml",
-		},
+		Environment: env,
 	}, nil
 }
 
