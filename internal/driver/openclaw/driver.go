@@ -67,6 +67,13 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			ReadOnly:      true,
 		},
 	}
+	if rc.PersonaHostPath != "" {
+		mounts = append(mounts, driver.Mount{
+			HostPath:      rc.PersonaHostPath,
+			ContainerPath: "/claw/persona",
+			ReadOnly:      false,
+		})
+	}
 
 	// Generate jobs.json if there are scheduled invocations.
 	// Mounted read-write: openclaw updates job state (nextRunAtMs, lastRunAtMs, etc.)
@@ -135,6 +142,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		},
 		Environment: map[string]string{
 			"CLAW_MANAGED":         "true",
+			"CLAW_PERSONA_DIR":     "/claw/persona",
 			"OPENCLAW_CONFIG_PATH": "/app/config/openclaw.json",
 			"OPENCLAW_STATE_DIR":   "/app/state",
 		},

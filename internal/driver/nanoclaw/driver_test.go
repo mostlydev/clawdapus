@@ -261,6 +261,42 @@ func TestMaterializeWithCllama(t *testing.T) {
 	}
 }
 
+func TestMaterializeMountsPersonaWorkspace(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	personaDir := filepath.Join(tmp, "persona")
+	if err := os.MkdirAll(personaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rc.Persona = "ghcr.io/mostlydev/personas/allen:latest"
+	rc.PersonaHostPath = personaDir
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Driver{}
+	result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test-pod"})
+	if err != nil {
+		t.Fatalf("Materialize failed: %v", err)
+	}
+
+	found := false
+	for _, mount := range result.Mounts {
+		if mount.ContainerPath == "/workspace/container/persona" {
+			found = true
+			if mount.ReadOnly {
+				t.Fatal("persona mount should be writable")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected persona mount for nanoclaw")
+	}
+	if result.Environment["CLAW_PERSONA_DIR"] != "/workspace/container/persona" {
+		t.Fatalf("unexpected persona env: %q", result.Environment["CLAW_PERSONA_DIR"])
+	}
+}
+
 func TestMaterializeWithoutCllama(t *testing.T) {
 	rc, tmp := newTestRC(t)
 	runtimeDir := filepath.Join(tmp, "runtime")

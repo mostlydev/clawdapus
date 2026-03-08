@@ -25,25 +25,26 @@ type Invocation struct {
 
 // ResolvedClaw combines image-level claw labels with pod-level x-claw overrides.
 type ResolvedClaw struct {
-	ServiceName   string
-	ImageRef      string
-	ClawType      string
-	Agent         string                            // filename from image labels (e.g., "AGENTS.md")
-	AgentHostPath string                            // resolved host path for bind mount
-	Persona       string                            // runtime persona ref from x-claw or image metadata
-	Models        map[string]string                 // slot -> provider/model
-	Handles       map[string]*HandleInfo            // platform -> contact card (from x-claw handles block)
-	PeerHandles   map[string]map[string]*HandleInfo // service name -> platform -> HandleInfo for sibling services
-	Includes      []ResolvedInclude                 // composed contract fragments from x-claw.include
-	Surfaces      []ResolvedSurface
-	Skills        []ResolvedSkill
-	Privileges    map[string]string
-	Configures    []string          // openclaw config set commands from labels
-	Invocations   []Invocation      // scheduled agent tasks from image labels + pod x-claw.invoke
-	Count         int               // from pod x-claw (default 1)
-	Environment   map[string]string // from pod environment block
-	Cllama        []string          // ordered cllama proxy types (e.g., ["passthrough"])
-	CllamaToken   string            // per-agent bearer token injected when cllama is active
+	ServiceName     string
+	ImageRef        string
+	ClawType        string
+	Agent           string                            // filename from image labels (e.g., "AGENTS.md")
+	AgentHostPath   string                            // resolved host path for bind mount
+	Persona         string                            // runtime persona ref from x-claw or image metadata
+	PersonaHostPath string                            // resolved host path for persona workspace mount
+	Models          map[string]string                 // slot -> provider/model
+	Handles         map[string]*HandleInfo            // platform -> contact card (from x-claw handles block)
+	PeerHandles     map[string]map[string]*HandleInfo // service name -> platform -> HandleInfo for sibling services
+	Includes        []ResolvedInclude                 // composed contract fragments from x-claw.include
+	Surfaces        []ResolvedSurface
+	Skills          []ResolvedSkill
+	Privileges      map[string]string
+	Configures      []string          // openclaw config set commands from labels
+	Invocations     []Invocation      // scheduled agent tasks from image labels + pod x-claw.invoke
+	Count           int               // from pod x-claw (default 1)
+	Environment     map[string]string // from pod environment block
+	Cllama          []string          // ordered cllama proxy types (e.g., ["passthrough"])
+	CllamaToken     string            // per-agent bearer token injected when cllama is active
 }
 
 // HandleInfo is the full contact card for an agent on a platform.

@@ -143,19 +143,28 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		return nil, fmt.Errorf("microclaw driver: write seeded AGENTS.md: %w", err)
 	}
 
-	return &driver.MaterializeResult{
-		Mounts: []driver.Mount{
-			{
-				HostPath:      configPath,
-				ContainerPath: "/app/config/microclaw.config.yaml",
-				ReadOnly:      true,
-			},
-			{
-				HostPath:      dataDir,
-				ContainerPath: "/claw-data",
-				ReadOnly:      false,
-			},
+	mounts := []driver.Mount{
+		{
+			HostPath:      configPath,
+			ContainerPath: "/app/config/microclaw.config.yaml",
+			ReadOnly:      true,
 		},
+		{
+			HostPath:      dataDir,
+			ContainerPath: "/claw-data",
+			ReadOnly:      false,
+		},
+	}
+	if rc.PersonaHostPath != "" {
+		mounts = append(mounts, driver.Mount{
+			HostPath:      rc.PersonaHostPath,
+			ContainerPath: "/claw-data/persona",
+			ReadOnly:      false,
+		})
+	}
+
+	return &driver.MaterializeResult{
+		Mounts:      mounts,
 		Tmpfs:       []string{"/tmp"},
 		ReadOnly:    false,
 		Restart:     "on-failure",
@@ -169,6 +178,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		},
 		Environment: map[string]string{
 			"CLAW_MANAGED":     "true",
+			"CLAW_PERSONA_DIR": "/claw-data/persona",
 			"MICROCLAW_CONFIG": "/app/config/microclaw.config.yaml",
 		},
 	}, nil

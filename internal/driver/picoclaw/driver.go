@@ -135,14 +135,23 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		}
 	}
 
-	return &driver.MaterializeResult{
-		Mounts: []driver.Mount{
-			{
-				HostPath:      homeDir,
-				ContainerPath: picoclawHomeDir,
-				ReadOnly:      false,
-			},
+	mounts := []driver.Mount{
+		{
+			HostPath:      homeDir,
+			ContainerPath: picoclawHomeDir,
+			ReadOnly:      false,
 		},
+	}
+	if rc.PersonaHostPath != "" {
+		mounts = append(mounts, driver.Mount{
+			HostPath:      rc.PersonaHostPath,
+			ContainerPath: picoclawWorkspaceDir + "/persona",
+			ReadOnly:      false,
+		})
+	}
+
+	return &driver.MaterializeResult{
+		Mounts:      mounts,
 		Tmpfs:       []string{"/tmp"},
 		ReadOnly:    true,
 		Restart:     "on-failure",
@@ -155,9 +164,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			Retries:  3,
 		},
 		Environment: map[string]string{
-			"CLAW_MANAGED":    "true",
-			"PICOCLAW_HOME":   picoclawHomeDir,
-			"PICOCLAW_CONFIG": picoclawHomeDir + "/config.json",
+			"CLAW_MANAGED":     "true",
+			"CLAW_PERSONA_DIR": picoclawWorkspaceDir + "/persona",
+			"PICOCLAW_HOME":    picoclawHomeDir,
+			"PICOCLAW_CONFIG":  picoclawHomeDir + "/config.json",
 		},
 	}, nil
 }

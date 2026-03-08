@@ -109,6 +109,25 @@ func TestGenerateClawdapusMDHandlesSection(t *testing.T) {
 	}
 }
 
+func TestGenerateClawdapusMDPersonaSection(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName:     "bot",
+		ClawType:        "openclaw",
+		Persona:         "ghcr.io/mostlydev/personas/allen:latest",
+		PersonaHostPath: "/tmp/runtime/persona",
+	}
+	md := GenerateClawdapusMD(rc, "test-pod")
+	if !strings.Contains(md, "Persona Ref") {
+		t.Fatal("expected persona ref in identity section")
+	}
+	if !strings.Contains(md, "## Persona") {
+		t.Fatal("expected persona section")
+	}
+	if !strings.Contains(md, "`persona/`") {
+		t.Fatal("expected persona mount path")
+	}
+}
+
 func TestGenerateClawdapusMDIncludesContextComposition(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		ServiceName: "bot",

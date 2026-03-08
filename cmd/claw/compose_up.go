@@ -19,6 +19,7 @@ import (
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
 	"github.com/mostlydev/clawdapus/internal/inspect"
+	"github.com/mostlydev/clawdapus/internal/persona"
 	"github.com/mostlydev/clawdapus/internal/pod"
 	"github.com/mostlydev/clawdapus/internal/runtime"
 )
@@ -163,6 +164,11 @@ func runComposeUp(podFile string) error {
 		if len(resolvedIncludes) > 0 {
 			agentHostPath = filepath.Join(svcRuntimeDir, "AGENTS.generated.md")
 		}
+		personaRef := firstNonEmpty(svc.Claw.Persona, info.Persona)
+		resolvedPersona, err := persona.Materialize(podDir, svcRuntimeDir, personaRef)
+		if err != nil {
+			return fmt.Errorf("service %q: materialize persona: %w", name, err)
+		}
 
 		// Merge skills: image-level (from labels) + pod-level (from x-claw)
 		imageSkills, err := runtime.ResolveSkills(podDir, info.Skills)
@@ -227,7 +233,7 @@ func runComposeUp(podFile string) error {
 			ClawType:      info.ClawType,
 			Agent:         agentFile,
 			AgentHostPath: agentHostPath,
-			Persona:       firstNonEmpty(svc.Claw.Persona, info.Persona),
+			Persona:       personaRef,
 			Models:        info.Models,
 			Handles:       svc.Claw.Handles,
 			PeerHandles:   peerHandles,
@@ -239,6 +245,9 @@ func runComposeUp(podFile string) error {
 			Surfaces:      surfaces,
 			Skills:        skills,
 			Cllama:        resolveCllama(info.Cllama, svc.Claw.Cllama),
+		}
+		if resolvedPersona != nil {
+			rc.PersonaHostPath = resolvedPersona.HostPath
 		}
 
 		// Merge image-level invocations (from Clawfile INVOKE labels via inspect)

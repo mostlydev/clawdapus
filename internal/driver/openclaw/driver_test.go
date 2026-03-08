@@ -150,3 +150,45 @@ func TestMaterializeJobsDirMountedNotFile(t *testing.T) {
 		t.Error("jobs cron dir must be read-write so openclaw can update job state")
 	}
 }
+
+func TestMaterializeMountsPersonaWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	agentFile := filepath.Join(dir, "AGENTS.md")
+	personaDir := filepath.Join(dir, "persona-src")
+	if err := os.WriteFile(agentFile, []byte("# Contract"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(personaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Driver{}
+	rc := &driver.ResolvedClaw{
+		ClawType:        "openclaw",
+		Agent:           "AGENTS.md",
+		AgentHostPath:   agentFile,
+		Persona:         "ghcr.io/mostlydev/personas/allen:latest",
+		PersonaHostPath: personaDir,
+		Models:          make(map[string]string),
+	}
+	result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: dir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	found := false
+	for _, mount := range result.Mounts {
+		if mount.ContainerPath == "/claw/persona" {
+			found = true
+			if mount.ReadOnly {
+				t.Fatal("persona mount should be writable")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected /claw/persona mount")
+	}
+	if result.Environment["CLAW_PERSONA_DIR"] != "/claw/persona" {
+		t.Fatalf("expected CLAW_PERSONA_DIR to be set, got %q", result.Environment["CLAW_PERSONA_DIR"])
+	}
+}

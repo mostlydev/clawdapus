@@ -60,8 +60,18 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		{HostPath: combinedPath, ContainerPath: "/workspace/groups/main/CLAUDE.md", ReadOnly: true},
 		{HostPath: "/var/run/docker.sock", ContainerPath: "/var/run/docker.sock", ReadOnly: false},
 	}
+	if rc.PersonaHostPath != "" {
+		mounts = append(mounts, driver.Mount{
+			HostPath:      rc.PersonaHostPath,
+			ContainerPath: "/workspace/container/persona",
+			ReadOnly:      false,
+		})
+	}
 
-	env := map[string]string{"CLAW_MANAGED": "true"}
+	env := map[string]string{
+		"CLAW_MANAGED":     "true",
+		"CLAW_PERSONA_DIR": "/workspace/container/persona",
+	}
 
 	if len(rc.Cllama) > 0 {
 		firstProxy := cllama.ProxyBaseURL(rc.Cllama[0])

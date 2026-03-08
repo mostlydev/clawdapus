@@ -124,14 +124,23 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		}
 	}
 
-	return &driver.MaterializeResult{
-		Mounts: []driver.Mount{
-			{
-				HostPath:      homeDir,
-				ContainerPath: "/root/.nanobot",
-				ReadOnly:      false,
-			},
+	mounts := []driver.Mount{
+		{
+			HostPath:      homeDir,
+			ContainerPath: "/root/.nanobot",
+			ReadOnly:      false,
 		},
+	}
+	if rc.PersonaHostPath != "" {
+		mounts = append(mounts, driver.Mount{
+			HostPath:      rc.PersonaHostPath,
+			ContainerPath: "/root/.nanobot/workspace/persona",
+			ReadOnly:      false,
+		})
+	}
+
+	return &driver.MaterializeResult{
+		Mounts:      mounts,
 		Tmpfs:       []string{"/tmp"},
 		ReadOnly:    true,
 		Restart:     "on-failure",
@@ -144,7 +153,8 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			Retries:  3,
 		},
 		Environment: map[string]string{
-			"CLAW_MANAGED": "true",
+			"CLAW_MANAGED":     "true",
+			"CLAW_PERSONA_DIR": "/root/.nanobot/workspace/persona",
 		},
 	}, nil
 }

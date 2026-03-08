@@ -83,30 +83,39 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		return nil, fmt.Errorf("nullclaw driver: write CLAWDAPUS.md: %w", err)
 	}
 
-	return &driver.MaterializeResult{
-		Mounts: []driver.Mount{
-			{
-				HostPath:      homeDir,
-				ContainerPath: "/root/.nullclaw",
-				ReadOnly:      false,
-			},
-			{
-				// Upstream image sets HOME=/nullclaw-data; mount both for compatibility.
-				HostPath:      homeDir,
-				ContainerPath: "/nullclaw-data/.nullclaw",
-				ReadOnly:      false,
-			},
-			{
-				HostPath:      rc.AgentHostPath,
-				ContainerPath: "/claw/AGENTS.md",
-				ReadOnly:      true,
-			},
-			{
-				HostPath:      clawdapusPath,
-				ContainerPath: "/claw/CLAWDAPUS.md",
-				ReadOnly:      true,
-			},
+	mounts := []driver.Mount{
+		{
+			HostPath:      homeDir,
+			ContainerPath: "/root/.nullclaw",
+			ReadOnly:      false,
 		},
+		{
+			// Upstream image sets HOME=/nullclaw-data; mount both for compatibility.
+			HostPath:      homeDir,
+			ContainerPath: "/nullclaw-data/.nullclaw",
+			ReadOnly:      false,
+		},
+		{
+			HostPath:      rc.AgentHostPath,
+			ContainerPath: "/claw/AGENTS.md",
+			ReadOnly:      true,
+		},
+		{
+			HostPath:      clawdapusPath,
+			ContainerPath: "/claw/CLAWDAPUS.md",
+			ReadOnly:      true,
+		},
+	}
+	if rc.PersonaHostPath != "" {
+		mounts = append(mounts, driver.Mount{
+			HostPath:      rc.PersonaHostPath,
+			ContainerPath: "/claw/persona",
+			ReadOnly:      false,
+		})
+	}
+
+	return &driver.MaterializeResult{
+		Mounts:      mounts,
 		Tmpfs:       []string{"/tmp"},
 		ReadOnly:    true,
 		Restart:     "on-failure",
@@ -119,7 +128,8 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			Retries:  3,
 		},
 		Environment: map[string]string{
-			"CLAW_MANAGED": "true",
+			"CLAW_MANAGED":     "true",
+			"CLAW_PERSONA_DIR": "/claw/persona",
 		},
 	}, nil
 }

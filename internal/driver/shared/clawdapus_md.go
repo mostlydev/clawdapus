@@ -23,7 +23,20 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 	b.WriteString(fmt.Sprintf("- **Pod:** %s\n", podName))
 	b.WriteString(fmt.Sprintf("- **Service:** %s\n", rc.ServiceName))
 	b.WriteString(fmt.Sprintf("- **Type:** %s\n", rc.ClawType))
+	if rc.Persona != "" {
+		b.WriteString(fmt.Sprintf("- **Persona Ref:** %s\n", rc.Persona))
+	}
 	b.WriteString("\n")
+
+	if rc.PersonaHostPath != "" {
+		b.WriteString("## Persona\n\n")
+		b.WriteString("Your mutable persona workspace is mounted separately from the behavioral contract.\n\n")
+		b.WriteString("- **Mount:** `persona/`\n")
+		if rc.Persona != "" {
+			b.WriteString(fmt.Sprintf("- **Source:** `%s`\n", rc.Persona))
+		}
+		b.WriteString("\n")
+	}
 
 	// Surfaces
 	b.WriteString("## Surfaces\n\n")
