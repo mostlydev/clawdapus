@@ -206,22 +206,37 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 
 Pick a driver based on what you need. All drivers support `MODEL`, `AGENT`, `CLLAMA`, and `CONFIGURE`.
 
-| | `openclaw` | `nanobot` | `picoclaw` | `nanoclaw` | `microclaw` | `nullclaw` |
+| | `openclaw` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Runtime** | [OpenClaw](https://openclaw.ai) | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | Claude Agent SDK | MicroClaw | NullClaw |
+| **Runtime** | [OpenClaw](https://openclaw.ai) | [Claude Agent SDK](https://github.com/anthropics/claude-code) | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [NullClaw](https://github.com/nullclaw/nullclaw) | [MicroClaw](https://github.com/microclaw/microclaw) |
 | `claw init` scaffold | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HANDLE: Discord | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| HANDLE: Telegram | — | ✅ | ✅ | — | ✅ | ✅ |
-| HANDLE: Slack | — | ✅ | ✅ | — | ✅ | ✅ |
-| HANDLE: long-tail ¹ | — | — | ✅ | — | — | — |
-| INVOKE (cron) | ✅ | ✅ | ✅ | — | — | ✅ |
-| Structured health | ✅ | — | ✅ | — | — | ✅ |
-| Read-only rootfs | ✅ | ✅ | ✅ | — | — | ✅ |
-| Non-root container | — | — | ✅ | — | — | — |
+| HANDLE: Discord | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| HANDLE: Telegram | — | — | ✅ | ✅ | ✅ | ✅ |
+| HANDLE: Slack | — | — | ✅ | ✅ | ✅ | ✅ |
+| HANDLE: long-tail ¹ | — | — | — | ✅ | — | — |
+| INVOKE (cron) | ✅ | — | ✅ | ✅ | ✅ | — |
+| Structured health | ✅ | — | — | ✅ | ✅ | — |
+| Read-only rootfs | ✅ | — | ✅ | ✅ | ✅ | — |
+| Non-root container | — | — | — | ✅ | — | — |
 
+Ordered by current upstream repo popularity as of March 8, 2026.
 ¹ PicoClaw long-tail: WhatsApp, Feishu, LINE, QQ, DingTalk, OneBot, WeCom, WeCom App, Pico, MaixCam.
 
 `claw init` also scaffolds `generic` (alpine:3.20, no driver enforcement) for custom runtimes.
+
+### OpenClaw Discord Routing Compatibility
+
+The OpenClaw driver now maps the supported `channel://discord` routing controls directly into generated config and rejects the unsupported ones early.
+
+| `channel://discord` map-form setting | `openclaw` |
+|---|:---:|
+| DM `policy` (`pairing`, `allowlist`, `open`, `disabled`) | ✅ |
+| DM `allowFrom` | ✅ |
+| Guild `requireMention` | ✅ |
+| Guild `users[]` allowlist | ✅ |
+| Guild `policy` | — ² |
+
+² The current OpenClaw runtime rejects guild-level `policy`; Clawdapus now fails during config generation instead of writing a config the container will reject at boot.
 
 ---
 
