@@ -294,6 +294,118 @@ func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
 	}
 }
 
+func TestMaterializeServiceSurfaceGuidesAppendsCustomServiceManuals(t *testing.T) {
+	tmpDir := t.TempDir()
+	runtimeDir := filepath.Join(tmpDir, "runtime")
+	if err := os.MkdirAll(filepath.Join(runtimeDir, "skills"), 0o755); err != nil {
+		t.Fatalf("create skills dir: %v", err)
+	}
+
+	agentPath := filepath.Join(tmpDir, "AGENTS.md")
+	if err := os.WriteFile(agentPath, []byte("# Base Contract\n"), 0o644); err != nil {
+		t.Fatalf("write agent contract: %v", err)
+	}
+
+	serviceSkillPath := filepath.Join(runtimeDir, "skills", "trade.md")
+	serviceSkill := `# trading-api
+
+POST /trades/propose
+{
+  "agent": "westin"
+}
+`
+	if err := os.WriteFile(serviceSkillPath, []byte(serviceSkill), 0o644); err != nil {
+		t.Fatalf("write service skill: %v", err)
+	}
+
+	generatedPath, err := materializeServiceSurfaceGuides(
+		runtimeDir,
+		agentPath,
+		[]driver.ResolvedSurface{
+			{Scheme: "service", Target: "trading-api", SkillName: "trade.md"},
+			{Scheme: "volume", Target: "clawd-shared", AccessMode: "read-write"},
+		},
+		[]driver.ResolvedSkill{
+			{Name: "trade.md", HostPath: serviceSkillPath},
+		},
+	)
+	if err != nil {
+		t.Fatalf("materializeServiceSurfaceGuides: %v", err)
+	}
+
+	if generatedPath != filepath.Join(runtimeDir, "AGENTS.generated.md") {
+		t.Fatalf("unexpected generated path: %q", generatedPath)
+	}
+
+	data, err := os.ReadFile(generatedPath)
+	if err != nil {
+		t.Fatalf("read generated contract: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "# Base Contract") {
+		t.Fatalf("expected base contract in generated output")
+	}
+	if !strings.Contains(text, "--- BEGIN: service_manual trading-api (guide) ---") {
+		t.Fatalf("expected service manual marker in generated contract:\n%s", text)
+	}
+	if !strings.Contains(text, "This service manual was injected automatically because you declared `service://trading-api`.") {
+		t.Fatalf("expected service manual explanation in generated contract:\n%s", text)
+	}
+	if !strings.Contains(text, "POST /trades/propose") {
+		t.Fatalf("expected service manual body in generated contract:\n%s", text)
+	}
+}
+
+func TestMaterializeServiceSurfaceGuidesSkipsFallbackSurfaceSkills(t *testing.T) {
+	tmpDir := t.TempDir()
+	runtimeDir := filepath.Join(tmpDir, "runtime")
+
+	agentPath := filepath.Join(tmpDir, "AGENTS.md")
+	if err := os.WriteFile(agentPath, []byte("# Base Contract\n"), 0o644); err != nil {
+		t.Fatalf("write agent contract: %v", err)
+	}
+
+	gotPath, err := materializeServiceSurfaceGuides(
+		runtimeDir,
+		agentPath,
+		[]driver.ResolvedSurface{
+			{Scheme: "service", Target: "trading-api", SkillName: "surface-trading-api.md"},
+		},
+		[]driver.ResolvedSkill{
+			{Name: "surface-trading-api.md", HostPath: filepath.Join(runtimeDir, "skills", "surface-trading-api.md")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("materializeServiceSurfaceGuides: %v", err)
+	}
+	if gotPath != agentPath {
+		t.Fatalf("expected original agent path, got %q", gotPath)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeDir, "AGENTS.generated.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected no generated contract for fallback skills, got err=%v", err)
+	}
+}
+
+func TestStripSkillFrontmatter(t *testing.T) {
+	content := strings.Join([]string{
+		"---",
+		`name: "surface-trading-api"`,
+		`description: "Trade workflow"`,
+		"---",
+		"",
+		"# trading-api",
+		"POST /trades/propose",
+	}, "\n")
+
+	got := stripSkillFrontmatter(content)
+	if strings.Contains(got, `name: "surface-trading-api"`) {
+		t.Fatalf("expected frontmatter to be stripped, got %q", got)
+	}
+	if !strings.Contains(got, "# trading-api") {
+		t.Fatalf("expected body to be preserved, got %q", got)
+	}
+}
+
 func TestRuntimeConsumerServicesIncludesManagedServicesAndInfra(t *testing.T) {
 	services := runtimeConsumerServices(
 		map[string]*driver.ResolvedClaw{

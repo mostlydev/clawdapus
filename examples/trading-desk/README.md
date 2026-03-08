@@ -13,7 +13,7 @@ This spike now enables cllama passthrough routing for trader agents (`cllama`).
 | `Clawfile.microclaw` | MicroClaw spike image with Discord startup announcement |
 | `claw-pod.yml` | Pod definition — per-agent handles, surfaces, invoke schedules |
 | `Dockerfile.openclaw-base` | Builds the local `openclaw:latest` base image |
-| `Dockerfile.trading-api` | Mock trading API with skill label emission |
+| `Dockerfile.trading-api` | Mock trading API with skill label emission and automatic contract injection |
 | `entrypoint.sh` | Baked into the base image — starts gateway, sends greeting |
 | `agents/` | Per-agent AGENTS.md contracts |
 | `policy/` | Shared skills (risk limits, approval workflow) |
