@@ -23,12 +23,9 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 	}
 
 	// Set workspace to /claw so openclaw finds AGENTS.md (mounted there) and workspace skills
-	// (/claw/skills/). Bootstrap-extra-files paths (e.g. "CLAWDAPUS.md") are also relative
-	// to workspace, so /claw/CLAWDAPUS.md resolves correctly.
+	// (/claw/skills/). CLAWDAPUS.md is mounted separately and inlined into the effective
+	// AGENTS contract by the driver, so no extra bootstrap hook is required.
 	if err := setPath(config, "agents.defaults.workspace", "/claw"); err != nil {
-		return nil, fmt.Errorf("config generation: %w", err)
-	}
-	if err := setPath(config, "hooks.bootstrap-extra-files.paths", []interface{}{"CLAWDAPUS.md"}); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
 
