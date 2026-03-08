@@ -1,5 +1,13 @@
 x-claw:
   pod: trading-desk
+  handles-defaults:
+    discord:
+      guilds:
+        - id: "${DISCORD_GUILD_ID}"
+          name: "Trading Floor"
+          channels:
+            - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
+              name: trading-floor
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Trading Desk Pod (tiverton + westin + allen + logan + micro)
@@ -63,12 +71,6 @@ services:
         discord:
           id: "${TIVERTON_DISCORD_ID}"
           username: "tiverton"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Trading Floor"
-              channels:
-                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-                  name: trading-floor
       surfaces:
         - "service://trading-api"
         - "volume://clawd-shared read-write"
@@ -109,12 +111,6 @@ services:
         discord:
           id: "${WESTIN_DISCORD_ID}"
           username: "westin"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Trading Floor"
-              channels:
-                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-                  name: trading-floor
       surfaces:
         - "service://trading-api"
         - "volume://clawd-shared read-write"
@@ -146,12 +142,6 @@ services:
         discord:
           id: "${ALLEN_DISCORD_ID}"
           username: "allen"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Trading Floor"
-              channels:
-                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-                  name: trading-floor
       surfaces:
         - "service://trading-api"
         - "volume://clawd-shared read-write"
@@ -176,12 +166,6 @@ services:
         discord:
           id: "${LOGAN_DISCORD_ID}"
           username: "logan"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Trading Floor"
-              channels:
-                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-                  name: trading-floor
       surfaces:
         - "service://trading-api"
         - "volume://clawd-shared read-write"
@@ -208,12 +192,6 @@ services:
         discord:
           id: "${MICRO_DISCORD_ID}"
           username: "micro"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Trading Floor"
-              channels:
-                - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-                  name: trading-floor
       surfaces:
         - "service://trading-api"
         - "volume://clawd-shared read-write"
