@@ -139,10 +139,13 @@ func copyFile(srcPath, dstPath string, mode os.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("create persona file %q: %w", dstPath, err)
 	}
-	defer dst.Close()
 
 	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
 		return fmt.Errorf("copy persona file %q: %w", srcPath, err)
+	}
+	if err := dst.Close(); err != nil {
+		return fmt.Errorf("close persona file %q: %w", dstPath, err)
 	}
 	return nil
 }

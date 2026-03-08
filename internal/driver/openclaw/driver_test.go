@@ -151,6 +151,27 @@ func TestMaterializeJobsDirMountedNotFile(t *testing.T) {
 	}
 }
 
+func TestMaterializeNoPersonaOmitsEnvVar(t *testing.T) {
+	dir := t.TempDir()
+	agentFile := filepath.Join(dir, "AGENTS.md")
+	os.WriteFile(agentFile, []byte("# Contract"), 0o644)
+
+	d := &Driver{}
+	rc := &driver.ResolvedClaw{
+		ClawType:      "openclaw",
+		Agent:         "AGENTS.md",
+		AgentHostPath: agentFile,
+		Models:        make(map[string]string),
+	}
+	result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: dir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v, ok := result.Environment["CLAW_PERSONA_DIR"]; ok {
+		t.Fatalf("CLAW_PERSONA_DIR should not be set without persona, got %q", v)
+	}
+}
+
 func TestMaterializeMountsPersonaWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	agentFile := filepath.Join(dir, "AGENTS.md")
