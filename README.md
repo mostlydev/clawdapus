@@ -45,6 +45,8 @@ The Clawdapus Dash fleet dashboard runs on port **8082** — live service health
 
 Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
 
+`claw up` resolves `${...}` placeholders inside `x-claw` metadata from your shell environment and the pod-local `.env` file before it generates runtime config. You do not need to duplicate handle IDs, guild IDs, or channel IDs into service `environment:` just to make driver config generation work.
+
 See [`examples/quickstart/`](./examples/quickstart/) for the full walkthrough, Telegram/Slack alternatives, and migration from existing OpenClaw.
 
 Or scaffold from scratch:

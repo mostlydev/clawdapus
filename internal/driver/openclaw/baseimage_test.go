@@ -24,8 +24,11 @@ func TestBaseImageProvider(t *testing.T) {
 	if !strings.Contains(dockerfile, "openclaw.ai/install.sh") {
 		t.Fatal("Dockerfile should install openclaw")
 	}
-	if !strings.Contains(dockerfile, "entrypoint.sh") {
-		t.Fatal("Dockerfile should include entrypoint")
+	if !strings.Contains(dockerfile, "/usr/local/bin/openclaw-entrypoint.sh") {
+		t.Fatal("Dockerfile should install the entrypoint outside /claw")
+	}
+	if strings.Contains(dockerfile, `ENTRYPOINT ["/usr/bin/tini", "--", "/claw/entrypoint.sh"]`) {
+		t.Fatal("Dockerfile should not place the runtime entrypoint under /claw")
 	}
 	if !strings.Contains(dockerfile, "ENTRYPOINT") {
 		t.Fatal("Dockerfile should have ENTRYPOINT directive")
