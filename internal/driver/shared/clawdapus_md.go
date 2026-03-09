@@ -51,6 +51,8 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 			switch s.Scheme {
 			case "volume":
 				b.WriteString(fmt.Sprintf("- **Mount path:** /mnt/%s\n", s.Target))
+			case "host":
+				b.WriteString(fmt.Sprintf("- **Mount path:** %s\n", s.Target))
 			case "service":
 				b.WriteString(fmt.Sprintf("- **Host:** %s\n", s.Target))
 				b.WriteString(fmt.Sprintf("- **Skill:** `skills/%s`\n", surfaceSkillName(s)))
