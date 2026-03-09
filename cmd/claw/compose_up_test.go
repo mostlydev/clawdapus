@@ -199,7 +199,7 @@ func TestResolveRuntimePlaceholdersExpandsDiscordAllowFromHandlesAndServices(t *
 		Services: map[string]*pod.Service{
 			"trading-api": {
 				Environment: map[string]string{
-					"DISCORD_TRADING_API_BOT_TOKEN": "MTIzNDU2Nzg5MDEyMzQ1Njc4.x.y",
+					"DISCORD_TRADING_API_BOT_TOKEN": "${DISCORD_TRADING_API_BOT_TOKEN}",
 				},
 			},
 			"tiverton": {
@@ -242,7 +242,12 @@ func TestResolveRuntimePlaceholdersExpandsDiscordAllowFromHandlesAndServices(t *
 		},
 	}
 
-	if err := resolveRuntimePlaceholders(t.TempDir(), p); err != nil {
+	podDir := t.TempDir()
+	dotEnv := filepath.Join(podDir, ".env")
+	if err := os.WriteFile(dotEnv, []byte("DISCORD_TRADING_API_BOT_TOKEN=MTIzNDU2Nzg5MDEyMzQ1Njc4.x.y\n"), 0o644); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	if err := resolveRuntimePlaceholders(podDir, p); err != nil {
 		t.Fatalf("resolveRuntimePlaceholders: %v", err)
 	}
 

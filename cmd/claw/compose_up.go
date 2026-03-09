@@ -695,7 +695,7 @@ func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
 				}
 				cc.Guilds = expandedGuilds
 				if svc.Claw.Surfaces[i].Target == "discord" {
-					if err := expandDiscordChannelAdmission(p, cc); err != nil {
+					if err := expandDiscordChannelAdmission(p, cc, expand); err != nil {
 						return err
 					}
 				}
@@ -705,7 +705,7 @@ func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
 	return nil
 }
 
-func expandDiscordChannelAdmission(p *pod.Pod, cc *driver.ChannelConfig) error {
+func expandDiscordChannelAdmission(p *pod.Pod, cc *driver.ChannelConfig, expand func(string) string) error {
 	if cc == nil || (!cc.AllowFromHandles && len(cc.AllowFromServices) == 0) {
 		return nil
 	}
@@ -715,7 +715,7 @@ func expandDiscordChannelAdmission(p *pod.Pod, cc *driver.ChannelConfig) error {
 		derived = append(derived, discordHandleIDsFromPod(p)...)
 	}
 
-	serviceIDs, err := discordServiceUserIDs(p, cc.AllowFromServices)
+	serviceIDs, err := discordServiceUserIDs(p, cc.AllowFromServices, expand)
 	if err != nil {
 		return err
 	}
@@ -747,14 +747,14 @@ func discordHandleIDsFromPod(p *pod.Pod) []string {
 	return uniqueSortedStrings(ids)
 }
 
-func discordServiceUserIDs(p *pod.Pod, serviceNames []string) ([]string, error) {
+func discordServiceUserIDs(p *pod.Pod, serviceNames []string, expand func(string) string) ([]string, error) {
 	ids := make([]string, 0, len(serviceNames))
 	for _, name := range serviceNames {
 		svc, ok := p.Services[name]
 		if !ok {
 			return nil, fmt.Errorf("channel://discord allow_from_services references unknown service %q", name)
 		}
-		id := discordUserIDFromService(svc)
+		id := discordUserIDFromService(svc, expand)
 		if id == "" {
 			return nil, fmt.Errorf("channel://discord allow_from_services service %q has no Discord bot identity; expected DISCORD_BOT_TOKEN or DISCORD_TRADING_API_BOT_TOKEN", name)
 		}
@@ -763,12 +763,12 @@ func discordServiceUserIDs(p *pod.Pod, serviceNames []string) ([]string, error) 
 	return uniqueSortedStrings(ids), nil
 }
 
-func discordUserIDFromService(svc *pod.Service) string {
+func discordUserIDFromService(svc *pod.Service, expand func(string) string) string {
 	if svc == nil {
 		return ""
 	}
 	for _, key := range []string{"DISCORD_BOT_TOKEN", "DISCORD_TRADING_API_BOT_TOKEN"} {
-		if token := strings.TrimSpace(svc.Environment[key]); token != "" {
+		if token := strings.TrimSpace(expand(svc.Environment[key])); token != "" {
 			if id := discordIDFromToken(token); id != "" {
 				return id
 			}
