@@ -52,6 +52,24 @@ services:
                   - "167037070349434880"
 `
 
+const podWithImplicitDiscordAdmission = `
+x-claw:
+  pod: test-pod
+services:
+  svc:
+    image: test:latest
+    x-claw:
+      agent: AGENTS.md
+      surfaces:
+        - channel://discord:
+            allow_from_handles: true
+            allow_from_services:
+              - trading-api
+            guilds:
+              "1465489501551067136":
+                require_mention: true
+`
+
 const podWithMixedSurfaces = `
 x-claw:
   pod: test-pod
@@ -146,6 +164,21 @@ func TestParsePodMapChannelSurfaceGuilds(t *testing.T) {
 	}
 	if len(g.Users) != 1 || g.Users[0] != "167037070349434880" {
 		t.Errorf("expected guild.Users=[167037070349434880], got %v", g.Users)
+	}
+}
+
+func TestParsePodMapChannelSurfaceImplicitAdmission(t *testing.T) {
+	p := mustParsePod(t, podWithImplicitDiscordAdmission)
+	svc := p.Services["svc"]
+	s := svc.Claw.Surfaces[0]
+	if s.ChannelConfig == nil {
+		t.Fatal("expected non-nil ChannelConfig")
+	}
+	if !s.ChannelConfig.AllowFromHandles {
+		t.Fatal("expected AllowFromHandles=true")
+	}
+	if len(s.ChannelConfig.AllowFromServices) != 1 || s.ChannelConfig.AllowFromServices[0] != "trading-api" {
+		t.Fatalf("expected AllowFromServices=[trading-api], got %v", s.ChannelConfig.AllowFromServices)
 	}
 }
 

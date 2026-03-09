@@ -85,6 +85,22 @@ func parseChannelConfig(raw interface{}) (*driver.ChannelConfig, error) {
 	}
 	config := &driver.ChannelConfig{}
 
+	if v, ok := m["allow_from_handles"]; ok {
+		b, ok := v.(bool)
+		if !ok {
+			return nil, fmt.Errorf("allow_from_handles must be a bool")
+		}
+		config.AllowFromHandles = b
+	}
+
+	if v, ok := m["allow_from_services"]; ok {
+		services, err := toStringSlice(v)
+		if err != nil {
+			return nil, fmt.Errorf("allow_from_services: %w", err)
+		}
+		config.AllowFromServices = services
+	}
+
 	if guildsRaw, ok := m["guilds"]; ok {
 		guildsMap, ok := guildsRaw.(map[string]interface{})
 		if !ok {

@@ -238,6 +238,8 @@ The OpenClaw driver now maps the supported `channel://discord` routing controls 
 | DM `allowFrom` | ✅ |
 | Guild `requireMention` | ✅ |
 | Guild `users[]` allowlist | ✅ |
+| Surface `allow_from_handles: true` → expands into each guild `users[]` | ✅ |
+| Surface `allow_from_services: [svc...]` → derives Discord IDs from service bot tokens and expands each guild `users[]` | ✅ |
 | Guild `policy` | — ² |
 
 ² The current OpenClaw runtime rejects guild-level `policy`; Clawdapus now fails during config generation instead of writing a config the container will reject at boot.

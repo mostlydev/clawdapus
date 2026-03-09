@@ -193,6 +193,138 @@ func TestResolveRuntimePlaceholdersUsesDotEnvForHandleTopology(t *testing.T) {
 	}
 }
 
+func TestResolveRuntimePlaceholdersExpandsDiscordAllowFromHandlesAndServices(t *testing.T) {
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"trading-api": {
+				Environment: map[string]string{
+					"DISCORD_TRADING_API_BOT_TOKEN": "${DISCORD_TRADING_API_BOT_TOKEN}",
+				},
+			},
+			"tiverton": {
+				Claw: &pod.ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							ID: "111111111111111111",
+							Guilds: []driver.GuildInfo{{
+								ID: "GUILD1",
+							}},
+						},
+					},
+					Surfaces: []driver.ResolvedSurface{
+						{
+							Scheme: "channel",
+							Target: "discord",
+							ChannelConfig: &driver.ChannelConfig{
+								AllowFromHandles:  true,
+								AllowFromServices: []string{"trading-api"},
+								Guilds: map[string]driver.ChannelGuildConfig{
+									"GUILD1": {
+										RequireMention: true,
+										Users:          []string{"167037070349434880"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			"weston": {
+				Claw: &pod.ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							ID: "222222222222222222",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	podDir := t.TempDir()
+	dotEnv := filepath.Join(podDir, ".env")
+	if err := os.WriteFile(dotEnv, []byte("DISCORD_TRADING_API_BOT_TOKEN=MTIzNDU2Nzg5MDEyMzQ1Njc4.x.y\n"), 0o644); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	if err := resolveRuntimePlaceholders(podDir, p); err != nil {
+		t.Fatalf("resolveRuntimePlaceholders: %v", err)
+	}
+
+	surface := p.Services["tiverton"].Claw.Surfaces[0]
+	users := surface.ChannelConfig.Guilds["GUILD1"].Users
+	expected := []string{
+		"167037070349434880",
+		"111111111111111111",
+		"123456789012345678",
+		"222222222222222222",
+	}
+	if !slices.Equal(users, expected) {
+		t.Fatalf("expected expanded users %v, got %v", expected, users)
+	}
+
+	configJSON, err := openclaw.GenerateConfig(&driver.ResolvedClaw{
+		ServiceName: "tiverton",
+		Handles:     p.Services["tiverton"].Claw.Handles,
+		PeerHandles: map[string]map[string]*driver.HandleInfo{
+			"weston": p.Services["weston"].Claw.Handles,
+		},
+		Models:   map[string]string{},
+		Surfaces: p.Services["tiverton"].Claw.Surfaces,
+	})
+	if err != nil {
+		t.Fatalf("GenerateConfig: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(configJSON, &config); err != nil {
+		t.Fatalf("unmarshal generated config: %v", err)
+	}
+	guild := config["channels"].(map[string]interface{})["discord"].(map[string]interface{})["guilds"].(map[string]interface{})["GUILD1"].(map[string]interface{})
+	gotUsers := guild["users"].([]interface{})
+	if len(gotUsers) != len(expected) {
+		t.Fatalf("expected %d guild users, got %v", len(expected), gotUsers)
+	}
+	for i, value := range expected {
+		if gotUsers[i] != value {
+			t.Fatalf("expected guild users %v, got %v", expected, gotUsers)
+		}
+	}
+}
+
+func TestResolveRuntimePlaceholdersRejectsDiscordAllowFromServicesWithoutBotIdentity(t *testing.T) {
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"api": {Environment: map[string]string{}},
+			"tiverton": {
+				Claw: &pod.ClawBlock{
+					Surfaces: []driver.ResolvedSurface{
+						{
+							Scheme: "channel",
+							Target: "discord",
+							ChannelConfig: &driver.ChannelConfig{
+								AllowFromServices: []string{"api"},
+								Guilds: map[string]driver.ChannelGuildConfig{
+									"GUILD1": {},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := resolveRuntimePlaceholders(t.TempDir(), p)
+	if err == nil {
+		t.Fatal("expected allow_from_services without bot identity to fail")
+	}
+	if !strings.Contains(err.Error(), "has no Discord bot identity") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestMaterializeContractIncludesBuildsGeneratedContractAndReferenceSkill(t *testing.T) {
 	baseDir := t.TempDir()
 	runtimeDir := filepath.Join(baseDir, ".claw-runtime", "bot")
