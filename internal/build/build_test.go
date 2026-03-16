@@ -3,6 +3,7 @@ package build
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -181,5 +182,72 @@ MODEL primary openrouter/anthropic/claude-sonnet-4
 	if !strings.Contains(string(content), `LABEL claw.type="hermes"`) {
 		t.Fatal("missing claw.type=hermes label in generated output")
 	}
+}
+
+func TestBuildFromGeneratedUsesExplicitContext(t *testing.T) {
+	dir := t.TempDir()
+	generatedPath := filepath.Join(dir, "agents", "shared", "Dockerfile.generated")
+	contextDir := filepath.Join(dir, "repo-root")
+	if err := os.MkdirAll(filepath.Dir(generatedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(contextDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(generatedPath, []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gotArgs := runBuildWithFakeDocker(t, generatedPath, "example:latest", contextDir)
+	want := []string{"build", "-f", generatedPath, "-t", "example:latest", contextDir}
+	if !reflect.DeepEqual(gotArgs, want) {
+		t.Fatalf("expected docker args %v, got %v", want, gotArgs)
+	}
+}
+
+func TestBuildFromGeneratedDefaultsContextToGeneratedDir(t *testing.T) {
+	dir := t.TempDir()
+	generatedPath := filepath.Join(dir, "agents", "shared", "Dockerfile.generated")
+	if err := os.MkdirAll(filepath.Dir(generatedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(generatedPath, []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gotArgs := runBuildWithFakeDocker(t, generatedPath, "", "")
+	want := []string{"build", "-f", generatedPath, filepath.Dir(generatedPath)}
+	if !reflect.DeepEqual(gotArgs, want) {
+		t.Fatalf("expected docker args %v, got %v", want, gotArgs)
+	}
+}
+
+func runBuildWithFakeDocker(t *testing.T, generatedPath, tag, contextDir string) []string {
+	t.Helper()
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	argsFile := filepath.Join(dir, "docker-args.txt")
+	dockerPath := filepath.Join(binDir, "docker")
+
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dockerPath, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$DOCKER_ARGS_FILE\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("DOCKER_ARGS_FILE", argsFile)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := BuildFromGenerated(generatedPath, tag, contextDir); err != nil {
+		t.Fatalf("BuildFromGenerated returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read fake docker args: %v", err)
+	}
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,5 +35,67 @@ func TestResolveClawfilePathAcceptsDirWithClawfile(t *testing.T) {
 	}
 	if got != clawfile {
 		t.Fatalf("expected %q, got %q", clawfile, got)
+	}
+}
+
+func TestResolveBuildContextDefaultsToClawfileDir(t *testing.T) {
+	dir := t.TempDir()
+	clawfile := filepath.Join(dir, "agents", "shared", "OpenClawfile")
+	if err := os.MkdirAll(filepath.Dir(clawfile), 0o755); err != nil {
+		t.Fatalf("mkdir clawfile dir: %v", err)
+	}
+	if err := os.WriteFile(clawfile, []byte("FROM alpine\nCLAW_TYPE openclaw\n"), 0o644); err != nil {
+		t.Fatalf("write Clawfile: %v", err)
+	}
+
+	got, err := resolveBuildContext("", clawfile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != filepath.Dir(clawfile) {
+		t.Fatalf("expected %q, got %q", filepath.Dir(clawfile), got)
+	}
+}
+
+func TestResolveBuildContextAcceptsExplicitDirectory(t *testing.T) {
+	dir := t.TempDir()
+	contextDir := filepath.Join(dir, "repo")
+	clawfile := filepath.Join(dir, "agents", "shared", "OpenClawfile")
+	if err := os.MkdirAll(contextDir, 0o755); err != nil {
+		t.Fatalf("mkdir context dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(clawfile), 0o755); err != nil {
+		t.Fatalf("mkdir clawfile dir: %v", err)
+	}
+	if err := os.WriteFile(clawfile, []byte("FROM alpine\nCLAW_TYPE openclaw\n"), 0o644); err != nil {
+		t.Fatalf("write Clawfile: %v", err)
+	}
+
+	got, err := resolveBuildContext(contextDir, clawfile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != contextDir {
+		t.Fatalf("expected %q, got %q", contextDir, got)
+	}
+}
+
+func TestResolveBuildContextRejectsNonDirectory(t *testing.T) {
+	dir := t.TempDir()
+	contextFile := filepath.Join(dir, "context.txt")
+	clawfile := filepath.Join(dir, "OpenClawfile")
+	if err := os.WriteFile(contextFile, []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("write context file: %v", err)
+	}
+	if err := os.WriteFile(clawfile, []byte("FROM alpine\nCLAW_TYPE openclaw\n"), 0o644); err != nil {
+		t.Fatalf("write Clawfile: %v", err)
+	}
+
+	_, err := resolveBuildContext(contextFile, clawfile)
+	if err == nil {
+		t.Fatal("expected error for non-directory context")
+	}
+	if !strings.Contains(err.Error(), "is not a directory") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

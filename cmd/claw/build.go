@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/build"
 	"github.com/spf13/cobra"
 )
 
 var buildTag string
+var buildContext string
 
 var buildCmd = &cobra.Command{
 	Use:   "build [path-or-clawfile]",
@@ -25,6 +27,10 @@ var buildCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		contextDir, err := resolveBuildContext(buildContext, clawfilePath)
+		if err != nil {
+			return err
+		}
 
 		fmt.Printf("Generating Dockerfile from %s\n", clawfilePath)
 		generatedPath, err := build.Generate(clawfilePath)
@@ -34,7 +40,7 @@ var buildCmd = &cobra.Command{
 		fmt.Printf("Generated %s\n", generatedPath)
 
 		fmt.Println("Building image with docker")
-		return build.BuildFromGenerated(generatedPath, buildTag, "")
+		return build.BuildFromGenerated(generatedPath, buildTag, contextDir)
 	},
 }
 
@@ -61,7 +67,33 @@ func resolveClawfilePath(input string) (string, error) {
 	return input, nil
 }
 
+func resolveBuildContext(input, clawfilePath string) (string, error) {
+	contextDir := strings.TrimSpace(input)
+	if contextDir == "" {
+		contextDir = filepath.Dir(clawfilePath)
+	}
+
+	resolved, err := filepath.Abs(contextDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve build context %q: %w", contextDir, err)
+	}
+
+	info, err := os.Stat(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("build context %q does not exist", contextDir)
+		}
+		return "", fmt.Errorf("stat build context %q: %w", resolved, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("build context %q is not a directory", contextDir)
+	}
+
+	return resolved, nil
+}
+
 func init() {
 	buildCmd.Flags().StringVarP(&buildTag, "tag", "t", "", "Tag for the built image")
+	buildCmd.Flags().StringVar(&buildContext, "context", "", "Docker build context directory (defaults to the Clawfile directory)")
 	rootCmd.AddCommand(buildCmd)
 }
