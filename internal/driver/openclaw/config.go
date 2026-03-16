@@ -9,6 +9,7 @@ import (
 
 	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
 
 // GenerateConfig builds an OpenClaw JSON config from resolved Claw directives.
@@ -265,24 +266,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 // parseConfigSetCommand extracts dotted path and value from
 // "openclaw config set <dotted.path> <value>".
 func parseConfigSetCommand(cmd string) (string, interface{}, error) {
-	parts := strings.Fields(cmd)
-	// Expected: "openclaw" "config" "set" "<path>" "<value>"
-	if len(parts) < 5 || parts[0] != "openclaw" || parts[1] != "config" || parts[2] != "set" {
-		return "", nil, fmt.Errorf("unrecognized CONFIGURE command: %q (expected 'openclaw config set <path> <value>')", cmd)
-	}
-	path := parts[3]
-	value := strings.TrimSpace(strings.Join(parts[4:], " "))
-	if value == "" {
-		return "", nil, fmt.Errorf("unrecognized CONFIGURE command: %q (expected non-empty value)", cmd)
-	}
-
-	// Preserve native JSON scalar/object/array types when possible.
-	var typed interface{}
-	if err := json.Unmarshal([]byte(value), &typed); err == nil {
-		return path, typed, nil
-	}
-
-	return path, value, nil
+	return shared.ParseConfigSetCommand(cmd, "openclaw")
 }
 
 // platformBotIDs collects all bot IDs for a given platform from own handle and
@@ -493,42 +477,5 @@ func getOrCreatePath(obj map[string]interface{}, path string) (map[string]interf
 
 // setPath sets a nested value in a map using a dotted path.
 func setPath(obj map[string]interface{}, path string, value interface{}) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return fmt.Errorf("invalid empty config path")
-	}
-
-	parts := strings.Split(path, ".")
-	current := obj
-	for i, part := range parts {
-		if part == "" {
-			return fmt.Errorf("invalid config path %q", path)
-		}
-
-		if i == len(parts)-1 {
-			if existing, exists := current[part]; exists {
-				if _, isMap := existing.(map[string]interface{}); isMap {
-					return fmt.Errorf("path conflict at %q: cannot overwrite object with value", strings.Join(parts[:i+1], "."))
-				}
-			}
-			current[part] = value
-			return nil
-		}
-
-		nextRaw, exists := current[part]
-		if !exists {
-			next := make(map[string]interface{})
-			current[part] = next
-			current = next
-			continue
-		}
-
-		next, ok := nextRaw.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("path conflict at %q: expected object, found %T", strings.Join(parts[:i+1], "."), nextRaw)
-		}
-		current = next
-	}
-
-	return nil
+	return shared.SetPath(obj, path, value)
 }

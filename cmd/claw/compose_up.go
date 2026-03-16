@@ -1799,7 +1799,7 @@ func buildManagedServiceImage(podDir, imageRef string, cfg *serviceBuildConfig) 
 		if err != nil {
 			return fmt.Errorf("generate Dockerfile from %q: %w", dockerfilePath, err)
 		}
-		if err := buildGeneratedImage(generatedPath, imageRef); err != nil {
+		if err := buildGeneratedImage(generatedPath, imageRef, contextDir); err != nil {
 			return fmt.Errorf("build image %q from %q: %w", imageRef, generatedPath, err)
 		}
 		return nil

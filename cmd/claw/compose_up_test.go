@@ -603,7 +603,10 @@ func TestMergedPortsPortsOnly(t *testing.T) {
 
 func TestResolveManagedServiceImageBuildOnlyClawfile(t *testing.T) {
 	tmpDir := t.TempDir()
-	clawfilePath := filepath.Join(tmpDir, "Clawfile")
+	clawfilePath := filepath.Join(tmpDir, "agents", "shared", "OpenClawfile")
+	if err := os.MkdirAll(filepath.Dir(clawfilePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(clawfilePath, []byte("FROM alpine\nCLAW_TYPE openclaw\nAGENT AGENTS.md\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +614,8 @@ func TestResolveManagedServiceImageBuildOnlyClawfile(t *testing.T) {
 	svc := &pod.Service{
 		Compose: map[string]interface{}{
 			"build": map[string]interface{}{
-				"context": ".",
+				"context":    ".",
+				"dockerfile": filepath.ToSlash(filepath.Join("agents", "shared", "OpenClawfile")),
 			},
 		},
 	}
@@ -637,11 +641,13 @@ func TestResolveManagedServiceImageBuildOnlyClawfile(t *testing.T) {
 		return generatedPath, nil
 	}
 	var builtTag string
-	buildGeneratedImage = func(path, tag string) error {
+	var builtContext string
+	buildGeneratedImage = func(path, tag, contextDir string) error {
 		if path != generatedPath {
 			t.Fatalf("expected generated path %q, got %q", generatedPath, path)
 		}
 		builtTag = tag
+		builtContext = contextDir
 		return nil
 	}
 	dockerBuildTaggedImage = func(string, string, string, map[string]string, string) error {
@@ -664,6 +670,9 @@ func TestResolveManagedServiceImageBuildOnlyClawfile(t *testing.T) {
 	}
 	if builtTag != imageRef {
 		t.Fatalf("expected built tag %q, got %q", imageRef, builtTag)
+	}
+	if builtContext != tmpDir {
+		t.Fatalf("expected build context %q, got %q", tmpDir, builtContext)
 	}
 }
 
@@ -705,7 +714,7 @@ func TestResolveManagedServiceImageBuildsPlainDockerfile(t *testing.T) {
 		t.Fatal("unexpected Clawfile generation for plain Dockerfile build")
 		return "", nil
 	}
-	buildGeneratedImage = func(string, string) error {
+	buildGeneratedImage = func(string, string, string) error {
 		t.Fatal("unexpected generated-image build for plain Dockerfile build")
 		return nil
 	}

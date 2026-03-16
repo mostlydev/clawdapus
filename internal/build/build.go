@@ -9,6 +9,7 @@ import (
 
 	"github.com/mostlydev/clawdapus/internal/clawfile"
 	"github.com/mostlydev/clawdapus/internal/driver"
+	_ "github.com/mostlydev/clawdapus/internal/driver/hermes"
 	_ "github.com/mostlydev/clawdapus/internal/driver/microclaw"
 	_ "github.com/mostlydev/clawdapus/internal/driver/nanobot"
 	_ "github.com/mostlydev/clawdapus/internal/driver/nanoclaw"
@@ -82,8 +83,11 @@ func ensureBaseImage(parsed *clawfile.ParseResult, d driver.Driver) error {
 	return BuildFromDockerfileContent(tag, dockerfile)
 }
 
-func BuildFromGenerated(generatedPath string, tag string) error {
-	buildContext := filepath.Dir(generatedPath)
+func BuildFromGenerated(generatedPath string, tag string, contextDir string) error {
+	buildContext := strings.TrimSpace(contextDir)
+	if buildContext == "" {
+		buildContext = filepath.Dir(generatedPath)
+	}
 
 	args := []string{"build", "-f", generatedPath}
 	if tag != "" {

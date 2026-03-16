@@ -34,7 +34,7 @@ var buildCmd = &cobra.Command{
 		fmt.Printf("Generated %s\n", generatedPath)
 
 		fmt.Println("Building image with docker")
-		return build.BuildFromGenerated(generatedPath, buildTag)
+		return build.BuildFromGenerated(generatedPath, buildTag, "")
 	},
 }
 

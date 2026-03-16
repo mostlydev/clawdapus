@@ -290,5 +290,5 @@ func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
 }
 
 func isFiveFieldCron(expr string) bool {
-	return len(strings.Fields(strings.TrimSpace(expr))) == 5
+	return shared.IsFiveFieldCron(expr)
 }
