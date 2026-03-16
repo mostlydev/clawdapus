@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,6 +28,12 @@ func TestQuickstartDocsRunInFreshDockerContainer(t *testing.T) {
 
 	repoRoot := quickstartRepoRoot(t)
 	env := loadQuickstartDocEnv(t, repoRoot)
+	if env["CLLAMA_UI_PORT"] == "" {
+		env["CLLAMA_UI_PORT"] = spikeFreePort(t)
+	}
+	if env["CLAWDASH_ADDR"] == "" {
+		env["CLAWDASH_ADDR"] = ":" + spikeFreePort(t)
+	}
 	required := []string{"OPENROUTER_API_KEY", "DISCORD_BOT_TOKEN", "DISCORD_BOT_ID", "DISCORD_GUILD_ID"}
 	missing := missingEnvKeys(env, required)
 	if len(missing) > 0 {
@@ -103,12 +108,15 @@ func loadQuickstartDocEnv(t *testing.T, repoRoot string) map[string]string {
 	}
 
 	dotEnvPath := filepath.Join(repoRoot, "examples", "quickstart", ".env")
-	fileVals := readDotEnvFile(t, dotEnvPath)
-	for key, value := range fileVals {
-		if _, exists := out[key]; exists {
-			continue
+	if fileVals, err := readDotEnvFile(dotEnvPath); err == nil {
+		for key, value := range fileVals {
+			if _, exists := out[key]; exists {
+				continue
+			}
+			out[key] = value
 		}
-		out[key] = value
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("read %s: %v", dotEnvPath, err)
 	}
 
 	return out
@@ -122,41 +130,6 @@ func missingEnvKeys(values map[string]string, required []string) []string {
 		}
 	}
 	return missing
-}
-
-func readDotEnvFile(t *testing.T, path string) map[string]string {
-	t.Helper()
-	out := map[string]string{}
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return out
-		}
-		t.Fatalf("open %s: %v", path, err)
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "export ")
-		idx := strings.IndexByte(line, '=')
-		if idx < 0 {
-			continue
-		}
-		key := strings.TrimSpace(line[:idx])
-		val := strings.TrimSpace(line[idx+1:])
-		if key != "" && val != "" {
-			out[key] = val
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("scan %s: %v", path, err)
-	}
-	return out
 }
 
 func buildLinuxClawBinary(t *testing.T, repoRoot string) string {
@@ -330,7 +303,7 @@ func runQuickstartDocCommandsInContainer(t *testing.T, repoRoot, linuxClaw strin
 		"-w", repoRoot,
 	}
 
-	for _, key := range []string{"OPENROUTER_API_KEY", "DISCORD_BOT_TOKEN", "DISCORD_BOT_ID", "DISCORD_GUILD_ID"} {
+	for _, key := range []string{"OPENROUTER_API_KEY", "DISCORD_BOT_TOKEN", "DISCORD_BOT_ID", "DISCORD_GUILD_ID", "CLLAMA_UI_PORT", "CLAWDASH_ADDR"} {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", key, env[key]))
 	}
 

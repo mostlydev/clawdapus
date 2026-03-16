@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/mostlydev/clawdapus/internal/build"
+	"github.com/mostlydev/clawdapus/internal/pod"
 	"gopkg.in/yaml.v3"
 )
 
@@ -75,6 +77,14 @@ func TestSpikeComposeUp(t *testing.T) {
 	if env["MICRO_DISCORD_ID"] == "" {
 		env["MICRO_DISCORD_ID"] = env["TIVERTON_DISCORD_ID"]
 	}
+	if env["CLLAMA_UI_PORT"] == "" {
+		env["CLLAMA_UI_PORT"] = spikeFreePort(t)
+	}
+	if env["CLAWDASH_ADDR"] == "" {
+		env["CLAWDASH_ADDR"] = ":" + spikeFreePort(t)
+	}
+	t.Setenv("CLLAMA_UI_PORT", env["CLLAMA_UI_PORT"])
+	t.Setenv("CLAWDASH_ADDR", env["CLAWDASH_ADDR"])
 
 	// Build images before running compose up.
 	// openclaw:latest is the base runtime image; build it from the local
@@ -98,6 +108,63 @@ func TestSpikeComposeUp(t *testing.T) {
 	}
 	defer os.Remove(spikePodPath)
 
+	if !strings.Contains(rawPod, "handles-defaults:") {
+		t.Fatal("trading-desk claw-pod.yml should declare x-claw.handles-defaults")
+	}
+
+	var rawPodMap map[string]interface{}
+	if err := yaml.Unmarshal([]byte(rawPod), &rawPodMap); err != nil {
+		t.Fatalf("parse raw trading-desk pod YAML: %v", err)
+	}
+	servicesMap, ok := rawPodMap["services"].(map[string]interface{})
+	if !ok {
+		t.Fatal("raw trading-desk pod YAML missing services map")
+	}
+	tivertonRaw, ok := servicesMap["tiverton"].(map[string]interface{})
+	if !ok {
+		t.Fatal("raw trading-desk pod YAML missing tiverton service")
+	}
+	tivertonClaw, ok := tivertonRaw["x-claw"].(map[string]interface{})
+	if !ok {
+		t.Fatal("raw trading-desk pod YAML missing tiverton x-claw block")
+	}
+	tivertonHandles, ok := tivertonClaw["handles"].(map[string]interface{})
+	if !ok {
+		t.Fatal("raw trading-desk pod YAML missing tiverton handles block")
+	}
+	tivertonDiscord, ok := tivertonHandles["discord"].(map[string]interface{})
+	if !ok {
+		t.Fatal("raw trading-desk pod YAML missing tiverton discord handle map")
+	}
+	if _, hasGuilds := tivertonDiscord["guilds"]; hasGuilds {
+		t.Fatal("tiverton handle should inherit guild topology from x-claw.handles-defaults, not redeclare guilds inline")
+	}
+
+	parsedPod, err := pod.Parse(strings.NewReader(expandedPod))
+	if err != nil {
+		t.Fatalf("parse expanded spike pod: %v", err)
+	}
+	for _, svcName := range []string{"tiverton", "westin", "allen", "logan", "micro"} {
+		svc := parsedPod.Services[svcName]
+		if svc == nil || svc.Claw == nil {
+			t.Fatalf("parsed pod: missing claw service %q", svcName)
+		}
+		discordHandle := svc.Claw.Handles["discord"]
+		if discordHandle == nil {
+			t.Fatalf("parsed pod: service %q missing discord handle", svcName)
+		}
+		if len(discordHandle.Guilds) != 1 {
+			t.Fatalf("parsed pod: service %q expected 1 inherited guild, got %d", svcName, len(discordHandle.Guilds))
+		}
+		guild := discordHandle.Guilds[0]
+		if guild.ID != env["DISCORD_GUILD_ID"] {
+			t.Fatalf("parsed pod: service %q expected inherited guild id %q, got %q", svcName, env["DISCORD_GUILD_ID"], guild.ID)
+		}
+		if len(guild.Channels) != 1 || guild.Channels[0].ID != env["DISCORD_TRADING_FLOOR_CHANNEL"] {
+			t.Fatalf("parsed pod: service %q expected inherited trading-floor channel %q, got %+v", svcName, env["DISCORD_TRADING_FLOOR_CHANNEL"], guild.Channels)
+		}
+	}
+
 	// Paths that runComposeUp will create
 	generatedPath := filepath.Join(dir, "compose.generated.yml")
 	runtimeDir := filepath.Join(dir, ".claw-runtime")
@@ -110,10 +177,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	defer func() { composeUpDetach = prev }()
 
 	// Pre-teardown: clean up any containers left over from a prior run.
-	preClean := exec.Command("docker", "compose", "-p", "trading-desk", "down", "--volumes", "--remove-orphans")
-	preClean.Stdout = os.Stdout
-	preClean.Stderr = os.Stderr
-	_ = preClean.Run()
+	spikeCleanupProject("trading-desk", generatedPath)
 
 	// Run the full pipeline: parse → materialize → generate → docker compose up.
 	if err := runComposeUp(spikePodPath); err != nil {
@@ -127,10 +191,7 @@ func TestSpikeComposeUp(t *testing.T) {
 			out, _ := exec.Command("docker", "logs", "--tail", "100", name).CombinedOutput()
 			t.Logf("=== %s logs ===\n%s", name, string(out))
 		}
-		cmd := exec.Command("docker", "compose", "-f", generatedPath, "down", "--volumes")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
+		spikeCleanupProject("trading-desk", generatedPath)
 	}
 	defer teardown()
 
@@ -603,6 +664,48 @@ func spikeLoadDotEnv(t *testing.T, path string) map[string]string {
 	return m
 }
 
+func spikeFreePort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate free port: %v", err)
+	}
+	defer ln.Close()
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("expected TCP listener addr, got %T", ln.Addr())
+	}
+	return fmt.Sprintf("%d", addr.Port)
+}
+
+func spikeCleanupProject(project, generatedPath string) {
+	if strings.TrimSpace(generatedPath) != "" {
+		cmd := exec.Command("docker", "compose", "-f", generatedPath, "down", "--volumes", "--remove-orphans")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
+	}
+
+	cmd := exec.Command("docker", "compose", "-p", project, "down", "--volumes", "--remove-orphans")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+
+	out, err := exec.Command("docker", "ps", "-aq", "--filter", "label=com.docker.compose.project="+project).Output()
+	if err != nil {
+		return
+	}
+	ids := strings.Fields(string(out))
+	if len(ids) == 0 {
+		return
+	}
+	rmArgs := append([]string{"rm", "-f"}, ids...)
+	rm := exec.Command("docker", rmArgs...)
+	rm.Stdout = os.Stdout
+	rm.Stderr = os.Stderr
+	_ = rm.Run()
+}
+
 var envVarRe = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
 
 func spikeExpandEnvVars(s string, env map[string]string) string {
@@ -639,7 +742,7 @@ func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 		if err != nil {
 			t.Fatalf("claw build generate %s: %v", clawfilePath, err)
 		}
-		if err := build.BuildFromGenerated(generatedPath, tag); err != nil {
+		if err := build.BuildFromGenerated(generatedPath, tag, contextDir); err != nil {
 			t.Fatalf("claw build %s: %v", tag, err)
 		}
 		return

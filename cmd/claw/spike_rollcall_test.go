@@ -58,6 +58,14 @@ func TestSpikeRollCall(t *testing.T) {
 	if env["OPENROUTER_API_KEY"] == "" {
 		env["OPENROUTER_API_KEY"] = "sk-unused-openrouter"
 	}
+	if env["CLLAMA_UI_PORT"] == "" {
+		env["CLLAMA_UI_PORT"] = spikeFreePort(t)
+	}
+	if env["CLAWDASH_ADDR"] == "" {
+		env["CLAWDASH_ADDR"] = ":" + spikeFreePort(t)
+	}
+	t.Setenv("CLLAMA_UI_PORT", env["CLLAMA_UI_PORT"])
+	t.Setenv("CLAWDASH_ADDR", env["CLAWDASH_ADDR"])
 
 	channelID := env["ROLLCALL_CHANNEL_ID"]
 	botToken := env["DISCORD_BOT_TOKEN"]
@@ -126,10 +134,7 @@ func TestSpikeRollCall(t *testing.T) {
 	defer os.RemoveAll(runtimeDir)
 
 	// ── Pre-teardown ────────────────────────────────────────────────────
-	preClean := exec.Command("docker", "compose", "-p", "rollcall", "down", "--volumes", "--remove-orphans")
-	preClean.Stdout = os.Stdout
-	preClean.Stderr = os.Stderr
-	_ = preClean.Run()
+	spikeCleanupProject("rollcall", generatedPath)
 
 	// ── Compose up ──────────────────────────────────────────────────────
 	prev := composeUpDetach
@@ -150,10 +155,7 @@ func TestSpikeRollCall(t *testing.T) {
 		cllamaLogs, _ := exec.Command("docker", "logs", "--tail", "80", "rollcall-cllama-1").CombinedOutput()
 		t.Logf("=== rollcall-cllama-1 logs ===\n%s", string(cllamaLogs))
 
-		cmd := exec.Command("docker", "compose", "-f", generatedPath, "down", "--volumes")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
+		spikeCleanupProject("rollcall", generatedPath)
 	}
 	defer teardown()
 

@@ -75,7 +75,7 @@ docker compose -f compose.generated.yml logs -f tiverton
 
 1. Builds all images (`Clawfile*` variants for all claw types, plus mock trading API)
 2. Runs `claw up` on a pre-expanded pod YAML
-3. Asserts generated artifacts — `openclaw.json` structure, `jobs.json` channel IDs, compose mounts
+3. Asserts generated artifacts — including `x-claw.handles-defaults` inheritance into per-service Discord topology, `openclaw.json` structure, `jobs.json` channel IDs, and compose mounts
 4. Asserts cllama wiring — proxy service emitted, provider endpoints in `models.providers.*` rewritten to `cllama`, bearer token injected, per-agent context dir generated
 5. Waits for containers to be healthy
 6. Polls the Discord channel REST API to confirm startup greetings arrived
