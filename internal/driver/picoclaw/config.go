@@ -50,16 +50,16 @@ var supportedPlatformSet = map[string]struct{}{
 
 // GenerateConfig builds a picoclaw JSON config from resolved Claw directives.
 func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
-	if _, err := primaryModelRef(rc.Models); err != nil {
-		return nil, err
+	if _, err := shared.PrimaryModelRef(rc.Models); err != nil {
+		return nil, fmt.Errorf("picoclaw driver: %w", err)
 	}
 
 	config := make(map[string]interface{})
 
-	if err := setPath(config, "agents.defaults.model_name", "primary"); err != nil {
+	if err := shared.SetPath(config, "agents.defaults.model_name", "primary"); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
-	if err := setPath(config, "agents.defaults.workspace", picoclawWorkspaceDir); err != nil {
+	if err := shared.SetPath(config, "agents.defaults.workspace", picoclawWorkspaceDir); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
 
@@ -67,7 +67,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
-	if err := setPath(config, "model_list", modelList); err != nil {
+	if err := shared.SetPath(config, "model_list", modelList); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
 
@@ -127,18 +127,18 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			}
 		}
 
-		if err := setPath(config, "channels."+platform, channel); err != nil {
+		if err := shared.SetPath(config, "channels."+platform, channel); err != nil {
 			return nil, fmt.Errorf("config generation: HANDLE %s: %w", platform, err)
 		}
 	}
 
 	// Apply CONFIGURE directives last so operator settings override defaults.
 	for _, cmd := range rc.Configures {
-		path, value, err := parseConfigSetCommand(cmd)
+		path, value, err := shared.ParseConfigSetCommand(cmd, "picoclaw")
 		if err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
 		}
-		if err := setPath(config, path, value); err != nil {
+		if err := shared.SetPath(config, path, value); err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
 		}
 	}
@@ -211,18 +211,6 @@ func sortedModelSlots(models map[string]string) []string {
 	return append(out, others...)
 }
 
-func parseConfigSetCommand(cmd string) (string, interface{}, error) {
-	return shared.ParseConfigSetCommand(cmd, "picoclaw")
-}
-
-func primaryModelRef(models map[string]string) (string, error) {
-	ref, err := shared.PrimaryModelRef(models)
-	if err != nil {
-		return "", fmt.Errorf("picoclaw driver: %w", err)
-	}
-	return ref, nil
-}
-
 func normalizePlatform(platform string) string {
 	return strings.ToLower(strings.TrimSpace(platform))
 }
@@ -230,8 +218,4 @@ func normalizePlatform(platform string) string {
 func isSupportedPlatform(platform string) bool {
 	_, ok := supportedPlatformSet[normalizePlatform(platform)]
 	return ok
-}
-
-func setPath(obj map[string]interface{}, path string, value interface{}) error {
-	return shared.SetPath(obj, path, value)
 }

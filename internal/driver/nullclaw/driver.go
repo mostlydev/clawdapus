@@ -28,7 +28,7 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	}
 
 	for _, cmd := range rc.Configures {
-		if _, _, err := parseConfigSetCommand(cmd); err != nil {
+		if _, _, err := shared.ParseConfigSetCommand(cmd, "nullclaw"); err != nil {
 			return fmt.Errorf("nullclaw driver: unsupported CONFIGURE command %q: %w", cmd, err)
 		}
 	}
@@ -189,7 +189,7 @@ func (d *Driver) PostApply(rc *driver.ResolvedClaw, opts driver.PostApplyOpts) e
 
 		args := buildCronAddArgs(inv.Schedule, command)
 		execCtx, cancelExec := context.WithTimeout(context.Background(), 20*time.Second)
-		stdout, stderr, exitCode, execErr := execInContainer(execCtx, cli, opts.ContainerID, args)
+		stdout, stderr, exitCode, execErr := shared.ExecInContainer(execCtx, cli, opts.ContainerID, args)
 		cancelExec()
 		if execErr != nil {
 			return fmt.Errorf("nullclaw driver: post-apply failed to add cron job (schedule: %s): %w", inv.Schedule, execErr)
@@ -291,7 +291,7 @@ func parseCronListOutput(text string) map[string]struct{} {
 func listExistingCronJobs(cli *client.Client, containerID string) (map[string]struct{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	stdout, stderr, exitCode, err := execInContainer(ctx, cli, containerID, []string{"nullclaw", "cron", "list"})
+	stdout, stderr, exitCode, err := shared.ExecInContainer(ctx, cli, containerID, []string{"nullclaw", "cron", "list"})
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +308,3 @@ func listExistingCronJobs(cli *client.Client, containerID string) (map[string]st
 	return parseCronListOutput(stdout + "\n" + stderr), nil
 }
 
-func execInContainer(ctx context.Context, cli *client.Client, containerID string, cmd []string) (string, string, int, error) {
-	return shared.ExecInContainer(ctx, cli, containerID, cmd)
-}

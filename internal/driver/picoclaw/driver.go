@@ -33,9 +33,9 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 		return fmt.Errorf("picoclaw driver: agent file %q not found: %w", rc.AgentHostPath, err)
 	}
 
-	modelRef, err := primaryModelRef(rc.Models)
+	modelRef, err := shared.PrimaryModelRef(rc.Models)
 	if err != nil {
-		return err
+		return fmt.Errorf("picoclaw driver: %w", err)
 	}
 	provider, _, ok := shared.SplitModelRef(modelRef)
 	if !ok {
@@ -43,7 +43,7 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	}
 
 	for _, cmd := range rc.Configures {
-		if _, _, err := parseConfigSetCommand(cmd); err != nil {
+		if _, _, err := shared.ParseConfigSetCommand(cmd, "picoclaw"); err != nil {
 			return fmt.Errorf("picoclaw driver: unsupported CONFIGURE command %q: %w", cmd, err)
 		}
 	}
@@ -295,7 +295,7 @@ func probeStatusEndpoint(cli *client.Client, containerID, url string) (status st
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	stdout, stderr, exitCode, execErr := execInContainer(ctx, cli, containerID, []string{"curl", "-fsS", url})
+	stdout, stderr, exitCode, execErr := shared.ExecInContainer(ctx, cli, containerID, []string{"curl", "-fsS", url})
 	if execErr != nil {
 		return "", "", execErr
 	}
@@ -319,10 +319,6 @@ func probeStatusEndpoint(cli *client.Client, containerID, url string) (status st
 		return "", "", fmt.Errorf("parse %s response: %w (output: %s)", url, parseErr, out)
 	}
 	return status, detail, nil
-}
-
-func execInContainer(ctx context.Context, cli *client.Client, containerID string, cmd []string) (string, string, int, error) {
-	return shared.ExecInContainer(ctx, cli, containerID, cmd)
 }
 
 type picoclawCronStore struct {
@@ -360,7 +356,7 @@ func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
 
 	for i, inv := range invocations {
 		expr := strings.TrimSpace(inv.Schedule)
-		if !isFiveFieldCron(expr) {
+		if !shared.IsFiveFieldCron(expr) {
 			return nil, fmt.Errorf("invocation %d has invalid cron expression %q (expected 5 fields)", i+1, inv.Schedule)
 		}
 
@@ -392,6 +388,3 @@ func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
 	return json.MarshalIndent(store, "", "  ")
 }
 
-func isFiveFieldCron(expr string) bool {
-	return shared.IsFiveFieldCron(expr)
-}

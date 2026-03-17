@@ -28,9 +28,9 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 		return fmt.Errorf("nanobot driver: agent file %q not found: %w", rc.AgentHostPath, err)
 	}
 
-	modelRef, err := primaryModelRef(rc.Models)
+	modelRef, err := shared.PrimaryModelRef(rc.Models)
 	if err != nil {
-		return err
+		return fmt.Errorf("nanobot driver: %w", err)
 	}
 	provider, _, ok := shared.SplitModelRef(modelRef)
 	if !ok {
@@ -38,7 +38,7 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	}
 
 	for _, cmd := range rc.Configures {
-		if _, _, err := parseConfigSetCommand(cmd); err != nil {
+		if _, _, err := shared.ParseConfigSetCommand(cmd, "nanobot"); err != nil {
 			return fmt.Errorf("nanobot driver: unsupported CONFIGURE command %q: %w", cmd, err)
 		}
 	}
@@ -255,7 +255,7 @@ func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
 
 	for i, inv := range invocations {
 		expr := strings.TrimSpace(inv.Schedule)
-		if !isFiveFieldCron(expr) {
+		if !shared.IsFiveFieldCron(expr) {
 			return nil, fmt.Errorf("invocation %d has invalid cron expression %q (expected 5 fields)", i+1, inv.Schedule)
 		}
 
@@ -289,6 +289,3 @@ func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
 	return json.MarshalIndent(store, "", "  ")
 }
 
-func isFiveFieldCron(expr string) bool {
-	return shared.IsFiveFieldCron(expr)
-}

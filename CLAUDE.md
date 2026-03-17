@@ -37,6 +37,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - `internal/driver/openclaw/` — JSON5-aware config injection, CLAWDAPUS.md generation, skill generation
 - `internal/driver/nanobot/` — Nanobot driver: JSON config, `/root/.nanobot` mounts, container-running health
 - `internal/driver/picoclaw/` — PicoClaw driver: `model_list[]` config, non-root mounts, HTTP `/health` probing
+- `internal/driver/hermes/` — Hermes driver: YAML config, workspace AGENTS.md, SOUL.md persona, cron/jobs.json, gateway health probing
 - `internal/driver/shared/` — Shared model/provider helpers, platform token mapping, CLAWDAPUS.md + handle skill generation
 - `internal/persona/` — Persona materialization: local copy + OCI pull via oras-go
 - `internal/pod/` — claw-pod.yml parser, compose emitter (includes x-claw.include composition)
@@ -59,6 +60,7 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 | Phase 4 — cllama sidecar proxy (standalone + wiring + cost tracking + dashboard) | DONE |
 | Phase 4.5 — Interactive claw init & claw agent add (canonical layout) | DONE |
 | Phase 4.7 — Nanobot + PicoClaw drivers, shared helpers, scaffold parity | DONE |
+| Phase 4.8 — Hermes driver + shared helper extraction | DONE |
 | v0.2.0 — PERSONA runtime materialization + x-claw.include contract composition | DONE |
 | Phase 4.6 — Unified worker architecture (config, provision, diagnostic) | DESIGN |
 | Phase 5 — Drift scoring + cllama policy pipeline | NOT STARTED |
@@ -101,7 +103,8 @@ Clawdapus is infrastructure-layer governance for AI agent containers. The `claw`
 - **Nanobot driver**: Config at `/root/.nanobot/config.json`, workspace at `/root/.nanobot/workspace`, cron at `/root/.nanobot/cron/jobs.json`. CONFIGURE DSL: `nanobot config set <path> <value>`. Container-running health only (no HTTP endpoint). MVP channels: discord, telegram, slack
 - **PicoClaw driver**: Non-root user (`USER picoclaw`); mounts at `/home/picoclaw/.picoclaw` with `PICOCLAW_HOME`/`PICOCLAW_CONFIG` env overrides. Model-centric config: `model_list[]` with `model` field (e.g. `openai/<ref>` under cllama) + `agents.defaults.model_name`. HTTP `/health` + `/ready` on port 18790. Requires at least one supported HANDLE (fail-closed, matching upstream). 13 supported platforms including long-tail set
 - **Shared driver helpers** (`internal/driver/shared/`): `SplitModelRef`, `CollectProviders`, `NormalizeProvider`, `ResolveProviderAPIKey` extracted from microclaw/nullclaw duplication. `PlatformTokenVar` maps 14 platforms to env var names. `GenerateClawdapusMD` and `GenerateHandleSkill` shared across all drivers
-- **INVOKE 5-field cron only**: Both nanobot and picoclaw drivers validate and reject non-5-field cron expressions. `at`/`every` syntaxes deferred to future Clawfile parser extension
+- **INVOKE 5-field cron only**: Nanobot, picoclaw, and hermes drivers validate and reject non-5-field cron expressions. `at`/`every` syntaxes deferred to future Clawfile parser extension
+- **Hermes driver**: Two-root layout (`/root/.hermes` + `/workspace`). YAML config (`config.yaml`) + dotenv (`.env`). Effective `AGENTS.md` inlines CLAWDAPUS.md as infrastructure context. PERSONA via `SOUL.md` copy. INVOKE translates to Hermes-native `cron/jobs.json` with deterministic SHA256 IDs. cllama via `OPENAI_BASE_URL`/`OPENAI_API_KEY` in `.env`. Gateway health: `hermes gateway status || pgrep` fallback. Scoped to discord/telegram/slack (fail-closed on unsupported). Scaffold deferred until stable base image exists
 - **PERSONA runtime materialization**: `PERSONA <ref>` in Clawfile emits `claw.persona.default` label; `x-claw.persona` overrides at pod level. Local paths (relative, absolute, `file://`) are copied with path-traversal + symlink checks. Non-local refs pulled as OCI artifacts via oras-go. Mounted writable into runner; `CLAW_PERSONA_DIR` env set only when persona is present. Currently a deploy-time mount mechanism — not yet a complete identity system (no memory restoration, no snapshotting, no registry round-trips)
 - **x-claw.include contract composition**: `include` array in x-claw block modularizes the behavioral contract. Modes: `enforce` (hard rules, inlined), `guide` (recommendations, inlined), `reference` (informational, mounted as read-only skill files). ADR-009
 

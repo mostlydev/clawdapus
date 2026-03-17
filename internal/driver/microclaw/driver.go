@@ -32,20 +32,18 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 		return fmt.Errorf("microclaw driver: agent file %q not found: %w", rc.AgentHostPath, err)
 	}
 
-	modelRef, err := primaryModelRef(rc.Models)
+	modelRef, err := shared.PrimaryModelRef(rc.Models)
 	if err != nil {
-		return err
+		return fmt.Errorf("microclaw driver: %w", err)
 	}
 	provider, _, ok := shared.SplitModelRef(modelRef)
 	if !ok {
 		return fmt.Errorf("microclaw driver: invalid MODEL primary %q (expected provider/model)", modelRef)
 	}
 
-	if len(rc.Configures) > 0 {
-		for _, cmd := range rc.Configures {
-			if _, _, err := parseConfigSetCommand(cmd); err != nil {
-				return fmt.Errorf("microclaw driver: unsupported CONFIGURE command %q: %w", cmd, err)
-			}
+	for _, cmd := range rc.Configures {
+		if _, _, err := parseConfigSetCommand(cmd); err != nil {
+			return fmt.Errorf("microclaw driver: unsupported CONFIGURE command %q: %w", cmd, err)
 		}
 	}
 
@@ -101,7 +99,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		if err != nil {
 			return nil, fmt.Errorf("microclaw driver: apply CONFIGURE %q: %w", cmd, err)
 		}
-		if err := setPath(cfg, path, value); err != nil {
+		if err := shared.SetPath(cfg, path, value); err != nil {
 			return nil, fmt.Errorf("microclaw driver: apply CONFIGURE %q: %w", cmd, err)
 		}
 	}
@@ -240,9 +238,9 @@ func (d *Driver) HealthProbe(ref driver.ContainerRef) (*driver.Health, error) {
 }
 
 func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
-	modelRef, err := primaryModelRef(rc.Models)
+	modelRef, err := shared.PrimaryModelRef(rc.Models)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("microclaw driver: %w", err)
 	}
 	provider, modelID, ok := shared.SplitModelRef(modelRef)
 	if !ok {
@@ -343,13 +341,6 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 	return cfg, nil
 }
 
-func primaryModelRef(models map[string]string) (string, error) {
-	ref, err := shared.PrimaryModelRef(models)
-	if err != nil {
-		return "", fmt.Errorf("microclaw driver: %w", err)
-	}
-	return ref, nil
-}
 
 func discordAllowedChannels(h *driver.HandleInfo) []uint64 {
 	if h == nil {
@@ -438,6 +429,3 @@ func parseConfigSetCommand(cmd string) (string, interface{}, error) {
 	return path, value, nil
 }
 
-func setPath(obj map[string]interface{}, path string, value interface{}) error {
-	return shared.SetPath(obj, path, value)
-}

@@ -21,6 +21,7 @@
 | Phase 4 — cllama sidecar + cost tracking + dashboard | — | **DONE** — standalone proxy, pod wiring, credential starvation, cost hooks, SSE dashboard; policy pipeline deferred to Phase 5 |
 | Phase 4.5 — Interactive claw init & claw agent add | — | **DONE** — canonical layout, layout auto-detection |
 | Phase 4.7 — Nanobot + PicoClaw drivers, scaffold parity | — | **DONE** — 6 driver types, shared helpers, rollcall spike |
+| Phase 4.8 — Hermes driver + shared helper extraction | — | **DONE** — 7 driver types, deeper shared extraction (SetPath, ParseConfigSetCommand, ExecInContainer, IsFiveFieldCron) |
 | v0.2.0 — PERSONA + x-claw.include | — | **DONE** — persona materialization (local + OCI), contract composition (enforce/guide/reference) |
 | Phase 4.6 — Unified worker architecture | — | **DESIGN** — `docs/plans/2026-02-27-worker-architecture-unified.md` |
 | Phase 5 — Drift scoring + cllama policy pipeline | — | NOT STARTED |

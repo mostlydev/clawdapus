@@ -15,32 +15,32 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 	config := make(map[string]interface{})
 
 	// Conservative gateway defaults: keep local bind + pairing requirement.
-	if err := setPath(config, "gateway.port", 3000); err != nil {
+	if err := shared.SetPath(config, "gateway.port", 3000); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
-	if err := setPath(config, "gateway.host", "127.0.0.1"); err != nil {
+	if err := shared.SetPath(config, "gateway.host", "127.0.0.1"); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
-	if err := setPath(config, "gateway.require_pairing", true); err != nil {
+	if err := shared.SetPath(config, "gateway.require_pairing", true); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
 
 	// Safety defaults.
-	if err := setPath(config, "autonomy.level", "supervised"); err != nil {
+	if err := shared.SetPath(config, "autonomy.level", "supervised"); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
-	if err := setPath(config, "autonomy.workspace_only", true); err != nil {
+	if err := shared.SetPath(config, "autonomy.workspace_only", true); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
 
 	for slot, model := range rc.Models {
 		if slot == "fallback" {
-			if err := setPath(config, "reliability.fallback_providers", []string{model}); err != nil {
+			if err := shared.SetPath(config, "reliability.fallback_providers", []string{model}); err != nil {
 				return nil, fmt.Errorf("config generation: %w", err)
 			}
 			continue
 		}
-		if err := setPath(config, "agents.defaults.model."+slot, model); err != nil {
+		if err := shared.SetPath(config, "agents.defaults.model."+slot, model); err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
 		}
 	}
@@ -52,10 +52,10 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		firstProxy := fmt.Sprintf("http://cllama-%s:8080/v1", rc.Cllama[0])
 		for _, provider := range shared.CollectProviders(rc.Models) {
 			base := "models.providers." + provider
-			if err := setPath(config, base+".base_url", firstProxy); err != nil {
+			if err := shared.SetPath(config, base+".base_url", firstProxy); err != nil {
 				return nil, fmt.Errorf("config generation: cllama provider %q base_url: %w", provider, err)
 			}
-			if err := setPath(config, base+".api_key", rc.CllamaToken); err != nil {
+			if err := shared.SetPath(config, base+".api_key", rc.CllamaToken); err != nil {
 				return nil, fmt.Errorf("config generation: cllama provider %q api_key: %w", provider, err)
 			}
 		}
@@ -66,7 +66,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		switch strings.ToLower(platform) {
 		case "discord":
 			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN"); token != "" {
-				if err := setPath(config, "channels.discord.accounts.main.token", token); err != nil {
+				if err := shared.SetPath(config, "channels.discord.accounts.main.token", token); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 				}
 			}
@@ -76,7 +76,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 					if gid == "" {
 						continue
 					}
-					if err := setPath(config, "channels.discord.accounts.main.guild_id", gid); err != nil {
+					if err := shared.SetPath(config, "channels.discord.accounts.main.guild_id", gid); err != nil {
 						return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 					}
 					break
@@ -84,32 +84,32 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			}
 		case "telegram":
 			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN"); token != "" {
-				if err := setPath(config, "channels.telegram.accounts.main.bot_token", token); err != nil {
+				if err := shared.SetPath(config, "channels.telegram.accounts.main.bot_token", token); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
 				}
 			}
 		case "slack":
 			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN"); token != "" {
-				if err := setPath(config, "channels.slack.accounts.main.bot_token", token); err != nil {
+				if err := shared.SetPath(config, "channels.slack.accounts.main.bot_token", token); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 				}
 			}
 			appToken := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN")
 			if appToken != "" {
-				if err := setPath(config, "channels.slack.accounts.main.app_token", appToken); err != nil {
+				if err := shared.SetPath(config, "channels.slack.accounts.main.app_token", appToken); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 				}
-				if err := setPath(config, "channels.slack.accounts.main.mode", "socket"); err != nil {
+				if err := shared.SetPath(config, "channels.slack.accounts.main.mode", "socket"); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 				}
 			}
 			signingSecret := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_SIGNING_SECRET")
 			if signingSecret != "" {
-				if err := setPath(config, "channels.slack.accounts.main.signing_secret", signingSecret); err != nil {
+				if err := shared.SetPath(config, "channels.slack.accounts.main.signing_secret", signingSecret); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 				}
 				if appToken == "" {
-					if err := setPath(config, "channels.slack.accounts.main.mode", "http"); err != nil {
+					if err := shared.SetPath(config, "channels.slack.accounts.main.mode", "http"); err != nil {
 						return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 					}
 				}
@@ -120,22 +120,14 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 	}
 
 	for _, cmd := range rc.Configures {
-		path, value, err := parseConfigSetCommand(cmd)
+		path, value, err := shared.ParseConfigSetCommand(cmd, "nullclaw")
 		if err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
 		}
-		if err := setPath(config, path, value); err != nil {
+		if err := shared.SetPath(config, path, value); err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
 		}
 	}
 
 	return json.MarshalIndent(config, "", "  ")
-}
-
-func parseConfigSetCommand(cmd string) (string, interface{}, error) {
-	return shared.ParseConfigSetCommand(cmd, "nullclaw")
-}
-
-func setPath(obj map[string]interface{}, path string, value interface{}) error {
-	return shared.SetPath(obj, path, value)
 }

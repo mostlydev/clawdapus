@@ -70,7 +70,7 @@ A planning file can be deleted when:
 
 ---
 
-## Current planning file status (as of 2026-03-08)
+## Current planning file status (as of 2026-03-17)
 
 | File | Status | Action |
 |------|--------|--------|
@@ -79,3 +79,4 @@ A planning file can be deleted when:
 | `2026-02-26-phase4-cllama-sidecar.md` | Shipped scope DONE; policy pipeline deferred to Phase 5 | Keep as reference for deferred policy work |
 | `2026-02-27-worker-architecture-unified.md` | Phase 4.6 DESIGN | Keep; implement next |
 | `2026-03-01-driver-parity-matrix.md` | Implemented (Phase 4.7) | Keep until verified in production |
+| `2026-03-16-hermes-driver-and-shared-refactor.md` | Implemented (Phase 4.8) | Keep until verified in production |
