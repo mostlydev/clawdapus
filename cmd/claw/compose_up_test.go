@@ -656,10 +656,11 @@ func TestRuntimeConsumerServicesIncludesManagedServicesAndInfra(t *testing.T) {
 			"worker":    {Count: 2},
 		},
 		[]pod.CllamaProxyConfig{{ProxyType: "passthrough"}},
+		&pod.ClawAPIConfig{},
 		&pod.ClawdashConfig{},
 	)
 
-	want := []string{"assistant", "clawdash", "cllama", "worker-0", "worker-1"}
+	want := []string{"assistant", "claw-api", "clawdash", "cllama", "worker-0", "worker-1"}
 	if !slices.Equal(services, want) {
 		t.Fatalf("unexpected runtime consumer services: got %v want %v", services, want)
 	}
@@ -672,6 +673,7 @@ func TestRuntimeConsumerServicesDeduplicatesAndSorts(t *testing.T) {
 			"alpha": nil,
 		},
 		[]pod.CllamaProxyConfig{{ProxyType: "passthrough"}, {ProxyType: "passthrough"}},
+		nil,
 		nil,
 	)
 
@@ -695,6 +697,44 @@ func TestMergedPortsDeduplication(t *testing.T) {
 			t.Errorf("duplicate port %q in merged result", p)
 		}
 		seen[p] = true
+	}
+}
+
+func TestPrepareClawAPIRuntimeWritesPrincipalsAndProjectsAuth(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name:   "trading-desk",
+		Master: "octopus",
+		Services: map[string]*pod.Service{
+			"octopus": {
+				Environment: map[string]string{},
+				Claw:        &pod.ClawBlock{},
+			},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	auth, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"octopus": {Count: 1},
+	})
+	if err != nil {
+		t.Fatalf("prepareClawAPIRuntime: %v", err)
+	}
+
+	if p.Services["octopus"].Environment["CLAW_API_URL"] != "http://claw-api:8080" {
+		t.Fatalf("expected CLAW_API_URL env, got %v", p.Services["octopus"].Environment)
+	}
+	if _, ok := p.Services["octopus"].Environment["CLAW_API_TOKEN"]; ok {
+		t.Fatalf("did not expect CLAW_API_TOKEN in service env, got %v", p.Services["octopus"].Environment)
+	}
+	if auth["octopus"].Service != "claw-api" || auth["octopus"].Token == "" {
+		t.Fatalf("expected projected claw-api auth, got %+v", auth)
+	}
+	if _, err := os.Stat(p.ClawAPI.PrincipalsHostPath); err != nil {
+		t.Fatalf("expected principals file to be written: %v", err)
 	}
 }
 

@@ -5,8 +5,10 @@ import "github.com/mostlydev/clawdapus/internal/driver"
 // Pod represents a parsed claw-pod.yml.
 type Pod struct {
 	Name     string
+	Master   string
 	Services map[string]*Service
 	Compose  map[string]interface{} // preserved top-level compose keys except x-claw and services
+	ClawAPI  *ClawAPIConfig
 	Clawdash *ClawdashConfig        // runtime-only dashboard sidecar config, injected by claw up
 }
 
@@ -37,10 +39,18 @@ type ClawBlock struct {
 	CllamaTokens map[string]string // runtime-only: expanded service name -> token
 	Count        int
 	Handles      map[string]*driver.HandleInfo // platform → contact card
+	Feeds        []FeedEntry
 	Include      []IncludeEntry
 	Surfaces     []driver.ResolvedSurface
 	Skills       []string
 	Invoke       []InvokeEntry
+}
+
+type FeedEntry struct {
+	Name   string
+	Source string
+	Path   string
+	TTL    int
 }
 
 type IncludeEntry struct {

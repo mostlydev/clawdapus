@@ -22,6 +22,9 @@ func TestBuildPodManifestIncludesResolvedState(t *testing.T) {
 				Image: "redis:7",
 			},
 		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Image: "ghcr.io/mostlydev/claw-api:latest",
+		},
 	}
 
 	resolved := map[string]*driver.ResolvedClaw{
@@ -63,8 +66,8 @@ func TestBuildPodManifestIncludesResolvedState(t *testing.T) {
 	if got.PodName != "fleet" {
 		t.Fatalf("expected podName=fleet, got %q", got.PodName)
 	}
-	if len(got.Services) != 2 {
-		t.Fatalf("expected 2 services, got %d", len(got.Services))
+	if len(got.Services) != 3 {
+		t.Fatalf("expected 3 services, got %d", len(got.Services))
 	}
 
 	botSvc := got.Services["bot"]
@@ -94,6 +97,9 @@ func TestBuildPodManifestIncludesResolvedState(t *testing.T) {
 	}
 	if got.Proxies[0].ServiceName != "cllama" {
 		t.Fatalf("expected proxy service cllama, got %q", got.Proxies[0].ServiceName)
+	}
+	if got.Services["claw-api"].ImageRef != "ghcr.io/mostlydev/claw-api:latest" {
+		t.Fatalf("expected claw-api in manifest, got %+v", got.Services["claw-api"])
 	}
 }
 

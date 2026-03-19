@@ -1,5 +1,6 @@
 x-claw:
   pod: trading-desk
+  master: octopus
   handles-defaults:
     discord:
       guilds:
@@ -15,6 +16,8 @@ x-trading-desk:
   proxy-env: &proxy_env
     OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
     ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+  master_surfaces: &master_surfaces
+    - "service://claw-api"
   shared-trading-surfaces: &shared_trading_surfaces
     - "service://trading-api"
     - "volume://clawd-shared read-write"
@@ -107,6 +110,26 @@ services:
       DISCORD_BOT_TOKEN: "${TIVERTON_BOT_TOKEN}"
       CLAW_GREETING_CHANNEL: "${DISCORD_TRADING_FLOOR_CHANNEL}"
       CLAW_GREETING_MESSAGE: "tiverton online."
+
+  # ── Octopus — Master Claw / Fleet Governor ────────────────────────────────
+
+  octopus:
+    image: trading-desk:latest
+    build:
+      context: .
+      dockerfile: Clawfile
+    x-claw:
+      <<: *cllama_agent
+      agent: ./agents/OCTOPUS.md
+      feeds:
+        - source: claw-api
+          path: /fleet/alerts
+          ttl: 30
+      surfaces: *master_surfaces
+      invoke:
+        - schedule: "*/15 * * * *"
+          name: "Fleet review"
+          message: "Review the latest fleet alerts feed. If there are anomalies, investigate via claw-api and produce a concise governance note with findings and recommended next checks."
 
   # ── Westin — Momentum / Tech Stocks ──────────────────────────────────────
 

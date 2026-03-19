@@ -71,6 +71,13 @@ func buildPodManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw, prox
 		out.Services[name] = manifest
 	}
 
+	if p.ClawAPI != nil {
+		out.Services["claw-api"] = clawdash.ServiceManifest{
+			ImageRef: p.ClawAPI.Image,
+			Count:    1,
+		}
+	}
+
 	if len(proxies) > 0 {
 		out.Proxies = make([]clawdash.ProxyManifest, 0, len(proxies))
 		for _, proxy := range proxies {

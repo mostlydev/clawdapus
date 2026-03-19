@@ -86,18 +86,25 @@ Do not assume older docs mentioning only a subset are current.
 - A `Clawfile` is parsed and emitted into a standard Dockerfile using image labels for Clawdapus directives.
 - A `claw-pod.yml` is parsed from service-level `x-claw` blocks. Current parsed fields include `agent`, `persona`, `cllama`, `cllama-env`, `count`, `handles`, `include`, `surfaces`, `skills`, and `invoke`.
 - `count > 1` expands into ordinal-named compose services like `svc-0`, `svc-1`, etc.
+- `x-claw.master` is parsed in `rawPodClaw` but NOT propagated into `Pod` — the field is silently dropped. Any feature depending on it needs the parser→Pod→compose_up chain wired first.
 - cllama wiring is resolved before materialization in a two-pass `claw up` flow.
 - Generated runtime artifacts like `AGENTS.generated.md`, `CLAWDAPUS.md`, cllama context files, and runner configs are produced under runtime dirs during `claw up`.
+- cllama context layout: host-side at `.claw-runtime/context/<agent-id>/` containing `AGENTS.md`, `CLAWDAPUS.md`, `metadata.json`. Mounted into cllama container at `/claw/context/<agent-id>/`. The `context/` directory segment is required.
 
 ## Repo-Specific Gotchas
 
+- `cllama/` is a git submodule pointing to a private SSH repo. Fresh `git clone` leaves it empty. Infra images (cllama, clawdash) are published to ghcr.io as public packages to avoid this for end users.
+- `ensureImage()` in `compose_up.go` has a 3-step fallback: local image → `docker pull` → local Dockerfile build → git URL build. All steps must be considered when debugging image failures.
 - Managed services require `claw up -d` because post-apply verification is fail-closed.
 - Multi-proxy cllama is represented in the data model but runtime currently fails fast if more than one proxy type is declared.
+- cllama proxy handler (`cllama/internal/proxy/handler.go`) is pure passthrough: it rewrites the `model` field and forwards. It does NOT touch the `messages` array. No prompt decoration, no system message injection, no middleware hooks exist. Two distinct code paths handle OpenAI format (`messages[]`) vs Anthropic format (top-level `system` field).
+- cllama context mount (`agentctx`) currently holds only `AgentsMD`, `ClawdapusMD`, and `Metadata` (for bearer token auth). No outbound service credentials, no feed manifests, no decoration config.
 - Provider API keys for cllama-managed services belong in `x-claw.cllama-env`, not regular agent `environment:` blocks.
 - For cllama-enabled `count > 1` services, bearer tokens and context are per ordinal, not per base service.
 - `compose.generated.yml` and `Dockerfile.generated` are generated artifacts. Inspect them, but do not hand-edit them as source.
 - OpenClaw config and cron paths are mounted as directories, not single files, because the runtime performs atomic rewrites.
 - OpenClaw `openclaw health --json` can emit noise to stderr. The repo handles it as a stdout-first parse path.
+- cllama logger (`cllama/internal/logging/logger.go`): field `intervention *string` has no `omitempty` — every event emits `"intervention": null`. Emitted `type` values are `request`, `response`, `error`, `intervention`. No `drift_score` exists in the reference implementation. The spec (`CLLAMA_SPEC.md` §5) omits `error` from its type enum and uses `intervention_reason` where the logger uses `intervention`.
 
 ## Current Behavior Worth Knowing
 
@@ -107,6 +114,7 @@ Do not assume older docs mentioning only a subset are current.
 - OpenClaw cllama wiring does not write to `agents.defaults.model.baseURL/apiKey`; the schema-valid rewrite path is `models.providers.<provider>.{baseUrl,apiKey,api,models}`.
 - `PERSONA` is implemented as runtime materialization. Local refs are copied with traversal/symlink hardening; non-local refs are pulled as OCI artifacts. `CLAW_PERSONA_DIR` is only set when a persona is present.
 - `x-claw.include` contract composition is live. `enforce` and `guide` content is inlined into generated `AGENTS.md`; `reference` content is mounted as read-only skill material.
+- The `Driver` interface (`internal/driver/types.go`) has four methods: `Validate`, `Materialize`, `PostApply`, `HealthProbe`. All run once at deploy/startup. There is no per-turn or per-request hook — any per-request context enrichment must go through cllama or a runner-native mechanism.
 
 ## Testing Reality
 
@@ -124,8 +132,11 @@ Build tags currently present in the repo:
 
 The spike tests are the heavy end-to-end path. They build images, run Docker, and in some cases require real Discord/provider credentials.
 
+- `docs_quickstart_spike_test.go` extracts shell blocks from README docs and runs them in a fresh Docker container. It removes infra images first to exercise the real pull path.
+
 ## Practical Guidance For Agents
 
+- Releases: use `gh release create` with semver tags. cllama has its own tag namespace (e.g. `v0.1.0`) published from the submodule repo. ghcr.io packages default to private; must be set public via GitHub UI after first push.
 - Prefer reading the code paths above before relying on plan documents.
 - When changing runtime behavior, update tests in the same area if they exist.
 - If a behavior is reflected in generated artifacts, inspect both the source logic and the generated output expectations in tests.

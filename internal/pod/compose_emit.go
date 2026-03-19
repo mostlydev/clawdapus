@@ -32,6 +32,15 @@ type ClawdashConfig struct {
 	PodName            string
 }
 
+type ClawAPIConfig struct {
+	Image              string // e.g. ghcr.io/mostlydev/claw-api:latest
+	Addr               string // e.g. :8080
+	ManifestHostPath   string // host path to pod-manifest.json
+	PrincipalsHostPath string // host path to principals.json
+	DockerSockHostPath string // host path to docker socket
+	PodName            string
+}
+
 // EmitCompose generates a compose.generated.yml string from pod definition and
 // driver materialization results. Output is deterministic (sorted service names).
 func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies ...CllamaProxyConfig) (string, error) {
@@ -132,7 +141,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 						if target == "" {
 							return "", fmt.Errorf("service %q: service surface %q has empty target", name, surfaceURI)
 						}
-						if _, ok := p.Services[target]; !ok {
+						if _, ok := p.Services[target]; !ok && !(p.ClawAPI != nil && target == "claw-api") {
 							return "", fmt.Errorf("service %q: service surface %q targets unknown service %q", name, surfaceURI, target)
 						}
 					}
@@ -310,6 +319,60 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				"claw.role":       "proxy",
 				"claw.proxy.type": proxy.ProxyType,
 				"claw.service":    serviceName,
+			},
+			"networks": []string{"claw-internal"},
+		}
+	}
+
+	if p.ClawAPI != nil {
+		if strings.TrimSpace(p.ClawAPI.Image) == "" {
+			return "", fmt.Errorf("claw-api image must not be empty")
+		}
+		if strings.TrimSpace(p.ClawAPI.ManifestHostPath) == "" {
+			return "", fmt.Errorf("claw-api manifest host path must not be empty")
+		}
+		if strings.TrimSpace(p.ClawAPI.PrincipalsHostPath) == "" {
+			return "", fmt.Errorf("claw-api principals host path must not be empty")
+		}
+
+		hasClaw = true
+		addr := strings.TrimSpace(p.ClawAPI.Addr)
+		if addr == "" {
+			addr = ":8080"
+		}
+		port := clawAPIPort(addr)
+		socketPath := strings.TrimSpace(p.ClawAPI.DockerSockHostPath)
+		if socketPath == "" {
+			socketPath = "/var/run/docker.sock"
+		}
+
+		rootServices["claw-api"] = map[string]interface{}{
+			"image":     p.ClawAPI.Image,
+			"read_only": true,
+			"tmpfs":     []string{"/tmp"},
+			"expose":    []string{port},
+			"volumes": []string{
+				fmt.Sprintf("%s:/claw/pod-manifest.json:ro", p.ClawAPI.ManifestHostPath),
+				fmt.Sprintf("%s:/claw/principals.json:ro", p.ClawAPI.PrincipalsHostPath),
+				fmt.Sprintf("%s:/var/run/docker.sock:ro", socketPath),
+			},
+			"environment": map[string]string{
+				"CLAW_API_ADDR":       addr,
+				"CLAW_API_MANIFEST":   "/claw/pod-manifest.json",
+				"CLAW_API_PRINCIPALS": "/claw/principals.json",
+				"CLAW_POD":            p.ClawAPI.PodName,
+			},
+			"restart": "on-failure",
+			"healthcheck": map[string]interface{}{
+				"test":     []string{"CMD", "/claw-api", "-healthcheck"},
+				"interval": "15s",
+				"timeout":  "5s",
+				"retries":  3,
+			},
+			"labels": map[string]string{
+				"claw.pod":     p.ClawAPI.PodName,
+				"claw.role":    "governance-api",
+				"claw.service": "claw-api",
 			},
 			"networks": []string{"claw-internal"},
 		}
@@ -494,6 +557,21 @@ func clawdashPort(addr string) string {
 		return "8082"
 	}
 	return strconv.Itoa(value)
+}
+
+func clawAPIPort(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "8080"
+	}
+	if strings.HasPrefix(addr, ":") {
+		return strings.TrimPrefix(addr, ":")
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil || strings.TrimSpace(port) == "" {
+		return "8080"
+	}
+	return port
 }
 
 func hostPortOrDefault(port, fallback string) string {

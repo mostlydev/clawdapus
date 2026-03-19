@@ -78,3 +78,54 @@ func TestGenerateContextDirMultipleAgents(t *testing.T) {
 		t.Errorf("bot-b missing: %v", err)
 	}
 }
+
+func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
+	dir := t.TempDir()
+	agents := []AgentContextInput{{
+		AgentID:     "octopus",
+		AgentsMD:    "# Contract",
+		ClawdapusMD: "# Infra",
+		Metadata:    map[string]interface{}{"service": "octopus"},
+		Feeds: []FeedManifestEntry{{
+			Name:   "fleet-alerts",
+			Source: "claw-api",
+			Path:   "/fleet/alerts",
+			TTL:    30,
+			URL:    "http://claw-api:8080/fleet/alerts",
+		}},
+		ServiceAuth: []ServiceAuthEntry{{
+			Service:   "claw-api",
+			AuthType:  "bearer",
+			Token:     "capi_deadbeef",
+			Principal: "octopus",
+		}},
+	}}
+
+	if err := GenerateContextDir(dir, agents); err != nil {
+		t.Fatal(err)
+	}
+
+	feedsRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "feeds.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var feeds []map[string]interface{}
+	if err := json.Unmarshal(feedsRaw, &feeds); err != nil {
+		t.Fatal(err)
+	}
+	if len(feeds) != 1 || feeds[0]["name"] != "fleet-alerts" {
+		t.Fatalf("unexpected feeds payload: %v", feeds)
+	}
+
+	authRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "service-auth", "claw-api.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var auth map[string]interface{}
+	if err := json.Unmarshal(authRaw, &auth); err != nil {
+		t.Fatal(err)
+	}
+	if auth["principal"] != "octopus" {
+		t.Fatalf("unexpected service-auth payload: %v", auth)
+	}
+}

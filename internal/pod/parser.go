@@ -3,6 +3,7 @@ package pod
 import (
 	"fmt"
 	"io"
+	"path"
 	"strconv"
 	"strings"
 
@@ -45,10 +46,18 @@ type rawClawBlock struct {
 	CllamaEnv map[string]string      `yaml:"cllama-env"`
 	Count     int                    `yaml:"count"`
 	Handles   map[string]interface{} `yaml:"handles"`
+	Feeds     []rawFeedEntry         `yaml:"feeds"`
 	Include   []rawIncludeEntry      `yaml:"include"`
 	Surfaces  []interface{}          `yaml:"surfaces"`
 	Skills    []string               `yaml:"skills"`
 	Invoke    []rawInvokeEntry       `yaml:"invoke"`
+}
+
+type rawFeedEntry struct {
+	Name   string `yaml:"name"`
+	Source string `yaml:"source"`
+	Path   string `yaml:"path"`
+	TTL    int    `yaml:"ttl"`
 }
 
 type rawIncludeEntry struct {
@@ -81,6 +90,7 @@ func Parse(r io.Reader) (*Pod, error) {
 
 	pod := &Pod{
 		Name:     raw.XClaw.Pod,
+		Master:   strings.TrimSpace(raw.XClaw.Master),
 		Services: make(map[string]*Service, len(raw.Services)),
 		Compose:  preservedRoot,
 	}
@@ -167,6 +177,10 @@ func Parse(r io.Reader) (*Pod, error) {
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse include: %w", name, err)
 			}
+			feeds, err := parseFeeds(svc.XClaw.Feeds)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: parse feeds: %w", name, err)
+			}
 			invoke := make([]InvokeEntry, 0, len(svc.XClaw.Invoke))
 			for _, rawInv := range svc.XClaw.Invoke {
 				if rawInv.Schedule == "" || rawInv.Message == "" {
@@ -186,6 +200,7 @@ func Parse(r io.Reader) (*Pod, error) {
 				CllamaEnv: svc.XClaw.CllamaEnv,
 				Count:     count,
 				Handles:   handles,
+				Feeds:     feeds,
 				Include:   include,
 				Surfaces:  parsedSurfaces,
 				Skills:    skills,
@@ -193,6 +208,30 @@ func Parse(r io.Reader) (*Pod, error) {
 			}
 		}
 		pod.Services[name] = service
+	}
+
+	if pod.Master != "" {
+		svc, ok := pod.Services[pod.Master]
+		if !ok {
+			return nil, fmt.Errorf("x-claw.master %q targets unknown service", pod.Master)
+		}
+		if svc == nil || svc.Claw == nil {
+			return nil, fmt.Errorf("x-claw.master %q must target a claw-managed service", pod.Master)
+		}
+	}
+	for name, svc := range pod.Services {
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		for _, feed := range svc.Claw.Feeds {
+			if _, ok := pod.Services[feed.Source]; ok {
+				continue
+			}
+			if feed.Source == "claw-api" && pod.Master != "" {
+				continue
+			}
+			return nil, fmt.Errorf("service %q: feed %q targets unknown source %q", name, feed.Name, feed.Source)
+		}
 	}
 
 	return pod, nil
@@ -234,6 +273,50 @@ func parseStringOrList(raw interface{}) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("expected string or list, got %T", raw)
 	}
+}
+
+func parseFeeds(rawFeeds []rawFeedEntry) ([]FeedEntry, error) {
+	if len(rawFeeds) == 0 {
+		return nil, nil
+	}
+
+	out := make([]FeedEntry, 0, len(rawFeeds))
+	for i, raw := range rawFeeds {
+		source := strings.TrimSpace(raw.Source)
+		if source == "" {
+			return nil, fmt.Errorf("feed %d: source is required", i)
+		}
+		feedPath := strings.TrimSpace(raw.Path)
+		if feedPath == "" {
+			return nil, fmt.Errorf("feed %d: path is required", i)
+		}
+		if !strings.HasPrefix(feedPath, "/") {
+			return nil, fmt.Errorf("feed %d: path %q must start with '/'", i, feedPath)
+		}
+		if raw.TTL <= 0 {
+			return nil, fmt.Errorf("feed %d: ttl must be > 0", i)
+		}
+		name := strings.TrimSpace(raw.Name)
+		if name == "" {
+			name = deriveFeedName(source, feedPath, i)
+		}
+		out = append(out, FeedEntry{
+			Name:   name,
+			Source: source,
+			Path:   feedPath,
+			TTL:    raw.TTL,
+		})
+	}
+	return out, nil
+}
+
+func deriveFeedName(source, feedPath string, index int) string {
+	base := strings.TrimSpace(path.Base(strings.TrimSpace(feedPath)))
+	base = strings.Trim(base, "/.")
+	if base == "" || base == "." {
+		return fmt.Sprintf("%s-feed-%d", source, index+1)
+	}
+	return base
 }
 
 func mergeHandleDefaults(defaults, service map[string]interface{}) map[string]interface{} {

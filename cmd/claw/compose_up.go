@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mostlydev/clawdapus/internal/build"
+	"github.com/mostlydev/clawdapus/internal/clawapi"
 	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
@@ -85,6 +86,19 @@ func runComposeUp(podFile string) error {
 	if err := resetRuntimeDir(runtimeDir); err != nil {
 		return fmt.Errorf("reset runtime dir: %w", err)
 	}
+	if p.Master != "" {
+		if _, exists := p.Services["claw-api"]; exists {
+			return fmt.Errorf("service name %q is reserved when x-claw.master is set", "claw-api")
+		}
+		p.ClawAPI = &pod.ClawAPIConfig{
+			Image:              "ghcr.io/mostlydev/claw-api:latest",
+			Addr:               envOrDefault("CLAW_API_ADDR", ":8080"),
+			ManifestHostPath:   filepath.Join(runtimeDir, "pod-manifest.json"),
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+			DockerSockHostPath: "/var/run/docker.sock",
+			PodName:            p.Name,
+		}
+	}
 
 	results := make(map[string]*driver.MaterializeResult)
 	drivers := make(map[string]driver.Driver)
@@ -152,6 +166,8 @@ func runComposeUp(podFile string) error {
 			if surfaces[i].Scheme == "service" {
 				if targetSvc, ok := p.Services[surfaces[i].Target]; ok {
 					surfaces[i].Ports = mergedPorts(targetSvc.Expose, targetSvc.Ports)
+				} else if p.ClawAPI != nil && surfaces[i].Target == "claw-api" {
+					surfaces[i].Ports = []string{clawAPIInternalPort(p.ClawAPI.Addr)}
 				}
 			}
 		}
@@ -299,6 +315,10 @@ func runComposeUp(podFile string) error {
 	}
 
 	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
+	clawAPIAuth, err := prepareClawAPIRuntime(runtimeDir, p, resolvedClaws)
+	if err != nil {
+		return err
+	}
 	proxies := make([]pod.CllamaProxyConfig, 0)
 	cllamaDashboardPort := envOrDefault("CLLAMA_UI_PORT", "8181")
 	if cllamaEnabled {
@@ -401,11 +421,17 @@ func runComposeUp(podFile string) error {
 					ordinalName := fmt.Sprintf("%s-%d", name, i)
 					ordinalRC := *rc
 					ordinalRC.ServiceName = ordinalName
+					feeds, err := buildFeedManifestEntries(p, name)
+					if err != nil {
+						return fmt.Errorf("service %q: build feed manifest: %w", ordinalName, err)
+					}
 					md := shared.GenerateClawdapusMD(&ordinalRC, p.Name)
 					contextInputs = append(contextInputs, cllama.AgentContextInput{
 						AgentID:     ordinalName,
 						AgentsMD:    string(agentContent),
 						ClawdapusMD: md,
+						Feeds:       feeds,
+						ServiceAuth: lookupServiceAuth(clawAPIAuth, ordinalName),
 						Metadata: map[string]interface{}{
 							"service": name,
 							"ordinal": i,
@@ -418,11 +444,17 @@ func runComposeUp(podFile string) error {
 				continue
 			}
 
+			feeds, err := buildFeedManifestEntries(p, name)
+			if err != nil {
+				return fmt.Errorf("service %q: build feed manifest: %w", name, err)
+			}
 			md := shared.GenerateClawdapusMD(rc, p.Name)
 			contextInputs = append(contextInputs, cllama.AgentContextInput{
 				AgentID:     name,
 				AgentsMD:    string(agentContent),
 				ClawdapusMD: md,
+				Feeds:       feeds,
+				ServiceAuth: lookupServiceAuth(clawAPIAuth, name),
 				Metadata: map[string]interface{}{
 					"service": name,
 					"pod":     p.Name,
@@ -522,7 +554,7 @@ func runComposeUp(podFile string) error {
 	}
 	fmt.Printf("[claw] wrote %s\n", generatedPath)
 
-	if err := ensureInfraImages(cllamaEnabled, proxies, p.Clawdash); err != nil {
+	if err := ensureInfraImages(cllamaEnabled, proxies, p.ClawAPI, p.Clawdash); err != nil {
 		return err
 	}
 
@@ -543,7 +575,7 @@ func runComposeUp(podFile string) error {
 		return fmt.Errorf("docker compose up failed: %w", err)
 	}
 
-	runtimeConsumers := runtimeConsumerServices(resolvedClaws, proxies, p.Clawdash)
+	runtimeConsumers := runtimeConsumerServices(resolvedClaws, proxies, p.ClawAPI, p.Clawdash)
 	if composeUpDetach && len(runtimeConsumers) > 0 {
 		recreateArgs := append([]string{"compose", "-f", generatedPath, "up", "-d", "--force-recreate"}, runtimeConsumers...)
 		if err := runComposeDockerCommand(recreateArgs...); err != nil {
@@ -579,7 +611,7 @@ func resetRuntimeDir(path string) error {
 	return os.MkdirAll(path, 0o700)
 }
 
-func runtimeConsumerServices(resolvedClaws map[string]*driver.ResolvedClaw, proxies []pod.CllamaProxyConfig, dash *pod.ClawdashConfig) []string {
+func runtimeConsumerServices(resolvedClaws map[string]*driver.ResolvedClaw, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) []string {
 	seen := make(map[string]struct{})
 	names := make([]string, 0, len(resolvedClaws)+len(proxies)+1)
 
@@ -604,6 +636,12 @@ func runtimeConsumerServices(resolvedClaws map[string]*driver.ResolvedClaw, prox
 		}
 		seen[serviceName] = struct{}{}
 		names = append(names, serviceName)
+	}
+
+	if api != nil {
+		if _, ok := seen["claw-api"]; !ok {
+			names = append(names, "claw-api")
+		}
 	}
 
 	if dash != nil {
@@ -660,6 +698,11 @@ func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
 			svc.Claw.Invoke[i].Message = expand(svc.Claw.Invoke[i].Message)
 			svc.Claw.Invoke[i].Name = expand(svc.Claw.Invoke[i].Name)
 			svc.Claw.Invoke[i].To = expand(svc.Claw.Invoke[i].To)
+		}
+		for i := range svc.Claw.Feeds {
+			svc.Claw.Feeds[i].Name = expand(svc.Claw.Feeds[i].Name)
+			svc.Claw.Feeds[i].Source = expand(svc.Claw.Feeds[i].Source)
+			svc.Claw.Feeds[i].Path = expand(svc.Claw.Feeds[i].Path)
 		}
 		for _, handle := range svc.Claw.Handles {
 			if handle == nil {
@@ -754,6 +797,129 @@ func discordHandleIDsFromPod(p *pod.Pod) []string {
 		ids = append(ids, handle.ID)
 	}
 	return uniqueSortedStrings(ids)
+}
+
+func buildFeedManifestEntries(p *pod.Pod, serviceName string) ([]cllama.FeedManifestEntry, error) {
+	svc := p.Services[serviceName]
+	if svc == nil || svc.Claw == nil || len(svc.Claw.Feeds) == 0 {
+		return nil, nil
+	}
+
+	entries := make([]cllama.FeedManifestEntry, 0, len(svc.Claw.Feeds))
+	for _, feed := range svc.Claw.Feeds {
+		url, err := resolveFeedURL(p, feed.Source, feed.Path)
+		if err != nil {
+			return nil, fmt.Errorf("feed %q: %w", feed.Name, err)
+		}
+		entries = append(entries, cllama.FeedManifestEntry{
+			Name:   feed.Name,
+			Source: feed.Source,
+			Path:   feed.Path,
+			TTL:    feed.TTL,
+			URL:    url,
+		})
+	}
+	return entries, nil
+}
+
+func resolveFeedURL(p *pod.Pod, source string, feedPath string) (string, error) {
+	if p.ClawAPI != nil && source == "claw-api" {
+		return buildFeedURL(source, clawAPIInternalPort(p.ClawAPI.Addr), feedPath), nil
+	}
+	svc, ok := p.Services[source]
+	if !ok {
+		return "", fmt.Errorf("targets unknown service %q", source)
+	}
+	port := "80"
+	if svc != nil {
+		ports := mergedPorts(svc.Expose, svc.Ports)
+		if len(ports) > 0 && strings.TrimSpace(ports[0]) != "" {
+			port = strings.TrimSpace(ports[0])
+		}
+	}
+	return buildFeedURL(source, port, feedPath), nil
+}
+
+func buildFeedURL(source, port, feedPath string) string {
+	return fmt.Sprintf("http://%s:%s%s", source, port, feedPath)
+}
+
+func clawAPIInternalPort(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "8080"
+	}
+	if strings.HasPrefix(addr, ":") {
+		return strings.TrimPrefix(addr, ":")
+	}
+	if idx := strings.LastIndex(addr, ":"); idx >= 0 && idx < len(addr)-1 {
+		return addr[idx+1:]
+	}
+	return "8080"
+}
+
+func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw) (map[string]cllama.ServiceAuthEntry, error) {
+	if p == nil || p.ClawAPI == nil || strings.TrimSpace(p.Master) == "" {
+		return nil, nil
+	}
+
+	rc := resolvedClaws[p.Master]
+	if rc == nil {
+		return nil, fmt.Errorf("master service %q did not resolve to a claw", p.Master)
+	}
+	masterSvc := p.Services[p.Master]
+	if masterSvc == nil {
+		return nil, fmt.Errorf("master service %q not found in pod services", p.Master)
+	}
+
+	principal, err := clawapi.BuildMasterPrincipal(p.Name, p.Master)
+	if err != nil {
+		return nil, err
+	}
+	store := clawapi.Store{Principals: []clawapi.Principal{principal}}
+	principalsDir := filepath.Dir(p.ClawAPI.PrincipalsHostPath)
+	if err := os.MkdirAll(principalsDir, 0700); err != nil {
+		return nil, fmt.Errorf("create claw-api runtime dir under %q: %w", runtimeDir, err)
+	}
+	data, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal claw-api principals: %w", err)
+	}
+	if err := writeRuntimeFile(p.ClawAPI.PrincipalsHostPath, append(data, '\n'), 0600); err != nil {
+		return nil, fmt.Errorf("write claw-api principals: %w", err)
+	}
+
+	if masterSvc.Environment == nil {
+		masterSvc.Environment = make(map[string]string)
+	}
+	masterSvc.Environment["CLAW_API_URL"] = fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr))
+
+	authEntry := cllama.ServiceAuthEntry{
+		Service:   "claw-api",
+		AuthType:  "bearer",
+		Token:     principal.Token,
+		Principal: principal.Name,
+	}
+	serviceAuth := make(map[string]cllama.ServiceAuthEntry)
+	count := 1
+	if rc.Count > 0 {
+		count = rc.Count
+	}
+	for _, agentID := range expandedServiceNames(p.Master, count) {
+		serviceAuth[agentID] = authEntry
+	}
+	return serviceAuth, nil
+}
+
+func lookupServiceAuth(entries map[string]cllama.ServiceAuthEntry, agentID string) []cllama.ServiceAuthEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	entry, ok := entries[agentID]
+	if !ok {
+		return nil
+	}
+	return []cllama.ServiceAuthEntry{entry}
 }
 
 func discordServiceUserIDs(p *pod.Pod, serviceNames []string, expand func(string) string) ([]string, error) {
@@ -1624,6 +1790,28 @@ func resolveServiceSurfaceSkills(podDir, runtimeDir string, p *pod.Pod, surfaces
 			return nil, nil, fmt.Errorf("invalid service target for generated skill: %q", surface.Target)
 		}
 
+		if surface.Target == "claw-api" && p.ClawAPI != nil {
+			resolvedSurfaces[i].SkillName = name
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+
+			skillPath := filepath.Join(surfaceSkillsDir, name)
+			if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
+				return nil, nil, fmt.Errorf("create generated skill dir: %w", err)
+			}
+			content := clawapi.GenerateServiceSkill(clawAPIInternalPort(p.ClawAPI.Addr))
+			if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
+				return nil, nil, fmt.Errorf("write generated claw-api skill %q: %w", name, err)
+			}
+			generated = append(generated, driver.ResolvedSkill{
+				Name:     name,
+				HostPath: skillPath,
+			})
+			continue
+		}
+
 		if targetSvc, ok := p.Services[surface.Target]; ok {
 			imageRef, info, err := resolveServiceInspection(podDir, p, surface.Target, targetSvc, imageRefs, infos)
 			if err != nil {
@@ -2285,14 +2473,19 @@ func dockerBuildTaggedImageDefault(imageRef, dockerfilePath, contextDir string, 
 	return nil
 }
 
-// ensureInfraImages checks that cllama proxy and clawdash images exist locally,
+// ensureInfraImages checks that cllama proxy, claw-api, and clawdash images exist locally,
 // building them from source when missing.
-func ensureInfraImages(cllamaEnabled bool, proxies []pod.CllamaProxyConfig, dash *pod.ClawdashConfig) error {
+func ensureInfraImages(cllamaEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
 	if cllamaEnabled {
 		for _, proxy := range proxies {
 			if err := ensureImage(proxy.Image, "cllama", "cllama/Dockerfile", "cllama"); err != nil {
 				return err
 			}
+		}
+	}
+	if api != nil {
+		if err := ensureImage(api.Image, "claw-api", "dockerfiles/claw-api/Dockerfile", "."); err != nil {
+			return err
 		}
 	}
 	if dash != nil {
