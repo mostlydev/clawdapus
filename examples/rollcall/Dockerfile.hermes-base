@@ -1,0 +1,44 @@
+# Base image for hermes agents (test stub).
+# Usage: docker build -t hermes:latest -f Dockerfile.hermes-base .
+#
+# Hermes is a real runtime but this stub provides a minimal process
+# named "hermes gateway" so the driver healthcheck (pgrep) passes.
+
+FROM alpine:3.20
+
+RUN apk add --no-cache curl jq procps tini
+
+# Stub binary: long-running process with "hermes gateway" in its command line
+COPY <<'STUB' /usr/local/bin/hermes
+#!/bin/sh
+case "${1:-}" in
+  gateway)
+    case "${2:-start}" in
+      start|run)
+        echo "[hermes-stub] gateway starting (pid $$)" >&2
+        while true; do sleep 3600; done
+        ;;
+      status)
+        pgrep -f "hermes gateway" >/dev/null 2>&1 && echo "ok" || exit 1
+        ;;
+      *) echo "[hermes-stub] unknown gateway subcommand: ${2:-}" >&2; exit 2 ;;
+    esac
+    ;;
+  *) echo "[hermes-stub] $*" >&2 ;;
+esac
+STUB
+RUN chmod +x /usr/local/bin/hermes
+
+COPY discord-responder.sh /usr/local/bin/discord-responder
+RUN chmod +x /usr/local/bin/discord-responder
+
+# Entrypoint wrapper: start Discord responder in background, then run main process
+COPY <<'WRAPPER' /usr/local/bin/hermes-entrypoint
+#!/bin/sh
+/usr/local/bin/discord-responder &
+exec hermes gateway start
+WRAPPER
+RUN chmod +x /usr/local/bin/hermes-entrypoint
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["hermes-entrypoint"]

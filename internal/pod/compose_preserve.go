@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+type composeStringValue struct {
+	Value       string
+	Passthrough bool
+}
+
 func deepCopyValue(v interface{}) interface{} {
 	switch tv := v.(type) {
 	case map[string]interface{}:
@@ -63,31 +68,55 @@ func interfaceSlice(raw interface{}) ([]interface{}, error) {
 }
 
 func parseEnvironment(raw interface{}) (map[string]string, error) {
+	values, err := parseEnvironmentValues(raw)
+	if err != nil {
+		return nil, err
+	}
+	if values == nil {
+		return nil, nil
+	}
+
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		if value.Passthrough {
+			out[key] = envPassthroughRef(key)
+			continue
+		}
+		out[key] = value.Value
+	}
+	return out, nil
+}
+
+func parseEnvironmentValues(raw interface{}) (map[string]composeStringValue, error) {
 	if raw == nil {
 		return nil, nil
 	}
 
 	switch tv := raw.(type) {
 	case map[string]string:
-		out := make(map[string]string, len(tv))
+		out := make(map[string]composeStringValue, len(tv))
 		for k, v := range tv {
-			out[k] = v
+			out[k] = composeStringValue{Value: v}
 		}
 		return out, nil
 	case map[string]interface{}:
-		out := make(map[string]string, len(tv))
+		out := make(map[string]composeStringValue, len(tv))
 		for k, v := range tv {
+			if v == nil {
+				out[k] = composeStringValue{Passthrough: true}
+				continue
+			}
 			s, err := scalarToString(v)
 			if err != nil {
 				return nil, fmt.Errorf("key %q: %w", k, err)
 			}
-			out[k] = s
+			out[k] = composeStringValue{Value: s}
 		}
 		return out, nil
 	case []string:
-		out := make(map[string]string, len(tv))
+		out := make(map[string]composeStringValue, len(tv))
 		for i, item := range tv {
-			key, value, err := parseEnvironmentEntry(item)
+			key, value, err := parseEnvironmentValueEntry(item)
 			if err != nil {
 				return nil, fmt.Errorf("entry %d: %w", i, err)
 			}
@@ -95,13 +124,13 @@ func parseEnvironment(raw interface{}) (map[string]string, error) {
 		}
 		return out, nil
 	case []interface{}:
-		out := make(map[string]string, len(tv))
+		out := make(map[string]composeStringValue, len(tv))
 		for i, item := range tv {
 			s, ok := item.(string)
 			if !ok {
 				return nil, fmt.Errorf("entry %d: expected string, got %T", i, item)
 			}
-			key, value, err := parseEnvironmentEntry(s)
+			key, value, err := parseEnvironmentValueEntry(s)
 			if err != nil {
 				return nil, fmt.Errorf("entry %d: %w", i, err)
 			}
@@ -111,6 +140,40 @@ func parseEnvironment(raw interface{}) (map[string]string, error) {
 	default:
 		return nil, fmt.Errorf("unsupported environment value type %T", raw)
 	}
+}
+
+func parseEnvironmentValueEntry(entry string) (string, composeStringValue, error) {
+	key := entry
+	value := composeStringValue{Passthrough: true}
+	if idx := strings.Index(entry, "="); idx >= 0 {
+		key = entry[:idx]
+		value = composeStringValue{Value: entry[idx+1:]}
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", composeStringValue{}, fmt.Errorf("environment key must not be empty")
+	}
+	return key, value, nil
+}
+
+func envPassthroughRef(key string) string {
+	return "${" + key + "}"
+}
+
+func environmentOutput(values map[string]composeStringValue) map[string]interface{} {
+	if len(values) == 0 {
+		return nil
+	}
+
+	out := make(map[string]interface{}, len(values))
+	for key, value := range values {
+		if value.Passthrough {
+			out[key] = nil
+			continue
+		}
+		out[key] = value.Value
+	}
+	return out
 }
 
 func parseEnvironmentEntry(entry string) (string, string, error) {
@@ -182,20 +245,20 @@ func appendedSequence(raw interface{}, additions []interface{}) ([]interface{}, 
 	return out, nil
 }
 
-func mergedEnvironment(base interface{}, layers ...map[string]string) (map[string]string, error) {
-	out, err := parseEnvironment(base)
+func mergedEnvironment(base interface{}, layers ...map[string]string) (map[string]interface{}, error) {
+	out, err := parseEnvironmentValues(base)
 	if err != nil {
 		return nil, err
 	}
 	if out == nil {
-		out = make(map[string]string)
+		out = make(map[string]composeStringValue)
 	}
 	for _, layer := range layers {
 		for k, v := range layer {
-			out[k] = v
+			out[k] = composeStringValue{Value: v}
 		}
 	}
-	return out, nil
+	return environmentOutput(out), nil
 }
 
 func mergedLabels(base interface{}, additions map[string]string) (map[string]string, error) {

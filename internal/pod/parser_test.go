@@ -219,8 +219,32 @@ services:
 	if env["LOG_LEVEL"] != "debug" {
 		t.Fatalf("expected LOG_LEVEL=debug, got %q", env["LOG_LEVEL"])
 	}
-	if env["EMPTY_VALUE"] != "" {
-		t.Fatalf("expected EMPTY_VALUE to parse as empty string, got %q", env["EMPTY_VALUE"])
+	if env["EMPTY_VALUE"] != "${EMPTY_VALUE}" {
+		t.Fatalf("expected EMPTY_VALUE passthrough, got %q", env["EMPTY_VALUE"])
+	}
+}
+
+func TestParsePodEnvironmentNullPreservesPassthrough(t *testing.T) {
+	const yaml = `
+x-claw:
+  pod: env-pod
+services:
+  bot:
+    image: ghcr.io/example/bot:latest
+    environment:
+      FROM_SHELL:
+      EXPLICIT_EMPTY: ""
+`
+	pod, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	env := pod.Services["bot"].Environment
+	if env["FROM_SHELL"] != "${FROM_SHELL}" {
+		t.Fatalf("expected FROM_SHELL passthrough, got %q", env["FROM_SHELL"])
+	}
+	if env["EXPLICIT_EMPTY"] != "" {
+		t.Fatalf("expected EXPLICIT_EMPTY to remain explicit empty string, got %q", env["EXPLICIT_EMPTY"])
 	}
 }
 

@@ -25,6 +25,7 @@ type quickstartDocCase struct {
 
 func TestQuickstartDocsRunInFreshDockerContainer(t *testing.T) {
 	requireDockerForQuickstartDocs(t)
+	removeInfraImages(t)
 
 	repoRoot := quickstartRepoRoot(t)
 	env := loadQuickstartDocEnv(t, repoRoot)
@@ -324,5 +325,19 @@ func runQuickstartDocCommandsInContainer(t *testing.T, repoRoot, linuxClaw strin
 	}
 	if strings.Contains(output, "unhealthy") || strings.Contains(output, "missing cllama") || strings.Contains(output, "assistant has unresolved env vars") {
 		t.Fatalf("quickstart runtime did not stabilize as healthy:\n%s", output)
+	}
+}
+
+// removeInfraImages removes cllama and clawdash images so the test exercises
+// the ensureImage pull path that real quickstart users hit.
+func removeInfraImages(t *testing.T) {
+	t.Helper()
+	for _, img := range []string{"ghcr.io/mostlydev/cllama:latest", "ghcr.io/mostlydev/clawdash:latest"} {
+		cmd := exec.Command("docker", "rmi", img)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Logf("removing %s (may not exist): %s", img, strings.TrimSpace(string(out)))
+		} else {
+			t.Logf("removed %s to force fresh pull", img)
+		}
 	}
 }

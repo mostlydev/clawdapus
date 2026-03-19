@@ -155,3 +155,29 @@ services:
                   name: roll-call
     environment:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+
+  hm-roll:
+    image: rollcall-hermes:latest
+    build:
+      context: .
+      dockerfile: agents/hm-roll/Clawfile
+    x-claw:
+      agent: ./agents/hm-roll/AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "hm-roll"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "Roll Call"
+              channels:
+                - id: "${ROLLCALL_CHANNEL_ID}"
+                  name: roll-call
+    environment:
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
+      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
+      CLAW_RUNTIME: "hermes"

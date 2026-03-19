@@ -27,7 +27,7 @@ import (
 
 var composeUpDetach bool
 
-var envVarPattern = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
+var runtimePlaceholderPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 var (
 	extractServiceSkillFromImage = runtime.ExtractServiceSkill
@@ -347,6 +347,9 @@ func runComposeUp(podFile string) error {
 					return fmt.Errorf("service %q: provider key %q found in pod env; cllama requires credential starvation (move provider keys to x-claw.cllama-env)", name, k)
 				}
 			}
+			if err := validateCllamaEnvFiles(podDir, name, svc); err != nil {
+				return err
+			}
 
 			imageEnv, ok := imageEnvCache[svc.Image]
 			if !ok {
@@ -618,14 +621,17 @@ func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
 	if err != nil {
 		return err
 	}
+	var expandErr error
 	expand := func(value string) string {
-		return envVarPattern.ReplaceAllStringFunc(value, func(match string) string {
-			key := match[2 : len(match)-1]
-			if v, ok := env[key]; ok {
-				return v
-			}
-			return match
-		})
+		if expandErr != nil {
+			return value
+		}
+		expanded, err := expandRuntimeValue(value, env)
+		if err != nil {
+			expandErr = err
+			return value
+		}
+		return expanded
 	}
 
 	for _, svc := range p.Services {
@@ -701,6 +707,9 @@ func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
 				}
 			}
 		}
+	}
+	if expandErr != nil {
+		return expandErr
 	}
 	return nil
 }
@@ -867,6 +876,133 @@ func loadRuntimeEnv(podDir string) (map[string]string, error) {
 	return env, nil
 }
 
+func expandRuntimeValue(value string, env map[string]string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+
+	var expandErr error
+	expanded := runtimePlaceholderPattern.ReplaceAllStringFunc(value, func(match string) string {
+		if expandErr != nil {
+			return match
+		}
+		resolved, err := resolveRuntimePlaceholder(match, env)
+		if err != nil {
+			expandErr = err
+			return match
+		}
+		return resolved
+	})
+	if expandErr != nil {
+		return "", expandErr
+	}
+	if unresolved := runtimePlaceholderPattern.FindString(expanded); unresolved != "" {
+		return "", fmt.Errorf("unresolved x-claw placeholder %q", unresolved)
+	}
+	return expanded, nil
+}
+
+func resolveRuntimePlaceholder(match string, env map[string]string) (string, error) {
+	expr := strings.TrimSpace(match[2 : len(match)-1])
+	name, op, operand, err := parseRuntimePlaceholderExpr(expr)
+	if err != nil {
+		return "", err
+	}
+
+	value, isSet := env[name]
+	nonEmpty := strings.TrimSpace(value) != ""
+
+	resolveOperand := func() (string, error) {
+		return expandRuntimeValue(operand, env)
+	}
+
+	switch op {
+	case "":
+		if !isSet {
+			return "", fmt.Errorf("unresolved x-claw placeholder %q", match)
+		}
+		return value, nil
+	case ":-":
+		if !isSet || !nonEmpty {
+			return resolveOperand()
+		}
+		return value, nil
+	case "-":
+		if !isSet {
+			return resolveOperand()
+		}
+		return value, nil
+	case ":?":
+		if !isSet || !nonEmpty {
+			msg := strings.TrimSpace(operand)
+			if msg == "" {
+				msg = fmt.Sprintf("%s is required", name)
+			}
+			return "", fmt.Errorf("%s", msg)
+		}
+		return value, nil
+	case "?":
+		if !isSet {
+			msg := strings.TrimSpace(operand)
+			if msg == "" {
+				msg = fmt.Sprintf("%s is required", name)
+			}
+			return "", fmt.Errorf("%s", msg)
+		}
+		return value, nil
+	case ":+":
+		if isSet && nonEmpty {
+			return resolveOperand()
+		}
+		return "", nil
+	case "+":
+		if isSet {
+			return resolveOperand()
+		}
+		return "", nil
+	default:
+		return "", fmt.Errorf("unsupported x-claw placeholder operator %q", op)
+	}
+}
+
+func parseRuntimePlaceholderExpr(expr string) (name, op, operand string, err error) {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return "", "", "", fmt.Errorf("empty x-claw placeholder")
+	}
+
+	for _, candidate := range []string{":-", ":?", ":+", "-", "?", "+"} {
+		if idx := strings.Index(expr, candidate); idx > 0 {
+			name = strings.TrimSpace(expr[:idx])
+			op = candidate
+			operand = expr[idx+len(candidate):]
+			break
+		}
+	}
+	if name == "" {
+		name = expr
+	}
+	if !isRuntimeEnvName(name) {
+		return "", "", "", fmt.Errorf("invalid x-claw placeholder %q", expr)
+	}
+	return name, op, operand, nil
+}
+
+func isRuntimeEnvName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if i == 0 && !(r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')) {
+			return false
+		}
+		if !(r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
 func readDotEnvFile(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -876,25 +1012,226 @@ func readDotEnvFile(path string) (map[string]string, error) {
 
 	out := make(map[string]string)
 	scanner := bufio.NewScanner(f)
+	lineNo := 0
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		lineNo++
+		key, value, ok, err := parseDotEnvLine(scanner.Text())
+		if err != nil {
+			return nil, fmt.Errorf("%s:%d: %w", path, lineNo, err)
+		}
+		if !ok {
 			continue
 		}
-		line = strings.TrimPrefix(line, "export ")
-		eq := strings.IndexByte(line, '=')
-		if eq < 0 {
-			continue
-		}
-		key := strings.TrimSpace(line[:eq])
-		value := strings.TrimSpace(line[eq+1:])
-		value = strings.Trim(value, `"'`)
 		out[key] = value
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func parseDotEnvLine(line string) (key, value string, ok bool, err error) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", false, nil
+	}
+	if strings.HasPrefix(line, "export ") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+	}
+
+	eq := strings.IndexByte(line, '=')
+	if eq < 0 {
+		key = strings.TrimSpace(line)
+		if key == "" {
+			return "", "", false, fmt.Errorf("dotenv key must not be empty")
+		}
+		return key, "", true, nil
+	}
+
+	key = strings.TrimSpace(line[:eq])
+	if key == "" {
+		return "", "", false, fmt.Errorf("dotenv key must not be empty")
+	}
+	value, err = parseDotEnvValue(line[eq+1:])
+	if err != nil {
+		return "", "", false, err
+	}
+	return key, value, true, nil
+}
+
+func parseDotEnvValue(raw string) (string, error) {
+	raw = strings.TrimLeft(raw, " \t")
+	if raw == "" {
+		return "", nil
+	}
+
+	switch raw[0] {
+	case '\'':
+		return parseSingleQuotedDotEnvValue(raw)
+	case '"':
+		return parseDoubleQuotedDotEnvValue(raw)
+	default:
+		return trimDotEnvComment(raw), nil
+	}
+}
+
+func parseSingleQuotedDotEnvValue(raw string) (string, error) {
+	end := strings.Index(raw[1:], "'")
+	if end < 0 {
+		return "", fmt.Errorf("unterminated single-quoted dotenv value")
+	}
+	end++
+	value := raw[1:end]
+	rest := strings.TrimSpace(raw[end+1:])
+	if rest != "" && !strings.HasPrefix(rest, "#") {
+		return "", fmt.Errorf("invalid trailing content after single-quoted dotenv value")
+	}
+	return value, nil
+}
+
+func parseDoubleQuotedDotEnvValue(raw string) (string, error) {
+	var b strings.Builder
+	escaped := false
+	for i := 1; i < len(raw); i++ {
+		ch := raw[i]
+		if escaped {
+			switch ch {
+			case 'n':
+				b.WriteByte('\n')
+			case 'r':
+				b.WriteByte('\r')
+			case 't':
+				b.WriteByte('\t')
+			case '\\', '"', '$':
+				b.WriteByte(ch)
+			default:
+				b.WriteByte(ch)
+			}
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			rest := strings.TrimSpace(raw[i+1:])
+			if rest != "" && !strings.HasPrefix(rest, "#") {
+				return "", fmt.Errorf("invalid trailing content after double-quoted dotenv value")
+			}
+			return b.String(), nil
+		}
+		b.WriteByte(ch)
+	}
+	return "", fmt.Errorf("unterminated double-quoted dotenv value")
+}
+
+func trimDotEnvComment(raw string) string {
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '#' {
+			continue
+		}
+		if i == 0 || raw[i-1] == ' ' || raw[i-1] == '\t' {
+			return strings.TrimSpace(raw[:i])
+		}
+	}
+	return strings.TrimSpace(raw)
+}
+
+type envFileRef struct {
+	Path     string
+	Required bool
+}
+
+func validateCllamaEnvFiles(podDir, serviceName string, svc *pod.Service) error {
+	if svc == nil {
+		return nil
+	}
+
+	refs, err := resolveEnvFileRefs(podDir, svc.Compose["env_file"])
+	if err != nil {
+		return fmt.Errorf("service %q: %w", serviceName, err)
+	}
+	for _, ref := range refs {
+		env, err := readDotEnvFile(ref.Path)
+		if err != nil {
+			if os.IsNotExist(err) && !ref.Required {
+				continue
+			}
+			return fmt.Errorf("service %q: inspect env_file %q for credential starvation: %w", serviceName, ref.Path, err)
+		}
+		for key := range env {
+			if isProviderKey(key) {
+				return fmt.Errorf("service %q: provider key %q found in env_file %q; cllama requires credential starvation", serviceName, key, ref.Path)
+			}
+		}
+	}
+	return nil
+}
+
+func resolveEnvFileRefs(baseDir string, raw interface{}) ([]envFileRef, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	switch v := raw.(type) {
+	case string:
+		ref, err := parseEnvFileRef(baseDir, v)
+		if err != nil {
+			return nil, err
+		}
+		return []envFileRef{ref}, nil
+	case []string:
+		refs := make([]envFileRef, 0, len(v))
+		for i, item := range v {
+			ref, err := parseEnvFileRef(baseDir, item)
+			if err != nil {
+				return nil, fmt.Errorf("env_file[%d]: %w", i, err)
+			}
+			refs = append(refs, ref)
+		}
+		return refs, nil
+	case []interface{}:
+		refs := make([]envFileRef, 0, len(v))
+		for i, item := range v {
+			ref, err := parseEnvFileRef(baseDir, item)
+			if err != nil {
+				return nil, fmt.Errorf("env_file[%d]: %w", i, err)
+			}
+			refs = append(refs, ref)
+		}
+		return refs, nil
+	default:
+		return nil, fmt.Errorf("unsupported env_file type %T", raw)
+	}
+}
+
+func parseEnvFileRef(baseDir string, raw interface{}) (envFileRef, error) {
+	ref := envFileRef{Required: true}
+
+	switch v := raw.(type) {
+	case string:
+		ref.Path = strings.TrimSpace(v)
+	case map[string]interface{}:
+		path, ok := v["path"].(string)
+		if !ok || strings.TrimSpace(path) == "" {
+			return envFileRef{}, fmt.Errorf("env_file map entries must include a non-empty path")
+		}
+		ref.Path = strings.TrimSpace(path)
+		if required, ok := v["required"].(bool); ok {
+			ref.Required = required
+		}
+	default:
+		return envFileRef{}, fmt.Errorf("unsupported env_file entry type %T", raw)
+	}
+
+	if ref.Path == "" {
+		return envFileRef{}, fmt.Errorf("env_file path must not be empty")
+	}
+	if !filepath.IsAbs(ref.Path) {
+		ref.Path = filepath.Join(baseDir, ref.Path)
+	}
+	return ref, nil
 }
 
 func mergeResolvedSkills(imageSkills, podSkills []driver.ResolvedSkill) []driver.ResolvedSkill {
@@ -1626,8 +1963,13 @@ func formatInvokeChannelMatches(matches []invokeChannelMatch) string {
 type serviceBuildConfig struct {
 	Context    string
 	Dockerfile string
-	Args       map[string]string
+	Args       map[string]buildArgValue
 	Target     string
+}
+
+type buildArgValue struct {
+	Value       string
+	Passthrough bool
 }
 
 func resolveManagedServiceImage(podDir string, p *pod.Pod, serviceName string, svc *pod.Service) (string, error) {
@@ -1722,26 +2064,30 @@ func parseServiceBuildConfig(raw interface{}) (*serviceBuildConfig, error) {
 	return cfg, nil
 }
 
-func parseBuildArgs(raw interface{}) (map[string]string, error) {
+func parseBuildArgs(raw interface{}) (map[string]buildArgValue, error) {
 	if raw == nil {
 		return nil, nil
 	}
 
 	switch v := raw.(type) {
 	case map[string]string:
-		out := make(map[string]string, len(v))
+		out := make(map[string]buildArgValue, len(v))
 		for k, value := range v {
-			out[k] = value
+			out[k] = buildArgValue{Value: value}
 		}
 		return out, nil
 	case map[string]interface{}:
-		out := make(map[string]string, len(v))
+		out := make(map[string]buildArgValue, len(v))
 		for k, value := range v {
+			if value == nil {
+				out[k] = buildArgValue{Passthrough: true}
+				continue
+			}
 			s, err := buildScalarString(value)
 			if err != nil {
 				return nil, fmt.Errorf("key %q: %w", k, err)
 			}
-			out[k] = s
+			out[k] = buildArgValue{Value: s}
 		}
 		return out, nil
 	case []string:
@@ -1761,14 +2107,14 @@ func parseBuildArgs(raw interface{}) (map[string]string, error) {
 	}
 }
 
-func parseBuildArgList(items []string) (map[string]string, error) {
-	out := make(map[string]string, len(items))
+func parseBuildArgList(items []string) (map[string]buildArgValue, error) {
+	out := make(map[string]buildArgValue, len(items))
 	for i, item := range items {
 		key := item
-		value := ""
+		value := buildArgValue{Passthrough: true}
 		if idx := strings.Index(item, "="); idx >= 0 {
 			key = item[:idx]
-			value = item[idx+1:]
+			value = buildArgValue{Value: item[idx+1:]}
 		}
 		key = strings.TrimSpace(key)
 		if key == "" {
@@ -1910,7 +2256,7 @@ func buildScalarString(v interface{}) (string, error) {
 	}
 }
 
-func dockerBuildTaggedImageDefault(imageRef, dockerfilePath, contextDir string, args map[string]string, target string) error {
+func dockerBuildTaggedImageDefault(imageRef, dockerfilePath, contextDir string, args map[string]buildArgValue, target string) error {
 	cmdArgs := []string{"build", "-t", imageRef, "-f", dockerfilePath}
 	if strings.TrimSpace(target) != "" {
 		cmdArgs = append(cmdArgs, "--target", strings.TrimSpace(target))
@@ -1921,7 +2267,12 @@ func dockerBuildTaggedImageDefault(imageRef, dockerfilePath, contextDir string, 
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		cmdArgs = append(cmdArgs, "--build-arg", key+"="+args[key])
+		arg := args[key]
+		if arg.Passthrough {
+			cmdArgs = append(cmdArgs, "--build-arg", key)
+			continue
+		}
+		cmdArgs = append(cmdArgs, "--build-arg", key+"="+arg.Value)
 	}
 	cmdArgs = append(cmdArgs, contextDir)
 

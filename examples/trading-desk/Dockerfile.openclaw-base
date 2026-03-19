@@ -18,7 +18,7 @@ RUN curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-prompt --no-onbo
 
 RUN mkdir -p /claw
 
-COPY entrypoint.sh /claw/entrypoint.sh
-RUN chmod +x /claw/entrypoint.sh
+COPY entrypoint.sh /usr/local/bin/openclaw-entrypoint.sh
+RUN chmod +x /usr/local/bin/openclaw-entrypoint.sh
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/claw/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/openclaw-entrypoint.sh"]

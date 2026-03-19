@@ -70,8 +70,14 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 		}
 	}
 
-	if _, err := resolveModelConfig(rc); err != nil {
-		return err
+	// Validate model ref format only — cllama token is not yet generated at
+	// validation time (two-pass compose-up populates it before Materialize).
+	modelRef, err := shared.PrimaryModelRef(rc.Models)
+	if err != nil {
+		return fmt.Errorf("hermes driver: %w", err)
+	}
+	if _, _, ok := shared.SplitModelRef(modelRef); !ok {
+		return fmt.Errorf("hermes driver: invalid MODEL primary %q (expected provider/model)", modelRef)
 	}
 	return nil
 }

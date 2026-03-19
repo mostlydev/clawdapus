@@ -77,6 +77,12 @@ func TestSpikeComposeUp(t *testing.T) {
 	if env["MICRO_DISCORD_ID"] == "" {
 		env["MICRO_DISCORD_ID"] = env["TIVERTON_DISCORD_ID"]
 	}
+	if env["HERMES_BOT_TOKEN"] == "" {
+		env["HERMES_BOT_TOKEN"] = env["TIVERTON_BOT_TOKEN"]
+	}
+	if env["HERMES_DISCORD_ID"] == "" {
+		env["HERMES_DISCORD_ID"] = env["TIVERTON_DISCORD_ID"]
+	}
 	if env["CLLAMA_UI_PORT"] == "" {
 		env["CLLAMA_UI_PORT"] = spikeFreePort(t)
 	}
@@ -87,15 +93,19 @@ func TestSpikeComposeUp(t *testing.T) {
 	t.Setenv("CLAWDASH_ADDR", env["CLAWDASH_ADDR"])
 
 	// Build images before running compose up.
-	// openclaw:latest is the base runtime image; build it from the local
-	// Dockerfile.openclaw-base if it isn't already present.
+	// Base runtime images are built from local Dockerfiles if not already present.
 	if !spikeImageExists("openclaw:latest") {
 		spikeBuildImage(t, dir, "openclaw:latest", "Dockerfile.openclaw-base")
+	}
+	if !spikeImageExists("nanoclaw-orchestrator:latest") {
+		rollcallDir := filepath.Join(repoRoot, "examples", "rollcall")
+		spikeBuildImage(t, rollcallDir, "nanoclaw-orchestrator:latest", "Dockerfile.nanoclaw-base")
 	}
 	spikeBuildImage(t, dir, "trading-desk:latest", "Clawfile")
 	spikeBuildImage(t, dir, "trading-desk-nanoclaw:latest", "Clawfile.nanoclaw")
 	spikeBuildImage(t, dir, "trading-desk-nullclaw:latest", "Clawfile.nullclaw")
 	spikeBuildImage(t, dir, "trading-desk-microclaw:latest", "Clawfile.microclaw")
+	spikeBuildImage(t, dir, "trading-desk-hermes:latest", "Clawfile.hermes")
 	spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
 	spikeEnsureCllamaPassthroughImage(t)
 
@@ -144,7 +154,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse expanded spike pod: %v", err)
 	}
-	for _, svcName := range []string{"tiverton", "westin", "allen", "logan", "micro"} {
+	for _, svcName := range []string{"tiverton", "westin", "allen", "logan", "micro", "hermes"} {
 		svc := parsedPod.Services[svcName]
 		if svc == nil || svc.Claw == nil {
 			t.Fatalf("parsed pod: missing claw service %q", svcName)
@@ -186,7 +196,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// teardown runs the compose down and dumps logs.
 	teardown := func() {
-		for _, svc := range []string{"tiverton", "westin", "allen", "logan", "micro", "trading-api"} {
+		for _, svc := range []string{"tiverton", "westin", "allen", "logan", "micro", "hermes", "trading-api"} {
 			name := fmt.Sprintf("trading-desk-%s-1", svc)
 			out, _ := exec.Command("docker", "logs", "--tail", "100", name).CombinedOutput()
 			t.Logf("=== %s logs ===\n%s", name, string(out))
@@ -366,7 +376,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// ── Verify cllama context artifacts ─────────────────────────────────────
 
-	for _, agent := range []string{"tiverton", "westin", "allen", "logan", "micro"} {
+	for _, agent := range []string{"tiverton", "westin", "allen", "logan", "micro", "hermes"} {
 		agentDir := filepath.Join(runtimeDir, "context", agent)
 		for _, rel := range []string{"AGENTS.md", "CLAWDAPUS.md", "metadata.json"} {
 			if _, err := os.Stat(filepath.Join(agentDir, rel)); err != nil {
@@ -496,6 +506,12 @@ func TestSpikeComposeUp(t *testing.T) {
 	if !strings.Contains(composeSrc, "/app/config/microclaw.config.yaml") {
 		t.Error("compose.generated.yml: expected microclaw config mount")
 	}
+	if !strings.Contains(composeSrc, "/root/.hermes") {
+		t.Error("compose.generated.yml: expected hermes home mount")
+	}
+	if !strings.Contains(composeSrc, "HERMES_HOME") {
+		t.Error("compose.generated.yml: expected HERMES_HOME env for hermes service")
+	}
 
 	// ANTHROPIC_BASE_URL env var points to cllama proxy
 	allenEnvOut, errE := exec.Command("docker", "exec", allenContainer, "printenv", "ANTHROPIC_BASE_URL").Output()
@@ -589,6 +605,53 @@ func TestSpikeComposeUp(t *testing.T) {
 		t.Errorf("micro: expected /app/config/microclaw.config.yaml in container: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
 
+	// ── Verify Hermes artifacts ──────────────────────────────────────────────
+
+	hermesConfigPath := filepath.Join(runtimeDir, "hermes", "hermes-home", "config.yaml")
+	hermesConfigData := spikeReadFile(t, hermesConfigPath)
+	var hermesCfg map[string]interface{}
+	if err := yaml.Unmarshal([]byte(hermesConfigData), &hermesCfg); err != nil {
+		t.Fatalf("parse hermes config.yaml: %v", err)
+	}
+	if modelCfg, ok := hermesCfg["model"].(map[string]interface{}); ok {
+		if modelCfg["default"] == nil || modelCfg["default"] == "" {
+			t.Errorf("hermes config.yaml: model.default is empty")
+		}
+		t.Logf("hermes config.yaml model: default=%v provider=%v", modelCfg["default"], modelCfg["provider"])
+	} else {
+		t.Fatalf("hermes config.yaml: missing 'model' object")
+	}
+
+	hermesEnvPath := filepath.Join(runtimeDir, "hermes", "hermes-home", ".env")
+	hermesEnvData := spikeReadFile(t, hermesEnvPath)
+	if !strings.Contains(hermesEnvData, "OPENAI_BASE_URL=") {
+		t.Errorf("hermes .env: expected OPENAI_BASE_URL for cllama wiring")
+	}
+	if !strings.Contains(hermesEnvData, "OPENAI_API_KEY=") {
+		t.Errorf("hermes .env: expected OPENAI_API_KEY (cllama bearer token)")
+	}
+
+	hermesAgentsPath := filepath.Join(runtimeDir, "hermes", "workspace", "AGENTS.md")
+	hermesAgentsData := spikeReadFile(t, hermesAgentsPath)
+	if !strings.Contains(hermesAgentsData, "Hermes") {
+		t.Errorf("hermes AGENTS.md: expected to mention 'Hermes'")
+	}
+	if !strings.Contains(hermesAgentsData, "infrastructure_context") {
+		t.Errorf("hermes AGENTS.md: expected inlined CLAWDAPUS.md infrastructure context")
+	}
+	t.Logf("hermes AGENTS.md: %d bytes", len(hermesAgentsData))
+
+	hermesContainer := spikeContainerName("hermes")
+	spikeWaitHealthy(t, hermesContainer, 60*time.Second)
+	if out, err := exec.Command("docker", "exec", hermesContainer, "cat", "/root/.hermes/config.yaml").CombinedOutput(); err != nil {
+		t.Errorf("hermes: expected /root/.hermes/config.yaml in container: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	if out, err := exec.Command("docker", "exec", hermesContainer, "cat", "/workspace/AGENTS.md").CombinedOutput(); err != nil {
+		t.Errorf("hermes: expected /workspace/AGENTS.md in container: %v (%s)", err, strings.TrimSpace(string(out)))
+	} else {
+		t.Logf("hermes AGENTS.md in container: %d bytes", len(out))
+	}
+
 	// Wait for trading-api to be running so its startup announcement has fired.
 	spikeWaitRunning(t, spikeContainerName("trading-api"), 30*time.Second)
 	// Show what env vars trading-api actually received (no values — just key presence + webhook prefix).
@@ -614,6 +677,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	spikeVerifyDiscordGreeting(t, env["WESTIN_BOT_TOKEN"], channelID, "westin online", 10*time.Second)
 	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "nullclaw online", 15*time.Second)
 	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "microclaw online", 15*time.Second)
+	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "hermes online", 15*time.Second)
 
 	// trading-api posts its own startup message to Discord via webhook — this
 	// proves non-claw services receive env vars (DISCORD_TRADING_API_WEBHOOK).

@@ -93,6 +93,49 @@ func TestEmitComposeBasicService(t *testing.T) {
 	}
 }
 
+func TestEmitComposePreservesEnvironmentPassthroughSemantics(t *testing.T) {
+	const src = `
+x-claw:
+  pod: test-pod
+services:
+  bot:
+    image: ghcr.io/example/bot:latest
+    environment:
+      - FROM_SHELL
+      - EXPLICIT_EMPTY=
+      - LOG_LEVEL=debug
+`
+	p, err := Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	out, err := EmitCompose(p, nil)
+	if err != nil {
+		t.Fatalf("EmitCompose: %v", err)
+	}
+
+	var cf struct {
+		Services map[string]struct {
+			Environment map[string]*string `yaml:"environment"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
+		t.Fatalf("unmarshal compose: %v", err)
+	}
+
+	env := cf.Services["bot"].Environment
+	if value, ok := env["FROM_SHELL"]; !ok || value != nil {
+		t.Fatalf("expected FROM_SHELL passthrough, got %#v", env["FROM_SHELL"])
+	}
+	if value, ok := env["EXPLICIT_EMPTY"]; !ok || value == nil || *value != "" {
+		t.Fatalf("expected EXPLICIT_EMPTY to remain explicit empty string, got %#v", env["EXPLICIT_EMPTY"])
+	}
+	if value, ok := env["LOG_LEVEL"]; !ok || value == nil || *value != "debug" {
+		t.Fatalf("expected LOG_LEVEL=debug, got %#v", env["LOG_LEVEL"])
+	}
+}
+
 func TestEmitComposeExpandsCount(t *testing.T) {
 	p := &Pod{
 		Name: "scale-pod",

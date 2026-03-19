@@ -193,6 +193,64 @@ func TestResolveRuntimePlaceholdersUsesDotEnvForHandleTopology(t *testing.T) {
 	}
 }
 
+func TestResolveRuntimePlaceholdersSupportsLowercaseNamesAndDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	dotEnv := strings.Join([]string{
+		"bot_id=123456789",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte(dotEnv), 0o644); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"bot": {
+				Claw: &pod.ClawBlock{
+					Agent: "agents/${bot_name:-default}/AGENTS.md",
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							ID: "${bot_id}",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := resolveRuntimePlaceholders(tmpDir, p); err != nil {
+		t.Fatalf("resolveRuntimePlaceholders: %v", err)
+	}
+
+	if got := p.Services["bot"].Claw.Agent; got != "agents/default/AGENTS.md" {
+		t.Fatalf("expected defaulted agent path, got %q", got)
+	}
+	if got := p.Services["bot"].Claw.Handles["discord"].ID; got != "123456789" {
+		t.Fatalf("expected lowercase env var expansion, got %q", got)
+	}
+}
+
+func TestResolveRuntimePlaceholdersRejectsUnresolvedPlaceholders(t *testing.T) {
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"bot": {
+				Claw: &pod.ClawBlock{
+					Agent: "agents/${missing_agent}/AGENTS.md",
+				},
+			},
+		},
+	}
+
+	err := resolveRuntimePlaceholders(t.TempDir(), p)
+	if err == nil {
+		t.Fatal("expected unresolved placeholder to fail")
+	}
+	if !strings.Contains(err.Error(), `unresolved x-claw placeholder "${missing_agent}"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveRuntimePlaceholdersExpandsDiscordAllowFromHandlesAndServices(t *testing.T) {
 	p := &pod.Pod{
 		Name: "test-pod",
@@ -321,6 +379,59 @@ func TestResolveRuntimePlaceholdersRejectsDiscordAllowFromServicesWithoutBotIden
 		t.Fatal("expected allow_from_services without bot identity to fail")
 	}
 	if !strings.Contains(err.Error(), "has no Discord bot identity") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadDotEnvFileParsesQuotedValuesAndComments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	content := strings.Join([]string{
+		`BOT_NAME="tiverton #1" # trailing comment`,
+		`HANDLE='westin #ops'`,
+		`URL=https://example.com/#frag`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	env, err := readDotEnvFile(path)
+	if err != nil {
+		t.Fatalf("readDotEnvFile: %v", err)
+	}
+	if env["BOT_NAME"] != "tiverton #1" {
+		t.Fatalf("expected quoted # to be preserved, got %q", env["BOT_NAME"])
+	}
+	if env["HANDLE"] != "westin #ops" {
+		t.Fatalf("expected single-quoted value, got %q", env["HANDLE"])
+	}
+	if env["URL"] != "https://example.com/#frag" {
+		t.Fatalf("expected inline # without leading space to be preserved, got %q", env["URL"])
+	}
+}
+
+func TestValidateCllamaEnvFilesRejectsProviderKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	envPath := filepath.Join(tmpDir, "bot.env")
+	if err := os.WriteFile(envPath, []byte("OPENAI_API_KEY=sk-real\nSAFE=yes\n"), 0o644); err != nil {
+		t.Fatalf("write env_file: %v", err)
+	}
+
+	svc := &pod.Service{
+		Compose: map[string]interface{}{
+			"env_file": []interface{}{
+				map[string]interface{}{
+					"path":     "bot.env",
+					"required": true,
+				},
+			},
+		},
+	}
+
+	err := validateCllamaEnvFiles(tmpDir, "bot", svc)
+	if err == nil {
+		t.Fatal("expected provider key in env_file to fail")
+	}
+	if !strings.Contains(err.Error(), `provider key "OPENAI_API_KEY" found in env_file`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -650,7 +761,7 @@ func TestResolveManagedServiceImageBuildOnlyClawfile(t *testing.T) {
 		builtContext = contextDir
 		return nil
 	}
-	dockerBuildTaggedImage = func(string, string, string, map[string]string, string) error {
+	dockerBuildTaggedImage = func(string, string, string, map[string]buildArgValue, string) error {
 		t.Fatal("unexpected plain docker build for Clawfile build")
 		return nil
 	}
@@ -720,8 +831,8 @@ func TestResolveManagedServiceImageBuildsPlainDockerfile(t *testing.T) {
 	}
 
 	var gotImageRef, gotDockerfile, gotContext, gotTarget string
-	var gotArgs map[string]string
-	dockerBuildTaggedImage = func(imageRef, dockerfile, contextDir string, args map[string]string, target string) error {
+	var gotArgs map[string]buildArgValue
+	dockerBuildTaggedImage = func(imageRef, dockerfile, contextDir string, args map[string]buildArgValue, target string) error {
 		gotImageRef = imageRef
 		gotDockerfile = dockerfile
 		gotContext = contextDir
@@ -749,8 +860,86 @@ func TestResolveManagedServiceImageBuildsPlainDockerfile(t *testing.T) {
 	if gotTarget != "runner" {
 		t.Fatalf("expected target runner, got %q", gotTarget)
 	}
-	if gotArgs["FOO"] != "bar" {
+	if gotArgs["FOO"] != (buildArgValue{Value: "bar"}) {
 		t.Fatalf("expected build args to be passed through, got %v", gotArgs)
+	}
+}
+
+func TestParseBuildArgsPreservesPassthroughSemantics(t *testing.T) {
+	args, err := parseBuildArgs([]interface{}{"FROM_SHELL", "EXPLICIT_EMPTY=", "FOO=bar"})
+	if err != nil {
+		t.Fatalf("parseBuildArgs(list): %v", err)
+	}
+	if got := args["FROM_SHELL"]; got != (buildArgValue{Passthrough: true}) {
+		t.Fatalf("expected FROM_SHELL passthrough, got %#v", got)
+	}
+	if got := args["EXPLICIT_EMPTY"]; got != (buildArgValue{Value: ""}) {
+		t.Fatalf("expected EXPLICIT_EMPTY explicit empty, got %#v", got)
+	}
+	if got := args["FOO"]; got != (buildArgValue{Value: "bar"}) {
+		t.Fatalf("expected FOO=bar, got %#v", got)
+	}
+
+	args, err = parseBuildArgs(map[string]interface{}{
+		"FROM_MAP": nil,
+		"EMPTY":    "",
+	})
+	if err != nil {
+		t.Fatalf("parseBuildArgs(map): %v", err)
+	}
+	if got := args["FROM_MAP"]; got != (buildArgValue{Passthrough: true}) {
+		t.Fatalf("expected FROM_MAP passthrough, got %#v", got)
+	}
+	if got := args["EMPTY"]; got != (buildArgValue{Value: ""}) {
+		t.Fatalf("expected EMPTY explicit empty, got %#v", got)
+	}
+}
+
+func TestDockerBuildTaggedImageDefaultOmitsEqualsForPassthroughArgs(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	argsFile := filepath.Join(dir, "docker-args.txt")
+	dockerPath := filepath.Join(binDir, "docker")
+
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dockerPath, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$DOCKER_ARGS_FILE\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("DOCKER_ARGS_FILE", argsFile)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := dockerBuildTaggedImageDefault(
+		"example:latest",
+		"/tmp/Dockerfile",
+		"/tmp/context",
+		map[string]buildArgValue{
+			"BAR": {Value: ""},
+			"FOO": {Passthrough: true},
+		},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("dockerBuildTaggedImageDefault: %v", err)
+	}
+
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read fake docker args: %v", err)
+	}
+	got := strings.Split(strings.TrimSpace(string(data)), "\n")
+	want := []string{
+		"build",
+		"-t", "example:latest",
+		"-f", "/tmp/Dockerfile",
+		"--build-arg", "BAR=",
+		"--build-arg", "FOO",
+		"/tmp/context",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("unexpected docker args: got %v want %v", got, want)
 	}
 }
 

@@ -96,14 +96,24 @@ func TestValidateRejectsInvalidCron(t *testing.T) {
 	}
 }
 
-func TestValidateRequiresCllamaToken(t *testing.T) {
-	rc, _ := newTestRC(t)
+func TestMaterializeRejectsEmptyCllamaToken(t *testing.T) {
+	rc, tmp := newTestRC(t)
 	rc.Cllama = []string{"passthrough"}
 	rc.CllamaToken = ""
 
-	err := (&Driver{}).Validate(rc)
+	// Validate should pass — cllama token is not yet available at validation time
+	// (the two-pass compose-up generates it between Validate and Materialize).
+	if err := (&Driver{}).Validate(rc); err != nil {
+		t.Fatalf("Validate should pass with empty cllama token: %v", err)
+	}
+
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
 	if err == nil {
-		t.Fatal("expected missing CLLAMA token error")
+		t.Fatal("expected Materialize to reject empty CLLAMA token")
 	}
 	if !strings.Contains(err.Error(), "CLLAMA is enabled but token is empty") {
 		t.Fatalf("unexpected error: %v", err)

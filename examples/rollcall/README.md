@@ -2,7 +2,7 @@
 
 End-to-end driver parity fixture for Clawdapus.
 
-This example boots six different runtime families in one pod, wires them through
+This example boots seven different runtime families in one pod, wires them through
 `cllama` passthrough, exposes `clawdash`, posts a Discord roll-call prompt, and
 verifies that each runtime replies identifying itself.
 
@@ -14,13 +14,14 @@ verifies that each runtime replies identifying itself.
 - `nanoclaw`
 - `nanobot`
 - `picoclaw`
+- `hermes`
 
 Each service shares the same Discord bot token. The distinction between agents
 comes from their `AGENTS.md` contracts and per-service runtime configuration.
 
 ## Files
 
-- `claw-pod.yml`: six agent services plus shared proxy/dashboard wiring
+- `claw-pod.yml`: seven agent services plus shared proxy/dashboard wiring
 - `agents/*/Clawfile`: one Clawfile per runtime
 - `agents/*/AGENTS.md`: minimal runtime-specific self-identification contract
 - `Dockerfile.*-base`: local base images used by the spike test
@@ -65,17 +66,18 @@ go test -tags spike -v -run TestSpikeRollCall ../../cmd/claw/...
 The test should:
 
 1. Build the base images for each runtime family if needed.
-2. Build the six rollcall agent images.
+2. Build the seven rollcall agent images.
 3. Run `claw up` on this pod.
 4. Wait for each container to become healthy or running.
 5. Post a Discord roll-call message through the webhook.
-6. Observe six AI-generated replies mentioning:
+6. Observe seven AI-generated replies mentioning:
    - `openclaw`
    - `nullclaw`
    - `microclaw`
    - `nanoclaw` (or `Claude Agent SDK`)
    - `nanobot`
    - `picoclaw`
+   - `hermes`
 7. Confirm `cllama` cost data is reachable.
 
 ## Notes

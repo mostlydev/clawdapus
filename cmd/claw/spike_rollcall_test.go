@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// TestSpikeRollCall boots all 6 driver types with cllama + clawdash, sends a
+// TestSpikeRollCall boots all 7 driver types with cllama + clawdash, sends a
 // Discord roll-call message, and verifies each agent responds with an
 // AI-generated introduction mentioning its runtime.
 //
@@ -83,6 +83,7 @@ func TestSpikeRollCall(t *testing.T) {
 		{"nanoclaw-orchestrator:latest", "Dockerfile.nanoclaw-base"},
 		{"nanobot:latest", "Dockerfile.nanobot-base"},
 		{"picoclaw:latest", "Dockerfile.picoclaw-base"},
+		{"hermes:latest", "Dockerfile.hermes-base"},
 	}
 	for _, b := range baseImages {
 		if !spikeImageExists(b.tag) {
@@ -102,6 +103,7 @@ func TestSpikeRollCall(t *testing.T) {
 		{"rollcall-nanoclaw:latest", "agents/nano-roll/Clawfile"},
 		{"rollcall-nanobot:latest", "agents/nb-roll/Clawfile"},
 		{"rollcall-picoclaw:latest", "agents/pc-roll/Clawfile"},
+		{"rollcall-hermes:latest", "agents/hm-roll/Clawfile"},
 	}
 	for _, a := range agentImages {
 		spikeBuildImage(t, dir, a.image, a.dockerfile)
@@ -117,6 +119,7 @@ func TestSpikeRollCall(t *testing.T) {
 		{"nano-roll", "nanoclaw"},
 		{"nb-roll", "nanobot"},
 		{"pc-roll", "picoclaw"},
+		{"hm-roll", "hermes"},
 	}
 
 	// ── Expand env vars in pod YAML ─────────────────────────────────────
@@ -194,6 +197,7 @@ func TestSpikeRollCall(t *testing.T) {
 		"nanoclaw":  false,
 		"nanobot":   false,
 		"picoclaw":  false,
+		"hermes":    false,
 	}
 
 	deadline := time.Now().Add(3 * time.Minute)
@@ -224,7 +228,7 @@ func TestSpikeRollCall(t *testing.T) {
 			}
 		}
 		if allFound {
-			t.Log("all 6 runtime responses received")
+			t.Log("all 7 runtime responses received")
 			break
 		}
 		time.Sleep(10 * time.Second)

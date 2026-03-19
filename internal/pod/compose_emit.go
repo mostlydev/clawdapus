@@ -216,8 +216,20 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				serviceOut["volumes"] = volumes
 			}
 
-			// Environment: handle envs (lowest) < pod env < driver env (highest).
-			env, err := mergedEnvironment(nil, handleEnvs, svc.Environment, result.Environment)
+			baseEnv, err := parseEnvironmentValues(serviceOut["environment"])
+			if err != nil {
+				return "", fmt.Errorf("service %q: environment: %w", serviceName, err)
+			}
+			serviceEnv := make(map[string]string)
+			for key, value := range svc.Environment {
+				if _, exists := baseEnv[key]; exists {
+					continue
+				}
+				serviceEnv[key] = value
+			}
+
+			// Environment: preserved compose env (lowest) < handle envs < service env fallback < driver env (highest).
+			env, err := mergedEnvironment(serviceOut["environment"], handleEnvs, serviceEnv, result.Environment)
 			if err != nil {
 				return "", fmt.Errorf("service %q: environment: %w", serviceName, err)
 			}
