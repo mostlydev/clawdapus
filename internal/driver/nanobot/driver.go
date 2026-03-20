@@ -141,6 +141,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 
 	env := map[string]string{
 		"CLAW_MANAGED": "true",
+		"HOME":         "/root",
 	}
 	if rc.PersonaHostPath != "" {
 		env["CLAW_PERSONA_DIR"] = "/root/.nanobot/workspace/persona"

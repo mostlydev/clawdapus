@@ -147,10 +147,12 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	env := map[string]string{
-		"CLAW_MANAGED":  "true",
-		"HERMES_HOME":   hermesHomeDir,
-		"MESSAGING_CWD": hermesWorkspaceDir,
-		"TERMINAL_CWD":  hermesWorkspaceDir,
+		"CLAW_MANAGED":           "true",
+		"HOME":                   "/root",
+		"HERMES_HOME":            hermesHomeDir,
+		"MESSAGING_CWD":          hermesWorkspaceDir,
+		"TERMINAL_CWD":           hermesWorkspaceDir,
+		"DISCORD_REQUIRE_MENTION": "true",
 	}
 
 	if rc.PersonaHostPath != "" {
