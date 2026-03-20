@@ -15,7 +15,7 @@ Clawdapus treats the agent as an untrusted workload. It is the layer below the f
 
 ## Quickstart (5 minutes)
 
-**You need:** Docker Desktop, an [OpenRouter](https://openrouter.ai/) API key, and a [Discord bot token](https://discord.com/developers/applications).
+**You need:** Docker Desktop, an [OpenRouter](https://openrouter.ai/) API key, and a Discord bot token + guild ID (see [Discord setup guide](./examples/quickstart/README.md#discord-bot-setup)).
 
 ```bash
 # Install

@@ -8,6 +8,17 @@ Get a governed OpenClaw agent running in 5 minutes.
 - An [OpenRouter](https://openrouter.ai/) API key (or Anthropic/OpenAI)
 - A Discord bot token ([create one here](https://discord.com/developers/applications))
 
+## Discord bot setup
+
+If you already have a Discord bot, skip to [Install](#1-install).
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**. Name it whatever you want.
+2. Go to **Bot** in the left sidebar. Click **Reset Token** and copy it — this is your `DISCORD_BOT_TOKEN`.
+3. Under **Privileged Gateway Intents**, enable **Message Content Intent**. The bot needs this to read messages.
+4. Go to **OAuth2 → URL Generator**. Select scopes: `bot`. Select permissions: `Send Messages`, `Read Message History`. Copy the generated URL and open it to invite the bot to your server.
+5. To get your `DISCORD_BOT_ID`: on the **General Information** page, copy the **Application ID**.
+6. To get your `DISCORD_GUILD_ID`: in Discord, enable Developer Mode (Settings → Advanced → Developer Mode), then right-click your server name and **Copy Server ID**.
+
 ## 1. Install
 
 ```bash
