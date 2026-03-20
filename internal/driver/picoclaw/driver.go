@@ -90,7 +90,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	homeDir := filepath.Join(opts.RuntimeDir, "picoclaw-home")
-	if err := os.MkdirAll(homeDir, 0o700); err != nil {
+	if err := os.MkdirAll(homeDir, 0o777); err != nil {
 		return nil, fmt.Errorf("picoclaw driver: create picoclaw home dir: %w", err)
 	}
 	configPath := filepath.Join(homeDir, "config.json")
@@ -99,7 +99,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	workspaceDir := filepath.Join(homeDir, "workspace")
-	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
+	if err := os.MkdirAll(workspaceDir, 0o777); err != nil {
 		return nil, fmt.Errorf("picoclaw driver: create workspace dir: %w", err)
 	}
 
@@ -120,7 +120,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 
 	if len(rc.Invocations) > 0 {
 		cronPath := filepath.Join(workspaceDir, "cron", "jobs.json")
-		if err := os.MkdirAll(filepath.Dir(cronPath), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Dir(cronPath), 0o777); err != nil {
 			return nil, fmt.Errorf("picoclaw driver: create cron dir: %w", err)
 		}
 		cronJSON, err := generateCronJobsJSON(rc.Invocations)

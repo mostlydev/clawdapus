@@ -44,7 +44,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	// (openclaw.json.<n>.<uuid>.tmp → rename). The directory must be writable for
 	// that pattern to work; a read-only single-file bind-mount causes EROFS.
 	configDir := filepath.Join(opts.RuntimeDir, "config")
-	if err := os.MkdirAll(configDir, 0700); err != nil {
+	if err := os.MkdirAll(configDir, 0777); err != nil {
 		return nil, fmt.Errorf("openclaw driver: create config dir: %w", err)
 	}
 	configPath := filepath.Join(configDir, "openclaw.json")
@@ -100,7 +100,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			return nil, fmt.Errorf("openclaw driver: generate jobs.json: %w", err)
 		}
 		jobsDir := filepath.Join(opts.RuntimeDir, "state", "cron")
-		if err := os.MkdirAll(jobsDir, 0700); err != nil {
+		if err := os.MkdirAll(jobsDir, 0777); err != nil {
 			return nil, fmt.Errorf("openclaw driver: create jobs dir: %w", err)
 		}
 		jobsPath := filepath.Join(jobsDir, "jobs.json")

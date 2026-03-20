@@ -110,7 +110,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	configDir := filepath.Join(opts.RuntimeDir, "config")
-	if err := os.MkdirAll(configDir, 0o700); err != nil {
+	if err := os.MkdirAll(configDir, 0o777); err != nil {
 		return nil, fmt.Errorf("microclaw driver: create config dir: %w", err)
 	}
 	configPath := filepath.Join(configDir, "microclaw.config.yaml")
@@ -120,13 +120,13 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 
 	dataDir := filepath.Join(opts.RuntimeDir, "data")
 	groupsDir := filepath.Join(dataDir, "runtime", "groups")
-	if err := os.MkdirAll(groupsDir, 0o700); err != nil {
+	if err := os.MkdirAll(groupsDir, 0o777); err != nil {
 		return nil, fmt.Errorf("microclaw driver: create runtime groups dir: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dataDir, "skills"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dataDir, "skills"), 0o777); err != nil {
 		return nil, fmt.Errorf("microclaw driver: create skills dir: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dataDir, "working_dir"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dataDir, "working_dir"), 0o777); err != nil {
 		return nil, fmt.Errorf("microclaw driver: create working_dir: %w", err)
 	}
 

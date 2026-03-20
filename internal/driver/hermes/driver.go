@@ -99,7 +99,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	homeDir := filepath.Join(opts.RuntimeDir, "hermes-home")
 	workspaceDir := filepath.Join(opts.RuntimeDir, "workspace")
 	for _, dir := range []string{homeDir, workspaceDir, filepath.Join(homeDir, "cron"), filepath.Join(homeDir, "skills")} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		if err := os.MkdirAll(dir, 0o777); err != nil {
 			return nil, fmt.Errorf("hermes driver: create runtime dir %q: %w", dir, err)
 		}
 	}

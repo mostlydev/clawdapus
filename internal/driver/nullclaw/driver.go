@@ -62,7 +62,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	homeDir := filepath.Join(opts.RuntimeDir, "nullclaw-home")
-	if err := os.MkdirAll(homeDir, 0o700); err != nil {
+	if err := os.MkdirAll(homeDir, 0o777); err != nil {
 		return nil, fmt.Errorf("nullclaw driver: create nullclaw home dir: %w", err)
 	}
 	configPath := filepath.Join(homeDir, "config.json")
