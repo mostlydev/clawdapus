@@ -56,6 +56,9 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			if err := shared.SetPath(config, "channels.discord.enabled", true); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 			}
+			if err := shared.SetPath(config, "channels.discord.mention_only", true); err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
+			}
 			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN"); token != "" {
 				if err := shared.SetPath(config, "channels.discord.token", token); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)

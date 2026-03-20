@@ -299,7 +299,7 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 		h := rc.Handles[platform]
 		switch platform {
 		case "discord":
-			discord := map[string]interface{}{"enabled": true}
+			discord := map[string]interface{}{"enabled": true, "mention_only": true}
 			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN"); token != "" {
 				discord["bot_token"] = token
 			}
