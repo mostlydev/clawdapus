@@ -941,6 +941,56 @@ func TestEmitComposeCllamaTokenPerOrdinalOverride(t *testing.T) {
 	}
 }
 
+func TestEmitComposeUserHealthcheckOverridesDriverDefault(t *testing.T) {
+	const podYAML = `
+x-claw:
+  pod: health-pod
+services:
+  bot:
+    image: ghcr.io/example/bot:latest
+    healthcheck:
+      test: ["CMD-SHELL", "custom-probe --deep"]
+      interval: "60s"
+      timeout: "15s"
+      retries: 5
+    x-claw:
+      agent: ./AGENTS.md
+`
+	p, err := Parse(strings.NewReader(podYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	results := map[string]*driver.MaterializeResult{
+		"bot": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+			Healthcheck: &driver.Healthcheck{
+				Test:     []string{"CMD-SHELL", "curl -fsS http://localhost:8080/health"},
+				Interval: "30s",
+				Timeout:  "10s",
+				Retries:  3,
+			},
+		},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatalf("EmitCompose: %v", err)
+	}
+
+	// User healthcheck should win over driver default
+	if !strings.Contains(out, "custom-probe --deep") {
+		t.Error("expected user-defined healthcheck command in output")
+	}
+	if strings.Contains(out, "curl -fsS") {
+		t.Error("driver default healthcheck should not appear when user provides override")
+	}
+	if !strings.Contains(out, "60s") {
+		t.Error("expected user-defined healthcheck interval")
+	}
+}
+
 func containsString(items []string, want string) bool {
 	for _, item := range items {
 		if item == want {

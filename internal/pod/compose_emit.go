@@ -260,8 +260,11 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				serviceOut["restart"] = result.Restart
 			}
 
-			// Healthcheck
-			if result.Healthcheck != nil {
+			// Healthcheck: user-defined healthcheck from claw-pod.yml takes precedence
+			// over the driver default. serviceOut already contains the user's compose
+			// keys (deep-copied in the parser), so we only apply the driver healthcheck
+			// when no user override is present.
+			if _, hasUserHealthcheck := serviceOut["healthcheck"]; !hasUserHealthcheck && result.Healthcheck != nil {
 				serviceOut["healthcheck"] = map[string]interface{}{
 					"test":     result.Healthcheck.Test,
 					"interval": result.Healthcheck.Interval,
