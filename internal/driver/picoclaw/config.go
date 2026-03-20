@@ -108,6 +108,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 
 		switch platform {
 		case "discord":
+			channel["mention_only"] = true
 			if h := normalizedHandles[platform]; h != nil {
 				for _, g := range h.Guilds {
 					gid := strings.TrimSpace(g.ID)

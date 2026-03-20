@@ -121,6 +121,33 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		}
 	}
 
+	// Peer handles
+	if len(rc.PeerHandles) > 0 {
+		b.WriteString("## Peer Handles\n\n")
+		b.WriteString("Discord IDs and usernames of other agents in this pod. Use `<@ID>` to mention them.\n\n")
+
+		peerNames := make([]string, 0, len(rc.PeerHandles))
+		for name := range rc.PeerHandles {
+			peerNames = append(peerNames, name)
+		}
+		sort.Strings(peerNames)
+
+		for _, peerName := range peerNames {
+			platformHandles := rc.PeerHandles[peerName]
+			for platform, info := range platformHandles {
+				if info == nil {
+					continue
+				}
+				b.WriteString(fmt.Sprintf("- **%s** (%s): `<@%s>`", peerName, platform, info.ID))
+				if info.Username != "" {
+					b.WriteString(fmt.Sprintf(" (username: %s)", info.Username))
+				}
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString("\n")
+	}
+
 	// Skills index
 	b.WriteString("## Skills\n\n")
 	var skillEntries []string

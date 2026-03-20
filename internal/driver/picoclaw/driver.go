@@ -149,6 +149,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 
 	env := map[string]string{
 		"CLAW_MANAGED":    "true",
+		"HOME":            "/home/picoclaw",
 		"PICOCLAW_HOME":   picoclawHomeDir,
 		"PICOCLAW_CONFIG": picoclawHomeDir + "/config.json",
 	}
