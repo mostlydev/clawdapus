@@ -132,6 +132,50 @@ func TestGenerateClawdapusMDPersonaSection(t *testing.T) {
 	}
 }
 
+func TestGenerateClawdapusMDPeerHandles(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "researcher",
+		ClawType:    "openclaw",
+		PeerHandles: map[string]map[string]*driver.HandleInfo{
+			"trader": {
+				"discord": {ID: "111", Username: "trader-bot"},
+			},
+			"auditor": {
+				"discord":  {ID: "222", Username: "auditor-bot"},
+				"telegram": {ID: "333"},
+			},
+		},
+	}
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	if !strings.Contains(md, "## Peer Handles") {
+		t.Fatal("expected Peer Handles section")
+	}
+	if !strings.Contains(md, "### auditor") {
+		t.Error("expected auditor peer heading")
+	}
+	if !strings.Contains(md, "### trader") {
+		t.Error("expected trader peer heading")
+	}
+	if !strings.Contains(md, "111") {
+		t.Error("expected trader discord ID")
+	}
+	if !strings.Contains(md, "@trader-bot") {
+		t.Error("expected trader username")
+	}
+	if !strings.Contains(md, "333") {
+		t.Error("expected auditor telegram ID")
+	}
+}
+
+func TestGenerateClawdapusMDNoPeerHandlesWhenEmpty(t *testing.T) {
+	rc := &driver.ResolvedClaw{ServiceName: "solo", ClawType: "openclaw"}
+	md := GenerateClawdapusMD(rc, "test-pod")
+	if strings.Contains(md, "Peer Handles") {
+		t.Error("should not include Peer Handles section when no peers")
+	}
+}
+
 func TestGenerateClawdapusMDIncludesContextComposition(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		ServiceName: "bot",

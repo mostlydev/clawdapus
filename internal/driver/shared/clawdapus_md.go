@@ -121,31 +121,41 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		}
 	}
 
-	// Peer handles
+	// Peer Handles — sibling services' contact cards so agents can @mention each other
 	if len(rc.PeerHandles) > 0 {
 		b.WriteString("## Peer Handles\n\n")
-		b.WriteString("Discord IDs and usernames of other agents in this pod. Use `<@ID>` to mention them.\n\n")
+		b.WriteString("Other agents in this pod and how to reach them.\n\n")
 
+		// Sort peer service names for determinism
 		peerNames := make([]string, 0, len(rc.PeerHandles))
-		for name := range rc.PeerHandles {
-			peerNames = append(peerNames, name)
+		for pn := range rc.PeerHandles {
+			peerNames = append(peerNames, pn)
 		}
 		sort.Strings(peerNames)
 
 		for _, peerName := range peerNames {
-			platformHandles := rc.PeerHandles[peerName]
-			for platform, info := range platformHandles {
+			peerPlatforms := rc.PeerHandles[peerName]
+			b.WriteString(fmt.Sprintf("### %s\n", peerName))
+
+			platforms := make([]string, 0, len(peerPlatforms))
+			for p := range peerPlatforms {
+				platforms = append(platforms, p)
+			}
+			sort.Strings(platforms)
+
+			for _, platform := range platforms {
+				info := peerPlatforms[platform]
 				if info == nil {
 					continue
 				}
-				b.WriteString(fmt.Sprintf("- **%s** (%s): `<@%s>`", peerName, platform, info.ID))
+				b.WriteString(fmt.Sprintf("- **%s:** %s", platform, info.ID))
 				if info.Username != "" {
-					b.WriteString(fmt.Sprintf(" (username: %s)", info.Username))
+					b.WriteString(fmt.Sprintf(" (@%s)", info.Username))
 				}
 				b.WriteString("\n")
 			}
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	}
 
 	// Skills index
