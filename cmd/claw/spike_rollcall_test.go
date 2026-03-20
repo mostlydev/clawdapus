@@ -260,6 +260,46 @@ func TestSpikeRollCall(t *testing.T) {
 		t.Log("warning: could not determine cllama container IP")
 	}
 
+	// ── Verify all agents routed inference through cllama ────────────
+	// This is the forced proxy contract assertion. Every claw that declares
+	// cllama: passthrough must have at least one telemetry event in the
+	// cllama proxy logs. If an agent used a static fallback instead of
+	// calling the LLM, it will be missing from claw audit output.
+	t.Log("checking claw audit telemetry for all agents...")
+	auditOut, auditErr := exec.Command(
+		"go", "run", "../../cmd/claw/", "audit",
+		"-f", spikePodPath,
+		"--json", "--since", "10m",
+	).CombinedOutput()
+	if auditErr != nil {
+		t.Logf("warning: claw audit failed: %v\n%s", auditErr, string(auditOut))
+	} else {
+		var auditResult struct {
+			Summary struct {
+				Agents []struct {
+					ClawID   string `json:"claw_id"`
+					Requests int    `json:"requests"`
+				} `json:"agents"`
+			} `json:"summary"`
+		}
+		if json.Unmarshal(auditOut, &auditResult) == nil {
+			agentSet := make(map[string]bool)
+			for _, a := range auditResult.Summary.Agents {
+				agentSet[a.ClawID] = true
+			}
+			t.Logf("claw audit: telemetry for %d agents: %v", len(agentSet), agentSet)
+			for _, a := range allAgents {
+				if !agentSet[a.name] {
+					t.Errorf("claw audit: missing telemetry for %s (%s) — inference did not route through cllama", a.name, a.runtime)
+				} else {
+					t.Logf("claw audit: confirmed telemetry for %s (%s)", a.name, a.runtime)
+				}
+			}
+		} else {
+			t.Logf("warning: could not parse claw audit JSON: %s", string(auditOut))
+		}
+	}
+
 	// ── Verify clawdash is running ──────────────────────────────────────
 	clawdashContainer := "rollcall-clawdash-1"
 	spikeWaitRunning(t, clawdashContainer, 30*time.Second)

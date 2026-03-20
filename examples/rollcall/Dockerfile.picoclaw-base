@@ -13,7 +13,7 @@ RUN mkdir -p workspace && make build VERSION=dev
 
 FROM alpine:3.23
 
-RUN apk add --no-cache ca-certificates tzdata curl wget
+RUN apk add --no-cache ca-certificates tzdata curl wget jq
 
 RUN adduser -D -u 1000 picoclaw
 USER picoclaw
@@ -22,10 +22,24 @@ COPY --from=builder /src/build/picoclaw /usr/local/bin/picoclaw
 
 RUN picoclaw onboard 2>/dev/null || true
 
+# Discord responder for spike tests (same pattern as other stubs)
+USER root
+COPY discord-responder.sh /usr/local/bin/discord-responder
+RUN chmod +x /usr/local/bin/discord-responder
+RUN apk add --no-cache tini
+
+COPY <<'WRAPPER' /usr/local/bin/picoclaw-entrypoint
+#!/bin/sh
+/usr/local/bin/discord-responder &
+exec picoclaw gateway
+WRAPPER
+RUN chmod +x /usr/local/bin/picoclaw-entrypoint
+USER picoclaw
+
 EXPOSE 18790
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD wget -q --spider http://localhost:18790/health || exit 1
 
-ENTRYPOINT ["picoclaw"]
-CMD ["gateway"]
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["picoclaw-entrypoint"]

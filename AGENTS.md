@@ -132,6 +132,7 @@ Build tags currently present in the repo:
 
 The spike tests are the heavy end-to-end path. They build images, run Docker, and in some cases require real Discord/provider credentials.
 
+- `TestSpikeRollCall` is the primary validation for cllama proxy enforcement. Every claw in the rollcall pod must make at least one real LLM call through cllama, and `claw audit` must show telemetry for all of them. If you change cllama wiring, driver materialization, feed injection, or telemetry normalization, this spike test is how you prove it works end-to-end.
 - `docs_quickstart_spike_test.go` extracts shell blocks from README docs and runs them in a fresh Docker container. It removes infra images first to exercise the real pull path.
 
 ## Practical Guidance For Agents

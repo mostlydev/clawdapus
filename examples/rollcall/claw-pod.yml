@@ -155,6 +155,9 @@ services:
                   name: roll-call
     environment:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
+      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
+      CLAW_RUNTIME: "picoclaw"
 
   hm-roll:
     image: rollcall-hermes:latest

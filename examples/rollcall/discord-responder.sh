@@ -1,14 +1,18 @@
 #!/bin/sh
 # discord-responder.sh — Background process for stub runtimes.
 # Polls Discord channel via REST API, responds to mentions of DISCORD_BOT_ID.
+# When CLLAMA_TOKEN is set, makes a real LLM call through the cllama proxy
+# before posting, proving the forced inference proxy contract.
 #
 # Required env vars: DISCORD_BOT_TOKEN, DISCORD_BOT_ID, ROLLCALL_CHANNEL_ID, CLAW_RUNTIME
+# Optional env vars: CLLAMA_TOKEN (enables real LLM call through proxy)
 set -eu
 
 TOKEN="${DISCORD_BOT_TOKEN:-}"
 BOT_ID="${DISCORD_BOT_ID:-}"
 CHANNEL_ID="${ROLLCALL_CHANNEL_ID:-}"
 RUNTIME="${CLAW_RUNTIME:-unknown}"
+CLLAMA="${CLLAMA_TOKEN:-}"
 UA="DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)"
 
 [ -n "$TOKEN" ] && [ -n "$BOT_ID" ] && [ -n "$CHANNEL_ID" ] || {
@@ -17,6 +21,37 @@ UA="DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)"
 }
 
 echo "[discord-responder] polling channel $CHANNEL_ID for mentions of $BOT_ID (runtime=$RUNTIME)" >&2
+if [ -n "$CLLAMA" ]; then
+  echo "[discord-responder] cllama token present — will route inference through proxy" >&2
+else
+  echo "[discord-responder] no cllama token — will use static response" >&2
+fi
+
+# Call cllama proxy for a real LLM response.
+# Returns the LLM text on stdout, or empty string on failure.
+call_cllama() {
+  [ -n "$CLLAMA" ] || return 0
+  payload=$(cat <<ENDJSON
+{
+  "model": "anthropic/claude-sonnet-4",
+  "max_tokens": 80,
+  "messages": [
+    {"role": "system", "content": "You are a bot named ${RUNTIME}. Your runtime is ${RUNTIME}. When asked to introduce yourself, say exactly: I am [your name] and I run on ${RUNTIME}. Do not say you are Claude or made by Anthropic. Do not use markdown. One sentence only."},
+    {"role": "user", "content": "Introduce yourself."}
+  ]
+}
+ENDJSON
+)
+  resp=$(curl -s --max-time 30 \
+    -H "Authorization: Bearer $CLLAMA" \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    "http://cllama:8080/v1/chat/completions" 2>/dev/null) || { echo ""; return 0; }
+
+  # Extract content from OpenAI-format response
+  content=$(printf '%s' "$resp" | jq -r '.choices[0].message.content // empty' 2>/dev/null) || content=""
+  printf '%s' "$content"
+}
 
 fetch_messages() {
   url="https://discord.com/api/v10/channels/$CHANNEL_ID/messages?limit=20"
@@ -89,12 +124,25 @@ for i in $(seq 1 60); do
       --arg bid "$BOT_ID" 2>/dev/null) || already=0
 
     if [ "$already" -eq 0 ]; then
-      echo "[discord-responder] found trigger (attempt $i), sending response for $RUNTIME" >&2
+      echo "[discord-responder] found trigger (attempt $i), calling LLM for $RUNTIME" >&2
+
+      # Try real LLM call through cllama; fall back to static message
+      llm_response=$(call_cllama)
+      if [ -n "$llm_response" ]; then
+        message="$llm_response"
+        echo "[discord-responder] got LLM response via cllama proxy" >&2
+      else
+        message="I'm running on ${RUNTIME}. Stub runtime reporting for duty! (no cllama)"
+        echo "[discord-responder] cllama unavailable, using static fallback" >&2
+      fi
+
+      # Escape the message for JSON (handle quotes and backslashes)
+      escaped=$(printf '%s' "$message" | jq -Rs '.')
       send_resp=$(curl -s -w "\n%{http_code}" -X POST \
         -H "Authorization: Bot $TOKEN" \
         -H "Content-Type: application/json" \
         -H "User-Agent: $UA" \
-        -d "{\"content\":\"I'm running on ${RUNTIME}. Stub runtime reporting for duty!\"}" \
+        -d "{\"content\":$escaped}" \
         "https://discord.com/api/v10/channels/$CHANNEL_ID/messages" 2>/dev/null)
       send_code=$(printf '%s' "$send_resp" | tail -1)
       echo "[discord-responder] send response HTTP $send_code" >&2
