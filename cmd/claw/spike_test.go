@@ -743,17 +743,21 @@ func spikeFreePort(t *testing.T) string {
 }
 
 func spikeCleanupProject(project, generatedPath string) {
-	if strings.TrimSpace(generatedPath) != "" {
-		cmd := exec.Command("docker", "compose", "-f", generatedPath, "down", "--volumes", "--remove-orphans")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
+	project = strings.TrimSpace(project)
+	generatedPath = strings.TrimSpace(generatedPath)
+
+	if generatedPath != "" {
+		if _, err := os.Stat(generatedPath); err == nil {
+			cmd := exec.Command("docker", "compose", "-f", generatedPath, "down", "--volumes", "--remove-orphans")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			_ = cmd.Run()
+		}
 	}
 
-	cmd := exec.Command("docker", "compose", "-p", project, "down", "--volumes", "--remove-orphans")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
+	if project == "" {
+		return
+	}
 
 	out, err := exec.Command("docker", "ps", "-aq", "--filter", "label=com.docker.compose.project="+project).Output()
 	if err != nil {
@@ -763,6 +767,14 @@ func spikeCleanupProject(project, generatedPath string) {
 	if len(ids) == 0 {
 		return
 	}
+
+	{
+		cmd := exec.Command("docker", "compose", "-p", project, "down", "--volumes", "--remove-orphans")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
+	}
+
 	rmArgs := append([]string{"rm", "-f"}, ids...)
 	rm := exec.Command("docker", rmArgs...)
 	rm.Stdout = os.Stdout

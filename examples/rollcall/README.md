@@ -2,9 +2,11 @@
 
 End-to-end driver parity fixture for Clawdapus.
 
-This example boots seven different runtime families in one pod, wires them through
-`cllama` passthrough, exposes `clawdash`, posts a Discord roll-call prompt, and
-verifies that each runtime replies identifying itself.
+This fixture reuses one Discord bot identity across seven runtime families, so
+the spike now materializes one runtime at a time rather than pretending to be a
+concurrent social-topology test. Each subtest wires one runtime through
+`cllama` passthrough, exposes `clawdash`, posts a Discord mention, and verifies
+that the runtime replies identifying itself.
 
 ## What It Covers
 
@@ -18,10 +20,12 @@ verifies that each runtime replies identifying itself.
 
 Each service shares the same Discord bot token. The distinction between agents
 comes from their `AGENTS.md` contracts and per-service runtime configuration.
+Because the identity is shared, this fixture is for sequential runtime
+conformance only. It is not a valid concurrent topology example.
 
 ## Files
 
-- `claw-pod.yml`: seven agent services plus shared proxy/dashboard wiring
+- `claw-pod.yml`: spike template containing the seven runtime service definitions
 - `agents/*/Clawfile`: one Clawfile per runtime
 - `agents/*/AGENTS.md`: minimal runtime-specific self-identification contract
 - `Dockerfile.*-base`: local base images used by the spike test
@@ -67,10 +71,10 @@ The test should:
 
 1. Build the base images for each runtime family if needed.
 2. Build the seven rollcall agent images.
-3. Run `claw up` on this pod.
-4. Wait for each container to become healthy or running.
-5. Post a Discord roll-call message through the webhook.
-6. Observe seven AI-generated replies mentioning:
+3. Materialize and run one single-service pod per runtime.
+4. Wait for each runtime container to become healthy or running.
+5. Post a Discord mention through the webhook for that runtime.
+6. Observe seven AI-generated replies across the full test run mentioning:
    - `openclaw`
    - `nullclaw`
    - `microclaw`
@@ -78,10 +82,12 @@ The test should:
    - `nanobot`
    - `picoclaw`
    - `hermes`
-7. Confirm `cllama` cost data is reachable.
+7. Confirm `claw audit` telemetry appears for each runtime's cllama-backed turn.
 
 ## Notes
 
 - This is a live spike test, not a CI-safe example.
 - Real Discord and model-provider credentials are required.
 - Cleanup is automatic on normal completion and on Ctrl-C.
+- `claw-pod.yml` is a spike template for the sequential test flow, not a
+  directly runnable concurrent shared-identity topology pod.

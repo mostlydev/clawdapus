@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -233,8 +234,56 @@ func Parse(r io.Reader) (*Pod, error) {
 			return nil, fmt.Errorf("service %q: feed %q targets unknown source %q", name, feed.Name, feed.Source)
 		}
 	}
+	if err := validateHandleIdentityUniqueness(pod); err != nil {
+		return nil, err
+	}
 
 	return pod, nil
+}
+
+func validateHandleIdentityUniqueness(p *Pod) error {
+	serviceNames := make([]string, 0, len(p.Services))
+	for name := range p.Services {
+		serviceNames = append(serviceNames, name)
+	}
+	sort.Strings(serviceNames)
+
+	type handleOwner struct {
+		platform string
+		id       string
+		service  string
+	}
+
+	owners := make(map[string]handleOwner)
+	for _, name := range serviceNames {
+		svc := p.Services[name]
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		for platform, info := range svc.Claw.Handles {
+			if info == nil {
+				continue
+			}
+			id := strings.TrimSpace(info.ID)
+			if id == "" {
+				continue
+			}
+			if svc.Claw.Count > 1 {
+				return fmt.Errorf("service %q: handle %s id %q cannot be used with count=%d; concurrent replicas need unique identities", name, platform, id, svc.Claw.Count)
+			}
+			key := platform + "\x00" + id
+			if prev, ok := owners[key]; ok {
+				return fmt.Errorf("services %q and %q declare the same %s handle id %q; concurrently active services need unique identities", prev.service, name, prev.platform, prev.id)
+			}
+			owners[key] = handleOwner{
+				platform: platform,
+				id:       id,
+				service:  name,
+			}
+		}
+	}
+
+	return nil
 }
 
 func parseStringOrList(raw interface{}) ([]string, error) {

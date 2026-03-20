@@ -13,6 +13,8 @@ BOT_ID="${DISCORD_BOT_ID:-}"
 CHANNEL_ID="${ROLLCALL_CHANNEL_ID:-}"
 RUNTIME="${CLAW_RUNTIME:-unknown}"
 CLLAMA="${CLLAMA_TOKEN:-}"
+CLLAMA_FORMAT="${ROLLCALL_CLLAMA_API_FORMAT:-openai}"
+CLLAMA_MODEL="${ROLLCALL_CLLAMA_MODEL:-anthropic/claude-sonnet-4}"
 UA="DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)"
 
 [ -n "$TOKEN" ] && [ -n "$BOT_ID" ] && [ -n "$CHANNEL_ID" ] || {
@@ -31,9 +33,42 @@ fi
 # Returns the LLM text on stdout, or empty string on failure.
 call_cllama() {
   [ -n "$CLLAMA" ] || return 0
-  payload=$(cat <<ENDJSON
+
+  case "$CLLAMA_FORMAT" in
+    anthropic)
+      payload=$(cat <<ENDJSON
 {
-  "model": "anthropic/claude-sonnet-4",
+  "model": "$CLLAMA_MODEL",
+  "max_tokens": 80,
+  "system": "You are a bot named ${RUNTIME}. Your runtime is ${RUNTIME}. When asked to introduce yourself, say exactly: I am [your name] and I run on ${RUNTIME}. Do not say you are Claude or made by Anthropic. Do not use markdown. One sentence only.",
+  "messages": [
+    {"role": "user", "content": "Introduce yourself."}
+  ]
+}
+ENDJSON
+)
+      resp=$(curl -s --max-time 30 \
+        -H "Authorization: Bearer $CLLAMA" \
+        -H "Anthropic-Version: 2023-06-01" \
+        -H "Content-Type: application/json" \
+        -d "$payload" \
+        "http://cllama:8080/v1/messages" 2>/dev/null) || { echo ""; return 0; }
+
+      content=$(printf '%s' "$resp" | jq -r '
+        if (.content | type) == "array" then
+          [.content[]? | select(.type == "text") | (.text // "")]
+          | join("")
+        else
+          empty
+        end
+      ' 2>/dev/null) || content=""
+      printf '%s' "$content"
+      return 0
+      ;;
+    openai)
+      payload=$(cat <<ENDJSON
+{
+  "model": "$CLLAMA_MODEL",
   "max_tokens": 80,
   "messages": [
     {"role": "system", "content": "You are a bot named ${RUNTIME}. Your runtime is ${RUNTIME}. When asked to introduce yourself, say exactly: I am [your name] and I run on ${RUNTIME}. Do not say you are Claude or made by Anthropic. Do not use markdown. One sentence only."},
@@ -42,15 +77,22 @@ call_cllama() {
 }
 ENDJSON
 )
-  resp=$(curl -s --max-time 30 \
-    -H "Authorization: Bearer $CLLAMA" \
-    -H "Content-Type: application/json" \
-    -d "$payload" \
-    "http://cllama:8080/v1/chat/completions" 2>/dev/null) || { echo ""; return 0; }
+      resp=$(curl -s --max-time 30 \
+        -H "Authorization: Bearer $CLLAMA" \
+        -H "Content-Type: application/json" \
+        -d "$payload" \
+        "http://cllama:8080/v1/chat/completions" 2>/dev/null) || { echo ""; return 0; }
 
-  # Extract content from OpenAI-format response
-  content=$(printf '%s' "$resp" | jq -r '.choices[0].message.content // empty' 2>/dev/null) || content=""
-  printf '%s' "$content"
+      content=$(printf '%s' "$resp" | jq -r '.choices[0].message.content // empty' 2>/dev/null) || content=""
+      printf '%s' "$content"
+      return 0
+      ;;
+    *)
+      echo "[discord-responder] unsupported CLLAMA format: $CLLAMA_FORMAT" >&2
+      echo ""
+      return 0
+      ;;
+  esac
 }
 
 fetch_messages() {

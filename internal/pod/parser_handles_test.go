@@ -122,6 +122,40 @@ services:
         discord: "123456789"
 `
 
+const podWithDuplicateHandleIDs = `
+x-claw:
+  pod: test-pod
+
+services:
+  alpha:
+    image: openclaw:latest
+    x-claw:
+      agent: ./ALPHA.md
+      handles:
+        discord: "123456789"
+
+  beta:
+    image: openclaw:latest
+    x-claw:
+      agent: ./BETA.md
+      handles:
+        discord: "123456789"
+`
+
+const podWithHandledCountReplica = `
+x-claw:
+  pod: test-pod
+
+services:
+  bot:
+    image: openclaw:latest
+    x-claw:
+      agent: ./AGENTS.md
+      count: 2
+      handles:
+        discord: "123456789"
+`
+
 func TestParseHandlesStringShorthand(t *testing.T) {
 	p, err := Parse(strings.NewReader(podWithStringHandle))
 	if err != nil {
@@ -294,6 +328,26 @@ func TestParseHandlesDefaultsMergeStringHandleIntoMap(t *testing.T) {
 	}
 	if len(info.Guilds) != 1 || info.Guilds[0].Name != "Trading Floor" {
 		t.Fatalf("expected inherited default guilds, got %+v", info.Guilds)
+	}
+}
+
+func TestParseHandlesDuplicateIDAcrossServicesErrors(t *testing.T) {
+	_, err := Parse(strings.NewReader(podWithDuplicateHandleIDs))
+	if err == nil {
+		t.Fatal("expected duplicate handle ID error")
+	}
+	if !strings.Contains(err.Error(), `services "alpha" and "beta" declare the same discord handle id "123456789"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseHandlesCountWithIdentityErrors(t *testing.T) {
+	_, err := Parse(strings.NewReader(podWithHandledCountReplica))
+	if err == nil {
+		t.Fatal("expected count-with-handle error")
+	}
+	if !strings.Contains(err.Error(), `service "bot": handle discord id "123456789" cannot be used with count=2`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

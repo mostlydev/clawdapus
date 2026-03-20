@@ -1,3 +1,5 @@
+# This fixture reuses one Discord bot identity across multiple runtimes.
+# It is for sequential runtime-conformance spikes, not concurrent topology tests.
 x-claw:
   pod: rollcall
 
