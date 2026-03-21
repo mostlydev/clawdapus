@@ -38,8 +38,8 @@ func TestGenerateConfigOpenRouterModel(t *testing.T) {
 	if got := model["provider"]; got != "openrouter" {
 		t.Fatalf("expected openrouter provider, got %#v", got)
 	}
-	if got := model["default"]; got != "openrouter/anthropic/claude-sonnet-4" {
-		t.Fatalf("unexpected model.default: %#v", got)
+	if got := model["default"]; got != "anthropic/claude-sonnet-4" {
+		t.Fatalf("expected bare OpenRouter model id, got %#v", got)
 	}
 }
 

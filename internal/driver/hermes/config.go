@@ -182,7 +182,7 @@ func resolveModelConfig(rc *driver.ResolvedClaw) (*modelConfig, error) {
 	switch shared.NormalizeProvider(provider) {
 	case "openrouter":
 		return &modelConfig{
-			DefaultModel: modelRef,
+			DefaultModel: modelID,
 			Provider:     "openrouter",
 			Env:          map[string]string{},
 		}, nil

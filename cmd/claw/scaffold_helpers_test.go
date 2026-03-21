@@ -13,6 +13,7 @@ func TestParseClawTypeAcceptsSupportedValues(t *testing.T) {
 		"nullclaw",
 		"nanobot",
 		"picoclaw",
+		"hermes",
 		"generic",
 	}
 
@@ -35,8 +36,8 @@ func TestParseClawTypeRejectsUnknownValue(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid claw type") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "nanobot") || !strings.Contains(err.Error(), "picoclaw") {
-		t.Fatalf("expected error to list nanobot/picoclaw, got: %v", err)
+	if !strings.Contains(err.Error(), "nanobot") || !strings.Contains(err.Error(), "hermes") {
+		t.Fatalf("expected error to list nanobot/hermes, got: %v", err)
 	}
 }
 
@@ -52,6 +53,7 @@ func TestDefaultBaseImageForClawType(t *testing.T) {
 		{name: "nullclaw", clawType: "nullclaw", want: "node:22-slim"},
 		{name: "nanobot", clawType: "nanobot", want: "nanobot:latest"},
 		{name: "picoclaw", clawType: "picoclaw", want: "docker.io/sipeed/picoclaw:latest"},
+		{name: "hermes", clawType: "hermes", want: "ghcr.io/mostlydev/hermes-base:v2026.3.17"},
 		{name: "generic", clawType: "generic", want: "alpine:3.20"},
 		{name: "unknown", clawType: "something-else", want: "alpine:3.20"},
 	}
