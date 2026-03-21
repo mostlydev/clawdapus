@@ -8,12 +8,12 @@ import (
 func TestParseClawTypeAcceptsSupportedValues(t *testing.T) {
 	tests := []string{
 		"openclaw",
+		"hermes",
 		"nanoclaw",
 		"microclaw",
 		"nullclaw",
 		"nanobot",
 		"picoclaw",
-		"hermes",
 		"generic",
 	}
 
@@ -36,8 +36,10 @@ func TestParseClawTypeRejectsUnknownValue(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid claw type") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "nanobot") || !strings.Contains(err.Error(), "hermes") {
-		t.Fatalf("expected error to list nanobot/hermes, got: %v", err)
+	for _, expected := range []string{"hermes", "nanobot", "picoclaw"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("expected error to list %s, got: %v", expected, err)
+		}
 	}
 }
 
@@ -48,12 +50,12 @@ func TestDefaultBaseImageForClawType(t *testing.T) {
 		want     string
 	}{
 		{name: "openclaw", clawType: "openclaw", want: "openclaw:latest"},
-		{name: "nanoclaw", clawType: "nanoclaw", want: "node:22-slim"},
-		{name: "microclaw", clawType: "microclaw", want: "node:22-slim"},
-		{name: "nullclaw", clawType: "nullclaw", want: "node:22-slim"},
+		{name: "hermes", clawType: "hermes", want: "hermes:latest"},
+		{name: "nanoclaw", clawType: "nanoclaw", want: "nanoclaw-orchestrator:latest"},
+		{name: "microclaw", clawType: "microclaw", want: "microclaw:latest"},
+		{name: "nullclaw", clawType: "nullclaw", want: "nullclaw:latest"},
 		{name: "nanobot", clawType: "nanobot", want: "nanobot:latest"},
-		{name: "picoclaw", clawType: "picoclaw", want: "docker.io/sipeed/picoclaw:latest"},
-		{name: "hermes", clawType: "hermes", want: "ghcr.io/mostlydev/hermes-base:v2026.3.17"},
+		{name: "picoclaw", clawType: "picoclaw", want: "picoclaw:latest"},
 		{name: "generic", clawType: "generic", want: "alpine:3.20"},
 		{name: "unknown", clawType: "something-else", want: "alpine:3.20"},
 	}

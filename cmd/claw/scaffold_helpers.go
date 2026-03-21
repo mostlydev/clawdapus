@@ -22,6 +22,8 @@ const (
 
 var validNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
+var scaffoldClawTypes = []string{"openclaw", "hermes", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic"}
+
 func shouldPromptInteractively() bool {
 	info, err := os.Stdin.Stat()
 	if err != nil {
@@ -153,10 +155,10 @@ func parseClawType(value string) (string, error) {
 	switch v {
 	case "":
 		return "", fmt.Errorf("claw type is required")
-	case "openclaw", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "hermes", "generic":
+	case "openclaw", "hermes", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic":
 		return v, nil
 	default:
-		return "", fmt.Errorf("invalid claw type %q (allowed: openclaw, nanoclaw, microclaw, nullclaw, nanobot, picoclaw, hermes, generic)", value)
+		return "", fmt.Errorf("invalid claw type %q (allowed: %s)", value, strings.Join(scaffoldClawTypes, ", "))
 	}
 }
 
@@ -164,18 +166,18 @@ func defaultBaseImageForClawType(clawType string) string {
 	switch strings.TrimSpace(strings.ToLower(clawType)) {
 	case "openclaw":
 		return "openclaw:latest"
+	case "hermes":
+		return "hermes:latest"
 	case "nanoclaw":
-		return "node:22-slim"
+		return "nanoclaw-orchestrator:latest"
 	case "microclaw":
-		return "node:22-slim"
+		return "microclaw:latest"
 	case "nullclaw":
-		return "node:22-slim"
+		return "nullclaw:latest"
 	case "nanobot":
 		return "nanobot:latest"
 	case "picoclaw":
-		return "docker.io/sipeed/picoclaw:latest"
-	case "hermes":
-		return "ghcr.io/mostlydev/hermes-base:v2026.3.17"
+		return "picoclaw:latest"
 	case "generic":
 		return "alpine:3.20"
 	default:

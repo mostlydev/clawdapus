@@ -170,12 +170,12 @@ func TestAgentAddTypeDefaults(t *testing.T) {
 		baseImage string
 	}{
 		{name: "generic", agentName: "genericone", clawType: "generic", baseImage: "alpine:3.20"},
-		{name: "nanoclaw", agentName: "nanoclawone", clawType: "nanoclaw", baseImage: "node:22-slim"},
-		{name: "microclaw", agentName: "microclawone", clawType: "microclaw", baseImage: "node:22-slim"},
-		{name: "nullclaw", agentName: "nullclawone", clawType: "nullclaw", baseImage: "node:22-slim"},
+		{name: "hermes", agentName: "hermesone", clawType: "hermes", baseImage: "hermes:latest"},
+		{name: "nanoclaw", agentName: "nanoclawone", clawType: "nanoclaw", baseImage: "nanoclaw-orchestrator:latest"},
+		{name: "microclaw", agentName: "microclawone", clawType: "microclaw", baseImage: "microclaw:latest"},
+		{name: "nullclaw", agentName: "nullclawone", clawType: "nullclaw", baseImage: "nullclaw:latest"},
 		{name: "nanobot", agentName: "nanobotone", clawType: "nanobot", baseImage: "nanobot:latest"},
-		{name: "picoclaw", agentName: "picoclawone", clawType: "picoclaw", baseImage: "docker.io/sipeed/picoclaw:latest"},
-		{name: "hermes", agentName: "hermesone", clawType: "hermes", baseImage: "ghcr.io/mostlydev/hermes-base:v2026.3.17"},
+		{name: "picoclaw", agentName: "picoclawone", clawType: "picoclaw", baseImage: "picoclaw:latest"},
 	}
 
 	for _, tc := range tests {
@@ -217,7 +217,7 @@ func TestAgentAddTypeFlagUsageListsAllScaffoldTypes(t *testing.T) {
 	}
 
 	usage := flag.Usage
-	for _, typ := range []string{"openclaw", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "hermes", "generic"} {
+	for _, typ := range []string{"openclaw", "hermes", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic"} {
 		if !strings.Contains(usage, typ) {
 			t.Fatalf("expected agent add --type usage to include %q, got: %s", typ, usage)
 		}

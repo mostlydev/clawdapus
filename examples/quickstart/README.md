@@ -40,9 +40,11 @@ cp .env.example .env
 
 ```bash
 source .env
-claw build -t quickstart-assistant ./agents/assistant
+claw build -t quickstart-assistant:latest ./agents/assistant
 claw up -f claw-pod.yml -d
 ```
+
+On the first run, `claw build` auto-builds the local `openclaw:latest` base image if it is missing.
 
 ## 4. Verify
 

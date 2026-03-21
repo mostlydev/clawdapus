@@ -184,6 +184,64 @@ MODEL primary openrouter/anthropic/claude-sonnet-4
 	}
 }
 
+func TestGenerateBuildsMatchingDriverBaseImageWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	clawfilePath := filepath.Join(dir, "Clawfile")
+
+	input := `FROM hermes:latest
+
+CLAW_TYPE hermes
+AGENT AGENTS.md
+`
+	if err := os.WriteFile(clawfilePath, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	generatedPath, args, baseDockerfile := runGenerateWithFakeDocker(t, clawfilePath)
+
+	if generatedPath != filepath.Join(dir, "Dockerfile.generated") {
+		t.Fatalf("expected generated Dockerfile path, got %q", generatedPath)
+	}
+	if len(args) != 4 {
+		t.Fatalf("expected docker build invocation with 4 args, got %v", args)
+	}
+	if !reflect.DeepEqual(args[:3], []string{"build", "-t", "hermes:latest"}) {
+		t.Fatalf("unexpected docker build args prefix: %v", args)
+	}
+	if baseDockerfile == "" {
+		t.Fatal("expected base image Dockerfile content to be captured")
+	}
+	if !strings.Contains(baseDockerfile, "https://github.com/NousResearch/hermes-agent.git") {
+		t.Fatal("expected captured base Dockerfile to use the Hermes upstream repository")
+	}
+}
+
+func TestGenerateSkipsAutoBuildWhenFROMDoesNotMatchDeclaredBaseImage(t *testing.T) {
+	dir := t.TempDir()
+	clawfilePath := filepath.Join(dir, "Clawfile")
+
+	input := `FROM docker.io/sipeed/picoclaw:latest
+
+CLAW_TYPE picoclaw
+AGENT AGENTS.md
+`
+	if err := os.WriteFile(clawfilePath, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	generatedPath, args, baseDockerfile := runGenerateWithFakeDocker(t, clawfilePath)
+
+	if generatedPath != filepath.Join(dir, "Dockerfile.generated") {
+		t.Fatalf("expected generated Dockerfile path, got %q", generatedPath)
+	}
+	if len(args) != 0 {
+		t.Fatalf("expected no auto-build when FROM does not match provider tag, got %v", args)
+	}
+	if baseDockerfile != "" {
+		t.Fatal("expected no base image Dockerfile capture when auto-build is skipped")
+	}
+}
+
 func TestBuildFromGeneratedUsesExplicitContext(t *testing.T) {
 	dir := t.TempDir()
 	generatedPath := filepath.Join(dir, "agents", "shared", "Dockerfile.generated")
@@ -251,3 +309,54 @@ func runBuildWithFakeDocker(t *testing.T, generatedPath, tag, contextDir string)
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
+func runGenerateWithFakeDocker(t *testing.T, clawfilePath string) (string, []string, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	argsFile := filepath.Join(dir, "docker-args.txt")
+	dockerfileCopy := filepath.Join(dir, "base.Dockerfile")
+	dockerPath := filepath.Join(binDir, "docker")
+
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	script := `#!/bin/sh
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+    exit 1
+fi
+
+if [ "$1" = "build" ]; then
+    printf '%s\n' "$@" > "$DOCKER_ARGS_FILE"
+    cp "$4/Dockerfile" "$BASE_DOCKERFILE_COPY"
+    exit 0
+fi
+
+exit 0
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("DOCKER_ARGS_FILE", argsFile)
+	t.Setenv("BASE_DOCKERFILE_COPY", dockerfileCopy)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	generatedPath, err := Generate(clawfilePath)
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	var args []string
+	if data, err := os.ReadFile(argsFile); err == nil {
+		args = strings.Split(strings.TrimSpace(string(data)), "\n")
+	}
+
+	var dockerfile string
+	if data, err := os.ReadFile(dockerfileCopy); err == nil {
+		dockerfile = string(data)
+	}
+
+	return generatedPath, args, dockerfile
+}
