@@ -31,7 +31,7 @@ cp .env.example .env
 
 # Build and launch
 source .env
-claw build -t quickstart-assistant ./agents/assistant
+claw build -t quickstart-assistant:latest ./agents/assistant
 claw up -f claw-pod.yml -d
 
 # Verify
@@ -42,6 +42,8 @@ claw health -f claw-pod.yml    # both healthy
 The cllama governance proxy dashboard runs on port **8181** — every LLM call in real time: which agent, which model, token counts, cost.
 
 The Clawdapus Dash fleet dashboard runs on port **8082** — live service health, topology wiring, and per-service drill-down.
+
+On the first run, `claw build` auto-builds the local `openclaw:latest` base image if it is missing.
 
 Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
 
@@ -212,8 +214,8 @@ Pick a driver based on what you need. All drivers support `MODEL`, `AGENT`, `CLL
 
 | | `openclaw` | `hermes` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Runtime** | [OpenClaw](https://openclaw.ai) | [Hermes](https://github.com/hermes-ai/hermes) | [Claude Agent SDK](https://github.com/anthropics/claude-code) | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [NullClaw](https://github.com/nullclaw/nullclaw) | [MicroClaw](https://github.com/microclaw/microclaw) |
-| `claw init` scaffold | ✅ | — ² | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Runtime** | [OpenClaw](https://openclaw.ai) | [Hermes](https://github.com/NousResearch/hermes-agent) | [Claude Agent SDK](https://github.com/anthropics/claude-code) | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [NullClaw](https://github.com/nullclaw/nullclaw) | [MicroClaw](https://github.com/microclaw/microclaw) |
+| `claw init` scaffold | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | HANDLE: Discord | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
 | HANDLE: Telegram | — | ✅ | — | ✅ | ✅ | ✅ | ✅ |
 | HANDLE: Slack | — | ✅ | — | ✅ | ✅ | ✅ | ✅ |
@@ -224,8 +226,6 @@ Pick a driver based on what you need. All drivers support `MODEL`, `AGENT`, `CLL
 | Non-root container | — | — | — | — | ✅ | — | — |
 
 ¹ PicoClaw long-tail: WhatsApp, Feishu, LINE, QQ, DingTalk, OneBot, WeCom, WeCom App, Pico, MaixCam.
-² Hermes scaffold deferred until a stable base image is available; driver is fully functional via `claw build` + `claw up`.
-
 `claw init` scaffolds `generic` (alpine:3.20, no driver enforcement) for custom runtimes.
 
 ### OpenClaw Discord Routing Compatibility
@@ -354,6 +354,7 @@ $ claw skillmap crypto-crusher-0
 | [`examples/picoclaw/`](./examples/picoclaw/) | Minimal PicoClaw driver project with model-list config + Discord handle wiring |
 | [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
 | [`examples/trading-desk/`](./examples/trading-desk/) | Three agents coordinating via Discord with a mock trading API, scheduled invocations, and cllama governance proxy |
+| [`examples/rollcall/`](./examples/rollcall/) | All 7 drivers sharing one Discord identity — driver parity fixture and end-to-end cllama validation |
 
 ---
 
@@ -371,7 +372,7 @@ In enterprise deployments, this naturally forms a **Hub-and-Spoke Governance Mod
 
 ---
 
-## Fleet Visibility (Planned — Phase 5)
+## Fleet Visibility (Design — Phase 5)
 
 ```bash
 $ claw ps
@@ -422,7 +423,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 
 ## Status
 
-**v0.2.2 released** — [download](https://github.com/mostlydev/clawdapus/releases/tag/v0.2.2)
+**v0.3.2 released** — [download](https://github.com/mostlydev/clawdapus/releases/tag/v0.3.2)
 
 | Phase | Status |
 |-------|--------|
@@ -435,10 +436,11 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 3.8 — Channel surface bindings | Done |
 | Phase 4 — Shared governance proxy integration + credential starvation | Done |
 | Phase 4.5 — Interactive claw init & claw agent add (canonical layout) | Done |
-| Phase 4.7 — Nanobot + PicoClaw drivers, shared helpers, scaffold parity | Done |
+| Phase 4.7 — Nanobot + PicoClaw + NullClaw + MicroClaw drivers | Done |
 | Phase 4.8 — Hermes driver + shared helper extraction | Done |
+| Phase 4.9 — Peer handles, mention safety, healthcheck passthrough | Done |
 | Phase 4.6 — Unified worker architecture (config, provision, diagnostic) | Design |
-| Phase 5 — Drift scoring + fleet governance | Planned |
+| Phase 5 — Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012–015) |
 | Phase 6 — Recipe promotion + worker mode | Planned |
 
 ---
@@ -457,6 +459,12 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 - [`docs/decisions/008-cllama-sidecar-standard.md`](./docs/decisions/008-cllama-sidecar-standard.md) — ADR: cllama as a Standardized Sidecar Interface
 - [`docs/decisions/009-contract-composition-and-policy.md`](./docs/decisions/009-contract-composition-and-policy.md) — ADR: Contract Composition and Policy Inclusion
 - [`docs/decisions/010-cli-surface-simplification.md`](./docs/decisions/010-cli-surface-simplification.md) — ADR: CLI Surface Simplification (`claw compose *` → `claw *`)
+- [`docs/decisions/011-canonical-project-layout.md`](./docs/decisions/011-canonical-project-layout.md) — ADR: Canonical-By-Default Scaffold Layout
+- [`docs/decisions/012-master-claw-fleet-governance.md`](./docs/decisions/012-master-claw-fleet-governance.md) — ADR: Master Claw and Fleet Governance
+- [`docs/decisions/013-context-feeds.md`](./docs/decisions/013-context-feeds.md) — ADR: Context Feeds — Live Data Injection for Claws
+- [`docs/decisions/014-telemetry-normalization-and-audit.md`](./docs/decisions/014-telemetry-normalization-and-audit.md) — ADR: Telemetry Normalization and `claw audit`
+- [`docs/decisions/015-claw-api-authentication-and-scoping.md`](./docs/decisions/015-claw-api-authentication-and-scoping.md) — ADR: `claw-api` Authentication and Authorization Scoping
+- [`docs/decisions/016-canonical-social-identity-and-conformance-spikes.md`](./docs/decisions/016-canonical-social-identity-and-conformance-spikes.md) — ADR: Canonical Social Identity and Conformance Spikes
 - [`docs/UPDATING.md`](./docs/UPDATING.md) — checklist of everything to update when implementation changes
 - [`TESTING.md`](./TESTING.md) — unit, E2E, and spike test runbook
 
