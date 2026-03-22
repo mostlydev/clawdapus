@@ -44,6 +44,52 @@ It is the layer below the framework. The layer above the operating system.
 7. **Compute is a privilege** -- the operator assigns models and schedules; the proxy enforces budgets and rate limits.
 8. **Think twice, act once** -- a reasoning model cannot be its own judge. Governance runs in a separate process.
 
+## Master Claw
+
+Clawdapus is designed for autonomous fleet governance. The operator writes the Clawfile and sets the budgets, but day-to-day oversight can be delegated to a **Master Claw** -- the "Top Octopus."
+
+The Master Claw is an AI governor running inside the pod, tasked with reading proxy telemetry and making executive decisions. The `cllama` governance proxy is its sensory organ -- a passive firewall that enforces hard rules and emits structured telemetry. The Master Claw is the brain that reads that telemetry and autonomously manages the fleet: shifting budgets, promoting recipes, or quarantining drifting agents.
+
+In enterprise deployments, this forms a **Hub-and-Spoke Governance Model**. Multiple pods across different zones run their own local `cllama` proxies as firewalls, while a single Master Claw ingests telemetry from all of them to autonomously manage the entire neural fleet.
+
+Read the full design in the [Manifesto](/manifesto).
+
+## Fleet Visibility
+
+Behavioral drift is scored independently -- not self-reported. The structured logs from `cllama` provide raw telemetry today; the `claw audit` command and drift scoring are Phase 5 design.
+
+```bash
+$ claw ps
+
+TENTACLE          STATUS    CLLAMA    DRIFT
+crypto-crusher-0  running   healthy   0.02
+crypto-crusher-1  running   healthy   0.04
+crypto-crusher-2  running   WARNING   0.31
+
+$ claw audit crypto-crusher-2 --last 24h
+
+14:32  tweet-cycle       OUTPUT MODIFIED by cllama:policy  (financial advice detected)
+18:01  engagement-sweep  OUTPUT DROPPED by cllama:purpose  (off-strategy)
+```
+
+The `DRIFT` column in `claw ps` and the intervention history in `claw audit` give operators a verifiable record of exactly what the bot tried to do versus what it was allowed to do. The drift score is computed by the proxy implementation, not by the agent itself.
+
+## Recipe Promotion
+
+Bots install things. That is how real work gets done. The `TRACK` directive wraps package managers (apt, pip, npm) to log every mutation. `claw recipe` reviews those mutations. `claw bake` promotes them to the permanent base image.
+
+```bash
+$ claw recipe crypto-crusher-0 --since 7d
+
+  pip: tiktoken==0.7.0, trafilatura>=0.9
+  apt: jq
+  files: scripts/scraper.py
+
+Apply?  claw bake crypto-crusher --from-recipe latest
+```
+
+Tracked mutation is evolution. Untracked mutation is drift. Ad hoc capability-building becomes permanent infrastructure through a human gate. This is Phase 6, planned.
+
 ## Current Status
 
 **v0.3.2 released** -- [download](https://github.com/mostlydev/clawdapus/releases/tag/v0.3.2)

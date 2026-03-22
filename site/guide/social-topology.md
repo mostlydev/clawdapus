@@ -34,11 +34,20 @@ A trading API, a webhook receiver, a monitoring service -- any container in the 
 
 ## The Leviathan Pattern
 
-The broadcasting mechanism enables a powerful integration pattern: a non-AI service can dynamically `@mention` a specific bot in a chat channel without hardcoding IDs.
+The broadcasting mechanism enables a named integration pattern: **the Leviathan Pattern**. A non-AI API service reads `CLAW_HANDLE_*` environment variables to dynamically construct `@mentions`, addressing cognitive services through the pod's social topology without any hardcoded coupling.
 
-For example, a trading API detects an anomaly and needs to alert the risk analyst bot. It reads `CLAW_HANDLE_RISK_ANALYST_DISCORD_ID` from its environment and constructs a Discord message that mentions the bot by ID. The bot receives the mention, processes it, and responds -- all without any hardcoded coupling between the services.
+For example, a trading API detects an anomaly and needs to alert the risk analyst bot. It reads `CLAW_HANDLE_RISK_ANALYST_DISCORD_ID` from its environment and constructs a Discord message that mentions the bot by ID. The bot receives the mention, processes it, and responds.
 
-This is the **Leviathan Pattern**: non-cognitive services dynamically addressing cognitive services through the pod's social topology.
+```python
+# In a non-AI trading API service (Python example)
+import os
+
+risk_bot_id = os.environ["CLAW_HANDLE_RISK_ANALYST_DISCORD_ID"]
+alert_message = f"<@{risk_bot_id}> Anomaly detected in ETH/USD — drawdown exceeds 5% threshold."
+send_to_discord(channel_id=alerts_channel, content=alert_message)
+```
+
+The pattern works because `claw up` injects every agent's handle environment variables into every service in the pod at compile time. The trading API does not import any Clawdapus library or know anything about the agent runtime. It just reads an environment variable and formats a string. Add a new agent to the pod, and its handle variables appear automatically in every service on the next `claw up`.
 
 ## Shared Topology with `handles-defaults`
 
@@ -135,3 +144,21 @@ x-claw:
 ```
 
 This declares that the agent's Discord channel surface only accepts messages from known handles and the `trading-api` service. The `allow_from_handles: true` flag expands into each guild's `users[]` allowlist using the handle IDs of all peer agents in the pod. The `allow_from_services` list derives Discord IDs from the named services' bot tokens.
+
+## OpenClaw Discord Routing Compatibility
+
+The OpenClaw driver maps supported `channel://discord` routing controls directly into generated config and rejects unsupported ones early at compile time, rather than letting the container reject them at boot.
+
+| `channel://discord` map-form setting | `openclaw` support |
+|---|:---:|
+| DM `policy` (`pairing`, `allowlist`, `open`, `disabled`) | yes |
+| DM `allowFrom` | yes |
+| Guild `requireMention` | yes |
+| Guild `users[]` allowlist | yes |
+| Surface `allow_from_handles: true` -- expands into each guild `users[]` | yes |
+| Surface `allow_from_services: [svc...]` -- derives Discord IDs from service bot tokens and expands each guild `users[]` | yes |
+| Guild `policy` | no |
+
+::: warning Guild Policy Not Supported
+The current OpenClaw runtime rejects guild-level `policy`. Clawdapus fails during config generation instead of writing a config the container would reject at boot. Use `requireMention` and `users[]` allowlists for guild-level access control.
+:::

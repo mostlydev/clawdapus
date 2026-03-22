@@ -98,6 +98,32 @@ claw agent add researcher
 
 `claw agent add` preserves your project's existing layout by default. Use `--layout canonical` or `--layout flat` to override auto-detection.
 
+## Install AI Skill
+
+Give your coding agent full operational knowledge of Clawdapus -- the `claw` CLI, Clawfile syntax, claw-pod.yml structure, cllama proxy wiring, driver semantics, and troubleshooting patterns.
+
+```bash
+SKILL_URL="https://raw.githubusercontent.com/mostlydev/clawdapus/master/skills/clawdapus/SKILL.md"
+
+# Claude Code
+mkdir -p ~/.claude/skills/clawdapus
+curl -sSL "$SKILL_URL" -o ~/.claude/skills/clawdapus/SKILL.md
+
+# Codex CLI
+curl -sSL "$SKILL_URL" >> ~/.codex/AGENTS.md
+
+# Gemini CLI
+curl -sSL "$SKILL_URL" >> ~/.gemini/GEMINI.md
+
+# OpenCode
+curl -sSL "$SKILL_URL" >> AGENTS.md
+
+# Cursor / Windsurf / other .cursorrules-based agents
+curl -sSL "$SKILL_URL" >> .cursorrules
+```
+
+This installs the Clawdapus skill into your coding agent's context, so it can help you write Clawfiles, debug pod configurations, and work with the full `claw` CLI surface.
+
 ## Next Steps
 
 - [Anatomy of a Claw](/guide/anatomy) -- understand the four layers: runner, contract, persona, and governance proxy.

@@ -110,6 +110,49 @@ CONFIGURE nullclaw config set channels.discord.accounts.main.require_mention tru
 `HANDLE` generates sensible driver defaults. `CONFIGURE` overrides specific fields after those defaults are applied. Use `HANDLE` for identity, `CONFIGURE` for policy details.
 :::
 
+## TRACK: Mutation Logging for Recipe Promotion
+
+Bots install things. That is how real work gets done. The `TRACK` directive wraps package managers to log every mutation the agent performs at runtime:
+
+```dockerfile
+FROM openclaw:latest
+
+CLAW_TYPE openclaw
+AGENT AGENTS.md
+
+TRACK apt
+TRACK pip
+TRACK npm
+```
+
+When `TRACK` is declared, the wrapped package manager logs every install, upgrade, and removal. These logs become a redeployment recipe that the operator can review and promote:
+
+```bash
+# Review what the bot installed over the last week
+claw recipe my-agent --since 7d
+
+# Promote tracked mutations to the permanent base image
+claw bake my-agent --from-recipe latest
+```
+
+The philosophy: tracked mutation is evolution; untracked mutation is drift. Ad hoc capability-building becomes permanent infrastructure through a human gate. The bot adapts freely within its container, but only the operator decides what becomes part of the permanent image.
+
+## PRIVILEGE: Dropping Container Privileges
+
+The `PRIVILEGE` directive drops container privileges to standard users and locks down filesystem and network access:
+
+```dockerfile
+FROM openclaw:latest
+
+CLAW_TYPE openclaw
+AGENT AGENTS.md
+
+PRIVILEGE drop-root
+PRIVILEGE read-only-fs
+```
+
+`PRIVILEGE` is the Clawfile's way of expressing the principle that compute is a privilege, not a right. The operator controls what the agent can access at the infrastructure level, independent of any prompt-level instructions.
+
 ## Building
 
 ```bash
@@ -118,8 +161,10 @@ claw build -t my-agent:latest ./agents/my-agent
 
 # Separate build context
 claw build -t my-agent:latest --context ./build-context ./agents/my-agent
-
-# On first run, claw build auto-builds the local base image if missing
 ```
+
+::: tip Auto-Built Base Images
+On the first run, `claw build` auto-builds the local `openclaw:latest` base image if it is missing. You do not need to pull or build base images manually -- the CLI handles it.
+:::
 
 The generated `Dockerfile.generated` is a standard Dockerfile. Inspect it to see exactly what `claw build` produced -- but do not hand-edit it, as it is regenerated on every build.

@@ -106,5 +106,7 @@ claw health -f claw-pod.yml  # ✓ all healthy
 2. **The workspace is alive** — bots install and adapt; mutations are tracked and promotable
 3. **Configuration is code** — every deviation from defaults is diffable
 4. **Drift is an open metric** — independent audit via the governance proxy, not self-report
-5. **Compute is a privilege** — operator assigns models and schedules; proxy enforces budgets
-6. **Think twice, act once** — a reasoning model cannot be its own judge
+5. **Surfaces are declared** — topology for operators; capability discovery for bots. The proxy enforces cognitive boundaries.
+6. **Claws are users** — standard credentials; the proxy governs intent, the service's own auth governs execution
+7. **Compute is a privilege** — operator assigns models and schedules; proxy enforces budgets
+8. **Think twice, act once** — a reasoning model cannot be its own judge

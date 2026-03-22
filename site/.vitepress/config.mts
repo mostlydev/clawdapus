@@ -40,6 +40,8 @@ export default defineConfig({
             { text: 'Clawfile', link: '/guide/clawfile' },
             { text: 'Pod YAML', link: '/guide/pod-yaml' },
             { text: 'cllama', link: '/guide/cllama' },
+            { text: 'Surfaces & Skills', link: '/guide/surfaces-and-skills' },
+            { text: 'Compilation Principles', link: '/guide/compilation-principles' },
             { text: 'Social Topology', link: '/guide/social-topology' },
           ],
         },
@@ -49,7 +51,7 @@ export default defineConfig({
           text: 'Reference',
           items: [
             { text: 'CLI Commands', link: '/reference/cli' },
-            { text: 'Clawfile Directives', link: '/reference/clawfile' },
+            { text: 'Clawfile Directives', link: '/reference/clawfile-directives' },
             { text: 'Driver Support Matrix', link: '/reference/drivers' },
             { text: 'cllama Spec', link: '/reference/cllama-spec' },
           ],

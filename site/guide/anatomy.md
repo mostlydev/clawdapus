@@ -44,21 +44,42 @@ The contract file (typically `AGENTS.md`) is bind-mounted read-only into the con
 
 ### Contract Composition
 
-Operators can provide a single monolithic contract file, or modularize it using `INCLUDE` directives in the pod manifest:
+Operators can provide a single monolithic contract file, or modularize it using `INCLUDE` directives in the pod manifest. Inclusions have three semantic modes that control how content reaches the agent:
 
-- **`enforce`** -- Hard constraints and mandatory rules (e.g., risk limits). Deterministically concatenated into the final read-only contract.
-- **`guide`** -- Strong recommendations and procedural workflows. Also inlined into the contract.
-- **`reference`** -- Informational context and playbooks. Not inlined (saving tokens); mounted as read-only files in the runner's skill directory.
+- **`enforce`** -- Hard constraints and mandatory rules (e.g., risk limits, compliance boundaries). These are **deterministically concatenated** into the final read-only contract. The agent sees them on every invocation as part of its core instructions. There is no ambiguity -- enforce content is law.
+- **`guide`** -- Strong recommendations and procedural workflows (e.g., escalation procedures, preferred trading strategies). Also **inlined into the contract**, so the agent sees them in prompt context. The distinction from `enforce` is semantic: guides are strong recommendations, not hard constraints. Operators use the separation to signal intent to future governance layers.
+- **`reference`** -- Informational context, playbooks, and documentation. These are **NOT inlined** into the contract, saving tokens. Instead, they are mounted as read-only files in the runner's skill directory, where the agent can read them on demand. Use `reference` for large bodies of context that the agent needs access to but does not need in every prompt -- API documentation, historical playbooks, onboarding guides.
+
+```yaml
+# In claw-pod.yml
+x-claw:
+  include:
+    - enforce: ./policy/risk-limits.md        # always in prompt
+    - enforce: ./policy/compliance.md         # always in prompt
+    - guide: ./procedures/escalation.md       # always in prompt (recommendation)
+    - reference: ./docs/api-playbook.md       # mounted as skill file (on-demand)
+    - reference: ./docs/market-primer.md      # mounted as skill file (on-demand)
+```
+
+The `enforce` and `guide` content is inlined into the generated `AGENTS.md` that the runner reads. The `reference` content appears in the agent's `CLAWDAPUS.md` as a skill index entry pointing to the mounted file, so the agent knows it exists and can read it when needed.
 
 ## The Persona
 
 A persona is a complete, portable, forkable workspace package that encapsulates everything a bot needs to *be someone*. Not just a name and a system prompt -- a full identity with memory, interaction history, stylistic fingerprint, and knowledge base.
 
-Personas are the content layer. They grow during operation and can be snapshotted. Snapshot a running Claw that has accumulated memory over months, fork it, and deploy the fork with a different behavioral contract. You now have two bots that share history and knowledge but differ in purpose.
+Personas are the content layer. They grow during operation and can be snapshotted.
 
 ::: tip Personas are Portable
 A persona can be a local directory path or an OCI artifact reference. Download one, fork it, deploy it under a different contract. The persona is the identity; the contract is the mission.
 :::
+
+### Persona Forking
+
+Snapshot a running Claw that has accumulated months of memory, interaction history, and knowledge. Fork it. Deploy the fork with a different behavioral contract. You now have two bots that share history and knowledge but differ in purpose.
+
+This is the key distinction between the persona and the contract: the contract is the mission (static, operator-defined, read-only), while the persona is the identity (dynamic, growing, forkable). A trading analyst that has learned market patterns over six months can be forked into a risk monitor -- same knowledge base, different mandate.
+
+The `PERSONA` directive in the Clawfile imports a persona workspace. Local refs are copied with traversal and symlink hardening. Non-local refs are pulled as OCI artifacts. At runtime, the persona directory is mounted into the container and `CLAW_PERSONA_DIR` is set so the runner knows where to find it.
 
 ## cllama: The Governance Proxy
 
@@ -70,7 +91,7 @@ The fourth component is optional but transformative. `cllama` is an independent 
 
 The key insight: **a reasoning model cannot be its own judge.** Prompt-level guardrails are part of the same cognitive process they are trying to constrain. Governance must be executed by a separate, independent process.
 
-Read more in the dedicated [cllama guide](/guide/cllama).
+Read more in the dedicated [cllama guide](/guide/cllama) for proxy architecture, credential starvation mechanics, and the audit pipeline.
 
 ## The Key Insight
 
