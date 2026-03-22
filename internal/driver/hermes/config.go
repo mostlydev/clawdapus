@@ -240,8 +240,16 @@ func resolvedEnvValue(env map[string]string, key string) string {
 	if raw == "" {
 		return ""
 	}
-	if resolved := shared.ResolveEnvToken(raw); resolved != "" {
+	// For single ${VAR} tokens, delegate to the shared resolver.
+	if resolved := shared.ResolveEnvToken(raw); resolved != "" && resolved != raw {
 		return resolved
+	}
+	// Expand all ${VAR} references in compound strings (e.g. "${A},${B}").
+	if strings.Contains(raw, "${") {
+		expanded := os.Expand(raw, os.Getenv)
+		if expanded != raw {
+			return expanded
+		}
 	}
 	return raw
 }
