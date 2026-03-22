@@ -14,6 +14,8 @@ type Event struct {
 	CostUSD            *float64  `json:"cost_usd,omitempty"`
 	InterventionReason string    `json:"intervention_reason,omitempty"`
 	Error              string    `json:"error,omitempty"`
+	FeedName           string    `json:"feed_name,omitempty"`
+	FeedURL            string    `json:"feed_url,omitempty"`
 	SourceService      string    `json:"source_service,omitempty"`
 }
 

@@ -40,6 +40,8 @@ func NormalizeLine(line []byte) (*Event, error) {
 		Type:          eventType,
 		Model:         strings.TrimSpace(stringField(raw, "model")),
 		Error:         strings.TrimSpace(stringField(raw, "error")),
+		FeedName:      strings.TrimSpace(stringField(raw, "feed_name")),
+		FeedURL:       strings.TrimSpace(stringField(raw, "feed_url")),
 		SourceService: strings.TrimSpace(stringField(raw, "source_service")),
 	}
 	if value, ok := nullableStringField(raw, "intervention_reason"); ok {
