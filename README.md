@@ -150,6 +150,16 @@ SKILL policy/risk-limits.md       # operator policy — mounted read-only into r
 ```yaml
 x-claw:
   pod: trading-desk
+  master: octopus
+  cllama-defaults:
+    proxy: [passthrough]
+    env:
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+  surfaces-defaults:
+    - "service://trading-api"
+    - "volume://shared-research read-write"
+  feeds-defaults: [market-context]    # resolved from trading-api's claw.describe
 services:
   tiverton:
     image: trading-desk-tiverton:latest
@@ -157,17 +167,24 @@ services:
       context: ./agents/tiverton
     x-claw:
       agent: ./agents/tiverton/AGENTS.md
-      cllama: passthrough
-      cllama-env:
-        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
-        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
       handles:
         discord:
           id: "${TIVERTON_DISCORD_ID}"
           username: "tiverton"
-      surfaces:
-        - "service://trading-api"
-        - "volume://shared-research read-write"
+      invoke:
+        - schedule: "15 8 * * 1-5"
+          name: "Pre-market synthesis"
+          message: "Run pre-market synthesis and post the floor briefing."
+          to: trading-floor
+```
+
+Services inherit `cllama-defaults`, `surfaces-defaults`, and `feeds-defaults` from the pod. Override any field to replace; use `...` spread to extend:
+
+```yaml
+    x-claw:
+      skills:
+        - ...                          # inherit pod defaults
+        - ./policy/escalation.md       # add coordinator-only skill
 ```
 
 `claw build` transpiles the Clawfile to a standard Dockerfile. `claw up` parses the pod YAML, runs driver enforcement, generates per-agent configs, wires the cllama proxy, and calls `docker compose`. The output is standard OCI images and a standard compose file. Eject from Clawdapus anytime — you still have working Docker artifacts.
@@ -331,9 +348,25 @@ When many services share the same Discord guild/channel topology, put that share
 
 ---
 
+## Compilation Principles
+
+`claw up` is a compiler. It reads the pod file, inspects images, and emits deterministic runtime artifacts. These principles govern the compilation pipeline:
+
+1. **Compile-time, not runtime.** All wiring — feeds, skills, identity, surfaces — is resolved during `claw up`. No runtime self-registration. The generated compose file is the single source of truth for what's deployed.
+
+2. **Provider-owns, consumer-subscribes.** Services declare what they offer (feeds, endpoints, auth). Agents subscribe by name. The consumer should never need to know a service's URL path or TTL — that's the provider's concern.
+
+3. **Pod-level defaults, service-level overrides.** Anything shared across most services — proxy config, surfaces, feeds, skills — is declared once at pod level. Services inherit by default and override or extend as needed.
+
+4. **One canonical descriptor.** A service's capabilities, feeds, and endpoints are declared once (via `claw.describe` in the image) and projected into whatever artifacts need them — CLAWDAPUS.md, feed manifests, effective agent contracts.
+
+5. **Services self-describe.** Images can carry a structured descriptor (`LABEL claw.describe=...`) that advertises feeds provided, auth requirements, and a skill file. `claw up` extracts and compiles these into the pod. Framework-specific adapters (e.g., RailsTrail for Rails apps) can generate descriptors from code introspection.
+
+---
+
 ## Surfaces, Skills, and CLAWDAPUS.md
 
-Every Claw receives a generated `CLAWDAPUS.md` — always in context — listing its surfaces, mount paths, and available skills. Services self-describe via MCP listings, OpenAPI specs, or `LABEL claw.skill.emit=/path/to/SKILL.md` in their image. Custom service-emitted manuals are also compiled into the effective agent contract automatically, so workflow-critical API docs are available in prompt context without extra pod YAML. Add a service, the skill map updates. No code changes.
+Every Claw receives a generated `CLAWDAPUS.md` — the single context document listing surfaces, mount paths, peer handles, feeds, and available skills. Service descriptions from `claw.describe` labels or `claw.skill.emit` are inlined directly into CLAWDAPUS.md surface sections, so workflow-critical API docs are always in prompt context without extra pod YAML. Add a service, the skill map updates. No code changes.
 
 ```bash
 $ claw skillmap crypto-crusher-0

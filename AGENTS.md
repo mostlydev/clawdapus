@@ -14,6 +14,18 @@ Core docs:
 - `docs/decisions/` — ADRs
 - `docs/plans/` — implementation plans and historical design notes
 
+## Compilation Principles
+
+`claw up` is a compiler. These principles govern the pipeline and must not be violated by new features:
+
+1. **Compile-time, not runtime.** All wiring — feeds, skills, identity, surfaces — is resolved during `claw up`. No runtime self-registration. The generated compose file is the single source of truth.
+2. **Provider-owns, consumer-subscribes.** Services declare what they offer (feeds, endpoints, auth). Agents subscribe by name. Consumers never need to know a service's URL path or TTL.
+3. **Pod-level defaults, service-level overrides.** Shared config is declared once at pod level. Services inherit by default, override or extend (`...` spread) as needed.
+4. **One canonical descriptor.** A service's capabilities are declared once (via `claw.describe` in the image) and projected into whatever artifacts need them. No manual duplication across pod YAML, skills, and CLAWDAPUS.md.
+5. **Services self-describe.** Images carry structured descriptors. `claw up` extracts and compiles them. Framework adapters (RailsTrail, etc.) generate descriptors from code introspection.
+
+See ADR-017 for the full design and `docs/plans/2026-03-22-pod-defaults-and-service-self-description.md` for implementation details.
+
 ## Trust Order
 
 There is some doc drift in the repo. When sources disagree, trust them in this order:
@@ -110,6 +122,9 @@ Do not assume older docs mentioning only a subset are current.
 - OpenClaw config and cron paths are mounted as directories, not single files, because the runtime performs atomic rewrites.
 - OpenClaw `openclaw health --json` can emit noise to stderr. The repo handles it as a stdout-first parse path.
 - cllama logger (`cllama/internal/logging/logger.go`): field `intervention *string` has no `omitempty` — every event emits `"intervention": null`. Emitted `type` values are `request`, `response`, `error`, `intervention`. No `drift_score` exists in the reference implementation. The spec (`CLLAMA_SPEC.md` §5) omits `error` from its type enum and uses `intervention_reason` where the logger uses `intervention`.
+- Hermes SOUL.md identity: The Hermes runner seeds a default SOUL.md ("You are Hermes, made by Nous Research") on first boot via `hermes_cli/default_soul.py`. The Clawdapus Hermes driver writes its own `SOUL.md` to `hermes-home/` during `Materialize` to override this with the agent's contracted identity. Persona SOUL.md takes priority when configured.
+- Hermes `.env` passthrough: Container env vars from compose `environment:` are NOT available in Hermes agent tool execution. Only vars in `allowedEnvPassthroughKeys()` (`internal/driver/hermes/config.go`) reach the tool runtime via the `.env` file. New env vars that agents need (e.g. `CLAW_API_TOKEN`) must be added to this list.
+- Pod-level `x-claw` only accepts `pod`, `master`, and `handles-defaults`. Provider keys (`cllama-env`) must be service-level — use YAML anchors to stay DRY. See `examples/trading-desk/claw-pod.yml` for the pattern.
 
 ## Current Behavior Worth Knowing
 

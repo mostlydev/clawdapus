@@ -129,7 +129,7 @@ An agent is useless if it doesn't know what it can do or who it is. Clawdapus so
 Every Claw receives a `CLAWDAPUS.md` file injected into its workspace. This is the infrastructure layer's letter to the agent. It lists the agent's identity, its allowed surfaces, and an index of available skill files. 
 
 **Skills Discovery:** 
-When an agent declares a `service://` surface, Clawdapus queries that service to find out what it does. Services self-describe via MCP tool listings, OpenAPI specs, or an explicit `claw.skill.emit` label. Clawdapus generates a markdown "skill" file explaining how to use the service and mounts it into the agent's skill directory. Add a service to the pod, and the agent automatically receives the manual on how to use it.
+When an agent declares a `service://` surface, Clawdapus queries that service to find out what it does. Services self-describe via a structured `claw.describe` descriptor in their image — advertising feeds, endpoints, auth requirements, and a skill file. Framework adapters like RailsTrail generate descriptors from code introspection (routes, state machines, manual actions). `claw up` extracts these at compile time and projects them into CLAWDAPUS.md, feed manifests, and the effective agent contract. Add a service to the pod, and the agent automatically receives the manual on how to use it.
 
 **Social Topology (`HANDLE`):** 
 Agents have identities on chat platforms. The `HANDLE` directive declares a bot's platform identity (e.g., `HANDLE discord`). Clawdapus translates this into the runner's native configuration (enabling the Discord plugin). Crucially, it also broadcasts the agent's Handle ID as an environment variable to *every* service in the pod. This enables the "Leviathan Pattern": a non-AI API service can read `CLAW_HANDLE_CRYPTO_CRUSHER_DISCORD_ID` and dynamically construct an `@mention` to alert a specific bot in a chat channel without hardcoding IDs.
@@ -178,6 +178,7 @@ Architecture decisions and implementation plans live alongside this manifesto:
 - [ADR-002: Runtime Authority](docs/decisions/002-runtime-authority.md) — compose-only lifecycle, SDK read-only
 - [ADR-003: Topology Simplification](docs/decisions/003-topology-simplification.md) — moving channel identity to HANDLE
 - [ADR-004: Service Surface Skills](docs/decisions/004-service-surface-skills.md) — `claw.skill.emit` and fallback generation
+- [ADR-017: Pod-Level Defaults and Service Self-Description](docs/decisions/017-pod-defaults-and-service-self-description.md) — `claw.describe`, provider-owned feeds, compilation principles
 - [ADR-006: INVOKE Scheduling](docs/decisions/006-invoke-scheduling.md) — native runner scheduling over system cron
 - [ADR-007: Credential Starvation](docs/decisions/007-llm-isolation-credential-starvation.md) — isolating LLM traffic without breaking egress
 - [ADR-008: cllama Sidecar Standard](docs/decisions/008-cllama-sidecar-standard.md) — formalizing the context-aware proxy
