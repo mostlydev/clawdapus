@@ -6,7 +6,16 @@ Get a governed agent pod running in five minutes.
 
 - **Docker Desktop** -- Clawdapus uses Docker for building images and running containers.
 - **OpenRouter API key** -- sign up at [openrouter.ai](https://openrouter.ai/) if you don't have one.
-- **Discord bot token + guild ID** -- see the [Discord setup guide](https://github.com/mostlydev/clawdapus/blob/master/examples/quickstart/README.md#discord-bot-setup) for creating a bot application and inviting it to your server.
+- **Discord bot token + guild ID** -- you'll need a Discord bot application. See below if you don't have one yet.
+
+::: details How to create a Discord bot and get your IDs
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**. Name it whatever you want.
+2. Go to **Bot** in the left sidebar. Click **Reset Token** and copy it — this is your `DISCORD_BOT_TOKEN`.
+3. Under **Privileged Gateway Intents**, enable **Message Content Intent**. The bot needs this to read messages.
+4. Go to **OAuth2 → URL Generator**. Select scopes: `bot`. Select permissions: `Send Messages`, `Read Message History`. Copy the generated URL and open it to invite the bot to your server.
+5. To get your `DISCORD_BOT_ID`: on the **General Information** page, copy the **Application ID**.
+6. To get your `DISCORD_GUILD_ID`: in Discord, enable Developer Mode (Settings → Advanced → Developer Mode), then right-click your server name and **Copy Server ID**.
+:::
 
 ## Install
 

@@ -3,7 +3,7 @@
 
 **Infrastructure-layer governance for AI agent containers.**
 
-[Documentation](https://mostlydev.github.io/clawdapus/) | [Quickstart](https://mostlydev.github.io/clawdapus/guide/quickstart) | [Manifesto](https://mostlydev.github.io/clawdapus/manifesto)
+[Documentation](https://clawdapus.dev/) | [Quickstart](https://clawdapus.dev/guide/quickstart) | [Manifesto](https://clawdapus.dev/manifesto)
 
 > Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you.
 

@@ -70,6 +70,7 @@ If you are debugging or changing behavior, these are the main entry points:
 - `internal/driver/` — driver registry and per-runner implementations
 - `internal/cllama/` — cllama context generation and wiring helpers
 - `internal/inspect/` — claw label parsing from images
+- `internal/describe/` — `claw.describe` service descriptor extraction, parsing, and feed registry
 - `internal/persona/` — persona materialization
 - `cllama/` — proxy implementation source
 
@@ -124,7 +125,10 @@ Do not assume older docs mentioning only a subset are current.
 - cllama logger (`cllama/internal/logging/logger.go`): field `intervention *string` has no `omitempty` — every event emits `"intervention": null`. Emitted `type` values are `request`, `response`, `error`, `intervention`. No `drift_score` exists in the reference implementation. The spec (`CLLAMA_SPEC.md` §5) omits `error` from its type enum and uses `intervention_reason` where the logger uses `intervention`.
 - Hermes SOUL.md identity: The Hermes runner seeds a default SOUL.md ("You are Hermes, made by Nous Research") on first boot via `hermes_cli/default_soul.py`. The Clawdapus Hermes driver writes its own `SOUL.md` to `hermes-home/` during `Materialize` to override this with the agent's contracted identity. Persona SOUL.md takes priority when configured.
 - Hermes `.env` passthrough: Container env vars from compose `environment:` are NOT available in Hermes agent tool execution. Only vars in `allowedEnvPassthroughKeys()` (`internal/driver/hermes/config.go`) reach the tool runtime via the `.env` file. New env vars that agents need (e.g. `CLAW_API_TOKEN`) must be added to this list.
-- Pod-level `x-claw` only accepts `pod`, `master`, and `handles-defaults`. Provider keys (`cllama-env`) must be service-level — use YAML anchors to stay DRY. See `examples/trading-desk/claw-pod.yml` for the pattern.
+- Pod-level `x-claw` accepts `pod`, `master`, `handles-defaults`, `cllama-defaults`, `surfaces-defaults`, `feeds-defaults`, and `skills-defaults`. Service-level fields inherit pod defaults; declaring a field replaces defaults unless `...` spread is used to extend. See `examples/master-claw/claw-pod.yml` for the pattern.
+- `claw.describe` is the structured service descriptor label. `claw up` extracts `.claw-describe.json` from images (or falls back to the build context filesystem). Descriptors declare feeds, endpoints, auth, and skill file paths. Feed names from descriptors populate a pod-global feed registry; consumers subscribe by name via short-form `feeds: [name]`.
+- Feed resolution is two-phase: the parser stores short-form feed names as `FeedEntry{Unresolved: true}` (no source/path validation). `claw up` resolves them after image inspection against the feed registry. Unresolved feeds that aren't in the registry are hard errors.
+- Spread expansion (`...`) in pod default lists happens at the raw YAML layer in `expandPodDefaults()`, BEFORE typed parsing (`ParseSurface`, `parseFeeds`). The typed parsers never see the `...` token. This ordering is critical — moving spread expansion after typed parsing will break.
 
 ## Current Behavior Worth Knowing
 
@@ -132,7 +136,7 @@ Do not assume older docs mentioning only a subset are current.
 - `claw compose <subcommand> [args...]` passes through to `docker compose -f compose.generated.yml`. Use it for any compose operation not covered by the named shortcuts (e.g. `claw compose exec analyst bash`, `claw compose restart cllama-passthrough`).
 - `HANDLE` and channel `SURFACE` are different layers in current code. `HANDLE` is identity/bootstrap data; channel `SURFACE` is routing policy. If both are present, surface-level routing config is applied after handle defaults.
 - Map-form channel surfaces are still real code paths at the pod layer; `ClawBlock.Surfaces` is parsed into `[]driver.ResolvedSurface`, not raw strings.
-- Channel/service surface skills are generated and referenced through `CLAWDAPUS.md` plus mounted skill files.
+- CLAWDAPUS.md is the single generated context document per agent. Surface metadata (service endpoints, channel config, handles) is inlined into CLAWDAPUS.md sections. Separate `surface-*.md` and `handle-*.md` skill files are no longer generated. Large service skill files (from `claw.describe` or `claw.skill.emit`) are still mounted separately at `/claw/skills/` with a pointer in CLAWDAPUS.md.
 - OpenClaw cllama wiring does not write to `agents.defaults.model.baseURL/apiKey`; the schema-valid rewrite path is `models.providers.<provider>.{baseUrl,apiKey,api,models}`.
 - `PERSONA` is implemented as runtime materialization. Local refs are copied with traversal/symlink hardening; non-local refs are pulled as OCI artifacts. `CLAW_PERSONA_DIR` is only set when a persona is present.
 - `x-claw.include` contract composition is live. `enforce` and `guide` content is inlined into generated `AGENTS.md`; `reference` content is mounted as read-only skill material.
