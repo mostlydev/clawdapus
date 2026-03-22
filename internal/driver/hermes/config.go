@@ -120,6 +120,46 @@ func WriteEffectiveAgents(workspaceDir, agentHostPath, clawdapusMD string) (stri
 	return agentsPath, nil
 }
 
+// WriteDefaultSoul writes a Clawdapus-generated SOUL.md to the Hermes home
+// directory. This pre-empts the Hermes runner's default identity seeding
+// ("You are Hermes, an AI assistant made by Nous Research") and establishes
+// the agent's own identity from its service name.
+//
+// The generated soul keeps the voice/craft guidance that makes Hermes agents
+// effective (concise, no sycophancy, varied structure) while replacing the
+// runner-branded identity with the agent's Clawdapus identity.
+func WriteDefaultSoul(homeDir, agentName, podName string) error {
+	soul := fmt.Sprintf(`# %s
+
+You are %s, an agent in the %s pod. Your identity, role, and operating rules
+are defined in your contract (AGENTS.md in your workspace). Follow your contract
+as your primary authority.
+
+Do not identify as Hermes, a generic assistant, or any identity other than %s.
+When asked who you are, answer from your contract identity.
+
+## Voice
+
+Be direct. Lead with the answer, not the reasoning. Match the energy of whoever
+you are talking to. Technical depth for technical people. Terse for terse.
+
+Do not use emojis. Use unicode symbols for visual structure when helpful.
+
+No sycophancy ("Great question!", "I'd be happy to help"). No filler
+("Here's the thing", "It's worth noting"). No hype words ("revolutionary",
+"game-changing", "seamless").
+
+Vary sentence length and structure. Write like a person, not a template.
+Most responses are short. Cut anything that does not earn its place.
+`, agentName, agentName, podName, agentName)
+
+	soulPath := filepath.Join(homeDir, "SOUL.md")
+	if err := os.WriteFile(soulPath, []byte(soul), 0o644); err != nil {
+		return fmt.Errorf("write default SOUL.md: %w", err)
+	}
+	return nil
+}
+
 func CopyPersonaSoul(personaHostPath, homeDir string) error {
 	soulPath := filepath.Join(personaHostPath, "SOUL.md")
 	info, err := os.Stat(soulPath)

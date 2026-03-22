@@ -175,6 +175,52 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	if result.Environment["TERMINAL_CWD"] != hermesWorkspaceDir {
 		t.Fatalf("unexpected TERMINAL_CWD: %q", result.Environment["TERMINAL_CWD"])
 	}
+
+	// Default SOUL.md should be written when no persona is configured
+	soulData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", "SOUL.md"))
+	if err != nil {
+		t.Fatalf("expected default SOUL.md: %v", err)
+	}
+	soulStr := string(soulData)
+	if !strings.Contains(soulStr, "# hermes") {
+		t.Fatalf("expected agent name in SOUL.md header, got: %s", soulStr[:100])
+	}
+	if !strings.Contains(soulStr, "fleet-echo") {
+		t.Fatalf("expected pod name in SOUL.md")
+	}
+	if strings.Contains(soulStr, "Nous Research") {
+		t.Fatal("default SOUL.md should not contain Hermes runner identity")
+	}
+}
+
+func TestMaterializePersonaSoulOverridesDefault(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	personaDir := filepath.Join(tmp, "persona")
+	if err := os.MkdirAll(personaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(personaDir, "SOUL.md"), []byte("Custom persona soul"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rc.PersonaHostPath = personaDir
+
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", "SOUL.md"))
+	if err != nil {
+		t.Fatalf("expected SOUL.md: %v", err)
+	}
+	if string(data) != "Custom persona soul" {
+		t.Fatalf("expected persona SOUL.md to override default, got: %q", string(data))
+	}
 }
 
 func TestMaterializeCopiesPersonaSoul(t *testing.T) {
