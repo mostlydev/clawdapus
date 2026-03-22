@@ -145,6 +145,9 @@ The spike tests are the heavy end-to-end path. They build images, run Docker, an
 - User-defined `healthcheck:` in `claw-pod.yml` takes precedence over driver defaults. The override happens in `compose_emit.go` — check `serviceOut["healthcheck"]` before applying `result.Healthcheck`.
 - `Service.Compose` in the pod parser preserves all non-`x-claw` compose keys as a deep-copied `map[string]interface{}`. This is how user healthchecks, depends_on, command, etc. flow through.
 - Releases: use `gh release create` with semver tags. cllama has its own tag namespace (e.g. `v0.1.0`) published from the submodule repo. ghcr.io packages default to private; must be set public via GitHub UI after first push.
+- `claw-api` image is not published to ghcr.io. The `ensureImage` fallback tries a git URL build which fails because the Docker builder cannot access the private cllama submodule. Build it locally from the repo root: `docker build -t ghcr.io/mostlydev/claw-api:latest -f dockerfiles/claw-api/Dockerfile .`
+- `x-claw.master` auto-injects a `claw-api` service into compose. The master claw gets a bearer token baked into its `feeds.json` via the `auth` field, and a `CLAW_API_URL` env var pointing at the in-pod API. Feed auth flows: `claw up` → `feeds.json` with `auth` → cllama fetcher sends `Authorization: Bearer` header → `claw-api` validates via principals.json.
+- Alert thresholds are configurable via `CLAW_ALERT_*` env vars on the host. `claw up` forwards them into the auto-injected `claw-api` container.
 - Prefer reading the code paths above before relying on plan documents.
 - When changing runtime behavior, update tests in the same area if they exist.
 - If a behavior is reflected in generated artifacts, inspect both the source logic and the generated output expectations in tests.

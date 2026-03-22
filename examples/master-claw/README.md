@@ -16,6 +16,15 @@ Demonstrates fleet governance using a Master Claw (ADR-012).
 3. `/fleet/alerts` feed is injected into governor's context on every LLM turn
 4. Governor has an INVOKE schedule that fires every 5 minutes for periodic review
 
+## Prerequisites
+
+The `claw-api` image must exist locally before first run. Build it from the repo root:
+
+```bash
+cd /path/to/clawdapus
+docker build -t ghcr.io/mostlydev/claw-api:latest -f dockerfiles/claw-api/Dockerfile .
+```
+
 ## Running
 
 ```bash
@@ -25,4 +34,22 @@ claw up -d
 claw ps
 claw logs governor
 claw audit
+```
+
+## Feed authentication
+
+The governor's `/fleet/alerts` feed requires bearer auth. `claw up` automatically:
+1. Generates a bearer token for the master claw principal
+2. Writes the token into the feed manifest (`feeds.json`) as `auth`
+3. cllama's feed fetcher sends `Authorization: Bearer <token>` on authenticated feeds
+
+## Alert thresholds
+
+Configure alert sensitivity via env vars on the host (forwarded to `claw-api`):
+
+```bash
+CLAW_ALERT_ERROR_RATE_PERCENT=5.0      # default: 5%
+CLAW_ALERT_MAX_COST_USD=10.0           # default: $10 per query window
+CLAW_ALERT_FEED_ERROR_RATE_PERCENT=20.0 # default: 20%
+CLAW_ALERT_INTERVENTION_COUNT=5         # default: 5
 ```
