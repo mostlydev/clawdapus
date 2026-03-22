@@ -85,8 +85,7 @@ func Summarize(events []Event) Summary {
 			agent.FeedFetches++
 			if event.StatusCode != nil && *event.StatusCode >= 400 {
 				agent.FeedErrors++
-			}
-			if event.Error != "" {
+			} else if event.Error != "" {
 				agent.FeedErrors++
 			}
 		}

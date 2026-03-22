@@ -16,7 +16,7 @@ type ThresholdAlert struct {
 
 type Thresholds struct {
 	ErrorRatePercent     float64 `json:"error_rate_percent"`
-	CostPerHourUSD       float64 `json:"cost_per_hour_usd"`
+	MaxCostUSD       float64 `json:"max_cost_usd"`
 	FeedErrorRatePercent float64 `json:"feed_error_rate_percent"`
 	InterventionCount    int     `json:"intervention_count"`
 }
@@ -24,7 +24,7 @@ type Thresholds struct {
 func DefaultThresholds() Thresholds {
 	return Thresholds{
 		ErrorRatePercent:     5.0,
-		CostPerHourUSD:       10.0,
+		MaxCostUSD:       10.0,
 		FeedErrorRatePercent: 20.0,
 		InterventionCount:    5,
 	}
@@ -37,9 +37,9 @@ func ThresholdsFromEnv() Thresholds {
 			th.ErrorRatePercent = f
 		}
 	}
-	if v := os.Getenv("CLAW_ALERT_COST_PER_HOUR_USD"); v != "" {
+	if v := os.Getenv("CLAW_ALERT_MAX_COST_USD"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			th.CostPerHourUSD = f
+			th.MaxCostUSD = f
 		}
 	}
 	if v := os.Getenv("CLAW_ALERT_FEED_ERROR_RATE_PERCENT"); v != "" {
@@ -69,11 +69,11 @@ func (th Thresholds) Evaluate(agent audit.AgentSummary) []ThresholdAlert {
 		}
 	}
 
-	if th.CostPerHourUSD > 0 && agent.CostUSD > th.CostPerHourUSD {
+	if th.MaxCostUSD > 0 && agent.CostUSD > th.MaxCostUSD {
 		alerts = append(alerts, ThresholdAlert{
 			Type:     "cost",
 			Severity: "warning",
-			Summary:  fmt.Sprintf("%s cost $%.2f exceeds $%.2f threshold in window", agent.ClawID, agent.CostUSD, th.CostPerHourUSD),
+			Summary:  fmt.Sprintf("%s cost $%.2f exceeds $%.2f threshold in window", agent.ClawID, agent.CostUSD, th.MaxCostUSD),
 		})
 	}
 

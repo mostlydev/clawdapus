@@ -64,13 +64,13 @@ func TestThresholdsFlagFeedErrors(t *testing.T) {
 
 func TestThresholdsFromEnvOverrides(t *testing.T) {
 	t.Setenv("CLAW_ALERT_ERROR_RATE_PERCENT", "10.0")
-	t.Setenv("CLAW_ALERT_COST_PER_HOUR_USD", "25.0")
+	t.Setenv("CLAW_ALERT_MAX_COST_USD", "25.0")
 	th := ThresholdsFromEnv()
 	if th.ErrorRatePercent != 10.0 {
 		t.Fatalf("expected error rate 10.0, got %f", th.ErrorRatePercent)
 	}
-	if th.CostPerHourUSD != 25.0 {
-		t.Fatalf("expected cost 25.0, got %f", th.CostPerHourUSD)
+	if th.MaxCostUSD != 25.0 {
+		t.Fatalf("expected cost 25.0, got %f", th.MaxCostUSD)
 	}
 	// Unset vars should keep defaults
 	if th.FeedErrorRatePercent != 20.0 {

@@ -1501,7 +1501,7 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 		},
 	}
 
-	westonFeeds, err := buildFeedManifestEntries(p, "weston")
+	westonFeeds, err := buildFeedManifestEntries(p, "weston", nil)
 	if err != nil {
 		t.Fatalf("weston feeds: %v", err)
 	}
@@ -1515,7 +1515,7 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 		t.Fatalf("expected weston URL substitution, got %q", westonFeeds[0].URL)
 	}
 
-	loganFeeds, err := buildFeedManifestEntries(p, "logan")
+	loganFeeds, err := buildFeedManifestEntries(p, "logan", nil)
 	if err != nil {
 		t.Fatalf("logan feeds: %v", err)
 	}
