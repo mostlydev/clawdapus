@@ -93,6 +93,10 @@ Do not assume older docs mentioning only a subset are current.
 
 ## Repo-Specific Gotchas
 
+- Bug fixes in one driver often apply to all 7. When fixing driver behavior (permissions, config defaults, env vars), check all drivers in `internal/driver/*/driver.go` and `config.go` — not just the one mentioned in the issue.
+- Runtime directories created by `Materialize()` use `0o777` (not `0o700`) so container users with different uids can write. Do not regress this.
+- All drivers set `mention_only` (or equivalent like `requireMention`, `DISCORD_REQUIRE_MENTION`) for Discord channels. Without this, multi-agent pods enter feedback loops.
+- All drivers explicitly set `HOME` in the container env map to match their config mount path. Container base images may run as root or a different user than expected.
 - `cllama/` is a git submodule pointing to a private SSH repo. Fresh `git clone` leaves it empty. Infra images (cllama, clawdash) are published to ghcr.io as public packages to avoid this for end users.
 - `ensureImage()` in `compose_up.go` has a 3-step fallback: local image → `docker pull` → local Dockerfile build → git URL build. All steps must be considered when debugging image failures.
 - Managed services require `claw up -d` because post-apply verification is fail-closed.
@@ -137,6 +141,9 @@ The spike tests are the heavy end-to-end path. They build images, run Docker, an
 
 ## Practical Guidance For Agents
 
+- Multi-arch cllama image: `docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/mostlydev/cllama:latest --push cllama/` using the `multiarch-builder` buildx builder.
+- User-defined `healthcheck:` in `claw-pod.yml` takes precedence over driver defaults. The override happens in `compose_emit.go` — check `serviceOut["healthcheck"]` before applying `result.Healthcheck`.
+- `Service.Compose` in the pod parser preserves all non-`x-claw` compose keys as a deep-copied `map[string]interface{}`. This is how user healthchecks, depends_on, command, etc. flow through.
 - Releases: use `gh release create` with semver tags. cllama has its own tag namespace (e.g. `v0.1.0`) published from the submodule repo. ghcr.io packages default to private; must be set public via GitHub UI after first push.
 - Prefer reading the code paths above before relying on plan documents.
 - When changing runtime behavior, update tests in the same area if they exist.
