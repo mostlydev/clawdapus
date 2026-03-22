@@ -910,6 +910,7 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		masterSvc.Environment = make(map[string]string)
 	}
 	masterSvc.Environment["CLAW_API_URL"] = fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr))
+	masterSvc.Environment["CLAW_API_TOKEN"] = principal.Token
 
 	authEntry := cllama.ServiceAuthEntry{
 		Service:   "claw-api",
