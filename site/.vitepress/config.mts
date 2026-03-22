@@ -3,9 +3,10 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'Clawdapus',
   description: 'Infrastructure-layer governance for AI agent containers',
+  base: '/clawdapus/',
 
   head: [
-    ['link', { rel: 'icon', href: '/clawdapus.png' }],
+    ['link', { rel: 'icon', href: '/clawdapus/clawdapus.png' }],
   ],
 
   themeConfig: {
