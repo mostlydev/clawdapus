@@ -4,7 +4,37 @@ export default defineConfig({
   title: 'Clawdapus',
   description: 'Infrastructure-layer governance for AI agent containers',
   head: [
-    ['link', { rel: 'icon', href: '/clawdapus-glyph.png' }],
+    // Favicons
+    ['link', { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32x32.png' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/favicon-16x16.png' }],
+    ['link', { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' }],
+    ['link', { rel: 'manifest', href: '/site.webmanifest' }],
+
+    // Theme
+    ['meta', { name: 'theme-color', content: '#E8501C' }],
+    ['meta', { name: 'msapplication-TileColor', content: '#E8501C' }],
+
+    // Open Graph
+    ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { property: 'og:site_name', content: 'Clawdapus' }],
+    ['meta', { property: 'og:title', content: 'Clawdapus — Docker on Rails for Claws' }],
+    ['meta', { property: 'og:description', content: 'Infrastructure-layer governance for AI agent containers. The layer below the framework, where deployment meets governance.' }],
+    ['meta', { property: 'og:image', content: 'https://clawdapus.dev/og-image.png' }],
+    ['meta', { property: 'og:image:width', content: '1200' }],
+    ['meta', { property: 'og:image:height', content: '630' }],
+    ['meta', { property: 'og:url', content: 'https://clawdapus.dev' }],
+
+    // Twitter / X
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    ['meta', { name: 'twitter:site', content: '@wojinald' }],
+    ['meta', { name: 'twitter:creator', content: '@wojinald' }],
+    ['meta', { name: 'twitter:title', content: 'Clawdapus — Docker on Rails for Claws' }],
+    ['meta', { name: 'twitter:description', content: 'Infrastructure-layer governance for AI agent containers. The layer below the framework, where deployment meets governance.' }],
+    ['meta', { name: 'twitter:image', content: 'https://clawdapus.dev/og-image.png' }],
+
+    // Author
+    ['meta', { name: 'author', content: 'Wojtek Grabski' }],
   ],
 
   themeConfig: {
@@ -56,7 +86,7 @@ export default defineConfig({
 
     footer: {
       message: 'Released under the MIT License.',
-      copyright: 'Copyright \u00a9 2025-present Mostly Dev',
+      copyright: 'Copyright \u00a9 2025-present Wojtek Grabski · <a href="https://x.com/wojinald">@wojinald</a> · <a href="https://github.com/mostlydev">mostlydev</a>',
     },
 
     search: {
