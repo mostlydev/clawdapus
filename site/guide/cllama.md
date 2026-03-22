@@ -109,4 +109,4 @@ The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) 
 
 The proxy is pure passthrough: it rewrites the `model` field and forwards. It does not touch the `messages` array. No prompt decoration, no system message injection -- that is reserved for the future `cllama-policy` type.
 
-See the [cllama specification](/docs/CLLAMA_SPEC.md) for the full standard. Any OpenAI-compatible proxy image that can consume Clawdapus context can act as the governance layer.
+See the [cllama specification](/reference/cllama-spec) for the full standard. Any OpenAI-compatible proxy image that can consume Clawdapus context can act as the governance layer.
