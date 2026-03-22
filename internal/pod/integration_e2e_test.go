@@ -154,14 +154,7 @@ func parsePhase3Materialization(t *testing.T, podFile string) (map[string]*drive
 			t.Fatalf("resolve contract for %s: %v", name, err)
 		}
 
-		var surfaces []driver.ResolvedSurface
-		for _, raw := range svc.Claw.Surfaces {
-			s, err := ParseSurface(raw)
-			if err != nil {
-				t.Fatalf("parse surface %q for %q: %v", raw, name, err)
-			}
-			surfaces = append(surfaces, s)
-		}
+		surfaces := svc.Claw.Surfaces
 
 		rc := &driver.ResolvedClaw{
 			ServiceName:   name,
