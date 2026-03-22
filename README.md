@@ -37,6 +37,11 @@ claw up -f claw-pod.yml -d
 # Verify
 claw ps -f claw-pod.yml        # assistant + cllama both running
 claw health -f claw-pod.yml    # both healthy
+
+# Run any docker compose command against the pod
+claw compose exec assistant bash
+claw compose restart cllama-passthrough
+claw compose top
 ```
 
 The cllama governance proxy dashboard runs on port **8181** — every LLM call in real time: which agent, which model, token counts, cost.

@@ -40,6 +40,7 @@ Current top-level commands are:
 - `claw doctor`
 - `claw init`
 - `claw agent add`
+- `claw compose`
 
 Useful current behavior:
 
@@ -112,6 +113,8 @@ Do not assume older docs mentioning only a subset are current.
 
 ## Current Behavior Worth Knowing
 
+- Lifecycle commands (`ps`, `logs`, `health`, `compose`) refuse to run if `claw-pod.yml` is newer than `compose.generated.yml`. `claw down` is exempt — you can always tear down a stale pod. Run `claw up` to regenerate.
+- `claw compose <subcommand> [args...]` passes through to `docker compose -f compose.generated.yml`. Use it for any compose operation not covered by the named shortcuts (e.g. `claw compose exec analyst bash`, `claw compose restart cllama-passthrough`).
 - `HANDLE` and channel `SURFACE` are different layers in current code. `HANDLE` is identity/bootstrap data; channel `SURFACE` is routing policy. If both are present, surface-level routing config is applied after handle defaults.
 - Map-form channel surfaces are still real code paths at the pod layer; `ClawBlock.Surfaces` is parsed into `[]driver.ResolvedSurface`, not raw strings.
 - Channel/service surface skills are generated and referenced through `CLAWDAPUS.md` plus mounted skill files.

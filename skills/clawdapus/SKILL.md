@@ -26,7 +26,10 @@ claw down [-f <pod>.yml]         # tear down
 claw ps [-f <pod>.yml]           # container status
 claw logs [-f <pod>.yml] [svc]   # stream logs
 claw health [-f <pod>.yml]       # driver health probes
+claw compose <cmd> [args]        # passthrough: any docker compose subcommand
 ```
+
+Lifecycle commands block if `claw-pod.yml` is newer than `compose.generated.yml` — run `claw up` to regenerate. `claw down` is exempt.
 
 `-f` locates `compose.generated.yml` next to the pod file. Without `-f`, `claw up` uses `./claw-pod.yml`; other lifecycle commands (`down`/`ps`/`logs`/`health`) look for `compose.generated.yml` in the current directory.
 
