@@ -60,7 +60,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	defer docker.Close()
 
-	handler := newHandler(manifest, store, docker, stdout)
+	handler := newHandler(manifest, store, docker, stdout, clawapi.ThresholdsFromEnv())
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           handler,

@@ -1,9 +1,10 @@
 # ADR-014: Telemetry Normalization and `claw audit`
 
 **Date:** 2026-03-19
-**Status:** Proposed
+**Status:** Accepted
 **Depends on:** ADR-008 (cllama Sidecar Standard)
 **Consumed by:** ADR-012 (Master Claw)
+**Implementation:** Milestones 1-3 complete. `claw audit` CLI, normalization pipeline (`internal/audit/`), and `claw-api` read operations all implemented. Alert thresholds configurable via `clawapi.Thresholds` type and `CLAW_ALERT_*` env vars. `feed_fetch` events surfaced in audit schema.
 
 ## Context
 

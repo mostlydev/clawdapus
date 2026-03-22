@@ -60,6 +60,45 @@ func TestSummarizeAggregatesByClaw(t *testing.T) {
 	}
 }
 
+func TestNormalizeLineParseFeedFetchEvent(t *testing.T) {
+	line := `{"ts":"2026-03-22T10:00:00Z","claw_id":"weston","type":"feed_fetch","feed_name":"market-context","feed_url":"http://trading-api:4000/api/v1/market_context/weston","status_code":200,"latency_ms":45}`
+	event, err := NormalizeLine([]byte(line))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if event.Type != "feed_fetch" {
+		t.Fatalf("expected type feed_fetch, got %q", event.Type)
+	}
+	if event.FeedName != "market-context" {
+		t.Fatalf("expected feed_name market-context, got %q", event.FeedName)
+	}
+	if event.FeedURL != "http://trading-api:4000/api/v1/market_context/weston" {
+		t.Fatalf("expected feed_url, got %q", event.FeedURL)
+	}
+	if event.StatusCode == nil || *event.StatusCode != 200 {
+		t.Fatalf("expected status_code 200, got %v", event.StatusCode)
+	}
+}
+
+func TestSummarizeCountsFeedFetches(t *testing.T) {
+	events := []Event{
+		{ClawID: "weston", Type: "request"},
+		{ClawID: "weston", Type: "feed_fetch", FeedName: "market-context", StatusCode: ptrInt(200)},
+		{ClawID: "weston", Type: "feed_fetch", FeedName: "market-context", StatusCode: ptrInt(500)},
+	}
+	summary := Summarize(events)
+	if len(summary.Agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(summary.Agents))
+	}
+	agent := summary.Agents[0]
+	if agent.FeedFetches != 2 {
+		t.Fatalf("expected 2 feed fetches, got %d", agent.FeedFetches)
+	}
+	if agent.FeedErrors != 1 {
+		t.Fatalf("expected 1 feed error, got %d", agent.FeedErrors)
+	}
+}
+
 func ptrInt(v int) *int {
 	return &v
 }

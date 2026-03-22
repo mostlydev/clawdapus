@@ -33,11 +33,12 @@ import (
 )
 
 type apiHandler struct {
-	manifest *manifestpkg.PodManifest
-	store    *clawapi.Store
-	docker   *client.Client
-	auditLog *json.Encoder
-	auditErr io.Writer
+	manifest   *manifestpkg.PodManifest
+	store      *clawapi.Store
+	docker     *client.Client
+	auditLog   *json.Encoder
+	auditErr   io.Writer
+	thresholds clawapi.Thresholds
 }
 
 type serviceStatus struct {
@@ -58,16 +59,17 @@ type alert struct {
 	Summary  string `json:"summary"`
 }
 
-func newHandler(manifest *manifestpkg.PodManifest, store *clawapi.Store, docker *client.Client, auditWriter io.Writer) http.Handler {
+func newHandler(manifest *manifestpkg.PodManifest, store *clawapi.Store, docker *client.Client, auditWriter io.Writer, thresholds clawapi.Thresholds) http.Handler {
 	if auditWriter == nil {
 		auditWriter = io.Discard
 	}
 	return &apiHandler{
-		manifest: manifest,
-		store:    store,
-		docker:   docker,
-		auditLog: json.NewEncoder(auditWriter),
-		auditErr: os.Stderr,
+		manifest:   manifest,
+		store:      store,
+		docker:     docker,
+		auditLog:   json.NewEncoder(auditWriter),
+		auditErr:   os.Stderr,
+		thresholds: thresholds,
 	}
 }
 
@@ -360,22 +362,15 @@ func (h *apiHandler) collectAlerts(ctx context.Context, principal *clawapi.Princ
 			})
 		}
 	}
-	for _, item := range summary.Agents {
-		if !principal.AllowsClawID(h.manifest.PodName, item.ClawID) {
+	for _, agent := range summary.Agents {
+		if !principal.AllowsClawID(h.manifest.PodName, agent.ClawID) {
 			continue
 		}
-		if item.Errors > 0 {
+		for _, ta := range h.thresholds.Evaluate(agent) {
 			alerts = append(alerts, alert{
-				Severity: "warning",
-				ClawID:   item.ClawID,
-				Summary:  fmt.Sprintf("%s recorded %d error event(s) in the current window", item.ClawID, item.Errors),
-			})
-		}
-		if item.Interventions > 0 {
-			alerts = append(alerts, alert{
-				Severity: "warning",
-				ClawID:   item.ClawID,
-				Summary:  fmt.Sprintf("%s recorded %d intervention event(s) in the current window", item.ClawID, item.Interventions),
+				Severity: ta.Severity,
+				ClawID:   agent.ClawID,
+				Summary:  ta.Summary,
 			})
 		}
 	}

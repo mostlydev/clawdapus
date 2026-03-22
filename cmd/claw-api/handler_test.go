@@ -14,7 +14,7 @@ import (
 )
 
 func TestHandlerHealthEndpoint(t *testing.T) {
-	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, &clawapi.Store{}, nil, nil)
+	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, &clawapi.Store{}, nil, nil, clawapi.DefaultThresholds())
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 
@@ -29,7 +29,7 @@ func TestHandlerHealthEndpoint(t *testing.T) {
 }
 
 func TestHandlerStatusRejectsMissingBearer(t *testing.T) {
-	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, &clawapi.Store{}, nil, nil)
+	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, &clawapi.Store{}, nil, nil, clawapi.DefaultThresholds())
 	req := httptest.NewRequest(http.MethodGet, "/fleet/status", nil)
 	w := httptest.NewRecorder()
 
@@ -51,6 +51,7 @@ func TestHandlerLogsRejectsInvalidLinesValue(t *testing.T) {
 		}}},
 		nil,
 		nil,
+		clawapi.DefaultThresholds(),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/fleet/logs?service=westin&lines=bad", nil)
 	req.Header.Set("Authorization", "Bearer capi_deadbeef")

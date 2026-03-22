@@ -14,6 +14,8 @@ type Event struct {
 	CostUSD            *float64  `json:"cost_usd,omitempty"`
 	InterventionReason string    `json:"intervention_reason,omitempty"`
 	Error              string    `json:"error,omitempty"`
+	FeedName           string    `json:"feed_name,omitempty"`
+	FeedURL            string    `json:"feed_url,omitempty"`
 	SourceService      string    `json:"source_service,omitempty"`
 }
 
@@ -27,6 +29,8 @@ type AgentSummary struct {
 	TokensOut      int            `json:"tokens_out"`
 	CostUSD        float64        `json:"cost_usd"`
 	ModelUsage     map[string]int `json:"model_usage,omitempty"`
+	FeedFetches    int            `json:"feed_fetches"`
+	FeedErrors     int            `json:"feed_errors"`
 	FirstTimestamp time.Time      `json:"first_timestamp,omitempty"`
 	LastTimestamp  time.Time      `json:"last_timestamp,omitempty"`
 }

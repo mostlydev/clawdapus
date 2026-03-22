@@ -97,6 +97,7 @@ func runComposeUp(podFile string) error {
 			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
 			DockerSockHostPath: "/var/run/docker.sock",
 			PodName:            p.Name,
+			Environment:        collectClawAlertEnv(),
 		}
 	}
 
@@ -421,7 +422,8 @@ func runComposeUp(podFile string) error {
 					ordinalName := fmt.Sprintf("%s-%d", name, i)
 					ordinalRC := *rc
 					ordinalRC.ServiceName = ordinalName
-					feeds, err := buildFeedManifestEntries(p, name)
+					ordinalAuth := lookupServiceAuth(clawAPIAuth, ordinalName)
+					feeds, err := buildFeedManifestEntries(p, name, ordinalAuth)
 					if err != nil {
 						return fmt.Errorf("service %q: build feed manifest: %w", ordinalName, err)
 					}
@@ -431,7 +433,7 @@ func runComposeUp(podFile string) error {
 						AgentsMD:    string(agentContent),
 						ClawdapusMD: md,
 						Feeds:       feeds,
-						ServiceAuth: lookupServiceAuth(clawAPIAuth, ordinalName),
+						ServiceAuth: ordinalAuth,
 						Metadata: map[string]interface{}{
 							"service": name,
 							"ordinal": i,
@@ -444,7 +446,8 @@ func runComposeUp(podFile string) error {
 				continue
 			}
 
-			feeds, err := buildFeedManifestEntries(p, name)
+			svcAuth := lookupServiceAuth(clawAPIAuth, name)
+			feeds, err := buildFeedManifestEntries(p, name, svcAuth)
 			if err != nil {
 				return fmt.Errorf("service %q: build feed manifest: %w", name, err)
 			}
@@ -454,7 +457,7 @@ func runComposeUp(podFile string) error {
 				AgentsMD:    string(agentContent),
 				ClawdapusMD: md,
 				Feeds:       feeds,
-				ServiceAuth: lookupServiceAuth(clawAPIAuth, name),
+				ServiceAuth: svcAuth,
 				Metadata: map[string]interface{}{
 					"service": name,
 					"pod":     p.Name,
@@ -799,10 +802,18 @@ func discordHandleIDsFromPod(p *pod.Pod) []string {
 	return uniqueSortedStrings(ids)
 }
 
-func buildFeedManifestEntries(p *pod.Pod, serviceName string) ([]cllama.FeedManifestEntry, error) {
+func buildFeedManifestEntries(p *pod.Pod, serviceName string, serviceAuth []cllama.ServiceAuthEntry) ([]cllama.FeedManifestEntry, error) {
 	svc := p.Services[serviceName]
 	if svc == nil || svc.Claw == nil || len(svc.Claw.Feeds) == 0 {
 		return nil, nil
+	}
+
+	// Index service auth by service name for feed auth lookup
+	authByService := make(map[string]string)
+	for _, entry := range serviceAuth {
+		if entry.AuthType == "bearer" && entry.Token != "" {
+			authByService[entry.Service] = entry.Token
+		}
 	}
 
 	entries := make([]cllama.FeedManifestEntry, 0, len(svc.Claw.Feeds))
@@ -813,13 +824,17 @@ func buildFeedManifestEntries(p *pod.Pod, serviceName string) ([]cllama.FeedMani
 		if err != nil {
 			return nil, fmt.Errorf("feed %q: %w", feedName, err)
 		}
-		entries = append(entries, cllama.FeedManifestEntry{
+		entry := cllama.FeedManifestEntry{
 			Name:   feedName,
 			Source: feed.Source,
 			Path:   feedPath,
 			TTL:    feed.TTL,
 			URL:    url,
-		})
+		}
+		if token, ok := authByService[feed.Source]; ok {
+			entry.Auth = token
+		}
+		entries = append(entries, entry)
 	}
 	return entries, nil
 }
@@ -1999,6 +2014,22 @@ func envOrDefault(key, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func collectClawAlertEnv() map[string]string {
+	env := make(map[string]string)
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "CLAW_ALERT_") {
+			parts := strings.SplitN(kv, "=", 2)
+			if len(parts) == 2 {
+				env[parts[0]] = parts[1]
+			}
+		}
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
 }
 
 func firstIf(ok bool, value string) string {

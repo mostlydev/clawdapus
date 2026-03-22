@@ -22,6 +22,7 @@ type FeedManifestEntry struct {
 	Path   string `json:"path"`
 	TTL    int    `json:"ttl"`
 	URL    string `json:"url,omitempty"`
+	Auth   string `json:"auth,omitempty"` // bearer token for authenticated feeds (e.g. claw-api)
 }
 
 type ServiceAuthEntry struct {
