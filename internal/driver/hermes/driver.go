@@ -163,6 +163,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		env["OPENAI_API_KEY"] = modelCfg.APIKey
 	}
 
+	// Always write a SOUL.md to pre-empt the Hermes runner's default identity.
+	// Persona SOUL.md takes priority; otherwise the Clawdapus default establishes
+	// the agent's identity from its service name and contract.
+	personaSoulWritten := false
 	if rc.PersonaHostPath != "" {
 		mounts = append(mounts, driver.Mount{
 			HostPath:      rc.PersonaHostPath,
@@ -171,6 +175,14 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		})
 		env["CLAW_PERSONA_DIR"] = hermesPersonaDir
 		if err := CopyPersonaSoul(rc.PersonaHostPath, homeDir); err != nil {
+			return nil, fmt.Errorf("hermes driver: %w", err)
+		}
+		if _, err := os.Stat(filepath.Join(homeDir, "SOUL.md")); err == nil {
+			personaSoulWritten = true
+		}
+	}
+	if !personaSoulWritten {
+		if err := WriteDefaultSoul(homeDir, rc.ServiceName, podName); err != nil {
 			return nil, fmt.Errorf("hermes driver: %w", err)
 		}
 	}
