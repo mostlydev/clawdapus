@@ -81,6 +81,14 @@ func Summarize(events []Event) Summary {
 		case "intervention":
 			agent.Interventions++
 			summary.Interventions++
+		case "feed_fetch":
+			agent.FeedFetches++
+			if event.StatusCode != nil && *event.StatusCode >= 400 {
+				agent.FeedErrors++
+			}
+			if event.Error != "" {
+				agent.FeedErrors++
+			}
 		}
 	}
 

@@ -80,6 +80,25 @@ func TestNormalizeLineParseFeedFetchEvent(t *testing.T) {
 	}
 }
 
+func TestSummarizeCountsFeedFetches(t *testing.T) {
+	events := []Event{
+		{ClawID: "weston", Type: "request"},
+		{ClawID: "weston", Type: "feed_fetch", FeedName: "market-context", StatusCode: ptrInt(200)},
+		{ClawID: "weston", Type: "feed_fetch", FeedName: "market-context", StatusCode: ptrInt(500)},
+	}
+	summary := Summarize(events)
+	if len(summary.Agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(summary.Agents))
+	}
+	agent := summary.Agents[0]
+	if agent.FeedFetches != 2 {
+		t.Fatalf("expected 2 feed fetches, got %d", agent.FeedFetches)
+	}
+	if agent.FeedErrors != 1 {
+		t.Fatalf("expected 1 feed error, got %d", agent.FeedErrors)
+	}
+}
+
 func ptrInt(v int) *int {
 	return &v
 }

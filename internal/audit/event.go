@@ -29,6 +29,8 @@ type AgentSummary struct {
 	TokensOut      int            `json:"tokens_out"`
 	CostUSD        float64        `json:"cost_usd"`
 	ModelUsage     map[string]int `json:"model_usage,omitempty"`
+	FeedFetches    int            `json:"feed_fetches"`
+	FeedErrors     int            `json:"feed_errors"`
 	FirstTimestamp time.Time      `json:"first_timestamp,omitempty"`
 	LastTimestamp  time.Time      `json:"last_timestamp,omitempty"`
 }
