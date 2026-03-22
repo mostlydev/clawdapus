@@ -182,8 +182,8 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 		t.Fatalf("expected default SOUL.md: %v", err)
 	}
 	soulStr := string(soulData)
-	if !strings.Contains(soulStr, "# hermes") {
-		t.Fatalf("expected agent name in SOUL.md header, got: %s", soulStr[:100])
+	if !strings.Contains(soulStr, "# Hermes") {
+		t.Fatalf("expected titlecase agent name in SOUL.md header, got: %s", soulStr[:100])
 	}
 	if !strings.Contains(soulStr, "fleet-echo") {
 		t.Fatalf("expected pod name in SOUL.md")

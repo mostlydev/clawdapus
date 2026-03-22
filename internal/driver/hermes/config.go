@@ -129,6 +129,7 @@ func WriteEffectiveAgents(workspaceDir, agentHostPath, clawdapusMD string) (stri
 // effective (concise, no sycophancy, varied structure) while replacing the
 // runner-branded identity with the agent's Clawdapus identity.
 func WriteDefaultSoul(homeDir, agentName, podName string) error {
+	displayName := strings.ToUpper(agentName[:1]) + agentName[1:]
 	soul := fmt.Sprintf(`# %s
 
 You are %s, an agent in the %s pod. Your identity, role, and operating rules
@@ -151,7 +152,7 @@ No sycophancy ("Great question!", "I'd be happy to help"). No filler
 
 Vary sentence length and structure. Write like a person, not a template.
 Most responses are short. Cut anything that does not earn its place.
-`, agentName, agentName, podName, agentName)
+`, displayName, displayName, podName, displayName)
 
 	soulPath := filepath.Join(homeDir, "SOUL.md")
 	if err := os.WriteFile(soulPath, []byte(soul), 0o644); err != nil {
