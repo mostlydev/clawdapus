@@ -23,11 +23,18 @@ const (
 var supportedPlatforms = []string{"discord", "slack", "telegram"}
 
 func GenerateConfig(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, error) {
+	modelBlock := map[string]any{
+		"default":  modelCfg.DefaultModel,
+		"provider": modelCfg.Provider,
+	}
+	if modelCfg.BaseURL != "" {
+		modelBlock["base_url"] = modelCfg.BaseURL
+	}
+	if modelCfg.APIKey != "" {
+		modelBlock["api_key"] = modelCfg.APIKey
+	}
 	config := map[string]any{
-		"model": map[string]any{
-			"default":  modelCfg.DefaultModel,
-			"provider": modelCfg.Provider,
-		},
+		"model": modelBlock,
 		"terminal": map[string]any{
 			"backend": "local",
 			"cwd":     hermesWorkspaceDir,
@@ -139,6 +146,8 @@ func CopyPersonaSoul(personaHostPath, homeDir string) error {
 type modelConfig struct {
 	DefaultModel string
 	Provider     string
+	BaseURL      string // written to config.yaml model.base_url for custom providers
+	APIKey       string // written to config.yaml model.api_key for custom providers
 	Env          map[string]string
 }
 
@@ -160,10 +169,9 @@ func resolveModelConfig(rc *driver.ResolvedClaw) (*modelConfig, error) {
 		return &modelConfig{
 			DefaultModel: modelRef,
 			Provider:     "custom",
-			Env: map[string]string{
-				"OPENAI_BASE_URL": cllama.ProxyBaseURL(rc.Cllama[0]),
-				"OPENAI_API_KEY":  rc.CllamaToken,
-			},
+			BaseURL:      cllama.ProxyBaseURL(rc.Cllama[0]),
+			APIKey:       rc.CllamaToken,
+			Env:          map[string]string{},
 		}, nil
 	}
 
@@ -172,10 +180,13 @@ func resolveModelConfig(rc *driver.ResolvedClaw) (*modelConfig, error) {
 		if provider == "openai" {
 			defaultModel = modelID
 		}
+		apiKey := resolvedEnvValue(rc.Environment, "OPENAI_API_KEY")
 		return &modelConfig{
 			DefaultModel: defaultModel,
 			Provider:     "custom",
-			Env:          map[string]string{"OPENAI_BASE_URL": baseURL},
+			BaseURL:      baseURL,
+			APIKey:       apiKey,
+			Env:          map[string]string{},
 		}, nil
 	}
 

@@ -1,7 +1,6 @@
 package hermes
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -78,7 +77,7 @@ func TestGenerateConfigAnthropicModelUsesBareModelName(t *testing.T) {
 	}
 }
 
-func TestGenerateEnvFileIncludesCllamaRouting(t *testing.T) {
+func TestGenerateConfigIncludesCllamaRouting(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:      map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},
 		Cllama:      []string{"passthrough"},
@@ -96,21 +95,22 @@ func TestGenerateEnvFileIncludesCllamaRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveModelConfig returned error: %v", err)
 	}
-	data, err := GenerateEnvFile(rc, mc)
+	data, err := GenerateConfig(rc, mc)
 	if err != nil {
-		t.Fatalf("GenerateEnvFile returned error: %v", err)
+		t.Fatalf("GenerateConfig returned error: %v", err)
 	}
-	text := string(data)
-	if !strings.Contains(text, "OPENAI_BASE_URL=http://cllama:8080/v1") {
-		t.Fatalf("expected cllama base URL in env file, got:\n%s", text)
+	var cfg map[string]any
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("parse generated yaml: %v", err)
 	}
-	if !strings.Contains(text, "OPENAI_API_KEY=agent-token") {
-		t.Fatalf("expected cllama token in env file, got:\n%s", text)
+	model, _ := cfg["model"].(map[string]any)
+	if got := model["base_url"]; got != "http://cllama:8080/v1" {
+		t.Fatalf("expected cllama base_url in config, got %#v", got)
 	}
-	if !strings.Contains(text, "HERMES_HOME=/root/.hermes") {
-		t.Fatalf("expected HERMES_HOME in env file, got:\n%s", text)
+	if got := model["api_key"]; got != "agent-token" {
+		t.Fatalf("expected cllama api_key in config, got %#v", got)
 	}
-	if !strings.Contains(text, "MESSAGING_CWD=/workspace") {
-		t.Fatalf("expected MESSAGING_CWD in env file, got:\n%s", text)
+	if got := model["provider"]; got != "custom" {
+		t.Fatalf("expected custom provider, got %#v", got)
 	}
 }
