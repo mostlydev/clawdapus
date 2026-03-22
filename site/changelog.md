@@ -4,7 +4,7 @@ outline: deep
 
 # Changelog
 
-Current version: **v0.3.4** — [Download](https://github.com/mostlydev/clawdapus/releases/tag/v0.3.4) | [All releases](https://github.com/mostlydev/clawdapus/releases)
+[Latest release](https://github.com/mostlydev/clawdapus/releases/latest) | [All releases](https://github.com/mostlydev/clawdapus/releases)
 
 ## Roadmap
 
@@ -26,7 +26,22 @@ Current version: **v0.3.4** — [Download](https://github.com/mostlydev/clawdapu
 | Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012-015) |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
 
-## v0.3.4 <Badge type="tip" text="Latest" /> {#v0-3-4}
+## v0.3.5 <Badge type="tip" text="Latest" /> {#v0-3-5}
+
+*2026-03-22*
+
+- **ADR-017: Pod defaults, service self-description & unified CLAWDAPUS.md** — `claw.describe` service descriptors, pod-level defaults with spread expansion, feed registry, and unified per-agent CLAWDAPUS.md generation
+- **Master Claw API access** — `CLAW_API_TOKEN` injected automatically; feed auth via bearer tokens in `feeds.json`
+- **`claw compose` passthrough** — `claw compose <subcommand>` passes through to `docker compose -f compose.generated.yml`
+- **Stale guard** — lifecycle commands refuse to run if `claw-pod.yml` is newer than `compose.generated.yml`
+- **Hermes SOUL.md** — default SOUL.md overrides runner identity with contracted agent identity; titlecased names
+- **Hermes env passthrough** — `CLAW_API_URL` and `CLAW_API_TOKEN` added for master claw
+- **Audit feed events** — feed fetch events surfaced with `feed_name` and `feed_url` fields
+- **Configurable alert thresholds** — `CLAW_ALERT_*` env vars for error rate, cost, feeds, interventions; wired into `/fleet/alerts`
+- **Documentation site** — [clawdapus.dev](https://clawdapus.dev) with full guide, reference, manifesto, and changelog
+- OG social cards, favicons, web manifest, and complete meta tags
+
+## v0.3.4 {#v0-3-4}
 
 *2026-03-22*
 
