@@ -17,18 +17,19 @@ type InspectInvocation struct {
 }
 
 type ClawInfo struct {
-	ClawType    string
-	Agent       string
-	Models      map[string]string
-	Cllama      []string
-	Persona     string
-	Handles     []string
-	Surfaces    []string
-	Skills      []string
-	Privileges  map[string]string
-	Configures  []string
-	Invocations []InspectInvocation
-	SkillEmit   string // claw.skill.emit label: path to skill file inside image
+	ClawType     string
+	Agent        string
+	Models       map[string]string
+	Cllama       []string
+	Persona      string
+	Handles      []string
+	Surfaces     []string
+	Skills       []string
+	Privileges   map[string]string
+	Configures   []string
+	Invocations  []InspectInvocation
+	SkillEmit    string // claw.skill.emit label: path to skill file inside image
+	DescribePath string // claw.describe label: path to a structured service descriptor inside image
 }
 
 func ParseLabels(labels map[string]string) *ClawInfo {
@@ -99,6 +100,8 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 			})
 		case key == "claw.skill.emit":
 			info.SkillEmit = value
+		case key == "claw.describe":
+			info.DescribePath = value
 		case strings.HasPrefix(key, "claw.skill."):
 			index := maxInt()
 			suffix := strings.TrimPrefix(key, "claw.skill.")

@@ -55,10 +55,12 @@ type rawClawBlock struct {
 }
 
 type rawFeedEntry struct {
-	Name   string `yaml:"name"`
-	Source string `yaml:"source"`
-	Path   string `yaml:"path"`
-	TTL    int    `yaml:"ttl"`
+	Name        string `yaml:"name"`
+	Source      string `yaml:"source"`
+	Path        string `yaml:"path"`
+	TTL         int    `yaml:"ttl"`
+	Description string `yaml:"description"`
+	Unresolved  bool   `yaml:"-"`
 }
 
 type rawIncludeEntry struct {
@@ -75,13 +77,21 @@ func Parse(r io.Reader) (*Pod, error) {
 		return nil, fmt.Errorf("read claw-pod.yml: %w", err)
 	}
 
-	var raw rawPod
-	if err := yaml.Unmarshal(src, &raw); err != nil {
+	var root map[string]interface{}
+	if err := yaml.Unmarshal(src, &root); err != nil {
+		return nil, fmt.Errorf("parse claw-pod.yml: %w", err)
+	}
+	if err := expandPodDefaults(root); err != nil {
 		return nil, fmt.Errorf("parse claw-pod.yml: %w", err)
 	}
 
-	var root map[string]interface{}
-	if err := yaml.Unmarshal(src, &root); err != nil {
+	expandedSrc, err := yaml.Marshal(root)
+	if err != nil {
+		return nil, fmt.Errorf("parse claw-pod.yml: marshal expanded config: %w", err)
+	}
+
+	var raw rawPod
+	if err := yaml.Unmarshal(expandedSrc, &raw); err != nil {
 		return nil, fmt.Errorf("parse claw-pod.yml: %w", err)
 	}
 
@@ -225,6 +235,9 @@ func Parse(r io.Reader) (*Pod, error) {
 			continue
 		}
 		for _, feed := range svc.Claw.Feeds {
+			if feed.Unresolved {
+				continue
+			}
 			if _, ok := pod.Services[feed.Source]; ok {
 				continue
 			}
@@ -331,6 +344,18 @@ func parseFeeds(rawFeeds []rawFeedEntry) ([]FeedEntry, error) {
 
 	out := make([]FeedEntry, 0, len(rawFeeds))
 	for i, raw := range rawFeeds {
+		name := strings.TrimSpace(raw.Name)
+		if raw.Unresolved {
+			if name == "" {
+				return nil, fmt.Errorf("feed %d: unresolved feed name must not be empty", i)
+			}
+			out = append(out, FeedEntry{
+				Name:       name,
+				Unresolved: true,
+			})
+			continue
+		}
+
 		source := strings.TrimSpace(raw.Source)
 		if source == "" {
 			return nil, fmt.Errorf("feed %d: source is required", i)
@@ -345,18 +370,224 @@ func parseFeeds(rawFeeds []rawFeedEntry) ([]FeedEntry, error) {
 		if raw.TTL <= 0 {
 			return nil, fmt.Errorf("feed %d: ttl must be > 0", i)
 		}
-		name := strings.TrimSpace(raw.Name)
 		if name == "" {
 			name = deriveFeedName(source, feedPath, i)
 		}
 		out = append(out, FeedEntry{
-			Name:   name,
-			Source: source,
-			Path:   feedPath,
-			TTL:    raw.TTL,
+			Name:        name,
+			Source:      source,
+			Path:        feedPath,
+			TTL:         raw.TTL,
+			Description: strings.TrimSpace(raw.Description),
 		})
 	}
 	return out, nil
+}
+
+func (r *rawFeedEntry) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.TrimSpace(node.Value) == "" {
+			return fmt.Errorf("feed name must not be empty")
+		}
+		r.Name = strings.TrimSpace(node.Value)
+		r.Unresolved = true
+		return nil
+	case yaml.MappingNode:
+		type alias rawFeedEntry
+		var parsed alias
+		if err := node.Decode(&parsed); err != nil {
+			return err
+		}
+		*r = rawFeedEntry(parsed)
+		r.Unresolved = false
+		return nil
+	default:
+		return fmt.Errorf("feed entry must be a string or mapping, got %s", yamlKindString(node.Kind))
+	}
+}
+
+func expandPodDefaults(root map[string]interface{}) error {
+	if len(root) == 0 {
+		return nil
+	}
+
+	rawXClaw, err := mapStringAny(root["x-claw"])
+	if err != nil {
+		return fmt.Errorf("x-claw: %w", err)
+	}
+	if rawXClaw == nil {
+		return nil
+	}
+
+	defaults := podDefaults{
+		CllamaDefaults:   deepCopyMapOrNil(rawXClaw["cllama-defaults"]),
+		SurfacesDefaults: deepCopySliceOrNil(rawXClaw["surfaces-defaults"]),
+		FeedsDefaults:    deepCopySliceOrNil(rawXClaw["feeds-defaults"]),
+		SkillsDefaults:   deepCopySliceOrNil(rawXClaw["skills-defaults"]),
+	}
+
+	rawServices, err := mapStringAny(root["services"])
+	if err != nil {
+		return fmt.Errorf("services: %w", err)
+	}
+	for name, rawSvc := range rawServices {
+		svcMap, err := mapStringAny(rawSvc)
+		if err != nil {
+			return fmt.Errorf("service %q: %w", name, err)
+		}
+		rawBlock, err := mapStringAny(svcMap["x-claw"])
+		if err != nil {
+			return fmt.Errorf("service %q: x-claw: %w", name, err)
+		}
+		if rawBlock == nil {
+			continue
+		}
+
+		if err := applyRawPodDefaults(rawBlock, defaults); err != nil {
+			return fmt.Errorf("service %q: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
+type podDefaults struct {
+	CllamaDefaults   map[string]interface{}
+	SurfacesDefaults []interface{}
+	FeedsDefaults    []interface{}
+	SkillsDefaults   []interface{}
+}
+
+func applyRawPodDefaults(raw map[string]interface{}, defaults podDefaults) error {
+	if err := applyRawCllamaDefaults(raw, defaults.CllamaDefaults); err != nil {
+		return err
+	}
+	if err := applyRawListDefaults(raw, "surfaces", defaults.SurfacesDefaults); err != nil {
+		return err
+	}
+	if err := applyRawListDefaults(raw, "feeds", defaults.FeedsDefaults); err != nil {
+		return err
+	}
+	if err := applyRawListDefaults(raw, "skills", defaults.SkillsDefaults); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyRawCllamaDefaults(raw map[string]interface{}, defaults map[string]interface{}) error {
+	if len(defaults) == 0 {
+		return nil
+	}
+
+	if _, present := raw["cllama"]; !present {
+		if proxy, ok := defaults["proxy"]; ok {
+			raw["cllama"] = deepCopyValue(proxy)
+		}
+	}
+
+	defaultEnv, err := mapStringAny(defaults["env"])
+	if err != nil {
+		return fmt.Errorf("cllama-defaults.env: %w", err)
+	}
+	if len(defaultEnv) == 0 {
+		return nil
+	}
+
+	serviceEnv, err := mapStringAny(raw["cllama-env"])
+	if err != nil {
+		return fmt.Errorf("cllama-env: %w", err)
+	}
+	if len(serviceEnv) == 0 {
+		raw["cllama-env"] = deepCopyMap(defaultEnv)
+		return nil
+	}
+	raw["cllama-env"] = mergeStringMap(defaultEnv, serviceEnv)
+	return nil
+}
+
+func applyRawListDefaults(raw map[string]interface{}, key string, defaults []interface{}) error {
+	_, present := raw[key]
+	if !present {
+		if defaults != nil {
+			raw[key] = deepCopyValue(defaults)
+		}
+		return nil
+	}
+
+	serviceList, err := interfaceSlice(raw[key])
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+
+	spreadIdx := -1
+	for i, item := range serviceList {
+		value, ok := item.(string)
+		if !ok || strings.TrimSpace(value) != "..." {
+			continue
+		}
+		if spreadIdx >= 0 {
+			return fmt.Errorf("%s: spread token \"...\" may appear at most once", key)
+		}
+		spreadIdx = i
+	}
+	if spreadIdx < 0 {
+		return nil
+	}
+	if len(defaults) == 0 {
+		return fmt.Errorf("%s: spread token \"...\" used but no pod-level %s-defaults declared", key, key)
+	}
+
+	expanded := make([]interface{}, 0, len(serviceList)+len(defaults)-1)
+	expanded = append(expanded, deepCopyInterfaces(serviceList[:spreadIdx])...)
+	expanded = append(expanded, deepCopyInterfaces(defaults)...)
+	expanded = append(expanded, deepCopyInterfaces(serviceList[spreadIdx+1:])...)
+	raw[key] = expanded
+	return nil
+}
+
+func deepCopyMapOrNil(raw interface{}) map[string]interface{} {
+	m, err := mapStringAny(raw)
+	if err != nil || m == nil {
+		return nil
+	}
+	return deepCopyMap(m)
+}
+
+func deepCopySliceOrNil(raw interface{}) []interface{} {
+	items, err := interfaceSlice(raw)
+	if err != nil || items == nil {
+		return nil
+	}
+	return deepCopyInterfaces(items)
+}
+
+func deepCopyInterfaces(items []interface{}) []interface{} {
+	if items == nil {
+		return nil
+	}
+	out := make([]interface{}, 0, len(items))
+	for _, item := range items {
+		out = append(out, deepCopyValue(item))
+	}
+	return out
+}
+
+func yamlKindString(kind yaml.Kind) string {
+	switch kind {
+	case yaml.DocumentNode:
+		return "document"
+	case yaml.SequenceNode:
+		return "sequence"
+	case yaml.MappingNode:
+		return "mapping"
+	case yaml.ScalarNode:
+		return "scalar"
+	case yaml.AliasNode:
+		return "alias"
+	default:
+		return fmt.Sprintf("kind(%d)", kind)
+	}
 }
 
 func deriveFeedName(source, feedPath string, index int) string {

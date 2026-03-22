@@ -36,6 +36,7 @@ type ResolvedClaw struct {
 	Handles         map[string]*HandleInfo            // platform -> contact card (from x-claw handles block)
 	PeerHandles     map[string]map[string]*HandleInfo // service name -> platform -> HandleInfo for sibling services
 	Includes        []ResolvedInclude                 // composed contract fragments from x-claw.include
+	Feeds           []ResolvedFeed
 	Surfaces        []ResolvedSurface
 	Skills          []ResolvedSkill
 	Privileges      map[string]string
@@ -105,12 +106,34 @@ type ChannelConfig struct {
 }
 
 type ResolvedSurface struct {
-	Scheme        string         // channel, service, volume, host, egress
-	Target        string         // discord, fleet-master, shared-cache, etc.
-	AccessMode    string         // read-only, read-write (for volume/host surfaces)
-	Ports         []string       // exposed ports from service definition (service surfaces only)
-	SkillName     string         // mounted skill filename for this surface when one exists
-	ChannelConfig *ChannelConfig // non-nil only for map-form channel surfaces
+	Scheme        string              // channel, service, volume, host, egress
+	Target        string              // discord, fleet-master, shared-cache, etc.
+	AccessMode    string              // read-only, read-write (for volume/host surfaces)
+	Ports         []string            // exposed ports from service definition (service surfaces only)
+	SkillName     string              // mounted skill filename for this surface when one exists
+	ServiceInfo   *ServiceSurfaceInfo // non-nil when a service surface has descriptor metadata
+	ChannelConfig *ChannelConfig      // non-nil only for map-form channel surfaces
+}
+
+type ResolvedFeed struct {
+	Name        string
+	Source      string
+	Path        string
+	TTL         int
+	Description string
+}
+
+type ServiceSurfaceInfo struct {
+	Description string
+	AuthType    string
+	AuthEnv     string
+	Endpoints   []ServiceEndpoint
+}
+
+type ServiceEndpoint struct {
+	Method      string
+	Path        string
+	Description string
 }
 
 type GeneratedSkill struct {

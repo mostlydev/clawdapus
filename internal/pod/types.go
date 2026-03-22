@@ -9,7 +9,7 @@ type Pod struct {
 	Services map[string]*Service
 	Compose  map[string]interface{} // preserved top-level compose keys except x-claw and services
 	ClawAPI  *ClawAPIConfig
-	Clawdash *ClawdashConfig        // runtime-only dashboard sidecar config, injected by claw up
+	Clawdash *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
 }
 
 // Service represents a service in a claw-pod.yml.
@@ -47,10 +47,12 @@ type ClawBlock struct {
 }
 
 type FeedEntry struct {
-	Name   string
-	Source string
-	Path   string
-	TTL    int
+	Name        string
+	Source      string
+	Path        string
+	TTL         int
+	Description string
+	Unresolved  bool
 }
 
 type IncludeEntry struct {

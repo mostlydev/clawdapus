@@ -87,14 +87,11 @@ func TestMasterClawExampleParsesCorrectly(t *testing.T) {
 		t.Fatal("governor: expected at least one feed entry")
 	}
 	feed := gov.Claw.Feeds[0]
-	if feed.Source != "claw-api" {
-		t.Errorf("governor feed source: expected %q, got %q", "claw-api", feed.Source)
+	if feed.Name != "fleet-alerts" {
+		t.Errorf("governor feed name: expected %q, got %q", "fleet-alerts", feed.Name)
 	}
-	if feed.Path != "/fleet/alerts" {
-		t.Errorf("governor feed path: expected %q, got %q", "/fleet/alerts", feed.Path)
-	}
-	if feed.TTL != 30 {
-		t.Errorf("governor feed TTL: expected 30, got %d", feed.TTL)
+	if !feed.Unresolved {
+		t.Errorf("governor feed should remain unresolved at parse time")
 	}
 
 	// Governor has invoke entries

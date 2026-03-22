@@ -55,12 +55,40 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 				b.WriteString(fmt.Sprintf("- **Mount path:** %s\n", s.Target))
 			case "service":
 				b.WriteString(fmt.Sprintf("- **Host:** %s\n", s.Target))
-				b.WriteString(fmt.Sprintf("- **Skill:** `skills/%s`\n", surfaceSkillName(s)))
+				if len(s.Ports) > 0 {
+					b.WriteString(fmt.Sprintf("- **Ports:** %s\n", strings.Join(s.Ports, ", ")))
+				}
+				if s.ServiceInfo != nil {
+					if s.ServiceInfo.AuthEnv != "" {
+						b.WriteString(fmt.Sprintf("- **Auth:** `%s` (%s)\n", s.ServiceInfo.AuthEnv, serviceAuthTypeLabel(s.ServiceInfo.AuthType)))
+					}
+					if s.ServiceInfo.Description != "" {
+						b.WriteString("\n")
+						b.WriteString(s.ServiceInfo.Description + "\n")
+					}
+					if len(s.ServiceInfo.Endpoints) > 0 {
+						b.WriteString("\nEndpoints:\n")
+						for _, endpoint := range s.ServiceInfo.Endpoints {
+							line := fmt.Sprintf("- `%s %s`", endpoint.Method, endpoint.Path)
+							if endpoint.Description != "" {
+								line += fmt.Sprintf(" — %s", endpoint.Description)
+							}
+							b.WriteString(line + "\n")
+						}
+					}
+				}
+				if s.SkillName != "" {
+					b.WriteString(fmt.Sprintf("\nFull service manual: `skills/%s`\n", s.SkillName))
+				}
 			case "channel":
 				if tokenVar := PlatformTokenVar(s.Target); tokenVar != "" {
 					b.WriteString(fmt.Sprintf("- **Token:** `%s` (env)\n", tokenVar))
 				}
-				b.WriteString(fmt.Sprintf("- **Skill:** `skills/%s`\n", surfaceSkillName(s)))
+				if s.ChannelConfig != nil {
+					for _, line := range renderChannelSurfaceDetails(s.ChannelConfig) {
+						b.WriteString(line + "\n")
+					}
+				}
 			}
 			b.WriteString("\n")
 		}
@@ -158,29 +186,29 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		}
 	}
 
+	if len(rc.Feeds) > 0 {
+		b.WriteString("## Feeds\n\n")
+		for _, feed := range rc.Feeds {
+			line := fmt.Sprintf("- `%s` from `%s` every %ds", feed.Name, feed.Source, feed.TTL)
+			if feed.Path != "" {
+				line += fmt.Sprintf(" via `%s`", feed.Path)
+			}
+			if feed.Description != "" {
+				line += fmt.Sprintf(" — %s", feed.Description)
+			}
+			b.WriteString(line + "\n")
+		}
+		b.WriteString("\n")
+	}
+
 	// Skills index
 	b.WriteString("## Skills\n\n")
 	var skillEntries []string
 
-	// Handle skills (one per declared platform)
-	if len(rc.Handles) > 0 {
-		handlePlatforms := make([]string, 0, len(rc.Handles))
-		for p := range rc.Handles {
-			handlePlatforms = append(handlePlatforms, p)
-		}
-		sort.Strings(handlePlatforms)
-		for _, p := range handlePlatforms {
-			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/handle-%s.md` — %s channel identity", p, p))
-		}
-	}
-
-	// Surface-generated skills (service and channel surfaces)
+	// Mounted service manuals
 	for _, s := range rc.Surfaces {
-		switch s.Scheme {
-		case "service":
-			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/%s` — %s service surface", surfaceSkillName(s), s.Target))
-		case "channel":
-			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/%s` — %s channel surface", surfaceSkillName(s), s.Target))
+		if s.Scheme == "service" && s.SkillName != "" {
+			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/%s` — %s service manual", s.SkillName, s.Target))
 		}
 	}
 
@@ -224,19 +252,49 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 	return b.String()
 }
 
-func surfaceSkillName(surface driver.ResolvedSurface) string {
-	if strings.TrimSpace(surface.SkillName) != "" {
-		return surface.SkillName
+func serviceAuthTypeLabel(authType string) string {
+	authType = strings.TrimSpace(authType)
+	if authType == "" {
+		return "auth"
+	}
+	return authType
+}
+
+func renderChannelSurfaceDetails(cfg *driver.ChannelConfig) []string {
+	if cfg == nil {
+		return nil
 	}
 
-	switch surface.Scheme {
-	case "service", "channel":
-		target := strings.TrimSpace(strings.ReplaceAll(surface.Target, "/", "-"))
-		if target == "" {
-			target = "unknown"
+	lines := make([]string, 0)
+	if len(cfg.Guilds) > 0 {
+		guildIDs := make([]string, 0, len(cfg.Guilds))
+		for guildID := range cfg.Guilds {
+			guildIDs = append(guildIDs, guildID)
 		}
-		return fmt.Sprintf("surface-%s.md", target)
-	default:
-		return ""
+		sort.Strings(guildIDs)
+		for _, guildID := range guildIDs {
+			guild := cfg.Guilds[guildID]
+			line := fmt.Sprintf("- **Guild:** %s", guildID)
+			if guild.Policy != "" {
+				line += fmt.Sprintf(" (%s)", guild.Policy)
+			}
+			if guild.RequireMention {
+				line += ", mention required"
+			}
+			lines = append(lines, line)
+		}
 	}
+	if cfg.DM.Enabled || cfg.DM.Policy != "" || len(cfg.DM.AllowFrom) > 0 {
+		line := "- **DMs:** "
+		if cfg.DM.Enabled {
+			line += "enabled"
+		} else {
+			line += "configured"
+		}
+		if cfg.DM.Policy != "" {
+			line += fmt.Sprintf(" (%s)", cfg.DM.Policy)
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }

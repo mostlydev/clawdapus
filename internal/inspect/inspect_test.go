@@ -65,6 +65,7 @@ func TestParseLabelsExtractsSkillEmit(t *testing.T) {
 	raw := map[string]string{
 		"claw.type":       "openclaw",
 		"claw.skill.emit": "/app/SKILL.md",
+		"claw.describe":   "/app/.claw-describe.json",
 		"claw.skill.0":    "./skills/custom-workflow.md",
 	}
 
@@ -72,6 +73,9 @@ func TestParseLabelsExtractsSkillEmit(t *testing.T) {
 
 	if info.SkillEmit != "/app/SKILL.md" {
 		t.Fatalf("expected SkillEmit=/app/SKILL.md, got %q", info.SkillEmit)
+	}
+	if info.DescribePath != "/app/.claw-describe.json" {
+		t.Fatalf("expected DescribePath=/app/.claw-describe.json, got %q", info.DescribePath)
 	}
 	// skill.emit should not appear in the Skills slice
 	if len(info.Skills) != 1 {

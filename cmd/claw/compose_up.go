@@ -18,6 +18,7 @@ import (
 	"github.com/mostlydev/clawdapus/internal/build"
 	"github.com/mostlydev/clawdapus/internal/clawapi"
 	"github.com/mostlydev/clawdapus/internal/cllama"
+	"github.com/mostlydev/clawdapus/internal/describe"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
 	"github.com/mostlydev/clawdapus/internal/inspect"
@@ -41,6 +42,9 @@ var (
 	findClawdapusRepoRoot        = findRepoRoot
 	runInfraDockerCommand        = runInfraDockerCommandDefault
 	runComposeDockerCommand      = runComposeDockerCommandDefault
+	loadDescriptorFromImage      = describe.LoadFromImage
+	loadDescriptorFromBuildCtx   = describe.LoadFromBuildContext
+	resolveBuildContextFile      = describe.ResolveBuildContextFile
 )
 
 var composeUpCmd = &cobra.Command{
@@ -107,6 +111,7 @@ func runComposeUp(podFile string) error {
 	serviceRuntimeDirs := make(map[string]string)
 	serviceImageRefs := make(map[string]string)
 	serviceInfos := make(map[string]*inspect.ClawInfo)
+	serviceDescriptors := make(map[string]*describe.ServiceDescriptor)
 
 	// Pre-collect all pod handles so each service can reference its peers.
 	// This is a cheap pass over the already-parsed pod YAML — no image inspection needed.
@@ -131,6 +136,8 @@ func runComposeUp(podFile string) error {
 		if err != nil {
 			return fmt.Errorf("inspect image %q for service %q: %w", imageRef, name, err)
 		}
+		serviceImageRefs[name] = imageRef
+		serviceInfos[name] = info
 
 		if info.ClawType == "" {
 			return fmt.Errorf("service %q: image %q has no claw.type label", name, imageRef)
@@ -205,27 +212,12 @@ func runComposeUp(podFile string) error {
 				imageSkills = append(imageSkills, *emitSkill)
 			}
 		}
-		surfaces, generatedSkills, err := resolveServiceSurfaceSkills(podDir, svcRuntimeDir, p, surfaces, serviceImageRefs, serviceInfos)
+		surfaces, generatedSkills, err := resolveServiceSurfaceSkills(podDir, svcRuntimeDir, p, surfaces, serviceImageRefs, serviceInfos, serviceDescriptors)
 		if err != nil {
 			return fmt.Errorf("service %q: resolve service surface skills: %w", name, err)
 		}
-		// Add channel surface skills (surface-discord.md etc.)
-		channelSkills, err := resolveChannelGeneratedSkills(svcRuntimeDir, surfaces)
-		if err != nil {
-			return fmt.Errorf("service %q: resolve generated channel skills: %w", name, err)
-		}
-		if len(channelSkills) > 0 {
-			generatedSkills = mergeResolvedSkills(generatedSkills, channelSkills)
-		}
 		if len(includeSkills) > 0 {
 			generatedSkills = mergeResolvedSkills(generatedSkills, includeSkills)
-		}
-		handleSkills, err := resolveHandleSkills(svcRuntimeDir, svc.Claw.Handles)
-		if err != nil {
-			return fmt.Errorf("service %q: resolve handle skills: %w", name, err)
-		}
-		if len(handleSkills) > 0 {
-			generatedSkills = mergeResolvedSkills(generatedSkills, handleSkills)
 		}
 		podSkills := make([]driver.ResolvedSkill, 0)
 		if svc.Claw != nil {
@@ -238,10 +230,6 @@ func runComposeUp(podFile string) error {
 		if len(generatedSkills) > 0 {
 			// Pod and image skills override generated defaults.
 			skills = mergeResolvedSkills(generatedSkills, skills)
-		}
-		agentHostPath, err = materializeServiceSurfaceGuides(svcRuntimeDir, agentHostPath, surfaces, skills)
-		if err != nil {
-			return fmt.Errorf("service %q: materialize service surface guides: %w", name, err)
 		}
 
 		// Build peer handles: all other claw services' handles, keyed by service name.
@@ -263,6 +251,7 @@ func runComposeUp(podFile string) error {
 			Handles:       svc.Claw.Handles,
 			PeerHandles:   peerHandles,
 			Includes:      resolvedIncludes,
+			Feeds:         cloneResolvedFeeds(svc.Claw.Feeds),
 			Configures:    info.Configures,
 			Privileges:    info.Privileges,
 			Count:         svc.Claw.Count,
@@ -315,8 +304,30 @@ func runComposeUp(podFile string) error {
 		fmt.Printf("[claw] %s: validated (%s driver)\n", name, rc.ClawType)
 	}
 
+	if err := collectServiceDescriptors(podDir, p, serviceImageRefs, serviceInfos, serviceDescriptors); err != nil {
+		return err
+	}
+	feedRegistry, err := describe.BuildFeedRegistry(serviceDescriptors)
+	if err != nil {
+		return fmt.Errorf("build feed registry: %w", err)
+	}
+	if err := resolveFeedSubscriptions(p, feedRegistry); err != nil {
+		return err
+	}
+	for name, rc := range resolvedClaws {
+		svc := p.Services[name]
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		rc.Feeds = cloneResolvedFeeds(svc.Claw.Feeds)
+	}
+
 	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
 	clawAPIAuth, err := prepareClawAPIRuntime(runtimeDir, p, resolvedClaws)
+	if err != nil {
+		return err
+	}
+	runtimeEnv, err := loadRuntimeEnv(podDir)
 	if err != nil {
 		return err
 	}
@@ -423,7 +434,7 @@ func runComposeUp(podFile string) error {
 					ordinalRC := *rc
 					ordinalRC.ServiceName = ordinalName
 					ordinalAuth := lookupServiceAuth(clawAPIAuth, ordinalName)
-					feeds, err := buildFeedManifestEntries(p, name, ordinalAuth)
+					feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, ordinalAuth)
 					if err != nil {
 						return fmt.Errorf("service %q: build feed manifest: %w", ordinalName, err)
 					}
@@ -447,7 +458,7 @@ func runComposeUp(podFile string) error {
 			}
 
 			svcAuth := lookupServiceAuth(clawAPIAuth, name)
-			feeds, err := buildFeedManifestEntries(p, name, svcAuth)
+			feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, svcAuth)
 			if err != nil {
 				return fmt.Errorf("service %q: build feed manifest: %w", name, err)
 			}
@@ -706,6 +717,7 @@ func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
 			svc.Claw.Feeds[i].Name = expand(svc.Claw.Feeds[i].Name)
 			svc.Claw.Feeds[i].Source = expand(svc.Claw.Feeds[i].Source)
 			svc.Claw.Feeds[i].Path = expand(svc.Claw.Feeds[i].Path)
+			svc.Claw.Feeds[i].Description = expand(svc.Claw.Feeds[i].Description)
 		}
 		for _, handle := range svc.Claw.Handles {
 			if handle == nil {
@@ -802,7 +814,7 @@ func discordHandleIDsFromPod(p *pod.Pod) []string {
 	return uniqueSortedStrings(ids)
 }
 
-func buildFeedManifestEntries(p *pod.Pod, serviceName string, serviceAuth []cllama.ServiceAuthEntry) ([]cllama.FeedManifestEntry, error) {
+func buildFeedManifestEntries(p *pod.Pod, descriptors map[string]*describe.ServiceDescriptor, runtimeEnv map[string]string, serviceName string, serviceAuth []cllama.ServiceAuthEntry) ([]cllama.FeedManifestEntry, error) {
 	svc := p.Services[serviceName]
 	if svc == nil || svc.Claw == nil || len(svc.Claw.Feeds) == 0 {
 		return nil, nil
@@ -818,6 +830,9 @@ func buildFeedManifestEntries(p *pod.Pod, serviceName string, serviceAuth []clla
 
 	entries := make([]cllama.FeedManifestEntry, 0, len(svc.Claw.Feeds))
 	for _, feed := range svc.Claw.Feeds {
+		if feed.Unresolved {
+			return nil, fmt.Errorf("feed %q is still unresolved", feed.Name)
+		}
 		feedPath := strings.ReplaceAll(feed.Path, "{claw_id}", serviceName)
 		feedName := strings.ReplaceAll(feed.Name, "{claw_id}", serviceName)
 		url, err := resolveFeedURL(p, feed.Source, feedPath)
@@ -833,10 +848,35 @@ func buildFeedManifestEntries(p *pod.Pod, serviceName string, serviceAuth []clla
 		}
 		if token, ok := authByService[feed.Source]; ok {
 			entry.Auth = token
+		} else if descriptor := descriptors[feed.Source]; descriptor != nil {
+			token, err := resolveFeedAuthFromServiceEnv(svc.Environment, descriptor, runtimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("feed %q: %w", feedName, err)
+			}
+			entry.Auth = token
 		}
 		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+func resolveFeedAuthFromServiceEnv(env map[string]string, descriptor *describe.ServiceDescriptor, runtimeEnv map[string]string) (string, error) {
+	if descriptor == nil || descriptor.Auth == nil || descriptor.Auth.Type != "bearer" || descriptor.Auth.Env == "" {
+		return "", nil
+	}
+	raw := strings.TrimSpace(env[descriptor.Auth.Env])
+	if raw == "" {
+		return "", fmt.Errorf("feed auth: service env has no value for %q (required by descriptor auth.env for bearer auth)", descriptor.Auth.Env)
+	}
+	if !strings.Contains(raw, "${") {
+		return raw, nil
+	}
+
+	expanded, err := expandRuntimeValue(raw, runtimeEnv)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s from service environment: %w", descriptor.Auth.Env, err)
+	}
+	return expanded, nil
 }
 
 func resolveFeedURL(p *pod.Pod, source string, feedPath string) (string, error) {
@@ -1508,102 +1548,6 @@ func materializeContractIncludes(baseDir, runtimeDir, agentHostPath string, incl
 	return resolved, skills, nil
 }
 
-func materializeServiceSurfaceGuides(runtimeDir, agentHostPath string, surfaces []driver.ResolvedSurface, skills []driver.ResolvedSkill) (string, error) {
-	if agentHostPath == "" || len(surfaces) == 0 || len(skills) == 0 {
-		return agentHostPath, nil
-	}
-
-	skillPaths := make(map[string]string, len(skills))
-	for _, skill := range skills {
-		if strings.TrimSpace(skill.Name) == "" || strings.TrimSpace(skill.HostPath) == "" {
-			continue
-		}
-		skillPaths[skill.Name] = skill.HostPath
-	}
-
-	type serviceGuide struct {
-		target    string
-		skillName string
-		hostPath  string
-	}
-
-	guides := make([]serviceGuide, 0)
-	seen := make(map[string]struct{})
-	for _, surface := range surfaces {
-		if surface.Scheme != "service" {
-			continue
-		}
-
-		skillName := strings.TrimSpace(surface.SkillName)
-		if skillName == "" || skillName == surfaceFallbackSkillName(surface.Target) {
-			continue
-		}
-		if _, exists := seen[skillName]; exists {
-			continue
-		}
-
-		hostPath, ok := skillPaths[skillName]
-		if !ok {
-			return "", fmt.Errorf("service surface %q references skill %q but no resolved skill was found", surface.Target, skillName)
-		}
-
-		guides = append(guides, serviceGuide{
-			target:    surface.Target,
-			skillName: skillName,
-			hostPath:  hostPath,
-		})
-		seen[skillName] = struct{}{}
-	}
-
-	if len(guides) == 0 {
-		return agentHostPath, nil
-	}
-
-	baseContract, err := os.ReadFile(agentHostPath)
-	if err != nil {
-		return "", fmt.Errorf("read agent contract: %w", err)
-	}
-
-	var compiled strings.Builder
-	compiled.WriteString(strings.TrimRight(string(baseContract), "\n"))
-
-	for _, guide := range guides {
-		content, err := os.ReadFile(guide.hostPath)
-		if err != nil {
-			return "", fmt.Errorf("read service guide %q: %w", guide.skillName, err)
-		}
-
-		compiled.WriteString("\n\n")
-		compiled.WriteString(fmt.Sprintf("--- BEGIN: service_manual %s (guide) ---\n\n", guide.target))
-		compiled.WriteString(fmt.Sprintf("This service manual was injected automatically because you declared `service://%s`.\n", guide.target))
-		compiled.WriteString("Treat it as the authoritative workflow for acting through that service.\n\n")
-		compiled.WriteString(strings.TrimRight(stripSkillFrontmatter(string(content)), "\n"))
-		compiled.WriteString("\n\n")
-		compiled.WriteString(fmt.Sprintf("--- END: service_manual %s (guide) ---", guide.target))
-	}
-
-	generatedPath := filepath.Join(runtimeDir, "AGENTS.generated.md")
-	if err := writeRuntimeFile(generatedPath, []byte(compiled.String()+"\n"), 0644); err != nil {
-		return "", fmt.Errorf("write generated AGENTS.md: %w", err)
-	}
-
-	return generatedPath, nil
-}
-
-func stripSkillFrontmatter(content string) string {
-	if !strings.HasPrefix(content, "---\n") {
-		return content
-	}
-
-	rest := strings.TrimPrefix(content, "---\n")
-	end := strings.Index(rest, "\n---\n")
-	if end < 0 {
-		return content
-	}
-
-	return strings.TrimLeft(rest[end+5:], "\n")
-}
-
 func resolveRuntimeScopedFile(baseDir, relPath string) (string, error) {
 	absBase, err := filepath.Abs(baseDir)
 	if err != nil {
@@ -1792,8 +1736,29 @@ func resolveSkillEmit(serviceName, runtimeDir, imageRef, emitPath string) (*driv
 	}, nil
 }
 
-func resolveServiceSurfaceSkills(podDir, runtimeDir string, p *pod.Pod, surfaces []driver.ResolvedSurface, imageRefs map[string]string, infos map[string]*inspect.ClawInfo) ([]driver.ResolvedSurface, []driver.ResolvedSkill, error) {
-	surfaceSkillsDir := filepath.Join(runtimeDir, "skills")
+func materializeImageSkill(serviceName, runtimeDir, imageRef, skillPath string) (*driver.ResolvedSkill, error) {
+	name := filepath.Base(skillPath)
+	if name == "." || name == "/" || strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("service %q: emitted skill path %q has invalid filename", serviceName, skillPath)
+	}
+
+	content, err := extractServiceSkillFromImage(imageRef, skillPath)
+	if err != nil {
+		return nil, fmt.Errorf("extract skill %q from %q: %w", skillPath, imageRef, err)
+	}
+
+	hostPath := filepath.Join(runtimeDir, "skills", name)
+	if err := os.MkdirAll(filepath.Dir(hostPath), 0700); err != nil {
+		return nil, fmt.Errorf("service %q: create skill dir: %w", serviceName, err)
+	}
+	if err := writeRuntimeFile(hostPath, content, 0644); err != nil {
+		return nil, fmt.Errorf("write emitted skill %q: %w", skillPath, err)
+	}
+
+	return &driver.ResolvedSkill{Name: name, HostPath: hostPath}, nil
+}
+
+func resolveServiceSurfaceSkills(podDir, runtimeDir string, p *pod.Pod, surfaces []driver.ResolvedSurface, imageRefs map[string]string, infos map[string]*inspect.ClawInfo, descriptors map[string]*describe.ServiceDescriptor) ([]driver.ResolvedSurface, []driver.ResolvedSkill, error) {
 	resolvedSurfaces := append([]driver.ResolvedSurface(nil), surfaces...)
 	generated := make([]driver.ResolvedSkill, 0)
 	seen := make(map[string]struct{}, len(surfaces))
@@ -1803,39 +1768,51 @@ func resolveServiceSurfaceSkills(podDir, runtimeDir string, p *pod.Pod, surfaces
 			continue
 		}
 
-		name := surfaceFallbackSkillName(surface.Target)
-		if name == "surface-.md" {
-			return nil, nil, fmt.Errorf("invalid service target for generated skill: %q", surface.Target)
+		if surface.Target == "" {
+			return nil, nil, fmt.Errorf("invalid service target for generated surface: %q", surface.Target)
 		}
 
 		if surface.Target == "claw-api" && p.ClawAPI != nil {
+			resolvedSurfaces[i].ServiceInfo = buildServiceSurfaceInfo(builtinClawAPIDescriptor())
+			name := surfaceFallbackSkillName(surface.Target)
 			resolvedSurfaces[i].SkillName = name
-			if _, exists := seen[name]; exists {
-				continue
+			if _, exists := seen[name]; !exists {
+				seen[name] = struct{}{}
+				skillPath := filepath.Join(runtimeDir, "skills", name)
+				if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
+					return nil, nil, fmt.Errorf("create generated skill dir: %w", err)
+				}
+				content := clawapi.GenerateServiceSkill(clawAPIInternalPort(p.ClawAPI.Addr))
+				if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
+					return nil, nil, fmt.Errorf("write generated claw-api skill %q: %w", name, err)
+				}
+				generated = append(generated, driver.ResolvedSkill{Name: name, HostPath: skillPath})
 			}
-			seen[name] = struct{}{}
-
-			skillPath := filepath.Join(surfaceSkillsDir, name)
-			if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
-				return nil, nil, fmt.Errorf("create generated skill dir: %w", err)
-			}
-			content := clawapi.GenerateServiceSkill(clawAPIInternalPort(p.ClawAPI.Addr))
-			if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
-				return nil, nil, fmt.Errorf("write generated claw-api skill %q: %w", name, err)
-			}
-			generated = append(generated, driver.ResolvedSkill{
-				Name:     name,
-				HostPath: skillPath,
-			})
 			continue
 		}
 
 		if targetSvc, ok := p.Services[surface.Target]; ok {
-			imageRef, info, err := resolveServiceInspection(podDir, p, surface.Target, targetSvc, imageRefs, infos)
+			imageRef, info, descriptor, err := resolveServiceMetadata(podDir, p, surface.Target, targetSvc, imageRefs, infos, descriptors)
 			if err != nil {
 				return nil, nil, fmt.Errorf("inspect target service %q: %w", surface.Target, err)
 			}
-			if info != nil && strings.TrimSpace(info.SkillEmit) != "" {
+			resolvedSurfaces[i].ServiceInfo = buildServiceSurfaceInfo(descriptor)
+
+			if descriptor != nil && strings.TrimSpace(descriptor.Skill) != "" {
+				descriptorSkill, err := resolveDescriptorSkill(surface.Target, podDir, runtimeDir, imageRef, targetSvc, descriptor)
+				if err != nil {
+					return nil, nil, fmt.Errorf("resolve descriptor skill for target service %q: %w", surface.Target, err)
+				}
+				if descriptorSkill != nil {
+					resolvedSurfaces[i].SkillName = descriptorSkill.Name
+					if _, exists := seen[descriptorSkill.Name]; !exists {
+						seen[descriptorSkill.Name] = struct{}{}
+						generated = append(generated, *descriptorSkill)
+					}
+					continue
+				}
+			}
+			if info != nil && strings.TrimSpace(info.SkillEmit) != "" && imageRef != "" {
 				emitSkill, err := resolveSkillEmit(surface.Target, runtimeDir, imageRef, info.SkillEmit)
 				if err != nil {
 					return nil, nil, fmt.Errorf("extract emitted skill for target service %q: %w", surface.Target, err)
@@ -1846,29 +1823,9 @@ func resolveServiceSurfaceSkills(podDir, runtimeDir string, p *pod.Pod, surfaces
 						seen[emitSkill.Name] = struct{}{}
 						generated = append(generated, *emitSkill)
 					}
-					continue
 				}
 			}
 		}
-
-		resolvedSurfaces[i].SkillName = name
-		if _, exists := seen[name]; exists {
-			continue
-		}
-		seen[name] = struct{}{}
-
-		skillPath := filepath.Join(surfaceSkillsDir, name)
-		if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
-			return nil, nil, fmt.Errorf("create generated skill dir: %w", err)
-		}
-		content := runtime.GenerateServiceSkillFallback(surface.Target, surface.Ports)
-		if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
-			return nil, nil, fmt.Errorf("write generated service skill %q: %w", name, err)
-		}
-		generated = append(generated, driver.ResolvedSkill{
-			Name:     name,
-			HostPath: skillPath,
-		})
 	}
 
 	return resolvedSurfaces, generated, nil
@@ -1878,55 +1835,210 @@ func surfaceFallbackSkillName(target string) string {
 	return fmt.Sprintf("surface-%s.md", strings.TrimSpace(strings.ReplaceAll(target, "/", "-")))
 }
 
-func resolveServiceInspection(podDir string, p *pod.Pod, serviceName string, svc *pod.Service, imageRefs map[string]string, infos map[string]*inspect.ClawInfo) (string, *inspect.ClawInfo, error) {
+func resolveServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *pod.Service, imageRefs map[string]string, infos map[string]*inspect.ClawInfo, descriptors map[string]*describe.ServiceDescriptor) (string, *inspect.ClawInfo, *describe.ServiceDescriptor, error) {
+	if descriptor, ok := descriptors[serviceName]; ok {
+		return imageRefs[serviceName], infos[serviceName], descriptor, nil
+	}
+
+	if serviceName == "claw-api" && p != nil && p.ClawAPI != nil {
+		descriptor := builtinClawAPIDescriptor()
+		descriptors[serviceName] = descriptor
+		return "", nil, descriptor, nil
+	}
+
+	imageRef, info, err := inspectServiceMetadata(podDir, p, serviceName, svc, imageRefs, infos)
+	if err != nil {
+		return "", nil, nil, err
+	}
+
+	var descriptor *describe.ServiceDescriptor
+	if info != nil && strings.TrimSpace(info.DescribePath) != "" && imageRef != "" {
+		if imageExistsLocally(imageRef) {
+			descriptor, err = loadDescriptorFromImage(imageRef, info.DescribePath)
+			if err != nil {
+				return "", nil, nil, fmt.Errorf("load descriptor from image: %w", err)
+			}
+		}
+	}
+	if descriptor == nil && svc != nil {
+		descriptorPath := ""
+		if info != nil {
+			descriptorPath = info.DescribePath
+		}
+		descriptor, _, err = loadDescriptorFromBuildCtx(podDir, svc.Compose["build"], descriptorPath)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("load descriptor from build context: %w", err)
+		}
+	}
+
+	descriptors[serviceName] = descriptor
+	return imageRef, info, descriptor, nil
+}
+
+func inspectServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *pod.Service, imageRefs map[string]string, infos map[string]*inspect.ClawInfo) (string, *inspect.ClawInfo, error) {
 	if imageRef, ok := imageRefs[serviceName]; ok {
 		return imageRef, infos[serviceName], nil
 	}
 
-	imageRef, err := resolveManagedServiceImage(podDir, p, serviceName, svc)
-	if err != nil {
-		return "", nil, err
+	if svc == nil {
+		return "", nil, nil
 	}
-	info, err := inspectClawImage(imageRef)
-	if err != nil {
-		return "", nil, err
+
+	imageRef := strings.TrimSpace(svc.Image)
+	if svc.Claw != nil {
+		var err error
+		imageRef, err = resolveManagedServiceImage(podDir, p, serviceName, svc)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+
+	var info *inspect.ClawInfo
+	if imageRef != "" && imageExistsLocally(imageRef) {
+		var err error
+		info, err = inspectClawImage(imageRef)
+		if err != nil {
+			return "", nil, err
+		}
 	}
 	imageRefs[serviceName] = imageRef
 	infos[serviceName] = info
 	return imageRef, info, nil
 }
 
-// resolveChannelGeneratedSkills generates surface-<platform>.md skill files for
-// each channel surface and returns them as ResolvedSkills.
-func resolveChannelGeneratedSkills(runtimeDir string, surfaces []driver.ResolvedSurface) ([]driver.ResolvedSkill, error) {
-	surfaceSkillsDir := filepath.Join(runtimeDir, "skills")
-	generated := make([]driver.ResolvedSkill, 0)
-	seen := make(map[string]struct{})
+func collectServiceDescriptors(podDir string, p *pod.Pod, imageRefs map[string]string, infos map[string]*inspect.ClawInfo, descriptors map[string]*describe.ServiceDescriptor) error {
+	if p == nil {
+		return nil
+	}
+	if p.ClawAPI != nil {
+		descriptors["claw-api"] = builtinClawAPIDescriptor()
+	}
 
-	for _, surface := range surfaces {
-		if surface.Scheme != "channel" {
+	serviceNames := make([]string, 0, len(p.Services))
+	for name := range p.Services {
+		serviceNames = append(serviceNames, name)
+	}
+	sort.Strings(serviceNames)
+
+	for _, name := range serviceNames {
+		svc := p.Services[name]
+		if _, _, _, err := resolveServiceMetadata(podDir, p, name, svc, imageRefs, infos, descriptors); err != nil {
+			return fmt.Errorf("service %q: resolve descriptor: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func resolveFeedSubscriptions(p *pod.Pod, registry map[string]describe.FeedSpec) error {
+	for serviceName, svc := range p.Services {
+		if svc == nil || svc.Claw == nil {
 			continue
 		}
-		name := fmt.Sprintf("surface-%s.md", strings.TrimSpace(surface.Target))
-		if _, exists := seen[name]; exists {
-			continue
+		for i := range svc.Claw.Feeds {
+			feed := &svc.Claw.Feeds[i]
+			if !feed.Unresolved {
+				continue
+			}
+			spec, ok := registry[feed.Name]
+			if !ok {
+				return fmt.Errorf("service %q: feed %q was not found in the descriptor registry", serviceName, feed.Name)
+			}
+			feed.Source = spec.Source
+			feed.Path = spec.Path
+			feed.TTL = spec.TTL
+			feed.Description = spec.Description
+			feed.Unresolved = false
 		}
-		seen[name] = struct{}{}
+	}
+	return nil
+}
 
-		skillPath := filepath.Join(surfaceSkillsDir, name)
-		if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
-			return nil, fmt.Errorf("create channel skill dir: %w", err)
-		}
-		content := shared.GenerateChannelSkill(surface)
-		if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
-			return nil, fmt.Errorf("write channel skill %q: %w", name, err)
-		}
-		generated = append(generated, driver.ResolvedSkill{
-			Name:     name,
-			HostPath: skillPath,
+func cloneResolvedFeeds(feeds []pod.FeedEntry) []driver.ResolvedFeed {
+	if len(feeds) == 0 {
+		return nil
+	}
+	out := make([]driver.ResolvedFeed, 0, len(feeds))
+	for _, feed := range feeds {
+		out = append(out, driver.ResolvedFeed{
+			Name:        feed.Name,
+			Source:      feed.Source,
+			Path:        feed.Path,
+			TTL:         feed.TTL,
+			Description: feed.Description,
 		})
 	}
-	return generated, nil
+	return out
+}
+
+func resolveDescriptorSkill(serviceName, podDir, runtimeDir, imageRef string, svc *pod.Service, descriptor *describe.ServiceDescriptor) (*driver.ResolvedSkill, error) {
+	if descriptor == nil || strings.TrimSpace(descriptor.Skill) == "" {
+		return nil, nil
+	}
+	if imageRef != "" && imageExistsLocally(imageRef) {
+		return materializeImageSkill(serviceName, runtimeDir, imageRef, descriptor.Skill)
+	}
+	if svc == nil {
+		return nil, fmt.Errorf("descriptor skill %q requires either a local image or build context", descriptor.Skill)
+	}
+
+	hostPath, err := resolveBuildContextFile(podDir, svc.Compose["build"], descriptor.Skill)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(hostPath) == "" {
+		return nil, fmt.Errorf("descriptor skill %q was not found in the build context", descriptor.Skill)
+	}
+	return &driver.ResolvedSkill{
+		Name:     filepath.Base(hostPath),
+		HostPath: hostPath,
+	}, nil
+}
+
+func buildServiceSurfaceInfo(descriptor *describe.ServiceDescriptor) *driver.ServiceSurfaceInfo {
+	if descriptor == nil {
+		return nil
+	}
+	info := &driver.ServiceSurfaceInfo{
+		Description: descriptor.Description,
+	}
+	if descriptor.Auth != nil {
+		info.AuthType = descriptor.Auth.Type
+		info.AuthEnv = descriptor.Auth.Env
+	}
+	if len(descriptor.Endpoints) > 0 {
+		info.Endpoints = make([]driver.ServiceEndpoint, 0, len(descriptor.Endpoints))
+		for _, endpoint := range descriptor.Endpoints {
+			info.Endpoints = append(info.Endpoints, driver.ServiceEndpoint{
+				Method:      endpoint.Method,
+				Path:        endpoint.Path,
+				Description: endpoint.Description,
+			})
+		}
+	}
+	return info
+}
+
+func builtinClawAPIDescriptor() *describe.ServiceDescriptor {
+	return &describe.ServiceDescriptor{
+		Version:     1,
+		Description: "Read-only governance API for fleet telemetry, health, logs, metrics, and alerts.",
+		Feeds: []describe.FeedDescriptor{{
+			Name:        "fleet-alerts",
+			Path:        "/fleet/alerts",
+			TTL:         30,
+			Description: "Threshold-based fleet alert summaries for the pod.",
+		}},
+		Endpoints: []describe.EndpointDescriptor{
+			{Method: "GET", Path: "/fleet/status", Description: "Scoped service health and uptime."},
+			{Method: "GET", Path: "/fleet/logs", Description: "Recent logs for one in-scope service."},
+			{Method: "GET", Path: "/fleet/metrics", Description: "Normalized telemetry for one claw."},
+			{Method: "GET", Path: "/fleet/alerts", Description: "Threshold-based anomaly summaries across the fleet."},
+		},
+		Auth: &describe.AuthDescriptor{
+			Type: "bearer",
+			Env:  "CLAW_API_TOKEN",
+		},
+	}
 }
 
 // mergedPorts combines expose and ports slices, deduplicating by value.
@@ -1946,33 +2058,6 @@ func mergedPorts(expose, ports []string) []string {
 		}
 	}
 	return out
-}
-
-func resolveHandleSkills(runtimeDir string, handles map[string]*driver.HandleInfo) ([]driver.ResolvedSkill, error) {
-	if len(handles) == 0 {
-		return nil, nil
-	}
-	skillsDir := filepath.Join(runtimeDir, "skills")
-	if err := os.MkdirAll(skillsDir, 0700); err != nil {
-		return nil, fmt.Errorf("create handle skill dir: %w", err)
-	}
-	generated := make([]driver.ResolvedSkill, 0, len(handles))
-	for platform, info := range handles {
-		if info == nil {
-			continue
-		}
-		name := fmt.Sprintf("handle-%s.md", platform)
-		skillPath := filepath.Join(skillsDir, name)
-		content := shared.GenerateHandleSkill(platform, info)
-		if err := writeRuntimeFile(skillPath, []byte(content), 0644); err != nil {
-			return nil, fmt.Errorf("write handle skill %q: %w", name, err)
-		}
-		generated = append(generated, driver.ResolvedSkill{
-			Name:     name,
-			HostPath: skillPath,
-		})
-	}
-	return generated, nil
 }
 
 func resolveContainerIDs(composePath, serviceName string) ([]string, error) {

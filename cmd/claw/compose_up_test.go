@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mostlydev/clawdapus/internal/describe"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/openclaw"
 	"github.com/mostlydev/clawdapus/internal/inspect"
@@ -537,118 +538,6 @@ func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
 	}
 }
 
-func TestMaterializeServiceSurfaceGuidesAppendsCustomServiceManuals(t *testing.T) {
-	tmpDir := t.TempDir()
-	runtimeDir := filepath.Join(tmpDir, "runtime")
-	if err := os.MkdirAll(filepath.Join(runtimeDir, "skills"), 0o755); err != nil {
-		t.Fatalf("create skills dir: %v", err)
-	}
-
-	agentPath := filepath.Join(tmpDir, "AGENTS.md")
-	if err := os.WriteFile(agentPath, []byte("# Base Contract\n"), 0o644); err != nil {
-		t.Fatalf("write agent contract: %v", err)
-	}
-
-	serviceSkillPath := filepath.Join(runtimeDir, "skills", "trade.md")
-	serviceSkill := `# trading-api
-
-POST /trades/propose
-{
-  "agent": "westin"
-}
-`
-	if err := os.WriteFile(serviceSkillPath, []byte(serviceSkill), 0o644); err != nil {
-		t.Fatalf("write service skill: %v", err)
-	}
-
-	generatedPath, err := materializeServiceSurfaceGuides(
-		runtimeDir,
-		agentPath,
-		[]driver.ResolvedSurface{
-			{Scheme: "service", Target: "trading-api", SkillName: "trade.md"},
-			{Scheme: "volume", Target: "clawd-shared", AccessMode: "read-write"},
-		},
-		[]driver.ResolvedSkill{
-			{Name: "trade.md", HostPath: serviceSkillPath},
-		},
-	)
-	if err != nil {
-		t.Fatalf("materializeServiceSurfaceGuides: %v", err)
-	}
-
-	if generatedPath != filepath.Join(runtimeDir, "AGENTS.generated.md") {
-		t.Fatalf("unexpected generated path: %q", generatedPath)
-	}
-
-	data, err := os.ReadFile(generatedPath)
-	if err != nil {
-		t.Fatalf("read generated contract: %v", err)
-	}
-	text := string(data)
-	if !strings.Contains(text, "# Base Contract") {
-		t.Fatalf("expected base contract in generated output")
-	}
-	if !strings.Contains(text, "--- BEGIN: service_manual trading-api (guide) ---") {
-		t.Fatalf("expected service manual marker in generated contract:\n%s", text)
-	}
-	if !strings.Contains(text, "This service manual was injected automatically because you declared `service://trading-api`.") {
-		t.Fatalf("expected service manual explanation in generated contract:\n%s", text)
-	}
-	if !strings.Contains(text, "POST /trades/propose") {
-		t.Fatalf("expected service manual body in generated contract:\n%s", text)
-	}
-}
-
-func TestMaterializeServiceSurfaceGuidesSkipsFallbackSurfaceSkills(t *testing.T) {
-	tmpDir := t.TempDir()
-	runtimeDir := filepath.Join(tmpDir, "runtime")
-
-	agentPath := filepath.Join(tmpDir, "AGENTS.md")
-	if err := os.WriteFile(agentPath, []byte("# Base Contract\n"), 0o644); err != nil {
-		t.Fatalf("write agent contract: %v", err)
-	}
-
-	gotPath, err := materializeServiceSurfaceGuides(
-		runtimeDir,
-		agentPath,
-		[]driver.ResolvedSurface{
-			{Scheme: "service", Target: "trading-api", SkillName: "surface-trading-api.md"},
-		},
-		[]driver.ResolvedSkill{
-			{Name: "surface-trading-api.md", HostPath: filepath.Join(runtimeDir, "skills", "surface-trading-api.md")},
-		},
-	)
-	if err != nil {
-		t.Fatalf("materializeServiceSurfaceGuides: %v", err)
-	}
-	if gotPath != agentPath {
-		t.Fatalf("expected original agent path, got %q", gotPath)
-	}
-	if _, err := os.Stat(filepath.Join(runtimeDir, "AGENTS.generated.md")); !os.IsNotExist(err) {
-		t.Fatalf("expected no generated contract for fallback skills, got err=%v", err)
-	}
-}
-
-func TestStripSkillFrontmatter(t *testing.T) {
-	content := strings.Join([]string{
-		"---",
-		`name: "surface-trading-api"`,
-		`description: "Trade workflow"`,
-		"---",
-		"",
-		"# trading-api",
-		"POST /trades/propose",
-	}, "\n")
-
-	got := stripSkillFrontmatter(content)
-	if strings.Contains(got, `name: "surface-trading-api"`) {
-		t.Fatalf("expected frontmatter to be stripped, got %q", got)
-	}
-	if !strings.Contains(got, "# trading-api") {
-		t.Fatalf("expected body to be preserved, got %q", got)
-	}
-}
-
 func TestRuntimeConsumerServicesIncludesManagedServicesAndInfra(t *testing.T) {
 	services := runtimeConsumerServices(
 		map[string]*driver.ResolvedClaw{
@@ -1111,7 +1000,7 @@ func TestEnsureImageFallsBackToRemoteBuildWithoutRepoRoot(t *testing.T) {
 	}
 }
 
-func TestResolveServiceSurfaceSkillsFallsBackWhenNoEmitExists(t *testing.T) {
+func TestResolveServiceSurfaceSkillsLeavesUndescribedServicesInlineOnly(t *testing.T) {
 	prevExists := imageExistsLocally
 	prevInspect := inspectClawImage
 	defer func() {
@@ -1148,25 +1037,21 @@ func TestResolveServiceSurfaceSkillsFallsBackWhenNoEmitExists(t *testing.T) {
 		},
 	}
 
-	updatedSurfaces, skills, err := resolveServiceSurfaceSkills(t.TempDir(), tmpDir, p, surfaces, map[string]string{}, map[string]*inspect.ClawInfo{})
+	updatedSurfaces, skills, err := resolveServiceSurfaceSkills(t.TempDir(), tmpDir, p, surfaces, map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(skills) != 2 {
-		t.Fatalf("expected 2 generated skills, got %d", len(skills))
+	if len(skills) != 0 {
+		t.Fatalf("expected no generated fallback skills, got %d", len(skills))
 	}
-	if updatedSurfaces[0].SkillName != "surface-api-server.md" {
-		t.Fatalf("expected api-server fallback skill name, got %q", updatedSurfaces[0].SkillName)
+	if updatedSurfaces[0].SkillName != "" {
+		t.Fatalf("expected api-server to rely on inline metadata only, got %q", updatedSurfaces[0].SkillName)
 	}
-	if updatedSurfaces[1].SkillName != "surface-db.md" {
-		t.Fatalf("expected db fallback skill name, got %q", updatedSurfaces[1].SkillName)
+	if updatedSurfaces[1].SkillName != "" {
+		t.Fatalf("expected db to rely on inline metadata only, got %q", updatedSurfaces[1].SkillName)
 	}
-
-	if skills[0].Name != "surface-api-server.md" && skills[1].Name != "surface-api-server.md" {
-		t.Fatalf("expected generated skill for api-server, got %v", []string{skills[0].Name, skills[1].Name})
-	}
-	if skills[0].Name != "surface-db.md" && skills[1].Name != "surface-db.md" {
-		t.Fatalf("expected generated skill for db, got %v", []string{skills[0].Name, skills[1].Name})
+	if updatedSurfaces[0].ServiceInfo != nil || updatedSurfaces[1].ServiceInfo != nil {
+		t.Fatalf("expected no service metadata without descriptors, got %+v %+v", updatedSurfaces[0].ServiceInfo, updatedSurfaces[1].ServiceInfo)
 	}
 }
 
@@ -1202,7 +1087,7 @@ func TestResolveServiceSurfaceSkillsPrefersTargetEmit(t *testing.T) {
 		},
 	}
 
-	updatedSurfaces, skills, err := resolveServiceSurfaceSkills(t.TempDir(), runtimeDir, p, surfaces, map[string]string{}, map[string]*inspect.ClawInfo{})
+	updatedSurfaces, skills, err := resolveServiceSurfaceSkills(t.TempDir(), runtimeDir, p, surfaces, map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1221,6 +1106,72 @@ func TestResolveServiceSurfaceSkillsPrefersTargetEmit(t *testing.T) {
 	}
 	if string(data) != "# trade\n" {
 		t.Fatalf("unexpected emitted skill content: %q", data)
+	}
+}
+
+func TestResolveServiceSurfaceSkillsUsesDescriptorMetadataAndManual(t *testing.T) {
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
+	prevExtract := extractServiceSkillFromImage
+	defer func() {
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
+		extractServiceSkillFromImage = prevExtract
+	}()
+
+	imageExistsLocally = func(string) bool { return true }
+	inspectClawImage = func(imageRef string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{DescribePath: "/app/.claw-describe.json"}, nil
+	}
+	loadDescriptorFromImage = func(imageRef, descriptorPath string) (*describe.ServiceDescriptor, error) {
+		if imageRef != "example/trading-api:latest" {
+			t.Fatalf("unexpected image ref: %q", imageRef)
+		}
+		if descriptorPath != "/app/.claw-describe.json" {
+			t.Fatalf("unexpected descriptor path: %q", descriptorPath)
+		}
+		return &describe.ServiceDescriptor{
+			Version:     1,
+			Description: "Trading API",
+			Skill:       "/app/skills/trading-api.md",
+			Auth:        &describe.AuthDescriptor{Type: "bearer", Env: "TRADING_API_TOKEN"},
+			Endpoints: []describe.EndpointDescriptor{
+				{Method: "GET", Path: "/positions", Description: "Open positions"},
+			},
+		}, nil
+	}
+	extractServiceSkillFromImage = func(imageRef, skillPath string) ([]byte, error) {
+		if skillPath != "/app/skills/trading-api.md" {
+			t.Fatalf("unexpected skill path: %q", skillPath)
+		}
+		return []byte("# manual\n"), nil
+	}
+
+	runtimeDir := t.TempDir()
+	surfaces := []driver.ResolvedSurface{{Scheme: "service", Target: "trading-api", Ports: []string{"4000"}}}
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"trading-api": {Image: "example/trading-api:latest"},
+		},
+	}
+
+	updatedSurfaces, skills, err := resolveServiceSurfaceSkills(t.TempDir(), runtimeDir, p, surfaces, map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected one descriptor-backed skill, got %d", len(skills))
+	}
+	if updatedSurfaces[0].SkillName != "trading-api.md" {
+		t.Fatalf("expected descriptor skill name, got %q", updatedSurfaces[0].SkillName)
+	}
+	if updatedSurfaces[0].ServiceInfo == nil || updatedSurfaces[0].ServiceInfo.Description != "Trading API" {
+		t.Fatalf("expected descriptor metadata on surface, got %+v", updatedSurfaces[0].ServiceInfo)
+	}
+	if updatedSurfaces[0].ServiceInfo.AuthEnv != "TRADING_API_TOKEN" {
+		t.Fatalf("expected descriptor auth env, got %+v", updatedSurfaces[0].ServiceInfo)
 	}
 }
 
@@ -1501,7 +1452,7 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 		},
 	}
 
-	westonFeeds, err := buildFeedManifestEntries(p, "weston", nil)
+	westonFeeds, err := buildFeedManifestEntries(p, nil, nil, "weston", nil)
 	if err != nil {
 		t.Fatalf("weston feeds: %v", err)
 	}
@@ -1515,7 +1466,7 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 		t.Fatalf("expected weston URL substitution, got %q", westonFeeds[0].URL)
 	}
 
-	loganFeeds, err := buildFeedManifestEntries(p, "logan", nil)
+	loganFeeds, err := buildFeedManifestEntries(p, nil, nil, "logan", nil)
 	if err != nil {
 		t.Fatalf("logan feeds: %v", err)
 	}
@@ -1524,5 +1475,52 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 	}
 	if loganFeeds[0].Path != "/api/v1/market_context/logan" {
 		t.Fatalf("expected logan path substitution, got %q", loganFeeds[0].Path)
+	}
+}
+
+func TestBuildFeedManifestProjectsBearerAuthFromServiceEnv(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"weston": {
+				Environment: map[string]string{
+					"TRADING_API_TOKEN": "${TRADING_API_TOKEN}",
+				},
+				Claw: &pod.ClawBlock{
+					Feeds: []pod.FeedEntry{
+						{Name: "market-context", Source: "trading-api", Path: "/api/v1/market_context/{claw_id}", TTL: 180},
+					},
+				},
+			},
+			"trading-api": {
+				Expose: []string{"4000"},
+			},
+		},
+	}
+
+	feeds, err := buildFeedManifestEntries(
+		p,
+		map[string]*describe.ServiceDescriptor{
+			"trading-api": {
+				Version: 1,
+				Auth: &describe.AuthDescriptor{
+					Type: "bearer",
+					Env:  "TRADING_API_TOKEN",
+				},
+			},
+		},
+		map[string]string{
+			"TRADING_API_TOKEN": "real-token",
+		},
+		"weston",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("buildFeedManifestEntries: %v", err)
+	}
+	if len(feeds) != 1 {
+		t.Fatalf("expected one feed, got %d", len(feeds))
+	}
+	if feeds[0].Auth != "real-token" {
+		t.Fatalf("expected projected bearer auth, got %q", feeds[0].Auth)
 	}
 }

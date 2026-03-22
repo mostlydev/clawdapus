@@ -15,7 +15,23 @@ func TestGenerateClawdapusMD(t *testing.T) {
 			{Scheme: "volume", Target: "research-cache", AccessMode: "read-write"},
 			{Scheme: "host", Target: "/var/shared/reports", AccessMode: "read-write"},
 			{Scheme: "channel", Target: "discord", AccessMode: ""},
-			{Scheme: "service", Target: "fleet-master", AccessMode: "", SkillName: "fleet-manual.md"},
+			{
+				Scheme:     "service",
+				Target:     "fleet-master",
+				AccessMode: "",
+				SkillName:  "fleet-manual.md",
+				ServiceInfo: &driver.ServiceSurfaceInfo{
+					Description: "Governance API",
+					AuthType:    "bearer",
+					AuthEnv:     "FLEET_TOKEN",
+					Endpoints: []driver.ServiceEndpoint{
+						{Method: "GET", Path: "/fleet/status", Description: "Service health"},
+					},
+				},
+			},
+		},
+		Feeds: []driver.ResolvedFeed{
+			{Name: "market-context", Source: "trading-api", Path: "/context", TTL: 180, Description: "Market summary"},
 		},
 	}
 
@@ -38,6 +54,15 @@ func TestGenerateClawdapusMD(t *testing.T) {
 	}
 	if !strings.Contains(md, "skills/fleet-manual.md") {
 		t.Error("service surface should reference its companion skill file")
+	}
+	if !strings.Contains(md, "Governance API") {
+		t.Error("expected inline service description")
+	}
+	if !strings.Contains(md, "GET /fleet/status") {
+		t.Error("expected endpoint list")
+	}
+	if !strings.Contains(md, "market-context") {
+		t.Error("expected feeds section entry")
 	}
 }
 

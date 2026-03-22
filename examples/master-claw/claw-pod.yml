@@ -1,12 +1,10 @@
 x-claw:
   pod: master-claw-demo
   master: governor
-
-x-master-claw-demo:
-  cllama_agent: &cllama_agent
-    cllama: [passthrough]
-  proxy_env: &proxy_env
-    OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+  cllama-defaults:
+    proxy: [passthrough]
+    env:
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
 
 services:
   worker-a:
@@ -15,9 +13,7 @@ services:
       context: .
       dockerfile: Clawfile
     x-claw:
-      <<: *cllama_agent
       agent: ./agents/WORKER.md
-      cllama-env: *proxy_env
       handles:
         discord:
           id: "${WORKER_A_DISCORD_ID}"
@@ -31,9 +27,7 @@ services:
       context: .
       dockerfile: Clawfile
     x-claw:
-      <<: *cllama_agent
       agent: ./agents/WORKER.md
-      cllama-env: *proxy_env
       handles:
         discord:
           id: "${WORKER_B_DISCORD_ID}"
@@ -47,13 +41,8 @@ services:
       context: .
       dockerfile: Clawfile
     x-claw:
-      <<: *cllama_agent
       agent: ./agents/GOVERNOR.md
-      cllama-env: *proxy_env
-      feeds:
-        - source: claw-api
-          path: /fleet/alerts
-          ttl: 30
+      feeds: [fleet-alerts]
       surfaces:
         - "service://claw-api"
       handles:
