@@ -1,9 +1,10 @@
 # ADR-015: `claw-api` Authentication and Authorization Scoping
 
 **Date:** 2026-03-19
-**Status:** Proposed
+**Status:** Accepted
 **Depends on:** ADR-002 (Runtime Authority), ADR-013 (Context Feeds)
 **Consumed by:** ADR-012 (Master Claw)
+**Implementation:** Bearer auth with auto-generated principals implemented. `claw up` generates per-agent tokens and `principals.json`. Scope filtering via `Principal.AllowsService`/`AllowsClawID` limits read access per principal. Structured audit logging via `logDecision` on all auth decisions.
 
 ## Context
 

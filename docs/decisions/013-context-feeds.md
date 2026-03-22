@@ -1,9 +1,10 @@
 # ADR-013: Context Feeds — Live Data Injection for Claws
 
 **Date:** 2026-03-19
-**Status:** Proposed
+**Status:** Accepted
 **Depends on:** ADR-004 (Service Surface Skills), ADR-008 (cllama Sidecar Standard)
 **Consumed by:** ADR-012 (Master Claw)
+**Implementation:** Full pipeline implemented. Pod parser handles short-form and explicit feeds. `claw up` resolves subscriptions against the descriptor-based feed registry, builds feed manifests with auth projection, and writes `feeds.json` into per-agent context directories. cllama loads manifests, fetches with TTL caching and bearer auth, and injects into both OpenAI and Anthropic request formats. Live in `examples/trading-desk/` and tiverton-house production.
 
 ## Context
 
