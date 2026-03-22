@@ -10,20 +10,21 @@ func GenerateServiceSkill(port string) string {
 	body := fmt.Sprintf(
 		"# claw-api\n\n"+
 			"## Connection\n"+
-			"- Hostname: claw-api\n"+
-			"- Port: %s\n"+
-			"- Base URL: http://claw-api:%s\n"+
-			"- Authentication: runtime-projected bearer credential\n\n"+
+			"- Base URL: `$CLAW_API_URL` (http://claw-api:%s)\n"+
+			"- Authentication: `Authorization: Bearer $CLAW_API_TOKEN`\n\n"+
+			"## Example\n"+
+			"```bash\n"+
+			"curl -s -H \"Authorization: Bearer $CLAW_API_TOKEN\" \"$CLAW_API_URL/fleet/status\"\n"+
+			"```\n\n"+
 			"## Read Operations\n"+
 			"- `GET /fleet/status` returns scoped service health and uptime\n"+
 			"- `GET /fleet/metrics?claw_id=<id>&since=<duration-or-rfc3339>` returns normalized telemetry for one claw\n"+
 			"- `GET /fleet/logs?service=<name>&lines=<n>` returns recent logs for one in-scope service\n"+
 			"- `GET /fleet/alerts?since=<duration-or-rfc3339>` returns anomaly summaries only\n\n"+
 			"## Usage\n"+
-			"- Use the runtime-projected credential for explicit HTTP calls when a client layer exposes it\n"+
-			"- Treat responses as scope-filtered; do not assume omitted services are healthy or visible\n"+
+			"- Always include the bearer token header — unauthenticated requests return 401\n"+
+			"- Responses are scope-filtered; do not assume omitted services are healthy or visible\n"+
 			"- Use `/fleet/alerts` for anomaly push and `/fleet/status`, `/fleet/metrics`, or `/fleet/logs` for detail pull\n",
-		port,
 		port,
 	)
 
