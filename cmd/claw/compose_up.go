@@ -808,12 +808,13 @@ func buildFeedManifestEntries(p *pod.Pod, serviceName string) ([]cllama.FeedMani
 	entries := make([]cllama.FeedManifestEntry, 0, len(svc.Claw.Feeds))
 	for _, feed := range svc.Claw.Feeds {
 		feedPath := strings.ReplaceAll(feed.Path, "{claw_id}", serviceName)
+		feedName := strings.ReplaceAll(feed.Name, "{claw_id}", serviceName)
 		url, err := resolveFeedURL(p, feed.Source, feedPath)
 		if err != nil {
-			return nil, fmt.Errorf("feed %q: %w", feed.Name, err)
+			return nil, fmt.Errorf("feed %q: %w", feedName, err)
 		}
 		entries = append(entries, cllama.FeedManifestEntry{
-			Name:   feed.Name,
+			Name:   feedName,
 			Source: feed.Source,
 			Path:   feedPath,
 			TTL:    feed.TTL,
