@@ -156,6 +156,13 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		"DISCORD_AUTO_THREAD":      "false",
 	}
 
+	if modelCfg.BaseURL != "" {
+		env["OPENAI_BASE_URL"] = modelCfg.BaseURL
+	}
+	if modelCfg.APIKey != "" {
+		env["OPENAI_API_KEY"] = modelCfg.APIKey
+	}
+
 	if rc.PersonaHostPath != "" {
 		mounts = append(mounts, driver.Mount{
 			HostPath:      rc.PersonaHostPath,
