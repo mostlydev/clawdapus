@@ -6,7 +6,7 @@ hero:
   text: Docker on Rails for Claws
   tagline: Infrastructure-layer governance for AI agent containers. The layer below the framework, where deployment meets governance.
   image:
-    src: /clawdapus.png
+    src: /clawdapus-glyph.png
     alt: Clawdapus
   actions:
     - theme: brand
