@@ -222,6 +222,62 @@ func TestCopyPersonaSoulNoopWhenMissing(t *testing.T) {
 	}
 }
 
+func TestMaterializeCllamaSetsContainerEnv(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	rc.Cllama = []string{"passthrough"}
+	rc.CllamaToken = "weston:abc123"
+
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if got := result.Environment["OPENAI_BASE_URL"]; got != "http://cllama:8080/v1" {
+		t.Fatalf("expected OPENAI_BASE_URL=http://cllama:8080/v1, got %q", got)
+	}
+	if got := result.Environment["OPENAI_API_KEY"]; got != "weston:abc123" {
+		t.Fatalf("expected OPENAI_API_KEY=weston:abc123, got %q", got)
+	}
+
+	// Verify config.yaml also has the routing
+	configData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", "config.yaml"))
+	if err != nil {
+		t.Fatalf("read config.yaml: %v", err)
+	}
+	cfg := string(configData)
+	if !strings.Contains(cfg, "base_url: http://cllama:8080/v1") {
+		t.Fatalf("expected base_url in config.yaml, got:\n%s", cfg)
+	}
+	if !strings.Contains(cfg, "api_key: weston:abc123") {
+		t.Fatalf("expected api_key in config.yaml, got:\n%s", cfg)
+	}
+	if !strings.Contains(cfg, "provider: custom") {
+		t.Fatalf("expected custom provider in config.yaml, got:\n%s", cfg)
+	}
+}
+
+func TestMaterializeDefaultsAutoThreadOff(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if got := result.Environment["DISCORD_AUTO_THREAD"]; got != "false" {
+		t.Fatalf("expected DISCORD_AUTO_THREAD=false, got %q", got)
+	}
+}
+
 func newTestRC(t *testing.T) (*driver.ResolvedClaw, string) {
 	t.Helper()
 	tmp := t.TempDir()

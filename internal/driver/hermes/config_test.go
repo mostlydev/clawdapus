@@ -77,6 +77,62 @@ func TestGenerateConfigAnthropicModelUsesBareModelName(t *testing.T) {
 	}
 }
 
+func TestResolvedEnvValueExpandsCompoundVars(t *testing.T) {
+	// Set env vars for the test
+	t.Setenv("TEST_ID_A", "111")
+	t.Setenv("TEST_ID_B", "222")
+	t.Setenv("TEST_ID_C", "333")
+
+	env := map[string]string{
+		"SINGLE":   "${TEST_ID_A}",
+		"COMPOUND": "${TEST_ID_A},${TEST_ID_B},${TEST_ID_C}",
+		"LITERAL":  "plain-value",
+	}
+
+	if got := resolvedEnvValue(env, "SINGLE"); got != "111" {
+		t.Fatalf("single var: expected 111, got %q", got)
+	}
+	if got := resolvedEnvValue(env, "COMPOUND"); got != "111,222,333" {
+		t.Fatalf("compound var: expected 111,222,333, got %q", got)
+	}
+	if got := resolvedEnvValue(env, "LITERAL"); got != "plain-value" {
+		t.Fatalf("literal: expected plain-value, got %q", got)
+	}
+}
+
+func TestGenerateConfigNoBaseURLWithoutCllama(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {},
+		},
+		Environment: map[string]string{
+			"DISCORD_BOT_TOKEN":  "discord-token",
+			"OPENROUTER_API_KEY": "or-key",
+		},
+	}
+
+	mc, err := resolveModelConfig(rc)
+	if err != nil {
+		t.Fatalf("resolveModelConfig returned error: %v", err)
+	}
+	data, err := GenerateConfig(rc, mc)
+	if err != nil {
+		t.Fatalf("GenerateConfig returned error: %v", err)
+	}
+	var cfg map[string]any
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("parse generated yaml: %v", err)
+	}
+	model, _ := cfg["model"].(map[string]any)
+	if _, exists := model["base_url"]; exists {
+		t.Fatal("expected no base_url when cllama is not enabled")
+	}
+	if _, exists := model["api_key"]; exists {
+		t.Fatal("expected no api_key when cllama is not enabled")
+	}
+}
+
 func TestGenerateConfigIncludesCllamaRouting(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:      map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},

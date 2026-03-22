@@ -1476,3 +1476,53 @@ func TestIsProviderKey(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"trading-api": {
+				Expose: []string{"4000"},
+			},
+			"weston": {
+				Claw: &pod.ClawBlock{
+					Feeds: []pod.FeedEntry{
+						{Name: "market-context", Source: "trading-api", Path: "/api/v1/market_context/{claw_id}", TTL: 180},
+					},
+				},
+			},
+			"logan": {
+				Claw: &pod.ClawBlock{
+					Feeds: []pod.FeedEntry{
+						{Name: "{claw_id}-context", Source: "trading-api", Path: "/api/v1/market_context/{claw_id}", TTL: 180},
+					},
+				},
+			},
+		},
+	}
+
+	westonFeeds, err := buildFeedManifestEntries(p, "weston")
+	if err != nil {
+		t.Fatalf("weston feeds: %v", err)
+	}
+	if len(westonFeeds) != 1 {
+		t.Fatalf("expected 1 feed, got %d", len(westonFeeds))
+	}
+	if westonFeeds[0].Path != "/api/v1/market_context/weston" {
+		t.Fatalf("expected weston path substitution, got %q", westonFeeds[0].Path)
+	}
+	if westonFeeds[0].URL != "http://trading-api:4000/api/v1/market_context/weston" {
+		t.Fatalf("expected weston URL substitution, got %q", westonFeeds[0].URL)
+	}
+
+	loganFeeds, err := buildFeedManifestEntries(p, "logan")
+	if err != nil {
+		t.Fatalf("logan feeds: %v", err)
+	}
+	if loganFeeds[0].Name != "logan-context" {
+		t.Fatalf("expected logan name substitution, got %q", loganFeeds[0].Name)
+	}
+	if loganFeeds[0].Path != "/api/v1/market_context/logan" {
+		t.Fatalf("expected logan path substitution, got %q", loganFeeds[0].Path)
+	}
+}
