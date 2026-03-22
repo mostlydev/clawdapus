@@ -3,6 +3,8 @@
 
 **Infrastructure-layer governance for AI agent containers.**
 
+[Documentation](https://mostlydev.github.io/clawdapus/) | [Quickstart](https://mostlydev.github.io/clawdapus/guide/quickstart) | [Manifesto](https://mostlydev.github.io/clawdapus/manifesto)
+
 > Swarm is for agents that work *for* you. Clawdapus is for bots that work *as* you.
 
 Every agent framework answers the same question: how do I make agents collaborate? Swarm, CrewAI, LangGraph — all application-layer orchestration, all built on a shared assumption: **the agent is a trusted process.**
