@@ -223,6 +223,8 @@ func allowedEnvPassthroughKeys() []string {
 	return []string{
 		"ANTHROPIC_API_KEY",
 		"ANTHROPIC_TOKEN",
+		"CLAW_API_TOKEN",
+		"CLAW_API_URL",
 		"DISCORD_ALLOWED_USERS",
 		"DISCORD_AUTO_THREAD",
 		"DISCORD_BOT_TOKEN",
