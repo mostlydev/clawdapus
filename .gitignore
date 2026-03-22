@@ -43,3 +43,4 @@ testdata/*
 !testdata/microclaw-stub/
 *-notes.md
 .claude/settings.local.json
+.worktrees/
