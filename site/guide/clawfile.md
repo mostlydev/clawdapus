@@ -57,6 +57,95 @@ This declares an OpenClaw agent that:
 | `TRACK` | Wraps package managers to log mutations for recipe promotion |
 | `PRIVILEGE` | Drops container privileges |
 
+## AGENT
+
+```dockerfile
+AGENT AGENTS.md
+```
+
+Names the behavioral contract file. This file is bind-mounted read-only into the container at runtime -- it survives full container compromise. The contract defines the agent's purpose, rules, and constraints.
+
+## PERSONA
+
+```dockerfile
+PERSONA ./persona
+PERSONA oci://ghcr.io/myorg/analyst-persona:v1
+```
+
+Imports a persona workspace containing memory, history, style, and knowledge files. Accepts a local path or an OCI artifact reference. When present, `CLAW_PERSONA_DIR` is set in the container environment.
+
+Local references are copied with traversal and symlink hardening. Non-local references are pulled as OCI artifacts.
+
+## CLLAMA
+
+```dockerfile
+CLLAMA passthrough
+```
+
+Declares the governance proxy type. The `passthrough` reference implementation provides credential starvation, identity resolution, cost tracking, and audit logging without modifying prompts or responses.
+
+Future proxy types (e.g. `cllama-policy`) will add bidirectional interception for prompt decoration and response amendment.
+
+## HANDLE
+
+```dockerfile
+HANDLE discord
+HANDLE telegram
+HANDLE slack
+```
+
+Declares platform identity for the agent. Clawdapus broadcasts every agent's handles as environment variables into every service in the pod, enabling bot-to-bot discovery and routing.
+
+The driver automatically wires runner config for the declared platform: mention patterns, bot allowlists, guild routing, and peer discovery.
+
+Handle details (bot ID, username, guild IDs) are specified in the pod YAML under `x-claw.handles`, not in the Clawfile.
+
+## INVOKE
+
+```dockerfile
+INVOKE 15 8 * * 1-5  pre-market
+```
+
+Schedules cron-based invocations. The format is a standard cron expression followed by a name. Invocation details (message content, target channel) are specified in the pod YAML under `x-claw.invoke`.
+
+## SURFACE
+
+```dockerfile
+SURFACE service://trading-api
+SURFACE volume://shared-research read-write
+SURFACE channel://discord
+```
+
+Declares the agent's access to external resources. Surfaces come in three types:
+
+- **`service://`** -- access to a service endpoint. Service skills are auto-discovered from `claw.describe` labels.
+- **`volume://`** -- access to a shared volume with an access mode (`read-only` or `read-write`).
+- **`channel://`** -- routing policy for platform channels (map-form supports DM policy, guild allowlists, mention requirements).
+
+Surfaces are typically declared at pod level via `x-claw.surfaces` or `surfaces-defaults` rather than in the Clawfile.
+
+## SKILL
+
+```dockerfile
+SKILL policy/risk-limits.md
+```
+
+Mounts operator policy files read-only into the runner. Skills appear in the agent's `CLAWDAPUS.md` context document and are available as reference material during reasoning.
+
+## INCLUDE
+
+```dockerfile
+INCLUDE enforce ./compliance/trading-rules.md
+INCLUDE guide ./style/house-voice.md
+INCLUDE reference ./docs/api-reference.md
+```
+
+Composes contracts at pod level with three inclusion modes:
+
+- **`enforce`** -- inlined into the generated `AGENTS.md` as hard rules.
+- **`guide`** -- inlined as soft guidance.
+- **`reference`** -- mounted as read-only skill material, not inlined.
+
 ## How Directives Become Docker
 
 `claw build` is purely a transpiler. Each directive maps to standard Dockerfile constructs:

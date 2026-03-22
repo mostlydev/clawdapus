@@ -6,15 +6,14 @@ export default defineConfig({
   base: '/clawdapus/',
 
   head: [
-    ['link', { rel: 'icon', href: '/clawdapus/clawdapus.png' }],
+    ['link', { rel: 'icon', href: '/clawdapus/clawdapus-glyph.png' }],
   ],
 
   themeConfig: {
-    logo: '/clawdapus.png',
+    logo: '/clawdapus-glyph.png',
 
     nav: [
       { text: 'Guide', link: '/guide/what-is-clawdapus' },
-      { text: 'Reference', link: '/reference/cli' },
       {
         text: 'v0.3.2',
         items: [
@@ -24,40 +23,34 @@ export default defineConfig({
       },
     ],
 
-    sidebar: {
-      '/guide/': [
-        {
-          text: 'Introduction',
-          items: [
-            { text: 'What is Clawdapus', link: '/guide/what-is-clawdapus' },
-            { text: 'Quickstart', link: '/guide/quickstart' },
-          ],
-        },
-        {
-          text: 'Core Concepts',
-          items: [
-            { text: 'Anatomy', link: '/guide/anatomy' },
-            { text: 'Clawfile', link: '/guide/clawfile' },
-            { text: 'Pod YAML', link: '/guide/pod-yaml' },
-            { text: 'cllama', link: '/guide/cllama' },
-            { text: 'Surfaces & Skills', link: '/guide/surfaces-and-skills' },
-            { text: 'Compilation Principles', link: '/guide/compilation-principles' },
-            { text: 'Social Topology', link: '/guide/social-topology' },
-          ],
-        },
-      ],
-      '/reference/': [
-        {
-          text: 'Reference',
-          items: [
-            { text: 'CLI Commands', link: '/reference/cli' },
-            { text: 'Clawfile Directives', link: '/reference/clawfile-directives' },
-            { text: 'Driver Support Matrix', link: '/reference/drivers' },
-            { text: 'cllama Spec', link: '/reference/cllama-spec' },
-          ],
-        },
-      ],
-    },
+    sidebar: [
+      {
+        text: 'Introduction',
+        items: [
+          { text: 'What is Clawdapus?', link: '/guide/what-is-clawdapus' },
+          { text: 'Quickstart', link: '/guide/quickstart' },
+        ],
+      },
+      {
+        text: 'Core Concepts',
+        items: [
+          { text: 'Anatomy of a Claw', link: '/guide/anatomy' },
+          { text: 'Clawfile', link: '/guide/clawfile' },
+          { text: 'Pod YAML', link: '/guide/pod-yaml' },
+          { text: 'cllama Governance Proxy', link: '/guide/cllama' },
+          { text: 'Surfaces & Skills', link: '/guide/surfaces-and-skills' },
+          { text: 'Compilation Principles', link: '/guide/compilation-principles' },
+          { text: 'Social Topology', link: '/guide/social-topology' },
+        ],
+      },
+      {
+        text: 'Reference',
+        items: [
+          { text: 'CLI Commands', link: '/guide/cli' },
+          { text: 'Driver Support Matrix', link: '/guide/drivers' },
+        ],
+      },
+    ],
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/mostlydev/clawdapus' },

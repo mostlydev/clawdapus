@@ -39,26 +39,77 @@ The proxy uses bearer tokens to resolve caller identity. Each token maps to a sp
 
 The token format is `<agent-id>:<secret>`, generated fresh on every `claw up`. The proxy loads a principals file mapping tokens to agent identities and their compiled contract context.
 
-## Bidirectional Interception
+When a request arrives, the proxy:
 
-The cllama specification defines a full bidirectional interception pipeline. The proxy sits between the runner and the provider, intercepting traffic in both directions. The runner never knows the proxy exists -- it thinks it is talking directly to the model.
+1. Extracts the `<agent-id>` from the bearer token.
+2. Loads the agent's context from `CLAW_CONTEXT_ROOT/<agent-id>/`.
+3. Validates the `<secure-secret>` against `metadata.json` principals.
+4. Checks the requested model against the agent's allowed models.
+
+Token validation is fail-closed: unknown or missing tokens are denied before any provider call is made.
+
+## Transport Model
+
+The proxy exposes an HTTP API compatible with the OpenAI Chat Completions API.
+
+| Property | Value |
+|----------|-------|
+| Endpoint | `POST /v1/chat/completions` |
+| Listen port | `0.0.0.0:8080` |
+| Base URL (as seen by runner) | `http://cllama-<type>:8080/v1` |
+| Auth header | `Authorization: Bearer <agent-id>:<secure-secret>` |
+
+Clawdapus configures each agent's runner to use the proxy URL as its LLM base URL. The runner thinks it is talking directly to the model provider. Two distinct code paths handle OpenAI format (`messages[]`) and Anthropic format (top-level `system` field).
+
+### OpenAI Format
+
+Requests to `/v1/chat/completions` are handled as OpenAI format. The payload contains a `messages[]` array and a `model` field. The proxy rewrites the `model` field to the operator-assigned provider and model, then forwards the request to the resolved upstream endpoint.
+
+### Anthropic Format
+
+Requests to `/v1/messages` are handled as Anthropic format. The payload uses a top-level `system` field rather than embedding system messages in the `messages` array. The proxy forwards Anthropic-specific headers (`Anthropic-Version`, `Anthropic-Beta`) and routes directly to the Anthropic provider.
+
+### Format Bridging
+
+When the resolved provider uses Anthropic format but the incoming request is OpenAI format (`/v1/chat/completions`), the proxy routes through OpenRouter instead, which accepts OpenAI format for all models. This transparent bridging means agents do not need to know which provider or format their assigned model requires.
+
+::: tip Pure Passthrough
+In passthrough mode, the proxy rewrites the `model` field and forwards. It does **not** touch the `messages` array. No prompt decoration, no system message injection -- those capabilities are reserved for the `cllama-policy` proxy type.
+:::
+
+## The Interception Pipeline
+
+The cllama specification defines a full bidirectional interception pipeline with five phases. The runner never knows the proxy exists -- it thinks it is talking directly to the model.
+
+### Pre-flight
+
+Identity resolution, token validation, and model authorization. Invalid tokens are rejected before any downstream work begins.
 
 ### Outbound Interception (Agent to Provider)
 
 Before the LLM sees the prompt, the proxy can evaluate and modify the outbound request:
 
-- **Tool scoping** -- If the agent's request contains `tools`, the proxy evaluates them against the agent's identity and active policy modules. Unauthorized tool calls are silently dropped based on who the agent is and what it is allowed to do.
-- **Prompt decoration** -- The proxy may modify the outbound `messages` array, injecting specific rules, priorities, or warnings derived from the agent's compiled `enforce` contract and active policy modules.
-- **Policy blocking** -- If the outbound prompt violates a loaded policy module, the proxy may short-circuit the request entirely and return an error or a mock response. The agent never reaches the provider.
-- **Forced model routing** -- Even if the agent requests a specific model (e.g., `gpt-4o`), the proxy may seamlessly rewrite the request to use a different, operator-approved model (e.g., `claude-3-haiku`). The agent does not know its model was downgraded. This enforces strict compute budgets across the fleet.
+- **Context aggregation** -- The proxy parses the `enforce` rules from the agent-specific `AGENTS.md`. These rules form the behavioral contract that governs what the agent is allowed to do.
+- **Tool scoping** -- If the agent's request contains `tools`, the proxy evaluates each tool against the agent's identity and active policy modules. Tools not authorized for the agent's contracted role are silently dropped before the request reaches the provider.
+- **Prompt decoration (pre-prompting)** -- The proxy may modify the outbound `messages` array to inject operator-defined rules, priorities, or warnings. This decoration happens transparently -- the agent has no visibility into what was added.
+- **Policy blocking** -- If the outbound prompt violates a loaded policy module or `enforce` rule, the proxy may short-circuit the request entirely and return an error or a mock response. The agent never reaches the provider.
+- **Forced model routing and rate limiting** -- Even if the agent requests a specific model (e.g., `gpt-4o`), the proxy may seamlessly rewrite the `model` field to use a different, operator-approved model (e.g., `claude-3-haiku`). The agent never knows its model was downgraded. Combined with rate limiting via `429 Too Many Requests` responses, this enforces strict compute budgets across the fleet.
+
+### Provider Execution
+
+The proxy strips the dummy token, attaches the real provider API key, and forwards the request upstream.
 
 ### Inbound Interception (Provider to Agent)
 
 After the provider responds but before the runner sees the result, the proxy can evaluate and amend:
 
-- **Response amendment** -- If the response contains content that drifts from the agent's contracted purpose, the proxy may rewrite or drop that content.
-- **PII leakage blocking** -- Responses containing restricted information (personal data, credentials, internal identifiers) can be intercepted before reaching the agent.
-- **Drift scoring** -- The proxy analyzes how far the provider's raw response drifted from the agent's ideal behavior defined in the contract, emitting a structured log of the drift score.
+- **Response amendment** -- The proxy evaluates the provider's response against the `enforce` rules in the agent's contract and active policy modules. If the response violates the tone, instructions, or restrictions defined in the contract, the proxy rewrites the content before the agent sees it.
+- **PII leakage blocking** -- The proxy can detect and redact personally identifiable information. If the provider's response contains data that should not flow back to the agent (customer names, account numbers, internal identifiers), the proxy strips or masks it.
+- **Drift scoring** -- The proxy quantifies how far the provider's raw response drifted from the agent's ideal behavior as defined in its contract, emitting a structured log of the drift score. The scoring methodology is organization-specific and not defined by the cllama standard.
+
+### Egress
+
+The (potentially amended) response is returned to the agent.
 
 ::: info Passthrough vs Policy
 The reference `passthrough` implementation currently performs identity resolution, model rewriting, and cost tracking only. It does **not** touch the `messages` array -- no prompt decoration, no response amendment. Full bidirectional interception is the `cllama-policy` proxy type, which is future work.
@@ -88,39 +139,31 @@ During `claw up`, Clawdapus generates context files under the runtime directory:
     └── metadata.json
 ```
 
+| File | Purpose |
+|------|---------|
+| `AGENTS.md` | The agent's compiled behavioral contract, including inlined `enforce` and `guide` content from `INCLUDE` directives. |
+| `CLAWDAPUS.md` | Infrastructure context: surfaces, mount paths, peer handles, feeds, and available skills. |
+| `metadata.json` | Machine-readable identity (handles, allowed models, bearer token auth). |
+
 ### Container-Side Mount
 
 The host directory is bind-mounted into the cllama container at `/claw/context/<agent-id>/`. The proxy reads `CLAW_CONTEXT_ROOT` (defaults to `/claw/context`) and loads each subdirectory as an agent identity.
 
+The `context/` directory segment is required in both host and container paths.
+
 ::: warning The context/ Segment Is Required
 The mount path must include the `context/` directory segment. The proxy expects `CLAW_CONTEXT_ROOT` to point at the directory containing agent subdirectories, not directly at an agent's files.
 :::
+
+### Context Mount Contents
+
+The `agentctx` struct currently holds only three fields: `AgentsMD`, `ClawdapusMD`, and `Metadata` (used for bearer token auth). There are no outbound service credentials, no feed manifests, and no decoration config in the context mount today.
 
 ### Scaled Services
 
 For services with `count > 1`, context is generated **per ordinal**. A service named `crypto-crusher` with `count: 3` produces three separate context directories: `crypto-crusher-0/`, `crypto-crusher-1/`, `crypto-crusher-2/`. Each ordinal gets its own bearer token, its own compiled contract, and its own audit trail.
 
 The `metadata.json` file in each directory contains the bearer token secret used for authentication. The proxy validates incoming tokens against these metadata files to resolve caller identity.
-
-## API Format Handling
-
-The proxy handler supports two distinct API formats through separate code paths, routed by request path:
-
-### OpenAI Format
-
-Requests to `/v1/chat/completions` are handled as OpenAI format. The payload contains a `messages[]` array and a `model` field. The proxy rewrites the `model` field to the operator-assigned provider and model, then forwards the request to the resolved upstream endpoint.
-
-### Anthropic Format
-
-Requests to `/v1/messages` are handled as Anthropic format. The payload uses a top-level `system` field rather than embedding system messages in the `messages` array. The proxy forwards Anthropic-specific headers (`Anthropic-Version`, `Anthropic-Beta`) and routes directly to the Anthropic provider.
-
-### Format Bridging
-
-When the resolved provider uses Anthropic format but the incoming request is OpenAI format (`/v1/chat/completions`), the proxy routes through OpenRouter instead, which accepts OpenAI format for all models. This transparent bridging means agents do not need to know which provider or format their assigned model requires.
-
-::: tip Pure Passthrough
-In passthrough mode, the proxy rewrites the `model` field and forwards. It does **not** touch the `messages` array. No prompt decoration, no system message injection -- those capabilities are reserved for the `cllama-policy` proxy type.
-:::
 
 ## Environment Variables
 
@@ -150,6 +193,65 @@ x-claw:
 Provider API keys belong in `x-claw.cllama-defaults.env` (or service-level `x-claw.cllama-env`), never in the service's compose `environment:` block. Putting real keys in `environment:` defeats credential starvation -- the agent container would have direct provider access.
 :::
 
+## Pod Configuration
+
+### Declaring a cllama Proxy
+
+The proxy is declared in `claw-pod.yml` via the `cllama` field on a service's `x-claw` block:
+
+```yaml
+services:
+  analyst:
+    x-claw:
+      agent: analyst
+      cllama: passthrough
+      cllama-env:
+        OPENAI_API_KEY: ${OPENAI_API_KEY}
+        ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+```
+
+The `cllama` value specifies the proxy type. Currently only `passthrough` ships as a reference implementation.
+
+### Provider Keys with YAML Anchors
+
+For pods with multiple services using the same provider keys, use YAML anchors to stay DRY:
+
+```yaml
+x-claw-env: &cllama-keys
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+
+services:
+  analyst:
+    x-claw:
+      agent: analyst
+      cllama: passthrough
+      cllama-env: *cllama-keys
+  researcher:
+    x-claw:
+      agent: researcher
+      cllama: passthrough
+      cllama-env: *cllama-keys
+```
+
+### Count Expansion with cllama
+
+When a service declares both `cllama` and `count > 1`, each ordinal gets its own bearer token and context directory. The proxy authenticates each ordinal independently:
+
+```yaml
+services:
+  analyst:
+    x-claw:
+      agent: analyst
+      cllama: passthrough
+      count: 3
+```
+
+This produces `analyst-0`, `analyst-1`, and `analyst-2`, each with:
+- A unique bearer token in format `analyst-N:<secret>`
+- A context directory at `/claw/context/analyst-N/`
+- Independent telemetry tagged with `claw_id: analyst-N`
+
 ## Cost Accounting
 
 The proxy extracts token usage from every LLM response, multiplies by the pricing table, and tracks cost per agent, per provider, and per model. This gives operators real-time visibility into spend without relying on provider dashboards that aggregate across all API keys.
@@ -163,19 +265,35 @@ crypto-crusher-1  running   healthy   0.04
 crypto-crusher-2  running   WARNING   0.31
 ```
 
-## Audit Logging
+## Telemetry and Audit
 
-Every request through the proxy produces a structured JSON log entry on stdout:
+Every request through the proxy produces a structured JSON log entry on stdout. Clawdapus collects these for the `claw audit` command and for the Master Claw's fleet governance decisions.
 
-- Timestamp
-- Agent identity (resolved from bearer token)
-- Model requested and model served
-- Request latency
-- Token counts (prompt + completion)
-- Cost (computed from token counts and pricing)
-- Intervention reason (if the proxy modified or blocked the request)
+### Telemetry Fields
 
-These logs are the raw telemetry for the `claw audit` command and for the Master Claw's fleet governance decisions.
+| Field | Description |
+|-------|-------------|
+| `timestamp` | ISO-8601 timestamp. |
+| `claw_id` | The calling agent's identifier. |
+| `type` | Event type: `request`, `response`, `error`, `intervention`. |
+| `intervention` | Why the proxy modified a prompt, dropped a tool, or amended a response. References the specific policy module or rule. |
+| `model` | The model used for the request. |
+| `tokens_in` | Input token count. |
+| `tokens_out` | Output token count. |
+| `cost` | Estimated cost for the request/response pair. |
+| `latency` | Request duration. |
+
+Every request/response pair produces two log events: one with `type: "request"` on ingress and one with `type: "response"` on egress. Error events use `type: "error"`. Intervention events use `type: "intervention"`. Token counts and cost estimates are extracted from the provider's response headers or body and attached to the response event.
+
+### Spec Divergences
+
+The reference implementation has a few known divergences from the spec document:
+
+- The `intervention` field is typed as `*string` with no `omitempty` tag. Every event emits `"intervention": null`, even when no intervention occurred. This is intentional -- it ensures log parsers can rely on the field always being present.
+- The implementation emits four `type` values: `request`, `response`, `error`, and `intervention`. The spec (section 5) omits `error` from its type enum and lists `drift_score` instead.
+- The spec uses the field name `intervention_reason` where the reference logger uses `intervention`.
+
+These divergences are documented here as practical guidance. The reference implementation is the source of truth for runtime behavior.
 
 ::: info Structured, Not Self-Reported
 Drift is independently scored from proxy telemetry -- not self-reported by the agent. The proxy provides a verifiable history of exactly what the bot *tried* to do versus what it was *allowed* to do.
@@ -183,30 +301,104 @@ Drift is independently scored from proxy telemetry -- not self-reported by the a
 
 ## Operator Dashboard
 
-The cllama proxy serves a real-time web UI:
+The cllama proxy serves a real-time web UI for operator visibility.
 
-- **Host port 8181** (container port 8081) by default
+| Property | Value |
+|----------|-------|
+| Host port | `8181` (default) |
+| Container port | `8081` |
+
+The dashboard shows:
+
 - Live agent activity -- which agent is calling, which model, right now
 - Provider status and error rates
 - Cost breakdown per agent, per model, per time window
+- Token usage across the pod
 
 The dashboard updates in real time as agents make LLM calls. No polling, no delay.
 
-## Pod YAML Configuration
+## Ecosystem Implementations
 
-Enable cllama at the pod level so all services inherit it:
+### Passthrough Reference
 
-```yaml
-x-claw:
-  pod: my-fleet
-  cllama-defaults:
-    proxy: [passthrough]
-    env:
-      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+The reference image (`ghcr.io/mostlydev/cllama`) implements the v1 API contract as a pure transparent proxy:
+
+- Bearer-token identity resolution and validation.
+- Environment validation (`CLAW_POD`, `CLAW_CONTEXT_ROOT`, provider credentials).
+- OpenAI and Anthropic API format passthrough with format bridging.
+- Per-agent token usage and cost tracking.
+- Structured audit logging of all traffic.
+- Real-time operator dashboard.
+- No prompt decoration, no response amendment.
+
+This image is used for testing and serves as the starting point for building custom policy engines.
+
+### Future: cllama-policy
+
+The next planned implementation is `cllama-policy`, which adds bidirectional interception -- prompt decoration, tool scoping, response amendment, and drift scoring. The passthrough reference establishes the transport and identity contract; `cllama-policy` builds the governance logic on top.
+
+### Third-Party Engines
+
+Any OpenAI-compatible proxy that consumes the Clawdapus context mount layout can act as a governance layer. The spec defines the contract, not the implementation. Operators can build proprietary engines incorporating advanced DLP, RAG-based context injection, or conversational configuration.
+
+### ClawRouter
+
+[ClawRouter](https://github.com/BlockRunAI/ClawRouter) is a specialized cllama implementation focused on forced model routing, rate limiting, and compute metering. It intercepts model requests, evaluates them against organizational budgets or provider availability, and dynamically routes, downgrades, or rate-limits requests to contain costs across a fleet of untrusted agents.
+
+## Security Model
+
+### Credential Isolation
+
+The proxy enforces a strict credential boundary. Agent containers never see real provider API keys. The flow is:
+
+1. `claw up` generates a dummy bearer token for each agent.
+2. The agent's runner is configured with the proxy URL and dummy token.
+3. The proxy receives the dummy token, validates it, strips it, and attaches the real provider key.
+4. The agent cannot extract the real key because it only communicates with the proxy, never directly with the provider.
+
+### Network Isolation
+
+Within the pod's Docker network, agents can reach the proxy at `http://cllama-<type>:8080`. They cannot reach the provider directly because no provider credentials exist in their environment. Even if an agent attempted to call the provider API directly, it would lack authentication.
+
+### Token Validation
+
+Bearer tokens are validated against the `principals` field in each agent's `metadata.json`. A request with an invalid or missing token is rejected before any provider call is made. This is fail-closed: unknown tokens are denied, not passed through.
+
+## Implementation Notes
+
+These notes reflect the current state of the reference implementation (`cllama/` submodule) and are useful for debugging or extending.
+
+### Proxy Handler
+
+The proxy handler (`cllama/internal/proxy/handler.go`) is pure passthrough. It rewrites the `model` field in the request body and forwards everything else unchanged. There is no prompt decoration, no system message injection, and no middleware hook system.
+
+### Logger Internals
+
+The logger (`cllama/internal/logging/logger.go`) writes one JSON object per line to stdout. The `intervention` field is declared as `*string` (pointer to string) with no `omitempty` struct tag, so Go's JSON marshaler emits `"intervention": null` on every event. This is intentional -- it ensures log parsers can rely on the field always being present.
+
+### Image Resolution
+
+When `claw up` encounters a cllama proxy declaration, it resolves the image through the standard `ensureImage()` fallback chain:
+
+1. Check if the image exists locally.
+2. Attempt `docker pull` from the registry.
+3. Attempt a local Dockerfile build.
+4. Attempt a git URL build.
+
+For the public `ghcr.io/mostlydev/cllama` image, step 2 succeeds on most systems. The git URL fallback does not work for cllama because the Docker builder cannot access the private submodule repo.
+
+### Build and Publish
+
+The cllama image supports multi-architecture builds:
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/mostlydev/cllama:latest \
+  --push cllama/
 ```
 
-The `passthrough` proxy type implements the transport layer: identity resolution, routing, cost tracking, and audit logging. Future proxy types (`cllama-policy`) will add bidirectional interception -- evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
+The `cllama/` directory is a git submodule pointing to a private SSH repo. Fresh clones leave it empty. The published image on `ghcr.io` is public, so end users pull the pre-built image rather than building from source.
 
 ## Limitations
 
@@ -218,17 +410,4 @@ Current constraints to be aware of:
 - **Intervention field quirk.** The cllama logger emits `"intervention": null` on every event (the field has no `omitempty` tag). This is expected behavior, not a missing value.
 - **Spec divergences.** The specification uses `intervention_reason` and omits `error` from its type enum. The reference implementation uses `intervention` and emits `error` as a log type. Consumers should handle both.
 
-## The Reference Implementation
-
-The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) -- a zero-dependency Go binary that handles:
-
-- Bearer token identity resolution
-- OpenAI and Anthropic API format passthrough
-- Format bridging (OpenAI-format requests to Anthropic models via OpenRouter)
-- Per-agent token usage and cost tracking
-- Structured JSON audit logging
-- Real-time operator dashboard
-
-Any OpenAI-compatible proxy image that can consume Clawdapus context can act as the governance layer. The specification is an open standard -- build a proprietary policy engine incorporating DLP, RAG-based context injection, or conversational configuration, as long as it adheres to the API contract and context mount structure.
-
-See the [cllama specification](/reference/cllama-spec) for the full standard.
+See the full [cllama specification on GitHub](https://github.com/mostlydev/clawdapus/blob/master/docs/CLLAMA_SPEC.md) for the formal standard.
