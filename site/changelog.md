@@ -4,13 +4,9 @@ outline: deep
 
 # Changelog
 
-This page tracks major milestones in the Clawdapus project. For detailed per-release changelogs, see [GitHub Releases](https://github.com/mostlydev/clawdapus/releases).
+Current version: **v0.3.4** — [Download](https://github.com/mostlydev/clawdapus/releases/tag/v0.3.4) | [All releases](https://github.com/mostlydev/clawdapus/releases)
 
-## Current Version: v0.3.2
-
-[Download v0.3.2](https://github.com/mostlydev/clawdapus/releases/tag/v0.3.2)
-
-## Phase Status
+## Roadmap
 
 | Phase | Status |
 |-------|--------|
@@ -29,3 +25,106 @@ This page tracks major milestones in the Clawdapus project. For detailed per-rel
 | Phase 4.6 -- Unified worker architecture (config, provision, diagnostic) | Design |
 | Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012-015) |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
+
+## v0.3.4 <Badge type="tip" text="Latest" /> {#v0-3-4}
+
+*2026-03-22*
+
+- **cllama feed injection** (ADR-013 Milestone 2) — the proxy now supports runtime feed injection into LLM requests with TTL caching
+- Updated AGENTS.md with cross-driver operational gotchas
+- Multi-arch cllama image (amd64 + arm64)
+
+## v0.3.3 {#v0-3-3}
+
+*2026-03-21*
+
+- **Auto-resolve base images** for all drivers — every driver now implements `BaseImageProvider`, eliminating manual `docker pull`
+- Hermes first-class scaffold support in `claw init` and `claw agent add`
+- README fully updated for v0.3.2+
+
+## v0.3.2 {#v0-3-2}
+
+*2026-03-21*
+
+- Discord bot setup guide added to quickstart
+- cllama image now multi-arch (amd64 + arm64)
+
+## v0.3.1 {#v0-3-1}
+
+*2026-03-20*
+
+Bug fixes across all 7 drivers:
+
+- Runtime directories use `0o777` for uid portability
+- `mention_only` for Discord in all drivers (prevents feedback loops)
+- Explicit `HOME` env var in all drivers
+- Peer handles in CLAWDAPUS.md
+- Healthcheck passthrough from `claw-pod.yml`
+- ADRs 012--016 for fleet governance
+
+## v0.3.0 {#v0-3-0}
+
+*2026-03-19*
+
+- **Hermes driver** added to trading-desk and rollcall examples
+- Compose emitter preserves non-managed services/volumes/networks
+- Published `ghcr.io/mostlydev/cllama:latest` as public image
+- `CLAUDE.md` is now a symlink to `AGENTS.md`
+- ADR-012 (Master Claw), ADR-013 (Context Feeds)
+
+## v0.2.2 {#v0-2-2}
+
+*2026-03-08*
+
+- Docs: reorder driver matrix, clarify OpenClaw routing
+
+## v0.2.1 {#v0-2-1}
+
+*2026-03-08*
+
+- Fix runtime regeneration and Discord guild policy handling
+- Fix `CLAW_PERSONA_DIR` only set when persona is configured
+- Review fixes (`dst.Close` error, `go mod tidy`, no-persona test)
+
+## v0.2.0 {#v0-2-0}
+
+*2026-03-08*
+
+Major release bringing four new drivers, scheduling, channel surfaces, and the cllama proxy:
+
+- **Interactive scaffold**: `claw init` + `claw agent add` with canonical layout
+- **Persona materialization** (local refs + OCI artifacts)
+- **x-claw include** composition (`enforce`, `guide`, `reference`)
+- **Nanobot and PicoClaw drivers**
+- **NullClaw driver** with `CONFIGURE` support
+- **MicroClaw driver**
+- Roll-call spike test covering 6 drivers
+- **cllama sidecar wiring** (Phase 4 complete)
+- **INVOKE scheduling** + Discord config wiring
+- **Channel surface bindings** (map-form)
+- Social topology: `mentionPatterns`, `allowBots`, peer handles
+- Service surface skills, `SKILL` directive, CLAWDAPUS.md generation
+- cllama dashboard (single-page with SSE live updates)
+- Install script
+- GoReleaser + release workflow
+
+## v0.1.0 {#v0-1-0}
+
+*2026-02-27*
+
+Foundation release establishing the core compilation model:
+
+- **Clawfile parser + build** (Phase 1)
+- **OpenClaw driver + pod runtime** (Phase 2)
+- Volume surfaces, service surfaces, CLAWDAPUS.md context injection
+- `SKILL` directive
+- `HANDLE` directive (Discord, Telegram, Slack)
+- **NanoClaw driver** (Claude Agent SDK)
+- Health probes, compose subcommands
+- Manifesto, architecture plan, ADRs 001--009
+
+## v0.0.1 {#v0-0-1}
+
+*2026-02-11*
+
+Initial pre-release tag. "Not quite ready, but tagging nonetheless."
