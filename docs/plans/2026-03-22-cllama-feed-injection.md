@@ -32,6 +32,7 @@
 | `cllama/internal/proxy/handler_test.go` | Modify | Add integration tests proving feeds appear in upstream request body |
 | `cllama/internal/agentctx/agentctx.go` | Modify | Add `ContextDir` field and `FeedsPath()` helper |
 | `cllama/internal/agentctx/agentctx_test.go` | Modify | Test ContextDir population and FeedsPath |
+| `cllama/internal/logging/logger.go` | Modify | Add `LogFeedFetch` event type for feed observability |
 | `cllama/cmd/cllama/main.go` | Modify | Pass `contextRoot` to handler so feeds can resolve paths |
 
 ---
@@ -337,6 +338,26 @@ func TestFetcherReturnsUnavailableOnFirstFailure(t *testing.T) {
     }
 }
 
+func TestFetcherWrapsJSONInFencedBlock(t *testing.T) {
+    srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.Write([]byte(`{"wallet":{"cash":"25000.0"}}`))
+    }))
+    defer srv.Close()
+
+    f := NewFetcher("pod", nil)
+    result, _ := f.Fetch(context.Background(), "agent", FeedEntry{Name: "ctx", URL: srv.URL, TTL: 60})
+    if !strings.HasPrefix(result.Content, "```json\n") {
+        t.Errorf("JSON feed should be wrapped in fenced block, got: %q", result.Content[:40])
+    }
+    if !strings.HasSuffix(result.Content, "\n```") {
+        t.Errorf("JSON feed should end with closing fence, got: %q", result.Content[len(result.Content)-20:])
+    }
+    if !strings.Contains(result.Content, `"cash":"25000.0"`) {
+        t.Error("JSON content should be preserved inside fence")
+    }
+}
+
 func TestFetcherTruncatesOversizeResponse(t *testing.T) {
     big := strings.Repeat("x", MaxFeedResponseBytes+100)
     srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -371,6 +392,7 @@ import (
     "fmt"
     "io"
     "net/http"
+    "strings"
     "sync"
     "time"
 )
@@ -398,7 +420,7 @@ type Fetcher struct {
     podName string
     client  *http.Client
     mu      sync.RWMutex
-    cache   map[string]*cacheEntry // key: agentID + ":" + feedName
+    cache   map[string]*cacheEntry // key: agentID + "|" + feedURL
     nowFunc func() time.Time       // for testing
 }
 
@@ -415,8 +437,8 @@ func NewFetcher(podName string, client *http.Client) *Fetcher {
     }
 }
 
-func (f *Fetcher) cacheKey(agentID, feedName string) string {
-    return agentID + ":" + feedName
+func (f *Fetcher) cacheKey(agentID, feedURL string) string {
+    return agentID + "|" + feedURL
 }
 
 func (f *Fetcher) now() time.Time {
@@ -427,7 +449,7 @@ func (f *Fetcher) now() time.Time {
 // stale cached content if available, otherwise an unavailable marker.
 // Pass a request context for cancellation on client disconnect.
 func (f *Fetcher) Fetch(ctx context.Context, agentID string, entry FeedEntry) (FeedResult, error) {
-    key := f.cacheKey(agentID, entry.Name)
+    key := f.cacheKey(agentID, entry.URL)
     now := f.now()
 
     // Check cache
@@ -523,7 +545,15 @@ func (f *Fetcher) doFetch(ctx context.Context, agentID string, entry FeedEntry) 
         truncated = true
     }
 
-    return string(body), truncated, nil
+    text := string(body)
+
+    // ADR-013: JSON feeds must be wrapped in a fenced code block before injection
+    ct := resp.Header.Get("Content-Type")
+    if strings.Contains(ct, "application/json") {
+        text = "```json\n" + text + "\n```"
+    }
+
+    return text, truncated, nil
 }
 ```
 
@@ -1030,9 +1060,10 @@ Add to `handler_test.go`:
 
 ```go
 func TestHandlerInjectsFeedsIntoOpenAI(t *testing.T) {
-    // Feed source: serves market context
+    // Feed source: serves market context as JSON (matching trading-api response)
     feedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.Write([]byte("Wallet: $5,000 cash | $20,000 invested"))
+        w.Header().Set("Content-Type", "application/json")
+        w.Write([]byte(`{"wallet":{"cash":"5000.0","invested":"20000.0"}}`))
     }))
     defer feedSrv.Close()
 
@@ -1086,7 +1117,7 @@ func TestHandlerInjectsFeedsIntoOpenAI(t *testing.T) {
     }
     first := messages[0].(map[string]any)
     content, _ := first["content"].(string)
-    if !strings.Contains(content, "Wallet: $5,000") {
+    if !strings.Contains(content, `"cash":"5000.0"`) {
         t.Errorf("expected feed content in first message, got: %s", content)
     }
     if !strings.Contains(content, "BEGIN FEED: market-context") {
@@ -1438,47 +1469,141 @@ git commit -m "proxy: add backward-compatibility test for agents without feeds"
 
 ---
 
-## Task 8: Build and Deploy to tiverton-house
+## Task 8: Add Feed-Fetch Logging
 
-Build the updated cllama binary, update the pod's cllama image, and verify feed injection works end-to-end with the live trading-api.
+The current cllama logger only emits request/response/error events. Feed fetches need their own log line so operators can verify feeds are working and diagnose failures. Without this, the verification steps in Task 9 have no signal.
+
+**Files:**
+- Modify: `cllama/internal/logging/logger.go`
+- Modify: `cllama/internal/logging/logger_test.go`
+- Modify: `cllama/internal/feeds/fetcher.go` (add logger parameter)
+
+- [ ] **Step 1: Add LogFeedFetch to the logger**
+
+Add to `logger.go`:
+
+```go
+func (l *Logger) LogFeedFetch(clawID, feedName, feedURL string, statusCode int, latencyMS int64, err error) {
+    e := entry{
+        TS:           time.Now().UTC().Format(time.RFC3339),
+        ClawID:       clawID,
+        Type:         "feed_fetch",
+        Intervention: nil,
+    }
+    if statusCode > 0 {
+        e.StatusCode = ptrInt(statusCode)
+    }
+    e.LatencyMS = ptrI64(latencyMS)
+    if err != nil {
+        e.Error = err.Error()
+    }
+    l.log(e)
+}
+```
+
+Note: The `entry` struct's existing `Model` field can be repurposed for feed name in feed_fetch events if desired, or we keep it simple and just log the type + status. The `claw audit` normalization can parse `type: "feed_fetch"` entries.
+
+- [ ] **Step 2: Add Logger to Fetcher and log each fetch**
+
+Update `NewFetcher` to accept a logger:
+
+```go
+func NewFetcher(podName string, client *http.Client, logger *logging.Logger) *Fetcher {
+```
+
+Store it on the struct and call `f.logger.LogFeedFetch(...)` at the end of `doFetch` (both success and failure paths). Update `WithFeeds` in `handler.go` accordingly:
+
+```go
+func WithFeeds(podName string) HandlerOption {
+    return func(h *Handler) {
+        h.feedFetcher = feeds.NewFetcher(podName, nil, h.logger)
+    }
+}
+```
+
+- [ ] **Step 3: Run full test suite**
+
+Run: `cd cllama && go test ./... -v`
+Expected: ALL PASS (update test call sites for new `NewFetcher` signature — pass `nil` for logger in unit tests)
+
+- [ ] **Step 4: Commit**
+
+```bash
+cd ~/clawdapus/cllama
+git add internal/logging/logger.go internal/feeds/fetcher.go
+git commit -m "logging: add feed_fetch event type for feed injection observability"
+```
+
+---
+
+## Task 9: Build and Deploy to tiverton-house
+
+Build the updated cllama image, push to GHCR, and verify feed injection end-to-end.
 
 **Files:**
 - No code changes — this is a build/deploy/verify task
 
-- [ ] **Step 1: Build cllama binary**
+The pod uses `image: ghcr.io/mostlydev/cllama:latest` (from `compose.generated.yml`). The Dockerfile at `cllama/Dockerfile` does a multi-stage Go build into a distroless image. To deploy, we must build and push a new image to GHCR.
 
-Run: `cd ~/clawdapus/cllama && go build -o cllama ./cmd/cllama/`
-Expected: clean build, no errors
+- [ ] **Step 1: Run final test suite**
 
-- [ ] **Step 2: Rebuild the cllama Docker image for the pod**
+Run: `cd ~/clawdapus/cllama && go test ./...`
+Expected: ALL PASS
 
-Check how cllama is built for the pod — it may be part of `compose.generated.yml` or a separate image build:
+- [ ] **Step 2: Build and tag the cllama Docker image**
 
-Run: `grep -n "cllama" ~/tiverton-house/compose.generated.yml | head -10`
+```bash
+cd ~/clawdapus/cllama
+docker build -t ghcr.io/mostlydev/cllama:latest -t ghcr.io/mostlydev/cllama:feeds-v1 .
+```
 
-Then rebuild the cllama image. The exact command depends on the pod's build setup.
+Expected: successful build, image tagged as both `:latest` and `:feeds-v1`
 
-- [ ] **Step 3: Restart the pod to pick up the new cllama**
+- [ ] **Step 3: Push image to GHCR**
 
-Run: `cd ~/tiverton-house && ./scripts/pod-down.sh && ./scripts/pod-up.sh`
+```bash
+docker push ghcr.io/mostlydev/cllama:latest
+docker push ghcr.io/mostlydev/cllama:feeds-v1
+```
 
-- [ ] **Step 4: Verify feed injection in agent logs**
+Expected: successful push. Requires `docker login ghcr.io` with a PAT that has `write:packages` scope.
 
-Watch an agent's logs to confirm feed content appears in LLM requests:
+- [ ] **Step 4: Stop the pod, pull new image, start**
 
-Run: `docker compose -f ~/tiverton-house/compose.generated.yml logs cllama --tail 20`
+```bash
+cd ~/tiverton-house
+./scripts/pod-down.sh
+docker pull ghcr.io/mostlydev/cllama:latest
+./scripts/pod-up.sh
+```
 
-Check for feed fetch log lines (cllama logs each request).
+- [ ] **Step 5: Verify cllama is running with feeds**
 
-- [ ] **Step 5: Trigger an agent and verify market context appears**
+```bash
+docker compose -f ~/tiverton-house/compose.generated.yml logs cllama --tail 5
+```
 
-Manually trigger one agent's cron job and watch the response to confirm market data is in context:
+Expected: cllama starts normally, shows `cllama api listening on :8080`
 
-Run: `docker compose -f ~/tiverton-house/compose.generated.yml exec -T weston hermes cron run <weston-heartbeat-uuid>`
+- [ ] **Step 6: Trigger an agent and verify feed injection in cllama logs**
 
-- [ ] **Step 6: Commit deployment notes**
+```bash
+# Trigger weston's heartbeat (use actual UUID from .claw-runtime/weston/hermes-home/cron/jobs.json)
+docker compose -f ~/tiverton-house/compose.generated.yml exec -T weston hermes cron run <weston-heartbeat-uuid>
 
-No code commit needed — document the deployment in the pod's operational log if applicable.
+# Watch cllama logs for feed_fetch events
+docker compose -f ~/tiverton-house/compose.generated.yml logs cllama --since 2m | grep feed_fetch
+```
+
+Expected: `{"type":"feed_fetch","claw_id":"weston",...}` log entries showing successful feed fetches with status 200.
+
+- [ ] **Step 7: Verify from the agent side**
+
+Check weston's session output to confirm market context data appears in the agent's response (the agent should reference positions, wallet, or market status without being explicitly told to fetch it):
+
+```bash
+docker compose -f ~/tiverton-house/compose.generated.yml logs weston --tail 30
+```
 
 ---
 
@@ -1487,11 +1612,19 @@ No code commit needed — document the deployment in the pod's operational log i
 After all tasks are complete:
 
 - [ ] `cd ~/clawdapus/cllama && go test ./...` — all pass
-- [ ] Feed content appears in agent LLM requests (visible in cllama audit logs)
-- [ ] Agents with no feeds.json work unchanged (backward compatible)
+- [ ] `type: "feed_fetch"` log entries appear in cllama container logs when agents make LLM requests
+- [ ] Agent responses reference market data they didn't explicitly fetch (feed injection working)
+- [ ] Agents with no feeds.json work unchanged (backward compatible — covered by Task 7 test)
 - [ ] Feed fetch failures degrade gracefully (stale cache or unavailable marker, not a proxy error)
 - [ ] Feed content is capped at 32KB per feed, 64KB total
+- [ ] JSON feed responses are wrapped in fenced code blocks
 - [ ] Feed responses are cached by TTL (180s for market-context)
 - [ ] `X-Claw-ID` and `X-Claw-Pod` headers are sent on feed fetches
 - [ ] `X-Forwarded-Proto: https` is sent to bypass Rails force_ssl redirect
 - [ ] Both OpenAI and Anthropic request paths inject feeds correctly
+- [ ] Cache keys use URL (not feed name) to avoid aliasing across sources
+
+## Scope Notes
+
+- **Service-auth for authenticated feeds** is intentionally out of scope for this plan. All current feeds (market-context from trading-api) are anonymous in-cluster HTTP. ADR-013 §5 describes authenticated feeds via `service-auth/<service>.json` — that can be added when `claw-api` feeds require it.
+- **Non-cllama driver parity** is deferred per ADR-013 §8. Only cllama-enabled claws get automatic feed injection.
