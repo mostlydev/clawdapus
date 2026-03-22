@@ -1,8 +1,9 @@
 # ADR-012: Master Claw and Fleet Governance
 
 **Date:** 2026-03-19
-**Status:** Proposed
+**Status:** Accepted
 **Depends on:** ADR-013 (Context Feeds), ADR-014 (Telemetry Normalization and `claw audit`), ADR-015 (`claw-api` Authentication and Authorization Scoping)
+**Implementation:** Milestones 1-2 complete (telemetry + claw-api read plane). Milestone 3 (Master Claw example) in `examples/master-claw/` and `examples/trading-desk/`. Write plane (Milestone 4) and hub-and-spoke (Milestone 5) deferred.
 
 ## Context
 
