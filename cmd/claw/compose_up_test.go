@@ -727,8 +727,8 @@ func TestPrepareClawAPIRuntimeWritesPrincipalsAndProjectsAuth(t *testing.T) {
 	if p.Services["octopus"].Environment["CLAW_API_URL"] != "http://claw-api:8080" {
 		t.Fatalf("expected CLAW_API_URL env, got %v", p.Services["octopus"].Environment)
 	}
-	if _, ok := p.Services["octopus"].Environment["CLAW_API_TOKEN"]; ok {
-		t.Fatalf("did not expect CLAW_API_TOKEN in service env, got %v", p.Services["octopus"].Environment)
+	if token := p.Services["octopus"].Environment["CLAW_API_TOKEN"]; token == "" {
+		t.Fatal("expected CLAW_API_TOKEN in master service env")
 	}
 	if auth["octopus"].Service != "claw-api" || auth["octopus"].Token == "" {
 		t.Fatalf("expected projected claw-api auth, got %+v", auth)
