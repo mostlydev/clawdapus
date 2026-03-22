@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
@@ -78,6 +79,75 @@ func TestResolveComposeGeneratedPathWithPodFileMissingGenerated(t *testing.T) {
 	_, err := resolveComposeGeneratedPath()
 	if err == nil {
 		t.Fatal("expected error when compose.generated.yml missing next to pod file")
+	}
+}
+
+func TestResolveComposeGeneratedPathStaleWithPodFile(t *testing.T) {
+	dir := t.TempDir()
+	podDir := filepath.Join(dir, "examples", "openclaw")
+	os.MkdirAll(podDir, 0755)
+
+	// Write compose.generated.yml first (older)
+	os.WriteFile(filepath.Join(podDir, "compose.generated.yml"), []byte("services: {}"), 0644)
+	time.Sleep(50 * time.Millisecond)
+	// Write pod file second (newer) — generated file is stale
+	os.WriteFile(filepath.Join(podDir, "claw-pod.yml"), []byte("services: {}"), 0644)
+
+	composePodFile = filepath.Join(podDir, "claw-pod.yml")
+	defer func() { composePodFile = "" }()
+
+	_, err := resolveComposeGeneratedPath()
+	if err == nil {
+		t.Fatal("expected error when compose.generated.yml is stale")
+	}
+	if !strings.Contains(err.Error(), "claw up") {
+		t.Errorf("expected error to mention 'claw up', got: %s", err.Error())
+	}
+}
+
+func TestResolveComposeGeneratedPathStaleDefaultDir(t *testing.T) {
+	orig, _ := os.Getwd()
+	dir := t.TempDir()
+	os.Chdir(dir)
+	defer os.Chdir(orig)
+
+	// Write compose.generated.yml first (older)
+	os.WriteFile(filepath.Join(dir, "compose.generated.yml"), []byte("services: {}"), 0644)
+	time.Sleep(50 * time.Millisecond)
+	// Write pod file second (newer) — generated file is stale
+	os.WriteFile(filepath.Join(dir, "claw-pod.yml"), []byte("services: {}"), 0644)
+
+	composePodFile = "" // reset global
+	_, err := resolveComposeGeneratedPath()
+	if err == nil {
+		t.Fatal("expected error when compose.generated.yml is stale")
+	}
+	if !strings.Contains(err.Error(), "claw up") {
+		t.Errorf("expected error to mention 'claw up', got: %s", err.Error())
+	}
+}
+
+func TestResolveComposeGeneratedPathFreshNotStale(t *testing.T) {
+	dir := t.TempDir()
+	podDir := filepath.Join(dir, "examples", "openclaw")
+	os.MkdirAll(podDir, 0755)
+
+	// Write pod file first (older)
+	os.WriteFile(filepath.Join(podDir, "claw-pod.yml"), []byte("services: {}"), 0644)
+	time.Sleep(50 * time.Millisecond)
+	// Write compose.generated.yml second (newer) — generated file is fresh
+	os.WriteFile(filepath.Join(podDir, "compose.generated.yml"), []byte("services: {}"), 0644)
+
+	composePodFile = filepath.Join(podDir, "claw-pod.yml")
+	defer func() { composePodFile = "" }()
+
+	path, err := resolveComposeGeneratedPath()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := filepath.Join(podDir, "compose.generated.yml")
+	if path != expected {
+		t.Errorf("expected %q, got %q", expected, path)
 	}
 }
 

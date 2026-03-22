@@ -12,6 +12,9 @@ var composeDownCmd = &cobra.Command{
 	Use:   "down",
 	Short: "Stop and remove a Claw pod",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		skipStalenessCheck = true
+		defer func() { skipStalenessCheck = false }()
+
 		generatedPath, err := resolveComposeGeneratedPath()
 		if err != nil {
 			return err
