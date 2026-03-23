@@ -72,6 +72,15 @@ For `count > 1` services: all ordinals share the same wall. Each ordinal uses it
 
 **Trigger:** at least one cllama-enabled service has Discord channel IDs in its handle graph. Does not require `x-claw.master`.
 
+**Reserved service name:** `injectConversationWall()` must fail hard if the user has already declared a service named `claw-wall`, mirroring the `claw-api` reservation check at `cmd/claw/compose_up.go:103`:
+```go
+if _, exists := p.Services["claw-wall"]; exists {
+    return fmt.Errorf("service name %q is reserved for the conversation wall sidecar", "claw-wall")
+}
+```
+
+**Image provisioning:** `claw-wall` has no cllama submodule dependency and can be built from the repo root and published to ghcr.io. It follows the clawdash model: `ensureInfraImages()` adds it with `dockerfiles/claw-wall/Dockerfile` and `.` context. The normal `ensureImage` fallback chain applies: local image → `docker pull ghcr.io/mostlydev/claw-wall:latest` → local Dockerfile build → error.
+
 **Injection steps:**
 
 1. Walk all services' `handles.discord.guilds[].channels[].id` — build list of `(channel_id, DISCORD_BOT_TOKEN)` pairs from each service's environment
@@ -109,7 +118,7 @@ Internal state per channel: ring buffer of messages. Internal state per consumer
 1. **`cllama/internal/feeds/inject.go`** — patch `FormatFeedBlock` to return `""` for empty non-unavailable content
 2. **`cmd/claw-wall/`** — binary: Discord poller, ring buffer, cursor tracking, HTTP handler
 3. **`dockerfiles/claw-wall/Dockerfile`** — image build
-4. **`cmd/claw/compose_up.go`** — `injectConversationWall()`: trigger detection, add `claw-wall` to `p.Services`, append feed entries per consumer agent
+4. **`cmd/claw/compose_up.go`** — `injectConversationWall()`: reserved-name guard, trigger detection, add `claw-wall` to `p.Services`, append feed entries per consumer agent; add `claw-wall` to `ensureInfraImages()` (clawdash pattern: `dockerfiles/claw-wall/Dockerfile`, context `.`)
 5. **Unit tests** — injection logic, feed path generation, cursor advancement, empty-body on no-new-messages, cllama skip-on-empty-feed
 6. **Spike test** — verify that `mention_only` agents in a multi-agent pod respond with awareness of ambient channel context; assert no reply loops introduced
 
