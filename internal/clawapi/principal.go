@@ -12,11 +12,19 @@ import (
 )
 
 const (
-	VerbFleetStatus       = "fleet.status"
-	VerbFleetLogs         = "fleet.logs"
-	VerbFleetQueryMetrics = "fleet.query_metrics"
-	VerbFleetAlerts       = "fleet.alerts"
+	VerbFleetStatus        = "fleet.status"
+	VerbFleetLogs          = "fleet.logs"
+	VerbFleetQueryMetrics  = "fleet.query_metrics"
+	VerbFleetAlerts        = "fleet.alerts"
+	VerbFleetRestart       = "fleet.restart"
+	VerbFleetQuarantine    = "fleet.quarantine"
+	VerbFleetBudgetSet     = "fleet.budget.set"
+	VerbFleetModelRestrict = "fleet.model.restrict"
 )
+
+var AllReadVerbs = []string{VerbFleetStatus, VerbFleetLogs, VerbFleetQueryMetrics, VerbFleetAlerts}
+var AllWriteVerbs = []string{VerbFleetRestart, VerbFleetQuarantine, VerbFleetBudgetSet, VerbFleetModelRestrict}
+var AllVerbs = append(append([]string{}, AllReadVerbs...), AllWriteVerbs...)
 
 type Store struct {
 	Principals []Principal `json:"principals"`
@@ -188,6 +196,26 @@ func validateStore(store *Store) error {
 		}
 		if err := validatePatterns("compose_services", principal.ComposeServices); err != nil {
 			return fmt.Errorf("principal %q: %w", principal.Name, err)
+		}
+		if err := validateVerbs(principal.Verbs); err != nil {
+			return fmt.Errorf("principal %q: %w", principal.Name, err)
+		}
+	}
+	return nil
+}
+
+func validateVerbs(verbs []string) error {
+	for _, verb := range verbs {
+		verb = strings.TrimSpace(verb)
+		known := false
+		for _, v := range AllVerbs {
+			if v == verb {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return fmt.Errorf("unknown verb %q", verb)
 		}
 	}
 	return nil

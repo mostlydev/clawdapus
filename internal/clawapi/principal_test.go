@@ -94,6 +94,32 @@ func TestPrincipalComposeServiceScope(t *testing.T) {
 	}
 }
 
+func TestValidateStoreRejectsUnknownVerb(t *testing.T) {
+	store := &Store{
+		Principals: []Principal{{
+			Name:  "bad",
+			Token: "capi_x",
+			Verbs: []string{"fleet.explode"},
+		}},
+	}
+	if err := validateStore(store); err == nil {
+		t.Fatal("expected unknown verb error")
+	}
+}
+
+func TestValidateStoreAcceptsAllKnownVerbs(t *testing.T) {
+	store := &Store{
+		Principals: []Principal{{
+			Name:  "full",
+			Token: "capi_x",
+			Verbs: AllVerbs,
+		}},
+	}
+	if err := validateStore(store); err != nil {
+		t.Fatalf("expected all known verbs to be valid: %v", err)
+	}
+}
+
 func TestPrincipalPodScopeGrantsComposeServiceAccess(t *testing.T) {
 	p := Principal{
 		Name:  "master",
