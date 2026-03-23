@@ -129,16 +129,26 @@ func BuildMasterPrincipal(podName, principalName string) (Principal, error) {
 	if err != nil {
 		return Principal{}, err
 	}
+	verbs := append([]string{}, AllVerbs...)
 	return Principal{
 		Name:  principalName,
 		Token: token,
-		Verbs: []string{
-			VerbFleetStatus,
-			VerbFleetLogs,
-			VerbFleetQueryMetrics,
-			VerbFleetAlerts,
-		},
-		Pods: []string{podName},
+		Verbs: verbs,
+		Pods:  []string{podName},
+	}, nil
+}
+
+func BuildSelfPrincipal(podName, serviceName string) (Principal, error) {
+	token, err := GenerateToken()
+	if err != nil {
+		return Principal{}, err
+	}
+	verbs := append([]string{}, AllReadVerbs...)
+	return Principal{
+		Name:     serviceName,
+		Token:    token,
+		Verbs:    verbs,
+		Services: []string{serviceName},
 	}, nil
 }
 
