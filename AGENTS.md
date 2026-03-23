@@ -13,6 +13,7 @@ Core docs:
 - `docs/CLLAMA_SPEC.md` — cllama proxy contract
 - `docs/decisions/` — ADRs
 - `docs/plans/` — implementation plans and historical design notes
+- [GitHub Project Board](https://github.com/users/mostlydev/projects/2) — prioritized roadmap (kanban). Update issue status on the board when starting and completing work.
 
 ## Compilation Principles
 
