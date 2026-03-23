@@ -90,6 +90,11 @@ func runComposeUp(podFile string) error {
 	if err := resetRuntimeDir(runtimeDir); err != nil {
 		return fmt.Errorf("reset runtime dir: %w", err)
 	}
+	// Governance dir is separate from runtimeDir so it survives claw up resets.
+	governanceDir := filepath.Join(podDir, ".claw-governance")
+	if err := os.MkdirAll(governanceDir, 0o777); err != nil {
+		return fmt.Errorf("create governance dir: %w", err)
+	}
 	if p.Master != "" {
 		if _, exists := p.Services["claw-api"]; exists {
 			return fmt.Errorf("service name %q is reserved when x-claw.master is set", "claw-api")
@@ -100,6 +105,7 @@ func runComposeUp(podFile string) error {
 			ManifestHostPath:   filepath.Join(runtimeDir, "pod-manifest.json"),
 			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
 			DockerSockHostPath: "/var/run/docker.sock",
+			GovernanceHostPath: governanceDir,
 			PodName:            p.Name,
 			Environment:        collectClawAlertEnv(),
 		}

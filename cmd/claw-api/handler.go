@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -33,12 +34,13 @@ import (
 )
 
 type apiHandler struct {
-	manifest   *manifestpkg.PodManifest
-	store      *clawapi.Store
-	docker     *client.Client
-	auditLog   *json.Encoder
-	auditErr   io.Writer
-	thresholds clawapi.Thresholds
+	manifest      *manifestpkg.PodManifest
+	store         *clawapi.Store
+	docker        *client.Client
+	auditLog      *json.Encoder
+	auditErr      io.Writer
+	thresholds    clawapi.Thresholds
+	governanceDir string
 }
 
 type serviceStatus struct {
@@ -59,17 +61,18 @@ type alert struct {
 	Summary  string `json:"summary"`
 }
 
-func newHandler(manifest *manifestpkg.PodManifest, store *clawapi.Store, docker *client.Client, auditWriter io.Writer, thresholds clawapi.Thresholds) http.Handler {
+func newHandler(manifest *manifestpkg.PodManifest, store *clawapi.Store, docker *client.Client, auditWriter io.Writer, thresholds clawapi.Thresholds, governanceDir string) http.Handler {
 	if auditWriter == nil {
 		auditWriter = io.Discard
 	}
 	return &apiHandler{
-		manifest:   manifest,
-		store:      store,
-		docker:     docker,
-		auditLog:   json.NewEncoder(auditWriter),
-		auditErr:   os.Stderr,
-		thresholds: thresholds,
+		manifest:      manifest,
+		store:         store,
+		docker:        docker,
+		auditLog:      json.NewEncoder(auditWriter),
+		auditErr:      os.Stderr,
+		thresholds:    thresholds,
+		governanceDir: governanceDir,
 	}
 }
 
@@ -89,6 +92,18 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodGet && r.URL.Path == "/fleet/alerts":
 		h.handleAlerts(w, r)
+		return
+	case r.Method == http.MethodPost && r.URL.Path == "/fleet/restart":
+		h.handleRestart(w, r)
+		return
+	case r.Method == http.MethodPost && r.URL.Path == "/fleet/quarantine":
+		h.handleQuarantine(w, r)
+		return
+	case r.Method == http.MethodPost && r.URL.Path == "/fleet/budget/set":
+		h.handleBudgetSet(w, r)
+		return
+	case r.Method == http.MethodPost && r.URL.Path == "/fleet/model/restrict":
+		h.handleModelRestrict(w, r)
 		return
 	default:
 		http.NotFound(w, r)
@@ -206,6 +221,18 @@ func (h *apiHandler) authorize(w http.ResponseWriter, r *http.Request, verb, tar
 			return nil, false
 		}
 	case clawapi.VerbFleetQueryMetrics:
+		if !principal.AllowsClawID(h.manifest.PodName, target) {
+			h.logDecision(principal.Name, verb, target, false, "claw_id out of scope")
+			writeJSONError(w, http.StatusForbidden, "claw_id is out of scope")
+			return nil, false
+		}
+	case clawapi.VerbFleetRestart, clawapi.VerbFleetQuarantine:
+		if !principal.AllowsComposeService(h.manifest.PodName, target) {
+			h.logDecision(principal.Name, verb, target, false, "compose service out of scope")
+			writeJSONError(w, http.StatusForbidden, "compose service is out of scope")
+			return nil, false
+		}
+	case clawapi.VerbFleetBudgetSet, clawapi.VerbFleetModelRestrict:
 		if !principal.AllowsClawID(h.manifest.PodName, target) {
 			h.logDecision(principal.Name, verb, target, false, "claw_id out of scope")
 			writeJSONError(w, http.StatusForbidden, "claw_id is out of scope")
@@ -375,6 +402,202 @@ func (h *apiHandler) collectAlerts(ctx context.Context, principal *clawapi.Princ
 		}
 	}
 	return alerts, nil
+}
+
+// --- Write plane handlers ---
+
+type serviceTargetRequest struct {
+	Service string `json:"service"`
+}
+
+type budgetSetRequest struct {
+	ClawID   string  `json:"claw_id"`
+	LimitUSD float64 `json:"limit_usd"`
+	Window   string  `json:"window"`
+	Behavior string  `json:"behavior"`
+}
+
+type modelRestrictRequest struct {
+	ClawID        string   `json:"claw_id"`
+	AllowedModels []string `json:"allowed_models"`
+}
+
+var knownBudgetBehaviors = map[string]bool{
+	"rate_limit":      true,
+	"hard_stop":       true,
+	"soft_alert":      true,
+	"graceful_switch": true,
+}
+
+func (h *apiHandler) handleRestart(w http.ResponseWriter, r *http.Request) {
+	var req serviceTargetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Service = strings.TrimSpace(req.Service)
+	if req.Service == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing service")
+		return
+	}
+	principal, ok := h.authorize(w, r, clawapi.VerbFleetRestart, req.Service)
+	if !ok {
+		return
+	}
+	_ = principal
+	containers, err := h.listPodContainers(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	targets := matchServiceContainers(containers, req.Service)
+	if len(targets) == 0 {
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("no containers found for service %q", req.Service))
+		return
+	}
+	for _, ctr := range targets {
+		if err := h.docker.ContainerRestart(r.Context(), ctr.ID, containerapi.StopOptions{}); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("restart %s: %v", ctr.ID[:12], err))
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"restarted": req.Service, "count": len(targets)})
+}
+
+func (h *apiHandler) handleQuarantine(w http.ResponseWriter, r *http.Request) {
+	var req serviceTargetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Service = strings.TrimSpace(req.Service)
+	if req.Service == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing service")
+		return
+	}
+	principal, ok := h.authorize(w, r, clawapi.VerbFleetQuarantine, req.Service)
+	if !ok {
+		return
+	}
+
+	// Write quarantine marker first so the state is recorded even if the stop races.
+	marker := map[string]any{
+		"quarantined": true,
+		"at":          time.Now().UTC().Format(time.RFC3339),
+		"by":          principal.Name,
+	}
+	if err := h.writeGovernanceFile(req.Service, "quarantine.json", marker); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write quarantine marker: %v", err))
+		return
+	}
+
+	if h.docker == nil {
+		writeJSONError(w, http.StatusInternalServerError, "docker client unavailable")
+		return
+	}
+	containers, err := h.listPodContainers(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	targets := matchServiceContainers(containers, req.Service)
+	if len(targets) == 0 {
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("no containers found for service %q", req.Service))
+		return
+	}
+	for _, ctr := range targets {
+		if err := h.docker.ContainerStop(r.Context(), ctr.ID, containerapi.StopOptions{}); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("stop %s: %v", ctr.ID[:12], err))
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"quarantined": req.Service, "count": len(targets)})
+}
+
+func (h *apiHandler) handleBudgetSet(w http.ResponseWriter, r *http.Request) {
+	var req budgetSetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.ClawID = strings.TrimSpace(req.ClawID)
+	if req.ClawID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing claw_id")
+		return
+	}
+	if req.LimitUSD <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "limit_usd must be positive")
+		return
+	}
+	if req.Window == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing window")
+		return
+	}
+	if !knownBudgetBehaviors[req.Behavior] {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("unknown behavior %q: must be one of rate_limit, hard_stop, soft_alert, graceful_switch", req.Behavior))
+		return
+	}
+	_, ok := h.authorize(w, r, clawapi.VerbFleetBudgetSet, req.ClawID)
+	if !ok {
+		return
+	}
+	payload := map[string]any{
+		"limit_usd": req.LimitUSD,
+		"window":    req.Window,
+		"behavior":  req.Behavior,
+	}
+	if err := h.writeGovernanceFile(req.ClawID, "budget.json", payload); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write budget override: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"claw_id": req.ClawID, "budget": payload})
+}
+
+func (h *apiHandler) handleModelRestrict(w http.ResponseWriter, r *http.Request) {
+	var req modelRestrictRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.ClawID = strings.TrimSpace(req.ClawID)
+	if req.ClawID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing claw_id")
+		return
+	}
+	if len(req.AllowedModels) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "allowed_models must not be empty")
+		return
+	}
+	_, ok := h.authorize(w, r, clawapi.VerbFleetModelRestrict, req.ClawID)
+	if !ok {
+		return
+	}
+	payload := map[string]any{
+		"allowed_models": req.AllowedModels,
+	}
+	if err := h.writeGovernanceFile(req.ClawID, "model-restrict.json", payload); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write model-restrict override: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"claw_id": req.ClawID, "model_restrict": payload})
+}
+
+// writeGovernanceFile atomically writes a JSON file to <governanceDir>/<target>/<name>.
+func (h *apiHandler) writeGovernanceFile(target, name string, payload any) error {
+	dir := filepath.Join(h.governanceDir, target)
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		return err
+	}
+	dest := filepath.Join(dir, name)
+	tmp := dest + ".tmp"
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(tmp, data, 0o666); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dest)
 }
 
 func (h *apiHandler) listPodContainers(ctx context.Context) ([]types.Container, error) {

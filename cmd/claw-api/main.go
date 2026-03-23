@@ -25,6 +25,7 @@ type config struct {
 	Addr           string
 	ManifestPath   string
 	PrincipalsPath string
+	GovernanceDir  string
 }
 
 func main() {
@@ -46,6 +47,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runHealthcheck(cfg.Addr)
 	}
 
+
 	manifest, err := loadManifest(cfg.ManifestPath)
 	if err != nil {
 		return err
@@ -60,7 +62,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	defer docker.Close()
 
-	handler := newHandler(manifest, store, docker, stdout, clawapi.ThresholdsFromEnv())
+	handler := newHandler(manifest, store, docker, stdout, clawapi.ThresholdsFromEnv(), cfg.GovernanceDir)
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           handler,
@@ -106,6 +108,7 @@ func configFromEnv() config {
 		Addr:           envOr("CLAW_API_ADDR", ":8080"),
 		ManifestPath:   envOr("CLAW_API_MANIFEST", "/claw/pod-manifest.json"),
 		PrincipalsPath: envOr("CLAW_API_PRINCIPALS", "/claw/principals.json"),
+		GovernanceDir:  envOr("CLAW_GOVERNANCE_DIR", "/claw-governance"),
 	}
 }
 
