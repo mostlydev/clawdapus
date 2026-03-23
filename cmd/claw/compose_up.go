@@ -929,11 +929,39 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		return nil, fmt.Errorf("master service %q not found in pod services", p.Master)
 	}
 
-	principal, err := clawapi.BuildMasterPrincipal(p.Name, p.Master)
+	clawAPIURL := fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr))
+
+	// 1. Build master principal (full access, pod-wide).
+	masterPrincipal, err := clawapi.BuildMasterPrincipal(p.Name, p.Master)
 	if err != nil {
 		return nil, err
 	}
-	store := clawapi.Store{Principals: []clawapi.Principal{principal}}
+	auto := []clawapi.Principal{masterPrincipal}
+
+	// 2. Build self principals for services declaring claw-api: self.
+	for name, svc := range p.Services {
+		if name == p.Master || svc.Claw == nil || svc.Claw.ClawAPIMode != "self" {
+			continue
+		}
+		sp, err := clawapi.BuildSelfPrincipal(p.Name, name)
+		if err != nil {
+			return nil, fmt.Errorf("service %q: build self principal: %w", name, err)
+		}
+		auto = append(auto, sp)
+	}
+
+	// 3. Merge with explicit pod-level principals.
+	merged, err := mergePrincipals(auto, p.Principals, p.Name)
+	if err != nil {
+		return nil, fmt.Errorf("merge principals: %w", err)
+	}
+
+	// 4. Write principals.json.
+	principals := make([]clawapi.Principal, len(merged))
+	for i, m := range merged {
+		principals[i] = m.Principal
+	}
+	store := clawapi.Store{Principals: principals}
 	principalsDir := filepath.Dir(p.ClawAPI.PrincipalsHostPath)
 	if err := os.MkdirAll(principalsDir, 0700); err != nil {
 		return nil, fmt.Errorf("create claw-api runtime dir under %q: %w", runtimeDir, err)
@@ -946,17 +974,41 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		return nil, fmt.Errorf("write claw-api principals: %w", err)
 	}
 
-	if masterSvc.Environment == nil {
-		masterSvc.Environment = make(map[string]string)
+	// 5. Inject tokens into services.
+	injectClawAPIEnv := func(svc *pod.Service, token string) {
+		if svc.Environment == nil {
+			svc.Environment = make(map[string]string)
+		}
+		svc.Environment["CLAW_API_URL"] = clawAPIURL
+		svc.Environment["CLAW_API_TOKEN"] = token
 	}
-	masterSvc.Environment["CLAW_API_URL"] = fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr))
-	masterSvc.Environment["CLAW_API_TOKEN"] = principal.Token
 
+	// Master always gets its token.
+	injectClawAPIEnv(masterSvc, masterPrincipal.Token)
+
+	// Self principals and explicit inject-into targets.
+	for _, m := range merged {
+		if m.Principal.Name == p.Master {
+			continue // already handled
+		}
+		// Self principal: inject into the service that declared claw-api: self.
+		if svc, ok := p.Services[m.Principal.Name]; ok && svc.Claw != nil && svc.Claw.ClawAPIMode == "self" {
+			injectClawAPIEnv(svc, m.Principal.Token)
+		}
+		// Explicit inject-into.
+		if m.InjectInto != "" {
+			if svc, ok := p.Services[m.InjectInto]; ok {
+				injectClawAPIEnv(svc, m.Principal.Token)
+			}
+		}
+	}
+
+	// 6. Build cllama service auth entries for the master (feed fetching).
 	authEntry := cllama.ServiceAuthEntry{
 		Service:   "claw-api",
 		AuthType:  "bearer",
-		Token:     principal.Token,
-		Principal: principal.Name,
+		Token:     masterPrincipal.Token,
+		Principal: masterPrincipal.Name,
 	}
 	serviceAuth := make(map[string]cllama.ServiceAuthEntry)
 	count := 1
