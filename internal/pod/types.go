@@ -12,6 +12,8 @@ type Pod struct {
 	ClawAPI               *ClawAPIConfig
 	Clawdash              *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
 	Principals            []PodPrincipal
+	AlertWebhooks         []string // pod-scoped Discord webhook URLs for pool-transition alerts
+	AlertMentions         []string // pod-scoped @-mention targets for alerts (e.g. "@wojtek", "@infra")
 }
 
 // Service represents a service in a claw-pod.yml.

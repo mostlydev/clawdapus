@@ -1580,8 +1580,12 @@ func TestIsProviderKey(t *testing.T) {
 		want bool
 	}{
 		{"OPENAI_API_KEY", true},
+		{"OPENAI_API_KEY_1", true},
+		{"OPENAI_API_KEY_2", true},
 		{"ANTHROPIC_API_KEY", true},
+		{"ANTHROPIC_API_KEY_1", true},
 		{"OPENROUTER_API_KEY", true},
+		{"OPENROUTER_API_KEY_1", true},
 		{"PROVIDER_API_KEY_CUSTOM", true},
 		{"DISCORD_BOT_TOKEN", false},
 		{"LOG_LEVEL", false},
@@ -1590,6 +1594,285 @@ func TestIsProviderKey(t *testing.T) {
 		if got := isProviderKey(tt.key); got != tt.want {
 			t.Errorf("isProviderKey(%q) = %v, want %v", tt.key, got, tt.want)
 		}
+	}
+}
+
+// -- mergeProviderSeeds -------------------------------------------------------
+
+func TestMergeProviderSeedsWritesV2File(t *testing.T) {
+	dir := t.TempDir()
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OPENAI_API_KEY": "sk-primary",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+
+	var probe struct {
+		Version   int `json:"version"`
+		Providers map[string]struct {
+			Keys []struct {
+				ID     string `json:"id"`
+				Secret string `json:"secret"`
+				State  string `json:"state"`
+				Source string `json:"source"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	if probe.Version != 2 {
+		t.Errorf("expected version=2, got %d", probe.Version)
+	}
+	op, ok := probe.Providers["openai"]
+	if !ok {
+		t.Fatal("openai missing from output")
+	}
+	if len(op.Keys) != 1 {
+		t.Fatalf("expected 1 openai key, got %d", len(op.Keys))
+	}
+	k := op.Keys[0]
+	if k.ID != "seed:OPENAI_API_KEY" {
+		t.Errorf("key ID = %q, want seed:OPENAI_API_KEY", k.ID)
+	}
+	if k.Secret != "sk-primary" {
+		t.Errorf("key secret = %q, want sk-primary", k.Secret)
+	}
+	if k.State != "ready" {
+		t.Errorf("key state = %q, want ready", k.State)
+	}
+}
+
+func TestMergeProviderSeedsPreservesExistingRuntimeKeys(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed an existing v2 file with a runtime key.
+	existing := `{
+		"version": 2,
+		"providers": {
+			"openai": {
+				"base_url": "https://api.openai.com/v1",
+				"auth": "bearer",
+				"api_format": "openai",
+				"active_key_id": "seed:OPENAI_API_KEY",
+				"keys": [
+					{"id": "seed:OPENAI_API_KEY", "label": "primary", "secret": "sk-primary",
+					 "source": "seed", "state": "ready", "cooldown_until": "",
+					 "last_error_code": 0, "last_error_reason": "", "last_error_at": "", "added_at": "2026-03-23T00:00:00Z"},
+					{"id": "runtime:extra", "label": "extra", "secret": "sk-runtime",
+					 "source": "runtime", "state": "ready", "cooldown_until": "",
+					 "last_error_code": 0, "last_error_reason": "", "last_error_at": "", "added_at": "2026-03-23T00:00:00Z"}
+				]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OPENAI_API_KEY": "sk-primary",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "providers.json"))
+	var probe struct {
+		Providers map[string]struct {
+			Keys []struct {
+				ID     string `json:"id"`
+				Source string `json:"source"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	_ = json.Unmarshal(data, &probe)
+	var foundRuntime bool
+	for _, k := range probe.Providers["openai"].Keys {
+		if k.ID == "runtime:extra" && k.Source == "runtime" {
+			foundRuntime = true
+		}
+	}
+	if !foundRuntime {
+		t.Error("runtime key was dropped by mergeProviderSeeds")
+	}
+}
+
+func TestMergeProviderSeedsResetsStateWhenSecretChanges(t *testing.T) {
+	dir := t.TempDir()
+
+	// Start with a dead key.
+	existing := `{
+		"version": 2,
+		"providers": {
+			"openai": {
+				"base_url": "https://api.openai.com/v1",
+				"auth": "bearer",
+				"api_format": "openai",
+				"active_key_id": "seed:OPENAI_API_KEY",
+				"keys": [
+					{"id": "seed:OPENAI_API_KEY", "label": "primary", "secret": "sk-old",
+					 "source": "seed", "state": "dead", "cooldown_until": "",
+					 "last_error_code": 401, "last_error_reason": "http_401", "last_error_at": "2026-03-23T00:00:00Z",
+					 "added_at": "2026-03-23T00:00:00Z"}
+				]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OPENAI_API_KEY": "sk-new",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "providers.json"))
+	var probe struct {
+		Providers map[string]struct {
+			Keys []struct {
+				Secret string `json:"secret"`
+				State  string `json:"state"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	_ = json.Unmarshal(data, &probe)
+	keys := probe.Providers["openai"].Keys
+	if len(keys) == 0 {
+		t.Fatal("no keys after merge")
+	}
+	if keys[0].Secret != "sk-new" {
+		t.Errorf("expected secret=sk-new, got %q", keys[0].Secret)
+	}
+	if keys[0].State != "ready" {
+		t.Errorf("expected state=ready after secret change, got %q", keys[0].State)
+	}
+}
+
+func TestMergeProviderSeedsPreservesStateWhenSecretUnchanged(t *testing.T) {
+	dir := t.TempDir()
+
+	// Start with a cooldown key with same secret.
+	existing := `{
+		"version": 2,
+		"providers": {
+			"openai": {
+				"base_url": "https://api.openai.com/v1",
+				"auth": "bearer",
+				"api_format": "openai",
+				"active_key_id": "seed:OPENAI_API_KEY",
+				"keys": [
+					{"id": "seed:OPENAI_API_KEY", "label": "primary", "secret": "sk-same",
+					 "source": "seed", "state": "cooldown", "cooldown_until": "2026-12-31T23:59:59Z",
+					 "last_error_code": 429, "last_error_reason": "rate_limit", "last_error_at": "2026-03-23T00:00:00Z",
+					 "added_at": "2026-03-23T00:00:00Z"}
+				]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OPENAI_API_KEY": "sk-same",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "providers.json"))
+	var probe struct {
+		Providers map[string]struct {
+			Keys []struct {
+				State string `json:"state"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	_ = json.Unmarshal(data, &probe)
+	keys := probe.Providers["openai"].Keys
+	if len(keys) == 0 {
+		t.Fatal("no keys after merge")
+	}
+	if keys[0].State != "cooldown" {
+		t.Errorf("expected state=cooldown preserved, got %q", keys[0].State)
+	}
+}
+
+// -- loadOrGenerateUIToken ----------------------------------------------------
+
+func TestLoadOrGenerateUITokenCreatesNewToken(t *testing.T) {
+	dir := t.TempDir()
+	token, err := loadOrGenerateUIToken(dir)
+	if err != nil {
+		t.Fatalf("loadOrGenerateUIToken: %v", err)
+	}
+	if len(token) == 0 {
+		t.Error("expected non-empty token")
+	}
+	// Token should be persisted.
+	data, err := os.ReadFile(filepath.Join(dir, "ui-token"))
+	if err != nil {
+		t.Fatalf("ui-token file not created: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != token {
+		t.Errorf("persisted token %q != returned token %q", strings.TrimSpace(string(data)), token)
+	}
+}
+
+func TestLoadOrGenerateUITokenRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	first, err := loadOrGenerateUIToken(dir)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	second, err := loadOrGenerateUIToken(dir)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if first != second {
+		t.Errorf("token changed between calls: %q != %q", first, second)
 	}
 }
 

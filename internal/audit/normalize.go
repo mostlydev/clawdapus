@@ -64,6 +64,12 @@ func NormalizeLine(line []byte) (*Event, error) {
 	if value, ok := float64Field(raw, "cost_usd"); ok {
 		event.CostUSD = &value
 	}
+	// provider_pool event fields
+	event.Provider = strings.TrimSpace(stringField(raw, "provider"))
+	event.KeyID = strings.TrimSpace(stringField(raw, "key_id"))
+	event.Action = strings.TrimSpace(stringField(raw, "action"))
+	event.Reason = strings.TrimSpace(stringField(raw, "reason"))
+	event.CooldownUntil = strings.TrimSpace(stringField(raw, "cooldown_until"))
 
 	return event, nil
 }

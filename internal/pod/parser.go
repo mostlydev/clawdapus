@@ -26,6 +26,8 @@ type rawPodClaw struct {
 	SequentialConformance bool                   `yaml:"sequential-conformance"`
 	HandlesDefaults       map[string]interface{} `yaml:"handles-defaults"`
 	Principals            []rawPrincipalEntry    `yaml:"principals"`
+	AlertWebhooks         []string               `yaml:"alert-webhooks"`
+	AlertMentions         []string               `yaml:"alert-mentions"`
 }
 
 type rawPrincipalEntry struct {
@@ -119,6 +121,8 @@ func Parse(r io.Reader) (*Pod, error) {
 		SequentialConformance: raw.XClaw.SequentialConformance,
 		Services:              make(map[string]*Service, len(raw.Services)),
 		Compose:               preservedRoot,
+		AlertWebhooks:         raw.XClaw.AlertWebhooks,
+		AlertMentions:         raw.XClaw.AlertMentions,
 	}
 
 	rawServices, err := mapStringAny(root["services"])
@@ -473,6 +477,14 @@ func expandPodDefaults(root map[string]interface{}) error {
 		}
 		if rawBlock == nil {
 			continue
+		}
+
+		// alert-webhooks and alert-mentions are pod-scoped only.
+		// A service x-claw block that declares either key is a hard error.
+		for _, forbidden := range []string{"alert-webhooks", "alert-mentions"} {
+			if _, found := rawBlock[forbidden]; found {
+				return fmt.Errorf("service %q: %q is a pod-level field and cannot be declared on a service", name, forbidden)
+			}
 		}
 
 		if err := applyRawPodDefaults(rawBlock, defaults); err != nil {

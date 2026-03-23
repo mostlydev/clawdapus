@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -506,9 +509,37 @@ func runComposeUp(podFile string) error {
 			return fmt.Errorf("generate cllama context dir: %w", err)
 		}
 
-		authDir := filepath.Join(runtimeDir, "proxy-auth")
-		if err := os.MkdirAll(authDir, 0700); err != nil {
+		// .claw-auth is a persistent sibling of .claw-runtime — claw up never wipes it.
+		authDir := filepath.Join(podDir, ".claw-auth")
+		if err := os.MkdirAll(authDir, 0o777); err != nil {
 			return fmt.Errorf("create cllama auth dir: %w", err)
+		}
+
+		// Compile seed keys from all service CllamaEnv into providers.json.
+		if err := mergeProviderSeeds(authDir, p); err != nil {
+			return fmt.Errorf("write providers.json: %w", err)
+		}
+
+		// Load or generate CLLAMA_UI_TOKEN (persists across re-ups).
+		uiToken, err := loadOrGenerateUIToken(authDir)
+		if err != nil {
+			return fmt.Errorf("cllama UI token: %w", err)
+		}
+
+		// Finalize proxyEnv: strip provider keys; add alert vars and UI token.
+		// Provider keys now live in providers.json, not in the container env.
+		finalProxyEnv := make(map[string]string, len(proxyEnv)+4)
+		for k, v := range proxyEnv {
+			if !isProviderKey(k) {
+				finalProxyEnv[k] = v
+			}
+		}
+		finalProxyEnv["CLLAMA_UI_TOKEN"] = uiToken
+		if len(p.AlertWebhooks) > 0 {
+			finalProxyEnv["CLLAMA_ALERT_WEBHOOKS"] = strings.Join(p.AlertWebhooks, ",")
+		}
+		if len(p.AlertMentions) > 0 {
+			finalProxyEnv["CLLAMA_ALERT_MENTIONS"] = strings.Join(p.AlertMentions, ",")
 		}
 
 		for _, proxyType := range proxyTypes {
@@ -518,7 +549,7 @@ func runComposeUp(podFile string) error {
 				ContextHostDir: filepath.Join(runtimeDir, "context"),
 				AuthHostDir:    authDir,
 				DashboardPort:  cllamaDashboardPort,
-				Environment:    proxyEnv,
+				Environment:    finalProxyEnv,
 				PodName:        p.Name,
 			})
 		}
@@ -1943,9 +1974,319 @@ func sortedResolvedClawNames(claws map[string]*driver.ResolvedClaw) []string {
 	return names
 }
 
+// -- provider seed helpers ---------------------------------------------------
+
+// seedKeyDef maps a cllama-env var name to its deterministic pool attributes.
+type seedKeyDef struct {
+	envVar   string
+	provider string
+	keyID    string // e.g. "seed:OPENAI_API_KEY"
+	label    string
+}
+
+var seedKeyDefs = []seedKeyDef{
+	{"OPENAI_API_KEY", "openai", "seed:OPENAI_API_KEY", "primary"},
+	{"OPENAI_API_KEY_1", "openai", "seed:OPENAI_API_KEY_1", "backup-1"},
+	{"OPENAI_API_KEY_2", "openai", "seed:OPENAI_API_KEY_2", "backup-2"},
+	{"ANTHROPIC_API_KEY", "anthropic", "seed:ANTHROPIC_API_KEY", "primary"},
+	{"ANTHROPIC_API_KEY_1", "anthropic", "seed:ANTHROPIC_API_KEY_1", "backup-1"},
+	{"OPENROUTER_API_KEY", "openrouter", "seed:OPENROUTER_API_KEY", "primary"},
+	{"OPENROUTER_API_KEY_1", "openrouter", "seed:OPENROUTER_API_KEY_1", "backup-1"},
+}
+
+// v2ProviderFile is the providers.json v2 on-disk shape (write path only).
+type v2ProviderFile struct {
+	Version   int                        `json:"version"`
+	Providers map[string]*v2ProviderState `json:"providers"`
+}
+
+type v2ProviderState struct {
+	BaseURL     string      `json:"base_url"`
+	Auth        string      `json:"auth,omitempty"`
+	APIFormat   string      `json:"api_format,omitempty"`
+	ActiveKeyID string      `json:"active_key_id,omitempty"`
+	Keys        []v2KeyEntry `json:"keys"`
+}
+
+type v2KeyEntry struct {
+	ID              string `json:"id"`
+	Label           string `json:"label,omitempty"`
+	Secret          string `json:"secret"`
+	Source          string `json:"source"`
+	State           string `json:"state"`
+	CooldownUntil   string `json:"cooldown_until"`
+	LastErrorCode   int    `json:"last_error_code"`
+	LastErrorReason string `json:"last_error_reason"`
+	LastErrorAt     string `json:"last_error_at"`
+	AddedAt         string `json:"added_at"`
+}
+
+var defaultBaseURLs = map[string]string{
+	"openai":     "https://api.openai.com/v1",
+	"anthropic":  "https://api.anthropic.com/v1",
+	"openrouter": "https://openrouter.ai/api/v1",
+}
+
+var defaultAuths = map[string]string{
+	"anthropic": "x-api-key",
+}
+
+var defaultFormats = map[string]string{
+	"anthropic": "anthropic",
+}
+
+// mergeProviderSeeds loads any existing providers.json from authDir, merges
+// seed keys compiled from the pod's cllama-env, and writes the result atomically.
+func mergeProviderSeeds(authDir string, p *pod.Pod) error {
+	// Collect deduplicated cllama-env from all services.
+	merged := make(map[string]string)
+	for _, svc := range p.Services {
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		for k, v := range svc.Claw.CllamaEnv {
+			if _, exists := merged[k]; !exists {
+				merged[k] = v
+			}
+		}
+	}
+
+	// Load existing file (v1 or v2) into our local v2 struct.
+	existing := loadExistingProviders(authDir)
+
+	// Build new provider states from seed defs.
+	// Group seed defs by provider.
+	type provSeed struct {
+		def    seedKeyDef
+		secret string
+	}
+	bySvc := make(map[string][]provSeed)
+	for _, def := range seedKeyDefs {
+		v := strings.TrimSpace(merged[def.envVar])
+		if v == "" {
+			continue
+		}
+		bySvc[def.provider] = append(bySvc[def.provider], provSeed{def, v})
+	}
+
+	// Also collect base URLs from cllama-env.
+	baseURLEnvMap := map[string]string{
+		"OPENAI_BASE_URL":     "openai",
+		"ANTHROPIC_BASE_URL":  "anthropic",
+		"OPENROUTER_BASE_URL": "openrouter",
+	}
+	customBaseURLs := make(map[string]string)
+	for envKey, prov := range baseURLEnvMap {
+		if v := strings.TrimSpace(merged[envKey]); v != "" {
+			customBaseURLs[prov] = v
+		}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Merge for each provider that has seeds.
+	for provName, seeds := range bySvc {
+		state, exists := existing[provName]
+		if !exists {
+			state = &v2ProviderState{
+				Auth:      defaultAuths[provName],
+				APIFormat: defaultFormats[provName],
+			}
+			if state.Auth == "" {
+				state.Auth = "bearer"
+			}
+			if state.APIFormat == "" {
+				state.APIFormat = "openai"
+			}
+		}
+		// Update base URL.
+		if cu := customBaseURLs[provName]; cu != "" {
+			state.BaseURL = cu
+		}
+		if state.BaseURL == "" {
+			state.BaseURL = defaultBaseURLs[provName]
+		}
+
+		// Build index of existing keys by ID.
+		existingByID := make(map[string]*v2KeyEntry, len(state.Keys))
+		for i := range state.Keys {
+			existingByID[state.Keys[i].ID] = &state.Keys[i]
+		}
+
+		// Determine which seed IDs are present in the new config.
+		newSeedIDs := make(map[string]bool)
+		for _, s := range seeds {
+			newSeedIDs[s.def.keyID] = true
+		}
+
+		// Keep runtime keys unchanged; rebuild seed keys.
+		var runtimeKeys []v2KeyEntry
+		for _, k := range state.Keys {
+			if k.Source == "runtime" {
+				runtimeKeys = append(runtimeKeys, k)
+			}
+		}
+
+		var newKeys []v2KeyEntry
+		var firstSeedID string
+		for _, s := range seeds {
+			if firstSeedID == "" {
+				firstSeedID = s.def.keyID
+			}
+			if old, ok := existingByID[s.def.keyID]; ok && old.Source == "seed" {
+				if old.Secret == s.secret {
+					// Same secret — keep existing runtime state (e.g., dead stays dead).
+					newKeys = append(newKeys, *old)
+				} else {
+					// Different secret — reset to ready.
+					*old = v2KeyEntry{
+						ID:      s.def.keyID,
+						Label:   s.def.label,
+						Secret:  s.secret,
+						Source:  "seed",
+						State:   "ready",
+						AddedAt: now,
+					}
+					newKeys = append(newKeys, *old)
+				}
+			} else {
+				newKeys = append(newKeys, v2KeyEntry{
+					ID:      s.def.keyID,
+					Label:   s.def.label,
+					Secret:  s.secret,
+					Source:  "seed",
+					State:   "ready",
+					AddedAt: now,
+				})
+			}
+		}
+		// Append runtime keys after seed keys.
+		newKeys = append(newKeys, runtimeKeys...)
+		state.Keys = newKeys
+
+		// Preserve active_key_id if it still exists, otherwise default to first seed.
+		found := false
+		for _, k := range state.Keys {
+			if k.ID == state.ActiveKeyID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			state.ActiveKeyID = firstSeedID
+		}
+
+		existing[provName] = state
+	}
+
+	out := v2ProviderFile{
+		Version:   2,
+		Providers: existing,
+	}
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(authDir, "providers.json")
+	tmp := dest + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dest)
+}
+
+// loadExistingProviders reads providers.json from authDir, handling v1 and v2 formats.
+// Returns an empty map if the file doesn't exist.
+func loadExistingProviders(authDir string) map[string]*v2ProviderState {
+	out := make(map[string]*v2ProviderState)
+	path := filepath.Join(authDir, "providers.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return out
+	}
+
+	var probe struct {
+		Version   int                              `json:"version"`
+		Providers map[string]json.RawMessage       `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return out
+	}
+
+	if probe.Version >= 2 {
+		// v2: unmarshal full ProviderState.
+		for name, raw := range probe.Providers {
+			var state v2ProviderState
+			if err := json.Unmarshal(raw, &state); err == nil {
+				cp := state
+				out[strings.ToLower(strings.TrimSpace(name))] = &cp
+			}
+		}
+		return out
+	}
+
+	// v1: extract api_key into a single seed entry.
+	for name, raw := range probe.Providers {
+		var v1 struct {
+			BaseURL   string `json:"base_url"`
+			APIKey    string `json:"api_key"`
+			Auth      string `json:"auth"`
+			APIFormat string `json:"api_format"`
+		}
+		if err := json.Unmarshal(raw, &v1); err != nil {
+			continue
+		}
+		n := strings.ToLower(strings.TrimSpace(name))
+		state := &v2ProviderState{
+			BaseURL:   v1.BaseURL,
+			Auth:      v1.Auth,
+			APIFormat: v1.APIFormat,
+		}
+		if v1.APIKey != "" {
+			keyID := "seed:" + strings.ToUpper(n) + "_API_KEY"
+			state.ActiveKeyID = keyID
+			state.Keys = []v2KeyEntry{{
+				ID:      keyID,
+				Label:   "primary",
+				Secret:  v1.APIKey,
+				Source:  "seed",
+				State:   "ready",
+				AddedAt: time.Now().UTC().Format(time.RFC3339),
+			}}
+		}
+		out[n] = state
+	}
+	return out
+}
+
+// loadOrGenerateUIToken reads the persisted UI token from authDir, or generates
+// and writes a new one if none exists.
+func loadOrGenerateUIToken(authDir string) (string, error) {
+	tokenPath := filepath.Join(authDir, "ui-token")
+	data, err := os.ReadFile(tokenPath)
+	if err == nil {
+		token := strings.TrimSpace(string(data))
+		if token != "" {
+			return token, nil
+		}
+	}
+	// Generate a new 32-byte random token.
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate UI token: %w", err)
+	}
+	token := hex.EncodeToString(b)
+	if err := os.WriteFile(tokenPath, []byte(token+"\n"), 0o600); err != nil {
+		return "", fmt.Errorf("write UI token: %w", err)
+	}
+	return token, nil
+}
+
 func isProviderKey(key string) bool {
 	switch key {
-	case "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY":
+	case "OPENAI_API_KEY", "OPENAI_API_KEY_1", "OPENAI_API_KEY_2",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY_1",
+		"OPENROUTER_API_KEY", "OPENROUTER_API_KEY_1":
 		return true
 	}
 	return strings.HasPrefix(key, "PROVIDER_API_KEY")
