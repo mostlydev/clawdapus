@@ -31,6 +31,16 @@ var composeUpDetach bool
 
 var runtimePlaceholderPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
+const (
+	conversationWallServiceName  = "claw-wall"
+	conversationWallImageRef     = "ghcr.io/mostlydev/claw-wall:latest"
+	conversationWallFeedName     = "channel-context"
+	conversationWallFeedTTL      = 30
+	conversationWallFeedLimit    = 20
+	conversationWallInternalPort = "8080"
+	conversationWallDockerfile   = "dockerfiles/claw-wall/Dockerfile"
+)
+
 var (
 	extractServiceSkillFromImage = runtime.ExtractServiceSkill
 	writeRuntimeFile             = os.WriteFile
@@ -315,6 +325,11 @@ func runComposeUp(podFile string) error {
 		fmt.Printf("[claw] %s: validated (%s driver)\n", name, rc.ClawType)
 	}
 
+	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		return err
+	}
+
 	if err := collectServiceDescriptors(podDir, p, serviceImageRefs, serviceInfos, serviceDescriptors); err != nil {
 		return err
 	}
@@ -333,7 +348,6 @@ func runComposeUp(podFile string) error {
 		rc.Feeds = cloneResolvedFeeds(svc.Claw.Feeds)
 	}
 
-	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
 	clawAPIAuth, err := prepareClawAPIRuntime(runtimeDir, p, resolvedClaws)
 	if err != nil {
 		return err
@@ -445,7 +459,7 @@ func runComposeUp(podFile string) error {
 					ordinalRC := *rc
 					ordinalRC.ServiceName = ordinalName
 					ordinalAuth := lookupServiceAuth(clawAPIAuth, ordinalName)
-					feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, ordinalAuth)
+					feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, ordinalName, ordinalAuth)
 					if err != nil {
 						return fmt.Errorf("service %q: build feed manifest: %w", ordinalName, err)
 					}
@@ -469,7 +483,7 @@ func runComposeUp(podFile string) error {
 			}
 
 			svcAuth := lookupServiceAuth(clawAPIAuth, name)
-			feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, svcAuth)
+			feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, name, svcAuth)
 			if err != nil {
 				return fmt.Errorf("service %q: build feed manifest: %w", name, err)
 			}
@@ -579,7 +593,7 @@ func runComposeUp(podFile string) error {
 	}
 	fmt.Printf("[claw] wrote %s\n", generatedPath)
 
-	if err := ensureInfraImages(cllamaEnabled, proxies, p.ClawAPI, p.Clawdash); err != nil {
+	if err := ensureInfraImages(p, cllamaEnabled, proxies, p.ClawAPI, p.Clawdash); err != nil {
 		return err
 	}
 
@@ -844,10 +858,13 @@ func discordHandleIDsFromPod(p *pod.Pod) []string {
 	return uniqueSortedStrings(ids)
 }
 
-func buildFeedManifestEntries(p *pod.Pod, descriptors map[string]*describe.ServiceDescriptor, runtimeEnv map[string]string, serviceName string, serviceAuth []cllama.ServiceAuthEntry) ([]cllama.FeedManifestEntry, error) {
+func buildFeedManifestEntries(p *pod.Pod, descriptors map[string]*describe.ServiceDescriptor, runtimeEnv map[string]string, serviceName string, clawID string, serviceAuth []cllama.ServiceAuthEntry) ([]cllama.FeedManifestEntry, error) {
 	svc := p.Services[serviceName]
 	if svc == nil || svc.Claw == nil || len(svc.Claw.Feeds) == 0 {
 		return nil, nil
+	}
+	if strings.TrimSpace(clawID) == "" {
+		clawID = serviceName
 	}
 
 	// Index service auth by service name for feed auth lookup
@@ -863,8 +880,8 @@ func buildFeedManifestEntries(p *pod.Pod, descriptors map[string]*describe.Servi
 		if feed.Unresolved {
 			return nil, fmt.Errorf("feed %q is still unresolved", feed.Name)
 		}
-		feedPath := strings.ReplaceAll(feed.Path, "{claw_id}", serviceName)
-		feedName := strings.ReplaceAll(feed.Name, "{claw_id}", serviceName)
+		feedPath := strings.ReplaceAll(feed.Path, "{claw_id}", clawID)
+		feedName := strings.ReplaceAll(feed.Name, "{claw_id}", clawID)
 		url, err := resolveFeedURL(p, feed.Source, feedPath)
 		if err != nil {
 			return nil, fmt.Errorf("feed %q: %w", feedName, err)
@@ -929,6 +946,161 @@ func resolveFeedURL(p *pod.Pod, source string, feedPath string) (string, error) 
 
 func buildFeedURL(source, port, feedPath string) string {
 	return fmt.Sprintf("http://%s:%s%s", source, port, feedPath)
+}
+
+type conversationWallTokenPair struct {
+	ChannelID string
+	Token     string
+}
+
+func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw) error {
+	if p == nil {
+		return nil
+	}
+
+	tokenPairs := make([]conversationWallTokenPair, 0)
+	triggerServices := make(map[string][]string)
+
+	for _, name := range sortedResolvedClawNames(resolvedClaws) {
+		rc := resolvedClaws[name]
+		if rc == nil {
+			continue
+		}
+		svc := p.Services[name]
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+
+		channelIDs := discordHandleChannelIDs(svc.Claw.Handles)
+		if len(channelIDs) == 0 {
+			continue
+		}
+
+		token := strings.TrimSpace(svc.Environment["DISCORD_BOT_TOKEN"])
+		if token == "" {
+			return fmt.Errorf("service %q: HANDLE discord with channel IDs requires DISCORD_BOT_TOKEN for conversation wall injection", name)
+		}
+		for _, channelID := range channelIDs {
+			tokenPairs = append(tokenPairs, conversationWallTokenPair{
+				ChannelID: channelID,
+				Token:     token,
+			})
+		}
+
+		if len(rc.Cllama) == 0 {
+			continue
+		}
+		triggerServices[name] = channelIDs
+	}
+
+	if len(triggerServices) == 0 {
+		return nil
+	}
+	if _, exists := p.Services[conversationWallServiceName]; exists {
+		return fmt.Errorf("service name %q is reserved for the conversation wall sidecar", conversationWallServiceName)
+	}
+	if len(tokenPairs) == 0 {
+		return fmt.Errorf("conversation wall injection triggered but no Discord channel/token pairs were found")
+	}
+	for name, channelIDs := range triggerServices {
+		svc := p.Services[name]
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		svc.Claw.Feeds = appendConversationWallFeed(svc.Claw.Feeds, channelIDs)
+	}
+
+	p.Services[conversationWallServiceName] = &pod.Service{
+		Image:       conversationWallImageRef,
+		Environment: map[string]string{"CLAW_WALL_TOKENS": formatConversationWallTokenPairs(tokenPairs)},
+		Expose:      []string{conversationWallInternalPort},
+		Compose: map[string]interface{}{
+			"networks":  []string{"claw-internal"},
+			"restart":   "on-failure",
+			"read_only": true,
+			"tmpfs":     []string{"/tmp"},
+			"healthcheck": map[string]interface{}{
+				"test":     []string{"CMD", "/claw-wall", "-healthcheck"},
+				"interval": "15s",
+				"timeout":  "5s",
+				"retries":  3,
+			},
+			"labels": map[string]string{
+				"claw.role": "conversation-wall",
+			},
+		},
+	}
+	return nil
+}
+
+func appendConversationWallFeed(feeds []pod.FeedEntry, channelIDs []string) []pod.FeedEntry {
+	path := fmt.Sprintf("/channel-context?consumer={claw_id}&channels=%s&limit=%d", strings.Join(channelIDs, ","), conversationWallFeedLimit)
+	for _, feed := range feeds {
+		if feed.Name == conversationWallFeedName && feed.Source == conversationWallServiceName && feed.Path == path {
+			return feeds
+		}
+	}
+	return append(feeds, pod.FeedEntry{
+		Name:   conversationWallFeedName,
+		Source: conversationWallServiceName,
+		Path:   path,
+		TTL:    conversationWallFeedTTL,
+	})
+}
+
+func discordHandleChannelIDs(handles map[string]*driver.HandleInfo) []string {
+	handle := handles["discord"]
+	if handle == nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	channelIDs := make([]string, 0)
+	for _, guild := range handle.Guilds {
+		for _, channel := range guild.Channels {
+			channelID := strings.TrimSpace(channel.ID)
+			if channelID == "" {
+				continue
+			}
+			if _, exists := seen[channelID]; exists {
+				continue
+			}
+			seen[channelID] = struct{}{}
+			channelIDs = append(channelIDs, channelID)
+		}
+	}
+	sort.Strings(channelIDs)
+	return channelIDs
+}
+
+func formatConversationWallTokenPairs(pairs []conversationWallTokenPair) string {
+	if len(pairs) == 0 {
+		return ""
+	}
+
+	seen := make(map[string]struct{})
+	deduped := make([]conversationWallTokenPair, 0, len(pairs))
+	for _, pair := range pairs {
+		key := pair.ChannelID + "\x00" + pair.Token
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, pair)
+	}
+
+	sort.Slice(deduped, func(i, j int) bool {
+		if deduped[i].ChannelID != deduped[j].ChannelID {
+			return deduped[i].ChannelID < deduped[j].ChannelID
+		}
+		return deduped[i].Token < deduped[j].Token
+	})
+
+	entries := make([]string, 0, len(deduped))
+	for _, pair := range deduped {
+		entries = append(entries, pair.ChannelID+":"+pair.Token)
+	}
+	return strings.Join(entries, ",")
 }
 
 func clawAPIInternalPort(addr string) string {
@@ -2704,9 +2876,9 @@ func dockerBuildTaggedImageDefault(imageRef, dockerfilePath, contextDir string, 
 	return nil
 }
 
-// ensureInfraImages checks that cllama proxy, claw-api, and clawdash images exist locally,
+// ensureInfraImages checks that cllama proxy, claw-api, clawdash, and claw-wall images exist locally,
 // building them from source when missing.
-func ensureInfraImages(cllamaEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
+func ensureInfraImages(p *pod.Pod, cllamaEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
 	if cllamaEnabled {
 		for _, proxy := range proxies {
 			if err := ensureImage(proxy.Image, "cllama", "cllama/Dockerfile", "cllama"); err != nil {
@@ -2722,6 +2894,13 @@ func ensureInfraImages(cllamaEnabled bool, proxies []pod.CllamaProxyConfig, api 
 	if dash != nil {
 		if err := ensureImage(dash.Image, "clawdash", "dockerfiles/clawdash/Dockerfile", "."); err != nil {
 			return err
+		}
+	}
+	if p != nil {
+		if wall := p.Services[conversationWallServiceName]; wall != nil && strings.TrimSpace(wall.Image) != "" {
+			if err := ensureImage(wall.Image, conversationWallServiceName, conversationWallDockerfile, "."); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

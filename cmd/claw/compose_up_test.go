@@ -1617,7 +1617,7 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 		},
 	}
 
-	westonFeeds, err := buildFeedManifestEntries(p, nil, nil, "weston", nil)
+	westonFeeds, err := buildFeedManifestEntries(p, nil, nil, "weston", "weston", nil)
 	if err != nil {
 		t.Fatalf("weston feeds: %v", err)
 	}
@@ -1631,7 +1631,7 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 		t.Fatalf("expected weston URL substitution, got %q", westonFeeds[0].URL)
 	}
 
-	loganFeeds, err := buildFeedManifestEntries(p, nil, nil, "logan", nil)
+	loganFeeds, err := buildFeedManifestEntries(p, nil, nil, "logan", "logan", nil)
 	if err != nil {
 		t.Fatalf("logan feeds: %v", err)
 	}
@@ -1640,6 +1640,44 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 	}
 	if loganFeeds[0].Path != "/api/v1/market_context/logan" {
 		t.Fatalf("expected logan path substitution, got %q", loganFeeds[0].Path)
+	}
+}
+
+func TestBuildFeedManifestUsesOrdinalClawID(t *testing.T) {
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"claw-wall": {
+				Image:  conversationWallImageRef,
+				Expose: []string{conversationWallInternalPort},
+			},
+			"trader": {
+				Claw: &pod.ClawBlock{
+					Feeds: []pod.FeedEntry{
+						{
+							Name:   conversationWallFeedName,
+							Source: conversationWallServiceName,
+							Path:   "/channel-context?consumer={claw_id}&channels=chan-a,chan-b&limit=20",
+							TTL:    conversationWallFeedTTL,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	feeds, err := buildFeedManifestEntries(p, nil, nil, "trader", "trader-1", nil)
+	if err != nil {
+		t.Fatalf("buildFeedManifestEntries: %v", err)
+	}
+	if len(feeds) != 1 {
+		t.Fatalf("expected one feed, got %d", len(feeds))
+	}
+	if feeds[0].Path != "/channel-context?consumer=trader-1&channels=chan-a,chan-b&limit=20" {
+		t.Fatalf("expected ordinal claw_id substitution, got %q", feeds[0].Path)
+	}
+	if feeds[0].URL != "http://claw-wall:8080/channel-context?consumer=trader-1&channels=chan-a,chan-b&limit=20" {
+		t.Fatalf("expected ordinal wall URL, got %q", feeds[0].URL)
 	}
 }
 
@@ -1677,6 +1715,7 @@ func TestBuildFeedManifestProjectsBearerAuthFromServiceEnv(t *testing.T) {
 			"TRADING_API_TOKEN": "real-token",
 		},
 		"weston",
+		"weston",
 		nil,
 	)
 	if err != nil {
@@ -1687,5 +1726,113 @@ func TestBuildFeedManifestProjectsBearerAuthFromServiceEnv(t *testing.T) {
 	}
 	if feeds[0].Auth != "real-token" {
 		t.Fatalf("expected projected bearer auth, got %q", feeds[0].Auth)
+	}
+}
+
+func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
+	p := &pod.Pod{
+		Name: "desk",
+		Services: map[string]*pod.Service{
+			"observer": {
+				Environment: map[string]string{
+					"DISCORD_BOT_TOKEN": "${OBSERVER_DISCORD_BOT_TOKEN}",
+				},
+				Claw: &pod.ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							Guilds: []driver.GuildInfo{{
+								ID: "guild-1",
+								Channels: []driver.ChannelInfo{
+									{ID: "chan-2"},
+								},
+							}},
+						},
+					},
+				},
+			},
+			"trader": {
+				Environment: map[string]string{
+					"DISCORD_BOT_TOKEN": "${TRADER_DISCORD_BOT_TOKEN}",
+				},
+				Claw: &pod.ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							Guilds: []driver.GuildInfo{{
+								ID: "guild-1",
+								Channels: []driver.ChannelInfo{
+									{ID: "chan-2"},
+									{ID: "chan-1"},
+								},
+							}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"observer": {ServiceName: "observer"},
+		"trader":   {ServiceName: "trader", Cllama: []string{"passthrough"}},
+	}
+
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		t.Fatalf("injectConversationWall: %v", err)
+	}
+
+	wall := p.Services[conversationWallServiceName]
+	if wall == nil {
+		t.Fatal("expected claw-wall service to be injected")
+	}
+	if wall.Image != conversationWallImageRef {
+		t.Fatalf("expected claw-wall image %q, got %q", conversationWallImageRef, wall.Image)
+	}
+	if !slices.Equal(wall.Expose, []string{conversationWallInternalPort}) {
+		t.Fatalf("expected claw-wall expose %v, got %v", []string{conversationWallInternalPort}, wall.Expose)
+	}
+	if wall.Environment["CLAW_WALL_TOKENS"] != "chan-1:${TRADER_DISCORD_BOT_TOKEN},chan-2:${OBSERVER_DISCORD_BOT_TOKEN},chan-2:${TRADER_DISCORD_BOT_TOKEN}" {
+		t.Fatalf("unexpected CLAW_WALL_TOKENS: %q", wall.Environment["CLAW_WALL_TOKENS"])
+	}
+
+	traderFeeds := p.Services["trader"].Claw.Feeds
+	if len(traderFeeds) != 1 {
+		t.Fatalf("expected one injected wall feed, got %+v", traderFeeds)
+	}
+	if traderFeeds[0].Source != conversationWallServiceName {
+		t.Fatalf("expected claw-wall feed source, got %+v", traderFeeds[0])
+	}
+	if traderFeeds[0].Path != "/channel-context?consumer={claw_id}&channels=chan-1,chan-2&limit=20" {
+		t.Fatalf("unexpected wall feed path: %q", traderFeeds[0].Path)
+	}
+	if len(p.Services["observer"].Claw.Feeds) != 0 {
+		t.Fatalf("expected no wall feed for non-cllama service, got %+v", p.Services["observer"].Claw.Feeds)
+	}
+}
+
+func TestInjectConversationWallRejectsReservedServiceName(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			conversationWallServiceName: {Image: "busybox"},
+			"trader": {
+				Environment: map[string]string{"DISCORD_BOT_TOKEN": "token"},
+				Claw: &pod.ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							Guilds: []driver.GuildInfo{{Channels: []driver.ChannelInfo{{ID: "chan-1"}}}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := injectConversationWall(p, map[string]*driver.ResolvedClaw{
+		"trader": {ServiceName: "trader", Cllama: []string{"passthrough"}},
+	})
+	if err == nil {
+		t.Fatal("expected reserved-name error")
+	}
+	if !strings.Contains(err.Error(), conversationWallServiceName) {
+		t.Fatalf("expected reserved service name in error, got %v", err)
 	}
 }
