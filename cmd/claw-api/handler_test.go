@@ -109,6 +109,21 @@ func postJSON(t *testing.T, h http.Handler, path string, body any, token string)
 	return w
 }
 
+func TestHandlerRestartRejectsPathTraversalService(t *testing.T) {
+	h := newWriteHandler(t, t.TempDir(), clawapi.Principal{
+		Name:  "governor",
+		Token: "capi_gov",
+		Verbs: clawapi.AllWriteVerbs,
+		Pods:  []string{"ops"},
+	})
+	for _, bad := range []string{"../etc/passwd", "foo/bar", ".", ".."} {
+		w := postJSON(t, h, "/fleet/restart", map[string]string{"service": bad}, "capi_gov")
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for %q, got %d body=%s", bad, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestHandlerRestartRequiresAuth(t *testing.T) {
 	h := newWriteHandler(t, t.TempDir())
 	w := postJSON(t, h, "/fleet/restart", map[string]string{"service": "trader-0"}, "")

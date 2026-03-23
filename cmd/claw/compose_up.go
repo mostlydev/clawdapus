@@ -95,6 +95,19 @@ func runComposeUp(podFile string) error {
 	if err := os.MkdirAll(governanceDir, 0o777); err != nil {
 		return fmt.Errorf("create governance dir: %w", err)
 	}
+	// Reject claw-api: self and x-claw.principals without a master — their tokens
+	// would never be written to principals.json, making the declarations silent no-ops.
+	if p.Master == "" {
+		if len(p.Principals) > 0 {
+			return fmt.Errorf("x-claw.principals requires x-claw.master to be set")
+		}
+		for name, svc := range p.Services {
+			if svc.Claw != nil && svc.Claw.ClawAPIMode == "self" {
+				return fmt.Errorf("service %q: claw-api: self requires x-claw.master to be set", name)
+			}
+		}
+	}
+
 	if p.Master != "" {
 		if _, exists := p.Services["claw-api"]; exists {
 			return fmt.Errorf("service name %q is reserved when x-claw.master is set", "claw-api")
@@ -962,6 +975,36 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		return nil, fmt.Errorf("merge principals: %w", err)
 	}
 
+	// 3a. Resolve effective master token from merged result.
+	// An explicit principal may have overridden the auto-generated master by name;
+	// use the merged token, not the pre-merge one.
+	effectiveMasterToken := ""
+	for _, m := range merged {
+		if m.Principal.Name == p.Master {
+			effectiveMasterToken = m.Principal.Token
+			break
+		}
+	}
+	if effectiveMasterToken == "" {
+		return nil, fmt.Errorf("master principal %q not found in merged result", p.Master)
+	}
+
+	// 3b. Reject explicit inject-into claims that target master or claw-api: self services.
+	// Those injection points are reserved for their auto-generated principals.
+	reservedInjectTargets := map[string]string{p.Master: "master claw"}
+	for name, svc := range p.Services {
+		if svc.Claw != nil && svc.Claw.ClawAPIMode == "self" {
+			reservedInjectTargets[name] = "claw-api: self service"
+		}
+	}
+	for _, m := range merged {
+		if m.InjectInto != "" {
+			if reason, reserved := reservedInjectTargets[m.InjectInto]; reserved {
+				return nil, fmt.Errorf("principal %q: inject-into %q conflicts with %s — that injection point is reserved", m.Principal.Name, m.InjectInto, reason)
+			}
+		}
+	}
+
 	// 4. Write principals.json.
 	principals := make([]clawapi.Principal, len(merged))
 	for i, m := range merged {
@@ -989,13 +1032,13 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		svc.Environment["CLAW_API_TOKEN"] = token
 	}
 
-	// Master always gets its token.
-	injectClawAPIEnv(masterSvc, masterPrincipal.Token)
+	// Master always gets its (effective, post-merge) token.
+	injectClawAPIEnv(masterSvc, effectiveMasterToken)
 
 	// Self principals and explicit inject-into targets.
 	for _, m := range merged {
 		if m.Principal.Name == p.Master {
-			continue // already handled
+			continue // already handled above
 		}
 		// Self principal: inject into the service that declared claw-api: self.
 		if svc, ok := p.Services[m.Principal.Name]; ok && svc.Claw != nil && svc.Claw.ClawAPIMode == "self" {
@@ -1013,8 +1056,8 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 	authEntry := cllama.ServiceAuthEntry{
 		Service:   "claw-api",
 		AuthType:  "bearer",
-		Token:     masterPrincipal.Token,
-		Principal: masterPrincipal.Name,
+		Token:     effectiveMasterToken,
+		Principal: p.Master,
 	}
 	serviceAuth := make(map[string]cllama.ServiceAuthEntry)
 	count := 1

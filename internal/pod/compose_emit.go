@@ -361,7 +361,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		}
 		rootServices["claw-api"] = map[string]interface{}{
 			"image":       p.ClawAPI.Image,
-			"read_only":   false, // write plane needs to write governance files
+			"read_only":   true, // rootfs read-only; governance bind mount is separately writable
 			"tmpfs":       []string{"/tmp"},
 			"expose":      []string{port},
 			"volumes":     clawAPIVolumes,

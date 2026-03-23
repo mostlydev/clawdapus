@@ -58,9 +58,9 @@ func TestEmitComposeInjectsClawAPI(t *testing.T) {
 	if !ok {
 		t.Fatal("expected claw-api service in output")
 	}
-	// Write plane: claw-api is not read-only (must write governance override files).
-	if clawAPISvc.ReadOnly {
-		t.Fatal("expected claw-api read_only: false (write plane needs to write governance files)")
+	// rootfs is read-only; the governance bind mount is writable independently.
+	if !clawAPISvc.ReadOnly {
+		t.Fatal("expected claw-api read_only: true")
 	}
 	if len(clawAPISvc.Expose) != 1 || clawAPISvc.Expose[0] != "8080" {
 		t.Fatalf("expected claw-api expose 8080, got %v", clawAPISvc.Expose)

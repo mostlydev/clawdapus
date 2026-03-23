@@ -436,8 +436,8 @@ func (h *apiHandler) handleRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Service = strings.TrimSpace(req.Service)
-	if req.Service == "" {
-		writeJSONError(w, http.StatusBadRequest, "missing service")
+	if err := validateGovernanceTarget(req.Service); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	principal, ok := h.authorize(w, r, clawapi.VerbFleetRestart, req.Service)
@@ -471,8 +471,8 @@ func (h *apiHandler) handleQuarantine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Service = strings.TrimSpace(req.Service)
-	if req.Service == "" {
-		writeJSONError(w, http.StatusBadRequest, "missing service")
+	if err := validateGovernanceTarget(req.Service); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	principal, ok := h.authorize(w, r, clawapi.VerbFleetQuarantine, req.Service)
@@ -521,8 +521,8 @@ func (h *apiHandler) handleBudgetSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.ClawID = strings.TrimSpace(req.ClawID)
-	if req.ClawID == "" {
-		writeJSONError(w, http.StatusBadRequest, "missing claw_id")
+	if err := validateGovernanceTarget(req.ClawID); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.LimitUSD <= 0 {
@@ -560,8 +560,8 @@ func (h *apiHandler) handleModelRestrict(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	req.ClawID = strings.TrimSpace(req.ClawID)
-	if req.ClawID == "" {
-		writeJSONError(w, http.StatusBadRequest, "missing claw_id")
+	if err := validateGovernanceTarget(req.ClawID); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(req.AllowedModels) == 0 {
@@ -583,7 +583,11 @@ func (h *apiHandler) handleModelRestrict(w http.ResponseWriter, r *http.Request)
 }
 
 // writeGovernanceFile atomically writes a JSON file to <governanceDir>/<target>/<name>.
+// target must be a single path component (no slashes, no traversal).
 func (h *apiHandler) writeGovernanceFile(target, name string, payload any) error {
+	if err := validateGovernanceTarget(target); err != nil {
+		return err
+	}
 	dir := filepath.Join(h.governanceDir, target)
 	if err := os.MkdirAll(dir, 0o777); err != nil {
 		return err
@@ -598,6 +602,25 @@ func (h *apiHandler) writeGovernanceFile(target, name string, payload any) error
 		return err
 	}
 	return os.Rename(tmp, dest)
+}
+
+// validateGovernanceTarget rejects targets that could escape the governance directory.
+// A valid target is a single path component that does not start with a dot and
+// contains no path separators or traversal sequences.
+func validateGovernanceTarget(target string) error {
+	if target == "" {
+		return fmt.Errorf("governance target must not be empty")
+	}
+	if strings.HasPrefix(target, ".") {
+		return fmt.Errorf("governance target %q must not start with '.'", target)
+	}
+	if filepath.Base(target) != target {
+		return fmt.Errorf("governance target %q must be a single path component", target)
+	}
+	if strings.Contains(target, "/") || strings.Contains(target, "\\") {
+		return fmt.Errorf("governance target %q contains invalid path separator", target)
+	}
+	return nil
 }
 
 func (h *apiHandler) listPodContainers(ctx context.Context) ([]types.Container, error) {
