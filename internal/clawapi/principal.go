@@ -23,12 +23,13 @@ type Store struct {
 }
 
 type Principal struct {
-	Name     string   `json:"name"`
-	Token    string   `json:"token"`
-	Verbs    []string `json:"verbs"`
-	Pods     []string `json:"pods,omitempty"`
-	Services []string `json:"services,omitempty"`
-	ClawIDs  []string `json:"claw_ids,omitempty"`
+	Name            string   `json:"name"`
+	Token           string   `json:"token"`
+	Verbs           []string `json:"verbs"`
+	Pods            []string `json:"pods,omitempty"`
+	Services        []string `json:"services,omitempty"`
+	ClawIDs         []string `json:"claw_ids,omitempty"`
+	ComposeServices []string `json:"compose_services,omitempty"`
 }
 
 func LoadStore(filePath string) (*Store, error) {
@@ -105,6 +106,16 @@ func (p *Principal) AllowsClawID(podName, clawID string) bool {
 	return matchesAny(p.ClawIDs, clawID)
 }
 
+func (p *Principal) AllowsComposeService(podName, composeName string) bool {
+	if p == nil {
+		return false
+	}
+	if p.AllowsPod(podName) {
+		return true
+	}
+	return matchesAny(p.ComposeServices, composeName)
+}
+
 func BuildMasterPrincipal(podName, principalName string) (Principal, error) {
 	token, err := GenerateToken()
 	if err != nil {
@@ -173,6 +184,9 @@ func validateStore(store *Store) error {
 			return fmt.Errorf("principal %q: %w", principal.Name, err)
 		}
 		if err := validatePatterns("claw_ids", principal.ClawIDs); err != nil {
+			return fmt.Errorf("principal %q: %w", principal.Name, err)
+		}
+		if err := validatePatterns("compose_services", principal.ComposeServices); err != nil {
 			return fmt.Errorf("principal %q: %w", principal.Name, err)
 		}
 	}

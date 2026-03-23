@@ -78,3 +78,30 @@ func TestPrincipalInvalidGlobDoesNotFallbackToLiteralMatch(t *testing.T) {
 		t.Fatal("did not expect invalid glob to fallback to literal service match")
 	}
 }
+
+func TestPrincipalComposeServiceScope(t *testing.T) {
+	p := Principal{
+		Name:            "ops",
+		Token:           "capi_x",
+		Verbs:           []string{VerbFleetStatus},
+		ComposeServices: []string{"worker-0"},
+	}
+	if !p.AllowsComposeService("trading-desk", "worker-0") {
+		t.Fatal("expected compose service match")
+	}
+	if p.AllowsComposeService("trading-desk", "worker-1") {
+		t.Fatal("did not expect worker-1 to match")
+	}
+}
+
+func TestPrincipalPodScopeGrantsComposeServiceAccess(t *testing.T) {
+	p := Principal{
+		Name:  "master",
+		Token: "capi_x",
+		Verbs: []string{VerbFleetStatus},
+		Pods:  []string{"trading-desk"},
+	}
+	if !p.AllowsComposeService("trading-desk", "worker-0") {
+		t.Fatal("expected pod scope to grant compose service access")
+	}
+}
