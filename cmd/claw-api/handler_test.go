@@ -109,6 +109,21 @@ func postJSON(t *testing.T, h http.Handler, path string, body any, token string)
 	return w
 }
 
+func TestValidateGovernanceTarget(t *testing.T) {
+	valid := []string{"trader-0", "analyst-1", "ops:trader-0", "svc"}
+	for _, v := range valid {
+		if err := validateGovernanceTarget(v); err != nil {
+			t.Errorf("expected %q to be valid, got: %v", v, err)
+		}
+	}
+	invalid := []string{"", "../etc/passwd", "foo/bar", ".", "..", ".hidden", "a\\b"}
+	for _, v := range invalid {
+		if err := validateGovernanceTarget(v); err == nil {
+			t.Errorf("expected %q to be rejected", v)
+		}
+	}
+}
+
 func TestHandlerRestartRejectsPathTraversalService(t *testing.T) {
 	h := newWriteHandler(t, t.TempDir(), clawapi.Principal{
 		Name:  "governor",

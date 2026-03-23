@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mostlydev/clawdapus/internal/clawapi"
 	"github.com/mostlydev/clawdapus/internal/describe"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/openclaw"
@@ -624,6 +625,170 @@ func TestPrepareClawAPIRuntimeWritesPrincipalsAndProjectsAuth(t *testing.T) {
 	}
 	if _, err := os.Stat(p.ClawAPI.PrincipalsHostPath); err != nil {
 		t.Fatalf("expected principals file to be written: %v", err)
+	}
+}
+
+func TestPrepareClawAPIRuntimeUsesPostMergeMasterToken(t *testing.T) {
+	// If an explicit principal overrides the master by name, the injected token
+	// must be the post-merge one, not the pre-merge auto-generated one.
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name:   "ops",
+		Master: "octopus",
+		Services: map[string]*pod.Service{
+			"octopus": {Environment: map[string]string{}, Claw: &pod.ClawBlock{}},
+		},
+		Principals: []pod.PodPrincipal{
+			// Override master by name with read-only verbs.
+			{Name: "octopus", Verbs: clawapi.AllReadVerbs, Scope: "pod"},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	auth, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"octopus": {Count: 1},
+	})
+	if err != nil {
+		t.Fatalf("prepareClawAPIRuntime: %v", err)
+	}
+
+	injectedToken := p.Services["octopus"].Environment["CLAW_API_TOKEN"]
+	if injectedToken == "" {
+		t.Fatal("expected CLAW_API_TOKEN in master service env")
+	}
+	// The cllama auth entry must use the same (post-merge) token.
+	if auth["octopus"].Token != injectedToken {
+		t.Fatalf("cllama auth token %q != injected token %q (pre-merge token leaked)", auth["octopus"].Token, injectedToken)
+	}
+	// Verify the token in principals.json matches the injected one.
+	raw, err := os.ReadFile(p.ClawAPI.PrincipalsHostPath)
+	if err != nil {
+		t.Fatalf("read principals: %v", err)
+	}
+	if !strings.Contains(string(raw), injectedToken) {
+		t.Fatalf("injected token %q not found in principals.json", injectedToken)
+	}
+}
+
+func TestPrepareClawAPIRuntimeRejectsInjectIntoReservedMasterService(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name:   "ops",
+		Master: "octopus",
+		Services: map[string]*pod.Service{
+			"octopus":   {Environment: map[string]string{}, Claw: &pod.ClawBlock{}},
+			"ci-runner": {Environment: map[string]string{}, Claw: &pod.ClawBlock{}},
+		},
+		Principals: []pod.PodPrincipal{
+			// inject-into targets the master service — must fail.
+			{Name: "ci", Verbs: clawapi.AllReadVerbs, Scope: "pod", InjectInto: "octopus"},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	_, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"octopus": {Count: 1},
+	})
+	if err == nil {
+		t.Fatal("expected error for inject-into targeting master service")
+	}
+	if !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected 'reserved' in error, got: %v", err)
+	}
+}
+
+func TestPrepareClawAPIRuntimeRejectsInjectIntoSelfPrincipalService(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name:   "ops",
+		Master: "octopus",
+		Services: map[string]*pod.Service{
+			"octopus":  {Environment: map[string]string{}, Claw: &pod.ClawBlock{}},
+			"reporter": {Environment: map[string]string{}, Claw: &pod.ClawBlock{ClawAPIMode: "self"}},
+		},
+		Principals: []pod.PodPrincipal{
+			// inject-into targets a claw-api: self service — must fail.
+			{Name: "external", Verbs: clawapi.AllReadVerbs, Scope: "pod", InjectInto: "reporter"},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	_, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"octopus":  {Count: 1},
+		"reporter": {Count: 1},
+	})
+	if err == nil {
+		t.Fatal("expected error for inject-into targeting claw-api: self service")
+	}
+	if !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected 'reserved' in error, got: %v", err)
+	}
+}
+
+func TestValidateClawAPIDeclarationsAllowsNoMasterNoDeclarations(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {Claw: &pod.ClawBlock{}},
+		},
+	}
+	if err := validateClawAPIDeclarations(p); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidateClawAPIDeclarationsRejectsPrincipalsWithoutMaster(t *testing.T) {
+	p := &pod.Pod{
+		Principals: []pod.PodPrincipal{
+			{Name: "ci", Verbs: []string{clawapi.VerbFleetStatus}, Scope: "pod"},
+		},
+		Services: map[string]*pod.Service{},
+	}
+	err := validateClawAPIDeclarations(p)
+	if err == nil {
+		t.Fatal("expected error for principals without master")
+	}
+	if !strings.Contains(err.Error(), "x-claw.master") {
+		t.Fatalf("expected x-claw.master in error, got: %v", err)
+	}
+}
+
+func TestValidateClawAPIDeclarationsRejectsClawAPISelfWithoutMaster(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"reporter": {Claw: &pod.ClawBlock{ClawAPIMode: "self"}},
+		},
+	}
+	err := validateClawAPIDeclarations(p)
+	if err == nil {
+		t.Fatal("expected error for claw-api: self without master")
+	}
+	if !strings.Contains(err.Error(), "x-claw.master") {
+		t.Fatalf("expected x-claw.master in error, got: %v", err)
+	}
+}
+
+func TestValidateClawAPIDeclarationsAllowsDeclarationsWithMaster(t *testing.T) {
+	p := &pod.Pod{
+		Master: "octopus",
+		Principals: []pod.PodPrincipal{
+			{Name: "ci", Verbs: []string{clawapi.VerbFleetStatus}, Scope: "pod"},
+		},
+		Services: map[string]*pod.Service{
+			"octopus":  {Claw: &pod.ClawBlock{}},
+			"reporter": {Claw: &pod.ClawBlock{ClawAPIMode: "self"}},
+		},
+	}
+	if err := validateClawAPIDeclarations(p); err != nil {
+		t.Fatalf("expected no error with master set, got: %v", err)
 	}
 }
 

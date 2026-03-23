@@ -95,17 +95,9 @@ func runComposeUp(podFile string) error {
 	if err := os.MkdirAll(governanceDir, 0o777); err != nil {
 		return fmt.Errorf("create governance dir: %w", err)
 	}
-	// Reject claw-api: self and x-claw.principals without a master — their tokens
-	// would never be written to principals.json, making the declarations silent no-ops.
-	if p.Master == "" {
-		if len(p.Principals) > 0 {
-			return fmt.Errorf("x-claw.principals requires x-claw.master to be set")
-		}
-		for name, svc := range p.Services {
-			if svc.Claw != nil && svc.Claw.ClawAPIMode == "self" {
-				return fmt.Errorf("service %q: claw-api: self requires x-claw.master to be set", name)
-			}
-		}
+	// Reject claw-api: self and x-claw.principals without a master.
+	if err := validateClawAPIDeclarations(p); err != nil {
+		return err
 	}
 
 	if p.Master != "" {
@@ -634,6 +626,25 @@ func runComposeUp(podFile string) error {
 	}
 
 	fmt.Println("[claw] pod is up")
+	return nil
+}
+
+// validateClawAPIDeclarations ensures that claw-api: self and x-claw.principals
+// are only declared when a master claw is present. Without a master, claw-api is
+// never injected, so tokens would never be written to principals.json — making the
+// declarations silent no-ops rather than compile errors.
+func validateClawAPIDeclarations(p *pod.Pod) error {
+	if p.Master != "" {
+		return nil
+	}
+	if len(p.Principals) > 0 {
+		return fmt.Errorf("x-claw.principals requires x-claw.master to be set")
+	}
+	for name, svc := range p.Services {
+		if svc.Claw != nil && svc.Claw.ClawAPIMode == "self" {
+			return fmt.Errorf("service %q: claw-api: self requires x-claw.master to be set", name)
+		}
+	}
 	return nil
 }
 

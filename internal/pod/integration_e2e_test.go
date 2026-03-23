@@ -321,9 +321,8 @@ func TestE2EComposeLifecycle(t *testing.T) {
 	if !strings.Contains(output, "claw-internal") {
 		t.Error("compose output missing claw-internal network")
 	}
-	if !strings.Contains(output, "internal: true") {
-		t.Error("compose output missing internal: true for claw-internal network")
-	}
+	// claw-internal is deliberately not set to internal:true — agents need internet
+	// access for LLM APIs and platform surfaces (Discord, Slack, etc.).
 
 	// Docker compose up -d
 	upCmd := exec.Command("docker", "compose", "-f", composePath, "up", "-d")
@@ -498,12 +497,10 @@ func TestE2EHealthProbe(t *testing.T) {
 	composePath := filepath.Join(workDir, "compose.generated.yml")
 	os.WriteFile(composePath, []byte(output), 0644)
 
-	// Verify network isolation in compose output
+	// Verify claw-internal network present in compose output.
+	// Not set to internal:true — agents need internet for LLM APIs and platform surfaces.
 	if !strings.Contains(output, "claw-internal") {
 		t.Error("compose output missing claw-internal network")
-	}
-	if !strings.Contains(output, "internal: true") {
-		t.Error("compose output missing internal: true for claw-internal network")
 	}
 
 	upCmd := exec.Command("docker", "compose", "-f", composePath, "up", "-d")
