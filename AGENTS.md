@@ -112,7 +112,8 @@ Do not assume older docs mentioning only a subset are current.
 - Runtime directories created by `Materialize()` use `0o777` (not `0o700`) so container users with different uids can write. Do not regress this.
 - All drivers set `mention_only` (or equivalent like `requireMention`, `DISCORD_REQUIRE_MENTION`) for Discord channels. Without this, multi-agent pods enter feedback loops.
 - All drivers explicitly set `HOME` in the container env map to match their config mount path. Container base images may run as root or a different user than expected.
-- `cllama/` is a git submodule pointing to a private SSH repo. Fresh `git clone` leaves it empty. Infra images (cllama, clawdash) are published to ghcr.io as public packages to avoid this for end users.
+- `cllama/` is a git submodule pointing to a private SSH repo. Fresh `git clone` leaves it empty. Infra images (cllama, clawdash) are published to ghcr.io as public packages to avoid this for end users. `cllama/` has its own `.git` — changes require two commits: one inside `cllama/` (for feeds/proxy code), then `git add cllama && git commit` in the repo root to update the pointer. Shell working directory can silently drift to `cllama/` between commands — use absolute paths for git operations or verify with `pwd` first.
+- `internal/feeds/` and other cllama internals live at `cllama/internal/`, not at the repo root.
 - `ensureImage()` in `compose_up.go` has a 3-step fallback: local image → `docker pull` → local Dockerfile build → git URL build. All steps must be considered when debugging image failures.
 - Managed services require `claw up -d` because post-apply verification is fail-closed.
 - Multi-proxy cllama is represented in the data model but runtime currently fails fast if more than one proxy type is declared.
