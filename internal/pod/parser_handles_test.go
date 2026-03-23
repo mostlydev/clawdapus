@@ -156,6 +156,27 @@ services:
         discord: "123456789"
 `
 
+const podWithDuplicateHandleIDsSequentialConformance = `
+x-claw:
+  pod: rollcall
+  sequential-conformance: true
+
+services:
+  oc-roll:
+    image: openclaw:latest
+    x-claw:
+      agent: ./OC.md
+      handles:
+        discord: "999000111"
+
+  nc-roll:
+    image: nullclaw:latest
+    x-claw:
+      agent: ./NC.md
+      handles:
+        discord: "999000111"
+`
+
 func TestParseHandlesStringShorthand(t *testing.T) {
 	p, err := Parse(strings.NewReader(podWithStringHandle))
 	if err != nil {
@@ -338,6 +359,16 @@ func TestParseHandlesDuplicateIDAcrossServicesErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `services "alpha" and "beta" declare the same discord handle id "123456789"`) {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseHandlesDuplicateIDAllowedInSequentialConformancePod(t *testing.T) {
+	p, err := Parse(strings.NewReader(podWithDuplicateHandleIDsSequentialConformance))
+	if err != nil {
+		t.Fatalf("expected no error for sequential-conformance pod with shared handle IDs, got: %v", err)
+	}
+	if !p.SequentialConformance {
+		t.Fatal("expected Pod.SequentialConformance to be true")
 	}
 }
 

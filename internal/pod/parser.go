@@ -21,10 +21,11 @@ type rawPod struct {
 }
 
 type rawPodClaw struct {
-	Pod             string                 `yaml:"pod"`
-	Master          string                 `yaml:"master"`
-	HandlesDefaults map[string]interface{} `yaml:"handles-defaults"`
-	Principals      []rawPrincipalEntry    `yaml:"principals"`
+	Pod                   string                 `yaml:"pod"`
+	Master                string                 `yaml:"master"`
+	SequentialConformance bool                   `yaml:"sequential-conformance"`
+	HandlesDefaults       map[string]interface{} `yaml:"handles-defaults"`
+	Principals            []rawPrincipalEntry    `yaml:"principals"`
 }
 
 type rawPrincipalEntry struct {
@@ -113,10 +114,11 @@ func Parse(r io.Reader) (*Pod, error) {
 	delete(preservedRoot, "services")
 
 	pod := &Pod{
-		Name:     raw.XClaw.Pod,
-		Master:   strings.TrimSpace(raw.XClaw.Master),
-		Services: make(map[string]*Service, len(raw.Services)),
-		Compose:  preservedRoot,
+		Name:                  raw.XClaw.Pod,
+		Master:                strings.TrimSpace(raw.XClaw.Master),
+		SequentialConformance: raw.XClaw.SequentialConformance,
+		Services:              make(map[string]*Service, len(raw.Services)),
+		Compose:               preservedRoot,
 	}
 
 	rawServices, err := mapStringAny(root["services"])
@@ -307,6 +309,11 @@ func validateHandleIdentityUniqueness(p *Pod) error {
 			}
 			if svc.Claw.Count > 1 {
 				return fmt.Errorf("service %q: handle %s id %q cannot be used with count=%d; concurrent replicas need unique identities", name, platform, id, svc.Claw.Count)
+			}
+			// Sequential conformance pods are allowed to reuse handle IDs across
+			// services — they are exercised one runtime at a time, not concurrently.
+			if p.SequentialConformance {
+				continue
 			}
 			key := platform + "\x00" + id
 			if prev, ok := owners[key]; ok {

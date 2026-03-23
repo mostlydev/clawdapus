@@ -4,13 +4,14 @@ import "github.com/mostlydev/clawdapus/internal/driver"
 
 // Pod represents a parsed claw-pod.yml.
 type Pod struct {
-	Name       string
-	Master     string
-	Services   map[string]*Service
-	Compose    map[string]interface{} // preserved top-level compose keys except x-claw and services
-	ClawAPI    *ClawAPIConfig
-	Clawdash   *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
-	Principals []PodPrincipal
+	Name                  string
+	Master                string
+	SequentialConformance bool // when true, shared handle IDs across services are allowed (sequential conformance spikes only)
+	Services              map[string]*Service
+	Compose               map[string]interface{} // preserved top-level compose keys except x-claw and services
+	ClawAPI               *ClawAPIConfig
+	Clawdash              *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
+	Principals            []PodPrincipal
 }
 
 // Service represents a service in a claw-pod.yml.
