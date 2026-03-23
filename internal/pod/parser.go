@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/mostlydev/clawdapus/internal/clawapi"
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
@@ -23,6 +24,17 @@ type rawPodClaw struct {
 	Pod             string                 `yaml:"pod"`
 	Master          string                 `yaml:"master"`
 	HandlesDefaults map[string]interface{} `yaml:"handles-defaults"`
+	Principals      []rawPrincipalEntry    `yaml:"principals"`
+}
+
+type rawPrincipalEntry struct {
+	Name            string   `yaml:"name"`
+	Verbs           []string `yaml:"verbs"`
+	Scope           string   `yaml:"scope"`
+	Services        []string `yaml:"services"`
+	ClawIDs         []string `yaml:"claw_ids"`
+	ComposeServices []string `yaml:"compose_services"`
+	InjectInto      string   `yaml:"inject-into"`
 }
 
 type rawService struct {
@@ -52,6 +64,7 @@ type rawClawBlock struct {
 	Surfaces  []interface{}          `yaml:"surfaces"`
 	Skills    []string               `yaml:"skills"`
 	Invoke    []rawInvokeEntry       `yaml:"invoke"`
+	ClawAPI   interface{}            `yaml:"claw-api"`
 }
 
 type rawFeedEntry struct {
@@ -204,18 +217,23 @@ func Parse(r io.Reader) (*Pod, error) {
 					To:       rawInv.To,
 				})
 			}
+			clawAPIMode, err := parseClawAPIMode(svc.XClaw.ClawAPI)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: claw-api: %w", name, err)
+			}
 			service.Claw = &ClawBlock{
-				Agent:     svc.XClaw.Agent,
-				Persona:   svc.XClaw.Persona,
-				Cllama:    cllama,
-				CllamaEnv: svc.XClaw.CllamaEnv,
-				Count:     count,
-				Handles:   handles,
-				Feeds:     feeds,
-				Include:   include,
-				Surfaces:  parsedSurfaces,
-				Skills:    skills,
-				Invoke:    invoke,
+				Agent:       svc.XClaw.Agent,
+				Persona:     svc.XClaw.Persona,
+				Cllama:      cllama,
+				CllamaEnv:   svc.XClaw.CllamaEnv,
+				Count:       count,
+				Handles:     handles,
+				Feeds:       feeds,
+				Include:     include,
+				Surfaces:    parsedSurfaces,
+				Skills:      skills,
+				Invoke:      invoke,
+				ClawAPIMode: clawAPIMode,
 			}
 		}
 		pod.Services[name] = service
@@ -230,6 +248,12 @@ func Parse(r io.Reader) (*Pod, error) {
 			return nil, fmt.Errorf("x-claw.master %q must target a claw-managed service", pod.Master)
 		}
 	}
+
+	principals, err := parsePrincipals(raw.XClaw.Principals, pod.Services)
+	if err != nil {
+		return nil, fmt.Errorf("parse claw-pod.yml: principals: %w", err)
+	}
+	pod.Principals = principals
 	for name, svc := range pod.Services {
 		if svc == nil || svc.Claw == nil {
 			continue
@@ -750,6 +774,75 @@ func parseHandleMap(m map[string]interface{}) (*driver.HandleInfo, error) {
 	}
 
 	return info, nil
+}
+
+func parseClawAPIMode(raw interface{}) (string, error) {
+	if raw == nil {
+		return "", nil
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("unsupported value %v, only \"self\" is valid", raw)
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	if s != "self" {
+		return "", fmt.Errorf("unsupported value %q, only \"self\" is valid", s)
+	}
+	return "self", nil
+}
+
+var knownVerbs = map[string]bool{
+	clawapi.VerbFleetStatus:       true,
+	clawapi.VerbFleetLogs:         true,
+	clawapi.VerbFleetQueryMetrics: true,
+	clawapi.VerbFleetAlerts:       true,
+	"fleet.restart":               true,
+	"fleet.quarantine":            true,
+	"fleet.budget.set":            true,
+	"fleet.model.restrict":        true,
+}
+
+func parsePrincipals(raw []rawPrincipalEntry, services map[string]*Service) ([]PodPrincipal, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make([]PodPrincipal, 0, len(raw))
+	for i, entry := range raw {
+		name := strings.TrimSpace(entry.Name)
+		if name == "" {
+			return nil, fmt.Errorf("principal %d: name must not be empty", i)
+		}
+		if len(entry.Verbs) == 0 {
+			return nil, fmt.Errorf("principal %q: verbs must not be empty", name)
+		}
+		for _, verb := range entry.Verbs {
+			if !knownVerbs[verb] {
+				return nil, fmt.Errorf("principal %q: unknown verb %q", name, verb)
+			}
+		}
+		scope := strings.TrimSpace(entry.Scope)
+		if scope == "pod" && (len(entry.Services) > 0 || len(entry.ClawIDs) > 0 || len(entry.ComposeServices) > 0) {
+			return nil, fmt.Errorf("principal %q: scope \"pod\" is mutually exclusive with services, claw_ids, and compose_services", name)
+		}
+		if entry.InjectInto != "" {
+			if _, ok := services[entry.InjectInto]; !ok {
+				return nil, fmt.Errorf("principal %q: inject-into %q does not reference a known service", name, entry.InjectInto)
+			}
+		}
+		out = append(out, PodPrincipal{
+			Name:            name,
+			Verbs:           entry.Verbs,
+			Scope:           scope,
+			Services:        entry.Services,
+			ClawIDs:         entry.ClawIDs,
+			ComposeServices: entry.ComposeServices,
+			InjectInto:      entry.InjectInto,
+		})
+	}
+	return out, nil
 }
 
 func parseIncludes(raw []rawIncludeEntry) ([]IncludeEntry, error) {

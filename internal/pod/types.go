@@ -4,12 +4,13 @@ import "github.com/mostlydev/clawdapus/internal/driver"
 
 // Pod represents a parsed claw-pod.yml.
 type Pod struct {
-	Name     string
-	Master   string
-	Services map[string]*Service
-	Compose  map[string]interface{} // preserved top-level compose keys except x-claw and services
-	ClawAPI  *ClawAPIConfig
-	Clawdash *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
+	Name       string
+	Master     string
+	Services   map[string]*Service
+	Compose    map[string]interface{} // preserved top-level compose keys except x-claw and services
+	ClawAPI    *ClawAPIConfig
+	Clawdash   *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
+	Principals []PodPrincipal
 }
 
 // Service represents a service in a claw-pod.yml.
@@ -44,6 +45,18 @@ type ClawBlock struct {
 	Surfaces     []driver.ResolvedSurface
 	Skills       []string
 	Invoke       []InvokeEntry
+	ClawAPIMode  string // "self" when claw-api: self is declared; empty otherwise
+}
+
+// PodPrincipal is an explicit principal declared in the pod-level x-claw.principals list.
+type PodPrincipal struct {
+	Name            string   `yaml:"name"`
+	Verbs           []string `yaml:"verbs"`
+	Scope           string   `yaml:"scope,omitempty"`
+	Services        []string `yaml:"services,omitempty"`
+	ClawIDs         []string `yaml:"claw_ids,omitempty"`
+	ComposeServices []string `yaml:"compose_services,omitempty"`
+	InjectInto      string   `yaml:"inject-into,omitempty"`
 }
 
 type FeedEntry struct {
