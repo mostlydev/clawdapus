@@ -58,6 +58,7 @@ func TestEmitComposeInjectsClawAPI(t *testing.T) {
 	if !ok {
 		t.Fatal("expected claw-api service in output")
 	}
+	// rootfs is read-only; the governance bind mount is writable independently.
 	if !clawAPISvc.ReadOnly {
 		t.Fatal("expected claw-api read_only: true")
 	}
@@ -67,6 +68,7 @@ func TestEmitComposeInjectsClawAPI(t *testing.T) {
 	if len(clawAPISvc.Tmpfs) != 1 || clawAPISvc.Tmpfs[0] != "/tmp" {
 		t.Fatalf("expected claw-api tmpfs [/tmp], got %v", clawAPISvc.Tmpfs)
 	}
+	// No GovernanceHostPath set → 3 volumes (manifest, principals, docker socket).
 	if len(clawAPISvc.Volumes) != 3 {
 		t.Fatalf("expected 3 claw-api mounts, got %v", clawAPISvc.Volumes)
 	}
@@ -75,6 +77,9 @@ func TestEmitComposeInjectsClawAPI(t *testing.T) {
 	}
 	if clawAPISvc.Environment["CLAW_API_MANIFEST"] != "/claw/pod-manifest.json" {
 		t.Fatalf("expected CLAW_API_MANIFEST env, got %v", clawAPISvc.Environment["CLAW_API_MANIFEST"])
+	}
+	if clawAPISvc.Environment["CLAW_GOVERNANCE_DIR"] != "/claw-governance" {
+		t.Fatalf("expected CLAW_GOVERNANCE_DIR env, got %v", clawAPISvc.Environment["CLAW_GOVERNANCE_DIR"])
 	}
 	if clawAPISvc.Labels["claw.role"] != "governance-api" {
 		t.Fatalf("expected claw.role=governance-api, got %q", clawAPISvc.Labels["claw.role"])

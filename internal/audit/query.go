@@ -88,6 +88,9 @@ func Summarize(events []Event) Summary {
 			} else if event.Error != "" {
 				agent.FeedErrors++
 			}
+		case "provider_pool":
+			agent.ProviderPoolEvents++
+			summary.ProviderPoolEvents++
 		}
 	}
 

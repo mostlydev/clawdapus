@@ -33,13 +33,14 @@ type ClawdashConfig struct {
 }
 
 type ClawAPIConfig struct {
-	Image              string            // e.g. ghcr.io/mostlydev/claw-api:latest
-	Addr               string            // e.g. :8080
-	ManifestHostPath   string            // host path to pod-manifest.json
-	PrincipalsHostPath string            // host path to principals.json
-	DockerSockHostPath string            // host path to docker socket
-	PodName            string
-	Environment        map[string]string // extra env vars (e.g. CLAW_ALERT_* thresholds)
+	Image               string            // e.g. ghcr.io/mostlydev/claw-api:latest
+	Addr                string            // e.g. :8080
+	ManifestHostPath    string            // host path to pod-manifest.json
+	PrincipalsHostPath  string            // host path to principals.json
+	DockerSockHostPath  string            // host path to docker socket
+	GovernanceHostPath  string            // host path to .claw-governance/ dir (write plane override files)
+	PodName             string
+	Environment         map[string]string // extra env vars (e.g. CLAW_ALERT_* thresholds)
 }
 
 // EmitCompose generates a compose.generated.yml string from pod definition and
@@ -350,16 +351,20 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 			socketPath = "/var/run/docker.sock"
 		}
 
+		clawAPIVolumes := []string{
+			fmt.Sprintf("%s:/claw/pod-manifest.json:ro", p.ClawAPI.ManifestHostPath),
+			fmt.Sprintf("%s:/claw/principals.json:ro", p.ClawAPI.PrincipalsHostPath),
+			fmt.Sprintf("%s:/var/run/docker.sock:ro", socketPath),
+		}
+		if p.ClawAPI.GovernanceHostPath != "" {
+			clawAPIVolumes = append(clawAPIVolumes, fmt.Sprintf("%s:/claw-governance:rw", p.ClawAPI.GovernanceHostPath))
+		}
 		rootServices["claw-api"] = map[string]interface{}{
-			"image":     p.ClawAPI.Image,
-			"read_only": true,
-			"tmpfs":     []string{"/tmp"},
-			"expose":    []string{port},
-			"volumes": []string{
-				fmt.Sprintf("%s:/claw/pod-manifest.json:ro", p.ClawAPI.ManifestHostPath),
-				fmt.Sprintf("%s:/claw/principals.json:ro", p.ClawAPI.PrincipalsHostPath),
-				fmt.Sprintf("%s:/var/run/docker.sock:ro", socketPath),
-			},
+			"image":       p.ClawAPI.Image,
+			"read_only":   true, // rootfs read-only; governance bind mount is separately writable
+			"tmpfs":       []string{"/tmp"},
+			"expose":      []string{port},
+			"volumes":     clawAPIVolumes,
 			"environment": clawAPIEnvironment(p.ClawAPI, addr),
 			"restart": "on-failure",
 			"healthcheck": map[string]interface{}{
@@ -586,10 +591,11 @@ func hostPortOrDefault(port, fallback string) string {
 
 func clawAPIEnvironment(cfg *ClawAPIConfig, addr string) map[string]string {
 	env := map[string]string{
-		"CLAW_API_ADDR":       addr,
-		"CLAW_API_MANIFEST":   "/claw/pod-manifest.json",
-		"CLAW_API_PRINCIPALS": "/claw/principals.json",
-		"CLAW_POD":            cfg.PodName,
+		"CLAW_API_ADDR":        addr,
+		"CLAW_API_MANIFEST":    "/claw/pod-manifest.json",
+		"CLAW_API_PRINCIPALS":  "/claw/principals.json",
+		"CLAW_GOVERNANCE_DIR":  "/claw-governance",
+		"CLAW_POD":             cfg.PodName,
 	}
 	for k, v := range cfg.Environment {
 		env[k] = v

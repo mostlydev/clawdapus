@@ -2,6 +2,7 @@
 # It is for sequential runtime-conformance spikes, not concurrent topology tests.
 x-claw:
   pod: rollcall
+  sequential-conformance: true
 
 services:
   oc-roll:

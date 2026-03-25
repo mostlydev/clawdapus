@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -30,6 +33,16 @@ import (
 var composeUpDetach bool
 
 var runtimePlaceholderPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
+
+const (
+	conversationWallServiceName  = "claw-wall"
+	conversationWallImageRef     = "ghcr.io/mostlydev/claw-wall:latest"
+	conversationWallFeedName     = "channel-context"
+	conversationWallFeedTTL      = 30
+	conversationWallFeedLimit    = 20
+	conversationWallInternalPort = "8080"
+	conversationWallDockerfile   = "dockerfiles/claw-wall/Dockerfile"
+)
 
 var (
 	extractServiceSkillFromImage = runtime.ExtractServiceSkill
@@ -90,6 +103,16 @@ func runComposeUp(podFile string) error {
 	if err := resetRuntimeDir(runtimeDir); err != nil {
 		return fmt.Errorf("reset runtime dir: %w", err)
 	}
+	// Governance dir is separate from runtimeDir so it survives claw up resets.
+	governanceDir := filepath.Join(podDir, ".claw-governance")
+	if err := os.MkdirAll(governanceDir, 0o777); err != nil {
+		return fmt.Errorf("create governance dir: %w", err)
+	}
+	// Reject claw-api: self and x-claw.principals without a master.
+	if err := validateClawAPIDeclarations(p); err != nil {
+		return err
+	}
+
 	if p.Master != "" {
 		if _, exists := p.Services["claw-api"]; exists {
 			return fmt.Errorf("service name %q is reserved when x-claw.master is set", "claw-api")
@@ -100,6 +123,7 @@ func runComposeUp(podFile string) error {
 			ManifestHostPath:   filepath.Join(runtimeDir, "pod-manifest.json"),
 			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
 			DockerSockHostPath: "/var/run/docker.sock",
+			GovernanceHostPath: governanceDir,
 			PodName:            p.Name,
 			Environment:        collectClawAlertEnv(),
 		}
@@ -304,6 +328,11 @@ func runComposeUp(podFile string) error {
 		fmt.Printf("[claw] %s: validated (%s driver)\n", name, rc.ClawType)
 	}
 
+	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		return err
+	}
+
 	if err := collectServiceDescriptors(podDir, p, serviceImageRefs, serviceInfos, serviceDescriptors); err != nil {
 		return err
 	}
@@ -322,7 +351,6 @@ func runComposeUp(podFile string) error {
 		rc.Feeds = cloneResolvedFeeds(svc.Claw.Feeds)
 	}
 
-	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
 	clawAPIAuth, err := prepareClawAPIRuntime(runtimeDir, p, resolvedClaws)
 	if err != nil {
 		return err
@@ -434,7 +462,7 @@ func runComposeUp(podFile string) error {
 					ordinalRC := *rc
 					ordinalRC.ServiceName = ordinalName
 					ordinalAuth := lookupServiceAuth(clawAPIAuth, ordinalName)
-					feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, ordinalAuth)
+					feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, ordinalName, ordinalAuth)
 					if err != nil {
 						return fmt.Errorf("service %q: build feed manifest: %w", ordinalName, err)
 					}
@@ -458,7 +486,7 @@ func runComposeUp(podFile string) error {
 			}
 
 			svcAuth := lookupServiceAuth(clawAPIAuth, name)
-			feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, svcAuth)
+			feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, name, svcAuth)
 			if err != nil {
 				return fmt.Errorf("service %q: build feed manifest: %w", name, err)
 			}
@@ -481,9 +509,37 @@ func runComposeUp(podFile string) error {
 			return fmt.Errorf("generate cllama context dir: %w", err)
 		}
 
-		authDir := filepath.Join(runtimeDir, "proxy-auth")
-		if err := os.MkdirAll(authDir, 0700); err != nil {
+		// .claw-auth is a persistent sibling of .claw-runtime — claw up never wipes it.
+		authDir := filepath.Join(podDir, ".claw-auth")
+		if err := os.MkdirAll(authDir, 0o777); err != nil {
 			return fmt.Errorf("create cllama auth dir: %w", err)
+		}
+
+		// Compile seed keys from all service CllamaEnv into providers.json.
+		if err := mergeProviderSeeds(authDir, p); err != nil {
+			return fmt.Errorf("write providers.json: %w", err)
+		}
+
+		// Load or generate CLLAMA_UI_TOKEN (persists across re-ups).
+		uiToken, err := loadOrGenerateUIToken(authDir)
+		if err != nil {
+			return fmt.Errorf("cllama UI token: %w", err)
+		}
+
+		// Finalize proxyEnv: strip provider keys; add alert vars and UI token.
+		// Provider keys now live in providers.json, not in the container env.
+		finalProxyEnv := make(map[string]string, len(proxyEnv)+4)
+		for k, v := range proxyEnv {
+			if !isProviderKey(k) {
+				finalProxyEnv[k] = v
+			}
+		}
+		finalProxyEnv["CLLAMA_UI_TOKEN"] = uiToken
+		if len(p.AlertWebhooks) > 0 {
+			finalProxyEnv["CLLAMA_ALERT_WEBHOOKS"] = strings.Join(p.AlertWebhooks, ",")
+		}
+		if len(p.AlertMentions) > 0 {
+			finalProxyEnv["CLLAMA_ALERT_MENTIONS"] = strings.Join(p.AlertMentions, ",")
 		}
 
 		for _, proxyType := range proxyTypes {
@@ -493,7 +549,7 @@ func runComposeUp(podFile string) error {
 				ContextHostDir: filepath.Join(runtimeDir, "context"),
 				AuthHostDir:    authDir,
 				DashboardPort:  cllamaDashboardPort,
-				Environment:    proxyEnv,
+				Environment:    finalProxyEnv,
 				PodName:        p.Name,
 			})
 		}
@@ -568,7 +624,7 @@ func runComposeUp(podFile string) error {
 	}
 	fmt.Printf("[claw] wrote %s\n", generatedPath)
 
-	if err := ensureInfraImages(cllamaEnabled, proxies, p.ClawAPI, p.Clawdash); err != nil {
+	if err := ensureInfraImages(p, cllamaEnabled, proxies, p.ClawAPI, p.Clawdash); err != nil {
 		return err
 	}
 
@@ -615,6 +671,25 @@ func runComposeUp(podFile string) error {
 	}
 
 	fmt.Println("[claw] pod is up")
+	return nil
+}
+
+// validateClawAPIDeclarations ensures that claw-api: self and x-claw.principals
+// are only declared when a master claw is present. Without a master, claw-api is
+// never injected, so tokens would never be written to principals.json — making the
+// declarations silent no-ops rather than compile errors.
+func validateClawAPIDeclarations(p *pod.Pod) error {
+	if p.Master != "" {
+		return nil
+	}
+	if len(p.Principals) > 0 {
+		return fmt.Errorf("x-claw.principals requires x-claw.master to be set")
+	}
+	for name, svc := range p.Services {
+		if svc.Claw != nil && svc.Claw.ClawAPIMode == "self" {
+			return fmt.Errorf("service %q: claw-api: self requires x-claw.master to be set", name)
+		}
+	}
 	return nil
 }
 
@@ -814,10 +889,13 @@ func discordHandleIDsFromPod(p *pod.Pod) []string {
 	return uniqueSortedStrings(ids)
 }
 
-func buildFeedManifestEntries(p *pod.Pod, descriptors map[string]*describe.ServiceDescriptor, runtimeEnv map[string]string, serviceName string, serviceAuth []cllama.ServiceAuthEntry) ([]cllama.FeedManifestEntry, error) {
+func buildFeedManifestEntries(p *pod.Pod, descriptors map[string]*describe.ServiceDescriptor, runtimeEnv map[string]string, serviceName string, clawID string, serviceAuth []cllama.ServiceAuthEntry) ([]cllama.FeedManifestEntry, error) {
 	svc := p.Services[serviceName]
 	if svc == nil || svc.Claw == nil || len(svc.Claw.Feeds) == 0 {
 		return nil, nil
+	}
+	if strings.TrimSpace(clawID) == "" {
+		clawID = serviceName
 	}
 
 	// Index service auth by service name for feed auth lookup
@@ -833,8 +911,8 @@ func buildFeedManifestEntries(p *pod.Pod, descriptors map[string]*describe.Servi
 		if feed.Unresolved {
 			return nil, fmt.Errorf("feed %q is still unresolved", feed.Name)
 		}
-		feedPath := strings.ReplaceAll(feed.Path, "{claw_id}", serviceName)
-		feedName := strings.ReplaceAll(feed.Name, "{claw_id}", serviceName)
+		feedPath := strings.ReplaceAll(feed.Path, "{claw_id}", clawID)
+		feedName := strings.ReplaceAll(feed.Name, "{claw_id}", clawID)
 		url, err := resolveFeedURL(p, feed.Source, feedPath)
 		if err != nil {
 			return nil, fmt.Errorf("feed %q: %w", feedName, err)
@@ -901,6 +979,161 @@ func buildFeedURL(source, port, feedPath string) string {
 	return fmt.Sprintf("http://%s:%s%s", source, port, feedPath)
 }
 
+type conversationWallTokenPair struct {
+	ChannelID string
+	Token     string
+}
+
+func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw) error {
+	if p == nil {
+		return nil
+	}
+
+	tokenPairs := make([]conversationWallTokenPair, 0)
+	triggerServices := make(map[string][]string)
+
+	for _, name := range sortedResolvedClawNames(resolvedClaws) {
+		rc := resolvedClaws[name]
+		if rc == nil {
+			continue
+		}
+		svc := p.Services[name]
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+
+		channelIDs := discordHandleChannelIDs(svc.Claw.Handles)
+		if len(channelIDs) == 0 {
+			continue
+		}
+
+		token := strings.TrimSpace(svc.Environment["DISCORD_BOT_TOKEN"])
+		if token == "" {
+			return fmt.Errorf("service %q: HANDLE discord with channel IDs requires DISCORD_BOT_TOKEN for conversation wall injection", name)
+		}
+		for _, channelID := range channelIDs {
+			tokenPairs = append(tokenPairs, conversationWallTokenPair{
+				ChannelID: channelID,
+				Token:     token,
+			})
+		}
+
+		if len(rc.Cllama) == 0 {
+			continue
+		}
+		triggerServices[name] = channelIDs
+	}
+
+	if len(triggerServices) == 0 {
+		return nil
+	}
+	if _, exists := p.Services[conversationWallServiceName]; exists {
+		return fmt.Errorf("service name %q is reserved for the conversation wall sidecar", conversationWallServiceName)
+	}
+	if len(tokenPairs) == 0 {
+		return fmt.Errorf("conversation wall injection triggered but no Discord channel/token pairs were found")
+	}
+	for name, channelIDs := range triggerServices {
+		svc := p.Services[name]
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		svc.Claw.Feeds = appendConversationWallFeed(svc.Claw.Feeds, channelIDs)
+	}
+
+	p.Services[conversationWallServiceName] = &pod.Service{
+		Image:       conversationWallImageRef,
+		Environment: map[string]string{"CLAW_WALL_TOKENS": formatConversationWallTokenPairs(tokenPairs)},
+		Expose:      []string{conversationWallInternalPort},
+		Compose: map[string]interface{}{
+			"networks":  []string{"claw-internal"},
+			"restart":   "on-failure",
+			"read_only": true,
+			"tmpfs":     []string{"/tmp"},
+			"healthcheck": map[string]interface{}{
+				"test":     []string{"CMD", "/claw-wall", "-healthcheck"},
+				"interval": "15s",
+				"timeout":  "5s",
+				"retries":  3,
+			},
+			"labels": map[string]string{
+				"claw.role": "conversation-wall",
+			},
+		},
+	}
+	return nil
+}
+
+func appendConversationWallFeed(feeds []pod.FeedEntry, channelIDs []string) []pod.FeedEntry {
+	path := fmt.Sprintf("/channel-context?consumer={claw_id}&channels=%s&limit=%d", strings.Join(channelIDs, ","), conversationWallFeedLimit)
+	for _, feed := range feeds {
+		if feed.Name == conversationWallFeedName && feed.Source == conversationWallServiceName && feed.Path == path {
+			return feeds
+		}
+	}
+	return append(feeds, pod.FeedEntry{
+		Name:   conversationWallFeedName,
+		Source: conversationWallServiceName,
+		Path:   path,
+		TTL:    conversationWallFeedTTL,
+	})
+}
+
+func discordHandleChannelIDs(handles map[string]*driver.HandleInfo) []string {
+	handle := handles["discord"]
+	if handle == nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	channelIDs := make([]string, 0)
+	for _, guild := range handle.Guilds {
+		for _, channel := range guild.Channels {
+			channelID := strings.TrimSpace(channel.ID)
+			if channelID == "" {
+				continue
+			}
+			if _, exists := seen[channelID]; exists {
+				continue
+			}
+			seen[channelID] = struct{}{}
+			channelIDs = append(channelIDs, channelID)
+		}
+	}
+	sort.Strings(channelIDs)
+	return channelIDs
+}
+
+func formatConversationWallTokenPairs(pairs []conversationWallTokenPair) string {
+	if len(pairs) == 0 {
+		return ""
+	}
+
+	seen := make(map[string]struct{})
+	deduped := make([]conversationWallTokenPair, 0, len(pairs))
+	for _, pair := range pairs {
+		key := pair.ChannelID + "\x00" + pair.Token
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, pair)
+	}
+
+	sort.Slice(deduped, func(i, j int) bool {
+		if deduped[i].ChannelID != deduped[j].ChannelID {
+			return deduped[i].ChannelID < deduped[j].ChannelID
+		}
+		return deduped[i].Token < deduped[j].Token
+	})
+
+	entries := make([]string, 0, len(deduped))
+	for _, pair := range deduped {
+		entries = append(entries, pair.ChannelID+":"+pair.Token)
+	}
+	return strings.Join(entries, ",")
+}
+
 func clawAPIInternalPort(addr string) string {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
@@ -929,11 +1162,69 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		return nil, fmt.Errorf("master service %q not found in pod services", p.Master)
 	}
 
-	principal, err := clawapi.BuildMasterPrincipal(p.Name, p.Master)
+	clawAPIURL := fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr))
+
+	// 1. Build master principal (full access, pod-wide).
+	masterPrincipal, err := clawapi.BuildMasterPrincipal(p.Name, p.Master)
 	if err != nil {
 		return nil, err
 	}
-	store := clawapi.Store{Principals: []clawapi.Principal{principal}}
+	auto := []clawapi.Principal{masterPrincipal}
+
+	// 2. Build self principals for services declaring claw-api: self.
+	for name, svc := range p.Services {
+		if name == p.Master || svc.Claw == nil || svc.Claw.ClawAPIMode != "self" {
+			continue
+		}
+		sp, err := clawapi.BuildSelfPrincipal(p.Name, name)
+		if err != nil {
+			return nil, fmt.Errorf("service %q: build self principal: %w", name, err)
+		}
+		auto = append(auto, sp)
+	}
+
+	// 3. Merge with explicit pod-level principals.
+	merged, err := mergePrincipals(auto, p.Principals, p.Name)
+	if err != nil {
+		return nil, fmt.Errorf("merge principals: %w", err)
+	}
+
+	// 3a. Resolve effective master token from merged result.
+	// An explicit principal may have overridden the auto-generated master by name;
+	// use the merged token, not the pre-merge one.
+	effectiveMasterToken := ""
+	for _, m := range merged {
+		if m.Principal.Name == p.Master {
+			effectiveMasterToken = m.Principal.Token
+			break
+		}
+	}
+	if effectiveMasterToken == "" {
+		return nil, fmt.Errorf("master principal %q not found in merged result", p.Master)
+	}
+
+	// 3b. Reject explicit inject-into claims that target master or claw-api: self services.
+	// Those injection points are reserved for their auto-generated principals.
+	reservedInjectTargets := map[string]string{p.Master: "master claw"}
+	for name, svc := range p.Services {
+		if svc.Claw != nil && svc.Claw.ClawAPIMode == "self" {
+			reservedInjectTargets[name] = "claw-api: self service"
+		}
+	}
+	for _, m := range merged {
+		if m.InjectInto != "" {
+			if reason, reserved := reservedInjectTargets[m.InjectInto]; reserved {
+				return nil, fmt.Errorf("principal %q: inject-into %q conflicts with %s — that injection point is reserved", m.Principal.Name, m.InjectInto, reason)
+			}
+		}
+	}
+
+	// 4. Write principals.json.
+	principals := make([]clawapi.Principal, len(merged))
+	for i, m := range merged {
+		principals[i] = m.Principal
+	}
+	store := clawapi.Store{Principals: principals}
 	principalsDir := filepath.Dir(p.ClawAPI.PrincipalsHostPath)
 	if err := os.MkdirAll(principalsDir, 0700); err != nil {
 		return nil, fmt.Errorf("create claw-api runtime dir under %q: %w", runtimeDir, err)
@@ -946,17 +1237,41 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		return nil, fmt.Errorf("write claw-api principals: %w", err)
 	}
 
-	if masterSvc.Environment == nil {
-		masterSvc.Environment = make(map[string]string)
+	// 5. Inject tokens into services.
+	injectClawAPIEnv := func(svc *pod.Service, token string) {
+		if svc.Environment == nil {
+			svc.Environment = make(map[string]string)
+		}
+		svc.Environment["CLAW_API_URL"] = clawAPIURL
+		svc.Environment["CLAW_API_TOKEN"] = token
 	}
-	masterSvc.Environment["CLAW_API_URL"] = fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr))
-	masterSvc.Environment["CLAW_API_TOKEN"] = principal.Token
 
+	// Master always gets its (effective, post-merge) token.
+	injectClawAPIEnv(masterSvc, effectiveMasterToken)
+
+	// Self principals and explicit inject-into targets.
+	for _, m := range merged {
+		if m.Principal.Name == p.Master {
+			continue // already handled above
+		}
+		// Self principal: inject into the service that declared claw-api: self.
+		if svc, ok := p.Services[m.Principal.Name]; ok && svc.Claw != nil && svc.Claw.ClawAPIMode == "self" {
+			injectClawAPIEnv(svc, m.Principal.Token)
+		}
+		// Explicit inject-into.
+		if m.InjectInto != "" {
+			if svc, ok := p.Services[m.InjectInto]; ok {
+				injectClawAPIEnv(svc, m.Principal.Token)
+			}
+		}
+	}
+
+	// 6. Build cllama service auth entries for the master (feed fetching).
 	authEntry := cllama.ServiceAuthEntry{
 		Service:   "claw-api",
 		AuthType:  "bearer",
-		Token:     principal.Token,
-		Principal: principal.Name,
+		Token:     effectiveMasterToken,
+		Principal: p.Master,
 	}
 	serviceAuth := make(map[string]cllama.ServiceAuthEntry)
 	count := 1
@@ -1659,9 +1974,323 @@ func sortedResolvedClawNames(claws map[string]*driver.ResolvedClaw) []string {
 	return names
 }
 
+// -- provider seed helpers ---------------------------------------------------
+
+// seedKeyDef maps a cllama-env var name to its deterministic pool attributes.
+type seedKeyDef struct {
+	envVar   string
+	provider string
+	keyID    string // e.g. "seed:OPENAI_API_KEY"
+	label    string
+}
+
+var seedKeyDefs = []seedKeyDef{
+	{"OPENAI_API_KEY", "openai", "seed:OPENAI_API_KEY", "primary"},
+	{"OPENAI_API_KEY_1", "openai", "seed:OPENAI_API_KEY_1", "backup-1"},
+	{"OPENAI_API_KEY_2", "openai", "seed:OPENAI_API_KEY_2", "backup-2"},
+	{"ANTHROPIC_API_KEY", "anthropic", "seed:ANTHROPIC_API_KEY", "primary"},
+	{"ANTHROPIC_API_KEY_1", "anthropic", "seed:ANTHROPIC_API_KEY_1", "backup-1"},
+	{"OPENROUTER_API_KEY", "openrouter", "seed:OPENROUTER_API_KEY", "primary"},
+	{"OPENROUTER_API_KEY_1", "openrouter", "seed:OPENROUTER_API_KEY_1", "backup-1"},
+}
+
+// v2ProviderFile is the providers.json v2 on-disk shape (write path only).
+type v2ProviderFile struct {
+	Version   int                        `json:"version"`
+	Providers map[string]*v2ProviderState `json:"providers"`
+}
+
+type v2ProviderState struct {
+	BaseURL     string       `json:"base_url"`
+	Auth        string       `json:"auth,omitempty"`
+	APIFormat   string       `json:"api_format,omitempty"`
+	ActiveKeyID string       `json:"active_key_id,omitempty"`
+	Source      string       `json:"source,omitempty"` // "seed" | "runtime"
+	Keys        []v2KeyEntry `json:"keys"`
+}
+
+type v2KeyEntry struct {
+	ID              string `json:"id"`
+	Label           string `json:"label,omitempty"`
+	Secret          string `json:"secret"`
+	Source          string `json:"source"`
+	State           string `json:"state"`
+	CooldownUntil   string `json:"cooldown_until"`
+	LastErrorCode   int    `json:"last_error_code"`
+	LastErrorReason string `json:"last_error_reason"`
+	LastErrorAt     string `json:"last_error_at"`
+	AddedAt         string `json:"added_at"`
+}
+
+var defaultBaseURLs = map[string]string{
+	"openai":     "https://api.openai.com/v1",
+	"anthropic":  "https://api.anthropic.com/v1",
+	"openrouter": "https://openrouter.ai/api/v1",
+}
+
+var defaultAuths = map[string]string{
+	"anthropic": "x-api-key",
+}
+
+var defaultFormats = map[string]string{
+	"anthropic": "anthropic",
+}
+
+// mergeProviderSeeds loads any existing providers.json from authDir, merges
+// seed keys compiled from the pod's cllama-env, and writes the result atomically.
+func mergeProviderSeeds(authDir string, p *pod.Pod) error {
+	// Collect deduplicated cllama-env from all services.
+	merged := make(map[string]string)
+	for _, svc := range p.Services {
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		for k, v := range svc.Claw.CllamaEnv {
+			if _, exists := merged[k]; !exists {
+				merged[k] = v
+			}
+		}
+	}
+
+	// Load existing file (v1 or v2) into our local v2 struct.
+	existing := loadExistingProviders(authDir)
+
+	// Build new provider states from seed defs.
+	// Group seed defs by provider.
+	type provSeed struct {
+		def    seedKeyDef
+		secret string
+	}
+	bySvc := make(map[string][]provSeed)
+	for _, def := range seedKeyDefs {
+		v := strings.TrimSpace(merged[def.envVar])
+		if v == "" {
+			continue
+		}
+		bySvc[def.provider] = append(bySvc[def.provider], provSeed{def, v})
+	}
+
+	// Also collect base URLs from cllama-env.
+	baseURLEnvMap := map[string]string{
+		"OPENAI_BASE_URL":     "openai",
+		"ANTHROPIC_BASE_URL":  "anthropic",
+		"OPENROUTER_BASE_URL": "openrouter",
+	}
+	customBaseURLs := make(map[string]string)
+	for envKey, prov := range baseURLEnvMap {
+		if v := strings.TrimSpace(merged[envKey]); v != "" {
+			customBaseURLs[prov] = v
+		}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Merge for each provider that has seeds.
+	for provName, seeds := range bySvc {
+		state, exists := existing[provName]
+		if !exists {
+			state = &v2ProviderState{
+				Auth:      defaultAuths[provName],
+				APIFormat: defaultFormats[provName],
+			}
+			if state.Auth == "" {
+				state.Auth = "bearer"
+			}
+			if state.APIFormat == "" {
+				state.APIFormat = "openai"
+			}
+		}
+		// Update base URL.
+		if cu := customBaseURLs[provName]; cu != "" {
+			state.BaseURL = cu
+		}
+		if state.BaseURL == "" {
+			state.BaseURL = defaultBaseURLs[provName]
+		}
+
+		// Build index of existing keys by ID.
+		existingByID := make(map[string]*v2KeyEntry, len(state.Keys))
+		for i := range state.Keys {
+			existingByID[state.Keys[i].ID] = &state.Keys[i]
+		}
+
+		// Determine which seed IDs are present in the new config.
+		newSeedIDs := make(map[string]bool)
+		for _, s := range seeds {
+			newSeedIDs[s.def.keyID] = true
+		}
+
+		// Keep runtime keys unchanged; rebuild seed keys.
+		var runtimeKeys []v2KeyEntry
+		for _, k := range state.Keys {
+			if k.Source == "runtime" {
+				runtimeKeys = append(runtimeKeys, k)
+			}
+		}
+
+		var newKeys []v2KeyEntry
+		var firstSeedID string
+		for _, s := range seeds {
+			if firstSeedID == "" {
+				firstSeedID = s.def.keyID
+			}
+			if old, ok := existingByID[s.def.keyID]; ok && old.Source == "seed" {
+				if old.Secret == s.secret {
+					// Same secret — keep existing runtime state (e.g., dead stays dead).
+					newKeys = append(newKeys, *old)
+				} else {
+					// Different secret — reset to ready.
+					*old = v2KeyEntry{
+						ID:      s.def.keyID,
+						Label:   s.def.label,
+						Secret:  s.secret,
+						Source:  "seed",
+						State:   "ready",
+						AddedAt: now,
+					}
+					newKeys = append(newKeys, *old)
+				}
+			} else {
+				newKeys = append(newKeys, v2KeyEntry{
+					ID:      s.def.keyID,
+					Label:   s.def.label,
+					Secret:  s.secret,
+					Source:  "seed",
+					State:   "ready",
+					AddedAt: now,
+				})
+			}
+		}
+		// Append runtime keys after seed keys.
+		newKeys = append(newKeys, runtimeKeys...)
+		state.Keys = newKeys
+
+		// Preserve active_key_id if it still exists, otherwise default to first seed.
+		found := false
+		for _, k := range state.Keys {
+			if k.ID == state.ActiveKeyID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			state.ActiveKeyID = firstSeedID
+		}
+
+		if old, alreadyExists := existing[provName]; alreadyExists && old.Source == "runtime" {
+			fmt.Fprintf(os.Stderr, "warning: claw up seeds provider %q, overwriting runtime-added provider\n", provName)
+		}
+		existing[provName] = state
+	}
+
+	out := v2ProviderFile{
+		Version:   2,
+		Providers: existing,
+	}
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(authDir, "providers.json")
+	tmp := dest + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dest)
+}
+
+// loadExistingProviders reads providers.json from authDir, handling v1 and v2 formats.
+// Returns an empty map if the file doesn't exist.
+func loadExistingProviders(authDir string) map[string]*v2ProviderState {
+	out := make(map[string]*v2ProviderState)
+	path := filepath.Join(authDir, "providers.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return out
+	}
+
+	var probe struct {
+		Version   int                              `json:"version"`
+		Providers map[string]json.RawMessage       `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return out
+	}
+
+	if probe.Version >= 2 {
+		// v2: unmarshal full ProviderState.
+		for name, raw := range probe.Providers {
+			var state v2ProviderState
+			if err := json.Unmarshal(raw, &state); err == nil {
+				cp := state
+				out[strings.ToLower(strings.TrimSpace(name))] = &cp
+			}
+		}
+		return out
+	}
+
+	// v1: extract api_key into a single seed entry.
+	for name, raw := range probe.Providers {
+		var v1 struct {
+			BaseURL   string `json:"base_url"`
+			APIKey    string `json:"api_key"`
+			Auth      string `json:"auth"`
+			APIFormat string `json:"api_format"`
+		}
+		if err := json.Unmarshal(raw, &v1); err != nil {
+			continue
+		}
+		n := strings.ToLower(strings.TrimSpace(name))
+		state := &v2ProviderState{
+			BaseURL:   v1.BaseURL,
+			Auth:      v1.Auth,
+			APIFormat: v1.APIFormat,
+		}
+		if v1.APIKey != "" {
+			keyID := "seed:" + strings.ToUpper(n) + "_API_KEY"
+			state.ActiveKeyID = keyID
+			state.Keys = []v2KeyEntry{{
+				ID:      keyID,
+				Label:   "primary",
+				Secret:  v1.APIKey,
+				Source:  "seed",
+				State:   "ready",
+				AddedAt: time.Now().UTC().Format(time.RFC3339),
+			}}
+		}
+		out[n] = state
+	}
+	return out
+}
+
+// loadOrGenerateUIToken reads the persisted UI token from authDir, or generates
+// and writes a new one if none exists.
+func loadOrGenerateUIToken(authDir string) (string, error) {
+	tokenPath := filepath.Join(authDir, "ui-token")
+	data, err := os.ReadFile(tokenPath)
+	if err == nil {
+		token := strings.TrimSpace(string(data))
+		if token != "" {
+			return token, nil
+		}
+	}
+	// Generate a new 32-byte random token.
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate UI token: %w", err)
+	}
+	token := hex.EncodeToString(b)
+	if err := os.WriteFile(tokenPath, []byte(token+"\n"), 0o600); err != nil {
+		return "", fmt.Errorf("write UI token: %w", err)
+	}
+	return token, nil
+}
+
 func isProviderKey(key string) bool {
 	switch key {
-	case "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY":
+	case "OPENAI_API_KEY", "OPENAI_API_KEY_1", "OPENAI_API_KEY_2",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY_1",
+		"OPENROUTER_API_KEY", "OPENROUTER_API_KEY_1":
 		return true
 	}
 	return strings.HasPrefix(key, "PROVIDER_API_KEY")
@@ -2592,9 +3221,9 @@ func dockerBuildTaggedImageDefault(imageRef, dockerfilePath, contextDir string, 
 	return nil
 }
 
-// ensureInfraImages checks that cllama proxy, claw-api, and clawdash images exist locally,
+// ensureInfraImages checks that cllama proxy, claw-api, clawdash, and claw-wall images exist locally,
 // building them from source when missing.
-func ensureInfraImages(cllamaEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
+func ensureInfraImages(p *pod.Pod, cllamaEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
 	if cllamaEnabled {
 		for _, proxy := range proxies {
 			if err := ensureImage(proxy.Image, "cllama", "cllama/Dockerfile", "cllama"); err != nil {
@@ -2610,6 +3239,13 @@ func ensureInfraImages(cllamaEnabled bool, proxies []pod.CllamaProxyConfig, api 
 	if dash != nil {
 		if err := ensureImage(dash.Image, "clawdash", "dockerfiles/clawdash/Dockerfile", "."); err != nil {
 			return err
+		}
+	}
+	if p != nil {
+		if wall := p.Services[conversationWallServiceName]; wall != nil && strings.TrimSpace(wall.Image) != "" {
+			if err := ensureImage(wall.Image, conversationWallServiceName, conversationWallDockerfile, "."); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

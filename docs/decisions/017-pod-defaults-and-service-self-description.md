@@ -3,7 +3,7 @@
 **Date:** 2026-03-22
 **Status:** Accepted
 **Depends on:** ADR-004 (Service Surface Skills), ADR-013 (Context Feeds)
-**Implementation:** docs/plans/2026-03-22-pod-defaults-and-service-self-description.md
+**Implementation:** Milestones 1-3 complete (pod defaults with spread expansion, service descriptor contract, feed resolution pipeline). Milestone 5 (unified CLAWDAPUS.md) complete — surface/handle metadata inlined, separate skill files removed. Milestone 4 (RailsTrail bridge) and Milestone 6 (driver helpers) deferred. Plan: docs/plans/2026-03-22-pod-defaults-and-service-self-description.md
 
 ## Context
 

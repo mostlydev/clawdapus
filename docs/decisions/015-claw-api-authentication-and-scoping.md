@@ -1,9 +1,10 @@
 # ADR-015: `claw-api` Authentication and Authorization Scoping
 
 **Date:** 2026-03-19
-**Status:** Proposed
+**Status:** Accepted
 **Depends on:** ADR-002 (Runtime Authority), ADR-013 (Context Feeds)
 **Consumed by:** ADR-012 (Master Claw)
+**Implementation:** Full principal model implemented. Three principal categories: (1) master principal (all verbs, pod-wide, auto-generated from `x-claw.master`), (2) self principals (read verbs, service-scoped, auto-generated from `claw-api: self` on service x-claw), (3) explicit principals (`x-claw.principals` with verbs, scope, inject-into). Scope has four dimensions: `pods`, `services`, `claw_ids`, `compose_services` (last reserved for write-plane ordinal targeting). Verbs validated against known set at parse time. `inject-into` collision between distinct principals fails closed. Surfaces grant topology (reachability) only — `claw-api: self` is the explicit authority signal.
 
 ## Context
 

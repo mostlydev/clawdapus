@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mostlydev/clawdapus/internal/clawapi"
 	"github.com/mostlydev/clawdapus/internal/describe"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/openclaw"
@@ -624,6 +625,170 @@ func TestPrepareClawAPIRuntimeWritesPrincipalsAndProjectsAuth(t *testing.T) {
 	}
 	if _, err := os.Stat(p.ClawAPI.PrincipalsHostPath); err != nil {
 		t.Fatalf("expected principals file to be written: %v", err)
+	}
+}
+
+func TestPrepareClawAPIRuntimeUsesPostMergeMasterToken(t *testing.T) {
+	// If an explicit principal overrides the master by name, the injected token
+	// must be the post-merge one, not the pre-merge auto-generated one.
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name:   "ops",
+		Master: "octopus",
+		Services: map[string]*pod.Service{
+			"octopus": {Environment: map[string]string{}, Claw: &pod.ClawBlock{}},
+		},
+		Principals: []pod.PodPrincipal{
+			// Override master by name with read-only verbs.
+			{Name: "octopus", Verbs: clawapi.AllReadVerbs, Scope: "pod"},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	auth, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"octopus": {Count: 1},
+	})
+	if err != nil {
+		t.Fatalf("prepareClawAPIRuntime: %v", err)
+	}
+
+	injectedToken := p.Services["octopus"].Environment["CLAW_API_TOKEN"]
+	if injectedToken == "" {
+		t.Fatal("expected CLAW_API_TOKEN in master service env")
+	}
+	// The cllama auth entry must use the same (post-merge) token.
+	if auth["octopus"].Token != injectedToken {
+		t.Fatalf("cllama auth token %q != injected token %q (pre-merge token leaked)", auth["octopus"].Token, injectedToken)
+	}
+	// Verify the token in principals.json matches the injected one.
+	raw, err := os.ReadFile(p.ClawAPI.PrincipalsHostPath)
+	if err != nil {
+		t.Fatalf("read principals: %v", err)
+	}
+	if !strings.Contains(string(raw), injectedToken) {
+		t.Fatalf("injected token %q not found in principals.json", injectedToken)
+	}
+}
+
+func TestPrepareClawAPIRuntimeRejectsInjectIntoReservedMasterService(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name:   "ops",
+		Master: "octopus",
+		Services: map[string]*pod.Service{
+			"octopus":   {Environment: map[string]string{}, Claw: &pod.ClawBlock{}},
+			"ci-runner": {Environment: map[string]string{}, Claw: &pod.ClawBlock{}},
+		},
+		Principals: []pod.PodPrincipal{
+			// inject-into targets the master service — must fail.
+			{Name: "ci", Verbs: clawapi.AllReadVerbs, Scope: "pod", InjectInto: "octopus"},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	_, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"octopus": {Count: 1},
+	})
+	if err == nil {
+		t.Fatal("expected error for inject-into targeting master service")
+	}
+	if !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected 'reserved' in error, got: %v", err)
+	}
+}
+
+func TestPrepareClawAPIRuntimeRejectsInjectIntoSelfPrincipalService(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name:   "ops",
+		Master: "octopus",
+		Services: map[string]*pod.Service{
+			"octopus":  {Environment: map[string]string{}, Claw: &pod.ClawBlock{}},
+			"reporter": {Environment: map[string]string{}, Claw: &pod.ClawBlock{ClawAPIMode: "self"}},
+		},
+		Principals: []pod.PodPrincipal{
+			// inject-into targets a claw-api: self service — must fail.
+			{Name: "external", Verbs: clawapi.AllReadVerbs, Scope: "pod", InjectInto: "reporter"},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	_, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"octopus":  {Count: 1},
+		"reporter": {Count: 1},
+	})
+	if err == nil {
+		t.Fatal("expected error for inject-into targeting claw-api: self service")
+	}
+	if !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected 'reserved' in error, got: %v", err)
+	}
+}
+
+func TestValidateClawAPIDeclarationsAllowsNoMasterNoDeclarations(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {Claw: &pod.ClawBlock{}},
+		},
+	}
+	if err := validateClawAPIDeclarations(p); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidateClawAPIDeclarationsRejectsPrincipalsWithoutMaster(t *testing.T) {
+	p := &pod.Pod{
+		Principals: []pod.PodPrincipal{
+			{Name: "ci", Verbs: []string{clawapi.VerbFleetStatus}, Scope: "pod"},
+		},
+		Services: map[string]*pod.Service{},
+	}
+	err := validateClawAPIDeclarations(p)
+	if err == nil {
+		t.Fatal("expected error for principals without master")
+	}
+	if !strings.Contains(err.Error(), "x-claw.master") {
+		t.Fatalf("expected x-claw.master in error, got: %v", err)
+	}
+}
+
+func TestValidateClawAPIDeclarationsRejectsClawAPISelfWithoutMaster(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"reporter": {Claw: &pod.ClawBlock{ClawAPIMode: "self"}},
+		},
+	}
+	err := validateClawAPIDeclarations(p)
+	if err == nil {
+		t.Fatal("expected error for claw-api: self without master")
+	}
+	if !strings.Contains(err.Error(), "x-claw.master") {
+		t.Fatalf("expected x-claw.master in error, got: %v", err)
+	}
+}
+
+func TestValidateClawAPIDeclarationsAllowsDeclarationsWithMaster(t *testing.T) {
+	p := &pod.Pod{
+		Master: "octopus",
+		Principals: []pod.PodPrincipal{
+			{Name: "ci", Verbs: []string{clawapi.VerbFleetStatus}, Scope: "pod"},
+		},
+		Services: map[string]*pod.Service{
+			"octopus":  {Claw: &pod.ClawBlock{}},
+			"reporter": {Claw: &pod.ClawBlock{ClawAPIMode: "self"}},
+		},
+	}
+	if err := validateClawAPIDeclarations(p); err != nil {
+		t.Fatalf("expected no error with master set, got: %v", err)
 	}
 }
 
@@ -1415,8 +1580,12 @@ func TestIsProviderKey(t *testing.T) {
 		want bool
 	}{
 		{"OPENAI_API_KEY", true},
+		{"OPENAI_API_KEY_1", true},
+		{"OPENAI_API_KEY_2", true},
 		{"ANTHROPIC_API_KEY", true},
+		{"ANTHROPIC_API_KEY_1", true},
 		{"OPENROUTER_API_KEY", true},
+		{"OPENROUTER_API_KEY_1", true},
 		{"PROVIDER_API_KEY_CUSTOM", true},
 		{"DISCORD_BOT_TOKEN", false},
 		{"LOG_LEVEL", false},
@@ -1425,6 +1594,285 @@ func TestIsProviderKey(t *testing.T) {
 		if got := isProviderKey(tt.key); got != tt.want {
 			t.Errorf("isProviderKey(%q) = %v, want %v", tt.key, got, tt.want)
 		}
+	}
+}
+
+// -- mergeProviderSeeds -------------------------------------------------------
+
+func TestMergeProviderSeedsWritesV2File(t *testing.T) {
+	dir := t.TempDir()
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OPENAI_API_KEY": "sk-primary",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+
+	var probe struct {
+		Version   int `json:"version"`
+		Providers map[string]struct {
+			Keys []struct {
+				ID     string `json:"id"`
+				Secret string `json:"secret"`
+				State  string `json:"state"`
+				Source string `json:"source"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	if probe.Version != 2 {
+		t.Errorf("expected version=2, got %d", probe.Version)
+	}
+	op, ok := probe.Providers["openai"]
+	if !ok {
+		t.Fatal("openai missing from output")
+	}
+	if len(op.Keys) != 1 {
+		t.Fatalf("expected 1 openai key, got %d", len(op.Keys))
+	}
+	k := op.Keys[0]
+	if k.ID != "seed:OPENAI_API_KEY" {
+		t.Errorf("key ID = %q, want seed:OPENAI_API_KEY", k.ID)
+	}
+	if k.Secret != "sk-primary" {
+		t.Errorf("key secret = %q, want sk-primary", k.Secret)
+	}
+	if k.State != "ready" {
+		t.Errorf("key state = %q, want ready", k.State)
+	}
+}
+
+func TestMergeProviderSeedsPreservesExistingRuntimeKeys(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed an existing v2 file with a runtime key.
+	existing := `{
+		"version": 2,
+		"providers": {
+			"openai": {
+				"base_url": "https://api.openai.com/v1",
+				"auth": "bearer",
+				"api_format": "openai",
+				"active_key_id": "seed:OPENAI_API_KEY",
+				"keys": [
+					{"id": "seed:OPENAI_API_KEY", "label": "primary", "secret": "sk-primary",
+					 "source": "seed", "state": "ready", "cooldown_until": "",
+					 "last_error_code": 0, "last_error_reason": "", "last_error_at": "", "added_at": "2026-03-23T00:00:00Z"},
+					{"id": "runtime:extra", "label": "extra", "secret": "sk-runtime",
+					 "source": "runtime", "state": "ready", "cooldown_until": "",
+					 "last_error_code": 0, "last_error_reason": "", "last_error_at": "", "added_at": "2026-03-23T00:00:00Z"}
+				]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OPENAI_API_KEY": "sk-primary",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "providers.json"))
+	var probe struct {
+		Providers map[string]struct {
+			Keys []struct {
+				ID     string `json:"id"`
+				Source string `json:"source"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	_ = json.Unmarshal(data, &probe)
+	var foundRuntime bool
+	for _, k := range probe.Providers["openai"].Keys {
+		if k.ID == "runtime:extra" && k.Source == "runtime" {
+			foundRuntime = true
+		}
+	}
+	if !foundRuntime {
+		t.Error("runtime key was dropped by mergeProviderSeeds")
+	}
+}
+
+func TestMergeProviderSeedsResetsStateWhenSecretChanges(t *testing.T) {
+	dir := t.TempDir()
+
+	// Start with a dead key.
+	existing := `{
+		"version": 2,
+		"providers": {
+			"openai": {
+				"base_url": "https://api.openai.com/v1",
+				"auth": "bearer",
+				"api_format": "openai",
+				"active_key_id": "seed:OPENAI_API_KEY",
+				"keys": [
+					{"id": "seed:OPENAI_API_KEY", "label": "primary", "secret": "sk-old",
+					 "source": "seed", "state": "dead", "cooldown_until": "",
+					 "last_error_code": 401, "last_error_reason": "http_401", "last_error_at": "2026-03-23T00:00:00Z",
+					 "added_at": "2026-03-23T00:00:00Z"}
+				]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OPENAI_API_KEY": "sk-new",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "providers.json"))
+	var probe struct {
+		Providers map[string]struct {
+			Keys []struct {
+				Secret string `json:"secret"`
+				State  string `json:"state"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	_ = json.Unmarshal(data, &probe)
+	keys := probe.Providers["openai"].Keys
+	if len(keys) == 0 {
+		t.Fatal("no keys after merge")
+	}
+	if keys[0].Secret != "sk-new" {
+		t.Errorf("expected secret=sk-new, got %q", keys[0].Secret)
+	}
+	if keys[0].State != "ready" {
+		t.Errorf("expected state=ready after secret change, got %q", keys[0].State)
+	}
+}
+
+func TestMergeProviderSeedsPreservesStateWhenSecretUnchanged(t *testing.T) {
+	dir := t.TempDir()
+
+	// Start with a cooldown key with same secret.
+	existing := `{
+		"version": 2,
+		"providers": {
+			"openai": {
+				"base_url": "https://api.openai.com/v1",
+				"auth": "bearer",
+				"api_format": "openai",
+				"active_key_id": "seed:OPENAI_API_KEY",
+				"keys": [
+					{"id": "seed:OPENAI_API_KEY", "label": "primary", "secret": "sk-same",
+					 "source": "seed", "state": "cooldown", "cooldown_until": "2026-12-31T23:59:59Z",
+					 "last_error_code": 429, "last_error_reason": "rate_limit", "last_error_at": "2026-03-23T00:00:00Z",
+					 "added_at": "2026-03-23T00:00:00Z"}
+				]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OPENAI_API_KEY": "sk-same",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "providers.json"))
+	var probe struct {
+		Providers map[string]struct {
+			Keys []struct {
+				State string `json:"state"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	_ = json.Unmarshal(data, &probe)
+	keys := probe.Providers["openai"].Keys
+	if len(keys) == 0 {
+		t.Fatal("no keys after merge")
+	}
+	if keys[0].State != "cooldown" {
+		t.Errorf("expected state=cooldown preserved, got %q", keys[0].State)
+	}
+}
+
+// -- loadOrGenerateUIToken ----------------------------------------------------
+
+func TestLoadOrGenerateUITokenCreatesNewToken(t *testing.T) {
+	dir := t.TempDir()
+	token, err := loadOrGenerateUIToken(dir)
+	if err != nil {
+		t.Fatalf("loadOrGenerateUIToken: %v", err)
+	}
+	if len(token) == 0 {
+		t.Error("expected non-empty token")
+	}
+	// Token should be persisted.
+	data, err := os.ReadFile(filepath.Join(dir, "ui-token"))
+	if err != nil {
+		t.Fatalf("ui-token file not created: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != token {
+		t.Errorf("persisted token %q != returned token %q", strings.TrimSpace(string(data)), token)
+	}
+}
+
+func TestLoadOrGenerateUITokenRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	first, err := loadOrGenerateUIToken(dir)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	second, err := loadOrGenerateUIToken(dir)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if first != second {
+		t.Errorf("token changed between calls: %q != %q", first, second)
 	}
 }
 
@@ -1452,7 +1900,7 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 		},
 	}
 
-	westonFeeds, err := buildFeedManifestEntries(p, nil, nil, "weston", nil)
+	westonFeeds, err := buildFeedManifestEntries(p, nil, nil, "weston", "weston", nil)
 	if err != nil {
 		t.Fatalf("weston feeds: %v", err)
 	}
@@ -1466,7 +1914,7 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 		t.Fatalf("expected weston URL substitution, got %q", westonFeeds[0].URL)
 	}
 
-	loganFeeds, err := buildFeedManifestEntries(p, nil, nil, "logan", nil)
+	loganFeeds, err := buildFeedManifestEntries(p, nil, nil, "logan", "logan", nil)
 	if err != nil {
 		t.Fatalf("logan feeds: %v", err)
 	}
@@ -1475,6 +1923,44 @@ func TestBuildFeedManifestSubstitutesClawID(t *testing.T) {
 	}
 	if loganFeeds[0].Path != "/api/v1/market_context/logan" {
 		t.Fatalf("expected logan path substitution, got %q", loganFeeds[0].Path)
+	}
+}
+
+func TestBuildFeedManifestUsesOrdinalClawID(t *testing.T) {
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"claw-wall": {
+				Image:  conversationWallImageRef,
+				Expose: []string{conversationWallInternalPort},
+			},
+			"trader": {
+				Claw: &pod.ClawBlock{
+					Feeds: []pod.FeedEntry{
+						{
+							Name:   conversationWallFeedName,
+							Source: conversationWallServiceName,
+							Path:   "/channel-context?consumer={claw_id}&channels=chan-a,chan-b&limit=20",
+							TTL:    conversationWallFeedTTL,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	feeds, err := buildFeedManifestEntries(p, nil, nil, "trader", "trader-1", nil)
+	if err != nil {
+		t.Fatalf("buildFeedManifestEntries: %v", err)
+	}
+	if len(feeds) != 1 {
+		t.Fatalf("expected one feed, got %d", len(feeds))
+	}
+	if feeds[0].Path != "/channel-context?consumer=trader-1&channels=chan-a,chan-b&limit=20" {
+		t.Fatalf("expected ordinal claw_id substitution, got %q", feeds[0].Path)
+	}
+	if feeds[0].URL != "http://claw-wall:8080/channel-context?consumer=trader-1&channels=chan-a,chan-b&limit=20" {
+		t.Fatalf("expected ordinal wall URL, got %q", feeds[0].URL)
 	}
 }
 
@@ -1512,6 +1998,7 @@ func TestBuildFeedManifestProjectsBearerAuthFromServiceEnv(t *testing.T) {
 			"TRADING_API_TOKEN": "real-token",
 		},
 		"weston",
+		"weston",
 		nil,
 	)
 	if err != nil {
@@ -1522,5 +2009,265 @@ func TestBuildFeedManifestProjectsBearerAuthFromServiceEnv(t *testing.T) {
 	}
 	if feeds[0].Auth != "real-token" {
 		t.Fatalf("expected projected bearer auth, got %q", feeds[0].Auth)
+	}
+}
+
+func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
+	p := &pod.Pod{
+		Name: "desk",
+		Services: map[string]*pod.Service{
+			"observer": {
+				Environment: map[string]string{
+					"DISCORD_BOT_TOKEN": "${OBSERVER_DISCORD_BOT_TOKEN}",
+				},
+				Claw: &pod.ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							Guilds: []driver.GuildInfo{{
+								ID: "guild-1",
+								Channels: []driver.ChannelInfo{
+									{ID: "chan-2"},
+								},
+							}},
+						},
+					},
+				},
+			},
+			"trader": {
+				Environment: map[string]string{
+					"DISCORD_BOT_TOKEN": "${TRADER_DISCORD_BOT_TOKEN}",
+				},
+				Claw: &pod.ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							Guilds: []driver.GuildInfo{{
+								ID: "guild-1",
+								Channels: []driver.ChannelInfo{
+									{ID: "chan-2"},
+									{ID: "chan-1"},
+								},
+							}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"observer": {ServiceName: "observer"},
+		"trader":   {ServiceName: "trader", Cllama: []string{"passthrough"}},
+	}
+
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		t.Fatalf("injectConversationWall: %v", err)
+	}
+
+	wall := p.Services[conversationWallServiceName]
+	if wall == nil {
+		t.Fatal("expected claw-wall service to be injected")
+	}
+	if wall.Image != conversationWallImageRef {
+		t.Fatalf("expected claw-wall image %q, got %q", conversationWallImageRef, wall.Image)
+	}
+	if !slices.Equal(wall.Expose, []string{conversationWallInternalPort}) {
+		t.Fatalf("expected claw-wall expose %v, got %v", []string{conversationWallInternalPort}, wall.Expose)
+	}
+	if wall.Environment["CLAW_WALL_TOKENS"] != "chan-1:${TRADER_DISCORD_BOT_TOKEN},chan-2:${OBSERVER_DISCORD_BOT_TOKEN},chan-2:${TRADER_DISCORD_BOT_TOKEN}" {
+		t.Fatalf("unexpected CLAW_WALL_TOKENS: %q", wall.Environment["CLAW_WALL_TOKENS"])
+	}
+
+	traderFeeds := p.Services["trader"].Claw.Feeds
+	if len(traderFeeds) != 1 {
+		t.Fatalf("expected one injected wall feed, got %+v", traderFeeds)
+	}
+	if traderFeeds[0].Source != conversationWallServiceName {
+		t.Fatalf("expected claw-wall feed source, got %+v", traderFeeds[0])
+	}
+	if traderFeeds[0].Path != "/channel-context?consumer={claw_id}&channels=chan-1,chan-2&limit=20" {
+		t.Fatalf("unexpected wall feed path: %q", traderFeeds[0].Path)
+	}
+	if len(p.Services["observer"].Claw.Feeds) != 0 {
+		t.Fatalf("expected no wall feed for non-cllama service, got %+v", p.Services["observer"].Claw.Feeds)
+	}
+}
+
+func TestInjectConversationWallRejectsReservedServiceName(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			conversationWallServiceName: {Image: "busybox"},
+			"trader": {
+				Environment: map[string]string{"DISCORD_BOT_TOKEN": "token"},
+				Claw: &pod.ClawBlock{
+					Handles: map[string]*driver.HandleInfo{
+						"discord": {
+							Guilds: []driver.GuildInfo{{Channels: []driver.ChannelInfo{{ID: "chan-1"}}}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := injectConversationWall(p, map[string]*driver.ResolvedClaw{
+		"trader": {ServiceName: "trader", Cllama: []string{"passthrough"}},
+	})
+	if err == nil {
+		t.Fatal("expected reserved-name error")
+	}
+	if !strings.Contains(err.Error(), conversationWallServiceName) {
+		t.Fatalf("expected reserved service name in error, got %v", err)
+	}
+}
+
+// -- mergeProviderSeeds source-field tests ------------------------------------
+
+func TestMergeProviderSeedsPreservesRuntimeProviderSource(t *testing.T) {
+	dir := t.TempDir()
+
+	// providers.json has a runtime-added provider that is NOT in any cllama-env.
+	existing := `{
+		"version": 2,
+		"providers": {
+			"mistral": {
+				"base_url": "https://api.mistral.ai/v1",
+				"auth": "bearer",
+				"api_format": "openai",
+				"source": "runtime",
+				"active_key_id": "runtime:mistral:abc",
+				"keys": [
+					{"id": "runtime:mistral:abc", "label": "primary", "secret": "sk-m",
+					 "source": "runtime", "state": "ready", "cooldown_until": "",
+					 "last_error_code": 0, "last_error_reason": "", "last_error_at": "",
+					 "added_at": "2026-03-24T00:00:00Z"}
+				]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pod with no cllama-env — mistral will not be seeded.
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+
+	var out struct {
+		Providers map[string]struct {
+			Source string `json:"source"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+
+	m, ok := out.Providers["mistral"]
+	if !ok {
+		t.Fatal("mistral provider missing from output after claw up")
+	}
+	if m.Source != "runtime" {
+		t.Errorf("mistral source = %q, want \"runtime\"", m.Source)
+	}
+}
+
+func TestMergeProviderSeedsWarnOnSeedOverwritesRuntime(t *testing.T) {
+	dir := t.TempDir()
+
+	// providers.json has a runtime-source provider named "openai".
+	existing := `{
+		"version": 2,
+		"providers": {
+			"openai": {
+				"base_url": "https://api.openai.com/v1",
+				"auth": "bearer",
+				"api_format": "openai",
+				"source": "runtime",
+				"active_key_id": "runtime:openai:xyz",
+				"keys": [
+					{"id": "runtime:openai:xyz", "label": "primary", "secret": "sk-runtime",
+					 "source": "runtime", "state": "ready", "cooldown_until": "",
+					 "last_error_code": 0, "last_error_reason": "", "last_error_at": "",
+					 "added_at": "2026-03-24T00:00:00Z"}
+				]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pod seeds "openai" via cllama-env — this should trigger the warning and win.
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OPENAI_API_KEY": "sk-seed",
+					},
+				},
+			},
+		},
+	}
+	// mergeProviderSeeds writes the warning to os.Stderr; we just verify it
+	// completes without error and that the seed key wins.
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+
+	var out struct {
+		Providers map[string]struct {
+			Keys []struct {
+				ID     string `json:"id"`
+				Secret string `json:"secret"`
+				Source string `json:"source"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+
+	op, ok := out.Providers["openai"]
+	if !ok {
+		t.Fatal("openai provider missing from output")
+	}
+
+	// Seed key must be present.
+	var seedKey *struct {
+		ID     string `json:"id"`
+		Secret string `json:"secret"`
+		Source string `json:"source"`
+	}
+	for i := range op.Keys {
+		if op.Keys[i].Source == "seed" {
+			seedKey = &op.Keys[i]
+			break
+		}
+	}
+	if seedKey == nil {
+		t.Fatal("expected a seed key in openai provider after merge, found none")
+	}
+	if seedKey.Secret != "sk-seed" {
+		t.Errorf("seed key secret = %q, want \"sk-seed\"", seedKey.Secret)
 	}
 }

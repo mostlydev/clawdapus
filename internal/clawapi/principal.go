@@ -12,23 +12,32 @@ import (
 )
 
 const (
-	VerbFleetStatus       = "fleet.status"
-	VerbFleetLogs         = "fleet.logs"
-	VerbFleetQueryMetrics = "fleet.query_metrics"
-	VerbFleetAlerts       = "fleet.alerts"
+	VerbFleetStatus        = "fleet.status"
+	VerbFleetLogs          = "fleet.logs"
+	VerbFleetQueryMetrics  = "fleet.query_metrics"
+	VerbFleetAlerts        = "fleet.alerts"
+	VerbFleetRestart       = "fleet.restart"
+	VerbFleetQuarantine    = "fleet.quarantine"
+	VerbFleetBudgetSet     = "fleet.budget.set"
+	VerbFleetModelRestrict = "fleet.model.restrict"
 )
+
+var AllReadVerbs = []string{VerbFleetStatus, VerbFleetLogs, VerbFleetQueryMetrics, VerbFleetAlerts}
+var AllWriteVerbs = []string{VerbFleetRestart, VerbFleetQuarantine, VerbFleetBudgetSet, VerbFleetModelRestrict}
+var AllVerbs = append(append([]string{}, AllReadVerbs...), AllWriteVerbs...)
 
 type Store struct {
 	Principals []Principal `json:"principals"`
 }
 
 type Principal struct {
-	Name     string   `json:"name"`
-	Token    string   `json:"token"`
-	Verbs    []string `json:"verbs"`
-	Pods     []string `json:"pods,omitempty"`
-	Services []string `json:"services,omitempty"`
-	ClawIDs  []string `json:"claw_ids,omitempty"`
+	Name            string   `json:"name"`
+	Token           string   `json:"token"`
+	Verbs           []string `json:"verbs"`
+	Pods            []string `json:"pods,omitempty"`
+	Services        []string `json:"services,omitempty"`
+	ClawIDs         []string `json:"claw_ids,omitempty"`
+	ComposeServices []string `json:"compose_services,omitempty"`
 }
 
 func LoadStore(filePath string) (*Store, error) {
@@ -105,21 +114,41 @@ func (p *Principal) AllowsClawID(podName, clawID string) bool {
 	return matchesAny(p.ClawIDs, clawID)
 }
 
+func (p *Principal) AllowsComposeService(podName, composeName string) bool {
+	if p == nil {
+		return false
+	}
+	if p.AllowsPod(podName) {
+		return true
+	}
+	return matchesAny(p.ComposeServices, composeName)
+}
+
 func BuildMasterPrincipal(podName, principalName string) (Principal, error) {
 	token, err := GenerateToken()
 	if err != nil {
 		return Principal{}, err
 	}
+	verbs := append([]string{}, AllVerbs...)
 	return Principal{
 		Name:  principalName,
 		Token: token,
-		Verbs: []string{
-			VerbFleetStatus,
-			VerbFleetLogs,
-			VerbFleetQueryMetrics,
-			VerbFleetAlerts,
-		},
-		Pods: []string{podName},
+		Verbs: verbs,
+		Pods:  []string{podName},
+	}, nil
+}
+
+func BuildSelfPrincipal(podName, serviceName string) (Principal, error) {
+	token, err := GenerateToken()
+	if err != nil {
+		return Principal{}, err
+	}
+	verbs := append([]string{}, AllReadVerbs...)
+	return Principal{
+		Name:     serviceName,
+		Token:    token,
+		Verbs:    verbs,
+		Services: []string{serviceName},
 	}, nil
 }
 
@@ -174,6 +203,29 @@ func validateStore(store *Store) error {
 		}
 		if err := validatePatterns("claw_ids", principal.ClawIDs); err != nil {
 			return fmt.Errorf("principal %q: %w", principal.Name, err)
+		}
+		if err := validatePatterns("compose_services", principal.ComposeServices); err != nil {
+			return fmt.Errorf("principal %q: %w", principal.Name, err)
+		}
+		if err := validateVerbs(principal.Verbs); err != nil {
+			return fmt.Errorf("principal %q: %w", principal.Name, err)
+		}
+	}
+	return nil
+}
+
+func validateVerbs(verbs []string) error {
+	for _, verb := range verbs {
+		verb = strings.TrimSpace(verb)
+		known := false
+		for _, v := range AllVerbs {
+			if v == verb {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return fmt.Errorf("unknown verb %q", verb)
 		}
 	}
 	return nil

@@ -13,6 +13,7 @@ Core docs:
 - `docs/CLLAMA_SPEC.md` — cllama proxy contract
 - `docs/decisions/` — ADRs
 - `docs/plans/` — implementation plans and historical design notes
+- [GitHub Project Board](https://github.com/users/mostlydev/projects/2) — prioritized roadmap (kanban). Update issue status on the board when starting and completing work.
 
 ## Compilation Principles
 
@@ -98,7 +99,7 @@ Do not assume older docs mentioning only a subset are current.
 ## Runtime Model That Exists Today
 
 - A `Clawfile` is parsed and emitted into a standard Dockerfile using image labels for Clawdapus directives.
-- A `claw-pod.yml` is parsed from service-level `x-claw` blocks. Current parsed fields include `agent`, `persona`, `cllama`, `cllama-env`, `count`, `handles`, `include`, `surfaces`, `skills`, and `invoke`.
+- A `claw-pod.yml` is parsed from service-level `x-claw` blocks. Current parsed fields include `agent`, `persona`, `cllama`, `cllama-env`, `count`, `handles`, `include`, `surfaces`, `skills`, and `invoke`. Pod-level `x-claw` also accepts `sequential-conformance: true`.
 - `count > 1` expands into ordinal-named compose services like `svc-0`, `svc-1`, etc.
 - `x-claw.master` is parsed in `rawPodClaw` but NOT propagated into `Pod` — the field is silently dropped. Any feature depending on it needs the parser→Pod→compose_up chain wired first.
 - cllama wiring is resolved before materialization in a two-pass `claw up` flow.
@@ -111,7 +112,8 @@ Do not assume older docs mentioning only a subset are current.
 - Runtime directories created by `Materialize()` use `0o777` (not `0o700`) so container users with different uids can write. Do not regress this.
 - All drivers set `mention_only` (or equivalent like `requireMention`, `DISCORD_REQUIRE_MENTION`) for Discord channels. Without this, multi-agent pods enter feedback loops.
 - All drivers explicitly set `HOME` in the container env map to match their config mount path. Container base images may run as root or a different user than expected.
-- `cllama/` is a git submodule pointing to a private SSH repo. Fresh `git clone` leaves it empty. Infra images (cllama, clawdash) are published to ghcr.io as public packages to avoid this for end users.
+- `cllama/` is a git submodule pointing to a private SSH repo. Fresh `git clone` leaves it empty. Infra images (cllama, clawdash) are published to ghcr.io as public packages to avoid this for end users. `cllama/` has its own `.git` — changes require two commits: one inside `cllama/` (for feeds/proxy code), then `git add cllama && git commit` in the repo root to update the pointer. Shell working directory can silently drift to `cllama/` between commands — use absolute paths for git operations or verify with `pwd` first.
+- `internal/feeds/` and other cllama internals live at `cllama/internal/`, not at the repo root.
 - `ensureImage()` in `compose_up.go` has a 3-step fallback: local image → `docker pull` → local Dockerfile build → git URL build. All steps must be considered when debugging image failures.
 - Managed services require `claw up -d` because post-apply verification is fail-closed.
 - Multi-proxy cllama is represented in the data model but runtime currently fails fast if more than one proxy type is declared.
@@ -125,7 +127,12 @@ Do not assume older docs mentioning only a subset are current.
 - cllama logger (`cllama/internal/logging/logger.go`): field `intervention *string` has no `omitempty` — every event emits `"intervention": null`. Emitted `type` values are `request`, `response`, `error`, `intervention`. No `drift_score` exists in the reference implementation. The spec (`CLLAMA_SPEC.md` §5) omits `error` from its type enum and uses `intervention_reason` where the logger uses `intervention`.
 - Hermes SOUL.md identity: The Hermes runner seeds a default SOUL.md ("You are Hermes, made by Nous Research") on first boot via `hermes_cli/default_soul.py`. The Clawdapus Hermes driver writes its own `SOUL.md` to `hermes-home/` during `Materialize` to override this with the agent's contracted identity. Persona SOUL.md takes priority when configured.
 - Hermes `.env` passthrough: Container env vars from compose `environment:` are NOT available in Hermes agent tool execution. Only vars in `allowedEnvPassthroughKeys()` (`internal/driver/hermes/config.go`) reach the tool runtime via the `.env` file. New env vars that agents need (e.g. `CLAW_API_TOKEN`) must be added to this list.
-- Pod-level `x-claw` accepts `pod`, `master`, `handles-defaults`, `cllama-defaults`, `surfaces-defaults`, `feeds-defaults`, and `skills-defaults`. Service-level fields inherit pod defaults; declaring a field replaces defaults unless `...` spread is used to extend. See `examples/master-claw/claw-pod.yml` for the pattern.
+- Pod-level `x-claw` accepts `pod`, `master`, `handles-defaults`, `cllama-defaults`, `surfaces-defaults`, `feeds-defaults`, `skills-defaults`, and `principals`. Service-level fields inherit pod defaults; declaring a field replaces defaults unless `...` spread is used to extend. See `examples/master-claw/claw-pod.yml` for the pattern.
+- `claw-api: self` on a service's `x-claw` block is an authority signal — it auto-generates a read-only bearer token scoped to that service and injects `CLAW_API_URL` + `CLAW_API_TOKEN`. This is separate from `surfaces: [service://claw-api]` which only grants network reachability. Both are needed for full access.
+- claw-api principal scopes have four dimensions: `pods`, `services` (base service names), `claw_ids` (ordinal IDs), `compose_services` (compose service names). `compose_services` is reserved for write-plane ordinal targeting (#78). Write verb constants (`fleet.restart` etc.) are defined but handlers are not yet implemented.
+- `sequential-conformance: true` at pod level allows services to share the same Discord handle ID (rollcall pattern). Without it, duplicate handle IDs across services are a hard error. The `count > 1` rejection is still enforced even in sequential-conformance pods.
+- `claw-wall` is an infrastructure service auto-injected by `claw up` when any cllama-enabled service has Discord channel IDs. The service name `claw-wall` is reserved — declaring it in `claw-pod.yml` is a hard error. Credentials are passed as `CLAW_WALL_TOKENS=channelID:token,...` pairs (not a map); the same channel ID can appear with different tokens for multi-bot pods. Cursor state is in-memory and resets on wall restart — agents may see some message overlap after redeploy.
+- Verb validation happens at parse time — unknown verbs in `x-claw.principals` or `principals.json` fail hard.
 - `claw.describe` is the structured service descriptor label. `claw up` extracts `.claw-describe.json` from images (or falls back to the build context filesystem). Descriptors declare feeds, endpoints, auth, and skill file paths. Feed names from descriptors populate a pod-global feed registry; consumers subscribe by name via short-form `feeds: [name]`.
 - Feed resolution is two-phase: the parser stores short-form feed names as `FeedEntry{Unresolved: true}` (no source/path validation). `claw up` resolves them after image inspection against the feed registry. Unresolved feeds that aren't in the registry are hard errors.
 - Spread expansion (`...`) in pod default lists happens at the raw YAML layer in `expandPodDefaults()`, BEFORE typed parsing (`ParseSurface`, `parseFeeds`). The typed parsers never see the `...` token. This ordering is critical — moving spread expansion after typed parsing will break.
@@ -168,6 +175,7 @@ The spike tests are the heavy end-to-end path. They build images, run Docker, an
 - `Service.Compose` in the pod parser preserves all non-`x-claw` compose keys as a deep-copied `map[string]interface{}`. This is how user healthchecks, depends_on, command, etc. flow through.
 - Releases: use `gh release create` with semver tags. cllama has its own tag namespace (e.g. `v0.1.0`) published from the submodule repo. ghcr.io packages default to private; must be set public via GitHub UI after first push.
 - `claw-api` image is not published to ghcr.io. The `ensureImage` fallback tries a git URL build which fails because the Docker builder cannot access the private cllama submodule. Build it locally from the repo root: `docker build -t ghcr.io/mostlydev/claw-api:latest -f dockerfiles/claw-api/Dockerfile .`
+- `claw-wall` image is built from `dockerfiles/claw-wall/Dockerfile` with `.` context and published to `ghcr.io/mostlydev/claw-wall:latest`. The `ensureInfraImages` fallback applies: local image → `docker pull` → local Dockerfile build.
 - `x-claw.master` auto-injects a `claw-api` service into compose. The master claw gets a bearer token baked into its `feeds.json` via the `auth` field, and a `CLAW_API_URL` env var pointing at the in-pod API. Feed auth flows: `claw up` → `feeds.json` with `auth` → cllama fetcher sends `Authorization: Bearer` header → `claw-api` validates via principals.json.
 - Alert thresholds are configurable via `CLAW_ALERT_*` env vars on the host. `claw up` forwards them into the auto-injected `claw-api` container.
 - Prefer reading the code paths above before relying on plan documents.
