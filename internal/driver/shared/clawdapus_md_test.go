@@ -182,10 +182,10 @@ func TestGenerateClawdapusMDPeerHandles(t *testing.T) {
 	if !strings.Contains(md, "### trader") {
 		t.Error("expected trader peer heading")
 	}
-	if !strings.Contains(md, "111") {
-		t.Error("expected trader discord ID")
+	if !strings.Contains(md, "<@111>") {
+		t.Error("expected trader discord mention syntax")
 	}
-	if !strings.Contains(md, "@trader-bot") {
+	if !strings.Contains(md, "trader-bot") {
 		t.Error("expected trader username")
 	}
 	if !strings.Contains(md, "333") {

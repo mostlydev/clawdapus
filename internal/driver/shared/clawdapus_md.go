@@ -176,9 +176,18 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 				if info == nil {
 					continue
 				}
-				b.WriteString(fmt.Sprintf("- **%s:** %s", platform, info.ID))
-				if info.Username != "" {
-					b.WriteString(fmt.Sprintf(" (@%s)", info.Username))
+				switch platform {
+				case "discord":
+					// Provide the actual mention syntax — plain @username is just text in Discord.
+					b.WriteString(fmt.Sprintf("- **discord:** `<@%s>`", info.ID))
+					if info.Username != "" {
+						b.WriteString(fmt.Sprintf(" (%s)", info.Username))
+					}
+				default:
+					b.WriteString(fmt.Sprintf("- **%s:** %s", platform, info.ID))
+					if info.Username != "" {
+						b.WriteString(fmt.Sprintf(" (@%s)", info.Username))
+					}
 				}
 				b.WriteString("\n")
 			}
