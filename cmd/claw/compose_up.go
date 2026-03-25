@@ -2001,10 +2001,11 @@ type v2ProviderFile struct {
 }
 
 type v2ProviderState struct {
-	BaseURL     string      `json:"base_url"`
-	Auth        string      `json:"auth,omitempty"`
-	APIFormat   string      `json:"api_format,omitempty"`
-	ActiveKeyID string      `json:"active_key_id,omitempty"`
+	BaseURL     string       `json:"base_url"`
+	Auth        string       `json:"auth,omitempty"`
+	APIFormat   string       `json:"api_format,omitempty"`
+	ActiveKeyID string       `json:"active_key_id,omitempty"`
+	Source      string       `json:"source,omitempty"` // "seed" | "runtime"
 	Keys        []v2KeyEntry `json:"keys"`
 }
 
@@ -2176,6 +2177,9 @@ func mergeProviderSeeds(authDir string, p *pod.Pod) error {
 			state.ActiveKeyID = firstSeedID
 		}
 
+		if old, alreadyExists := existing[provName]; alreadyExists && old.Source == "runtime" {
+			fmt.Fprintf(os.Stderr, "warning: claw up seeds provider %q, overwriting runtime-added provider\n", provName)
+		}
 		existing[provName] = state
 	}
 

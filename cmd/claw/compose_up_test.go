@@ -2119,3 +2119,155 @@ func TestInjectConversationWallRejectsReservedServiceName(t *testing.T) {
 		t.Fatalf("expected reserved service name in error, got %v", err)
 	}
 }
+
+// -- mergeProviderSeeds source-field tests ------------------------------------
+
+func TestMergeProviderSeedsPreservesRuntimeProviderSource(t *testing.T) {
+	dir := t.TempDir()
+
+	// providers.json has a runtime-added provider that is NOT in any cllama-env.
+	existing := `{
+		"version": 2,
+		"providers": {
+			"mistral": {
+				"base_url": "https://api.mistral.ai/v1",
+				"auth": "bearer",
+				"api_format": "openai",
+				"source": "runtime",
+				"active_key_id": "runtime:mistral:abc",
+				"keys": [
+					{"id": "runtime:mistral:abc", "label": "primary", "secret": "sk-m",
+					 "source": "runtime", "state": "ready", "cooldown_until": "",
+					 "last_error_code": 0, "last_error_reason": "", "last_error_at": "",
+					 "added_at": "2026-03-24T00:00:00Z"}
+				]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pod with no cllama-env — mistral will not be seeded.
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+
+	var out struct {
+		Providers map[string]struct {
+			Source string `json:"source"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+
+	m, ok := out.Providers["mistral"]
+	if !ok {
+		t.Fatal("mistral provider missing from output after claw up")
+	}
+	if m.Source != "runtime" {
+		t.Errorf("mistral source = %q, want \"runtime\"", m.Source)
+	}
+}
+
+func TestMergeProviderSeedsWarnOnSeedOverwritesRuntime(t *testing.T) {
+	dir := t.TempDir()
+
+	// providers.json has a runtime-source provider named "openai".
+	existing := `{
+		"version": 2,
+		"providers": {
+			"openai": {
+				"base_url": "https://api.openai.com/v1",
+				"auth": "bearer",
+				"api_format": "openai",
+				"source": "runtime",
+				"active_key_id": "runtime:openai:xyz",
+				"keys": [
+					{"id": "runtime:openai:xyz", "label": "primary", "secret": "sk-runtime",
+					 "source": "runtime", "state": "ready", "cooldown_until": "",
+					 "last_error_code": 0, "last_error_reason": "", "last_error_at": "",
+					 "added_at": "2026-03-24T00:00:00Z"}
+				]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pod seeds "openai" via cllama-env — this should trigger the warning and win.
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OPENAI_API_KEY": "sk-seed",
+					},
+				},
+			},
+		},
+	}
+	// mergeProviderSeeds writes the warning to os.Stderr; we just verify it
+	// completes without error and that the seed key wins.
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+
+	var out struct {
+		Providers map[string]struct {
+			Keys []struct {
+				ID     string `json:"id"`
+				Secret string `json:"secret"`
+				Source string `json:"source"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+
+	op, ok := out.Providers["openai"]
+	if !ok {
+		t.Fatal("openai provider missing from output")
+	}
+
+	// Seed key must be present.
+	var seedKey *struct {
+		ID     string `json:"id"`
+		Secret string `json:"secret"`
+		Source string `json:"source"`
+	}
+	for i := range op.Keys {
+		if op.Keys[i].Source == "seed" {
+			seedKey = &op.Keys[i]
+			break
+		}
+	}
+	if seedKey == nil {
+		t.Fatal("expected a seed key in openai provider after merge, found none")
+	}
+	if seedKey.Secret != "sk-seed" {
+		t.Errorf("seed key secret = %q, want \"sk-seed\"", seedKey.Secret)
+	}
+}
