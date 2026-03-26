@@ -89,7 +89,65 @@ Logs must contain the following fields:
 - `type`: `request`, `response`, `intervention`, or `drift_score`.
 - `intervention_reason`: If the proxy modified a prompt, dropped a tool, or amended a response, it must describe *why*, referencing the specific policy module or `enforce` rule that triggered the intervention.
 
-## 6. Ecosystem Implementations
+## 6. Session History
+
+### Overview
+
+cllama writes a durable JSONL session history at the proxy boundary. This is an infrastructure-owned record of every completed inference transaction — written by the proxy, not by agents. It is distinct from `/claw/memory`, which is runner-owned and agent-writable.
+
+### Environment Variable
+
+| Variable | Default | Description |
+|---|---|---|
+| `CLAW_SESSION_HISTORY_DIR` | `/claw/session-history` | Host-side base directory for per-agent JSONL history files. When set, cllama writes one file per agent at `<dir>/<agent-id>/history.jsonl`. |
+
+When orchestrated by Clawdapus, `claw up` automatically bind-mounts `.claw-session-history/` (relative to the pod file) into the cllama container at `/claw/session-history` whenever cllama is enabled for any service in the pod.
+
+### Layout
+
+```text
+/claw/session-history/
+├── crypto-crusher-0/
+│   └── history.jsonl
+├── crypto-crusher-1/
+│   └── history.jsonl
+```
+
+One JSONL file per agent. Each line is a single entry. Entries are appended on every successful upstream completion (HTTP 2xx only). Non-2xx responses are not recorded in session history; they appear only in structured audit logs (see §5).
+
+### Entry Schema
+
+Each line is a JSON object with the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `version` | integer | Schema version. Currently `1`. |
+| `ts` | string | RFC3339 timestamp of when the response was received. |
+| `claw_id` | string | Agent ID that issued the request. |
+| `path` | string | Request path (e.g., `/v1/chat/completions`). |
+| `requested_model` | string | Model string as sent by the agent. |
+| `effective_provider` | string | Provider name after routing (e.g., `anthropic`). |
+| `effective_model` | string | Model name forwarded to the upstream provider. |
+| `status_code` | integer | HTTP status code returned by the upstream. |
+| `stream` | boolean | Whether the response was streamed (SSE). |
+| `request_original` | object | The request body as received from the agent, before any proxy modification. |
+| `request_effective` | object | The request body as forwarded to the upstream provider, after credential swap and any model rewrite. |
+| `response` | object | See response payload below. |
+| `usage` | object | Token counts extracted from the response: `prompt_tokens` (integer), `completion_tokens` (integer). |
+
+**Response payload (`response` field):**
+
+| Field | Type | Description |
+|---|---|---|
+| `format` | string | `"json"` for standard JSON responses; `"sse"` for Server-Sent Events streams. |
+| `json` | object | Present when `format` is `"json"`. The parsed response body. |
+| `text` | string | Present when `format` is `"sse"`. The raw event stream text. |
+
+### Phase 1 Scope
+
+Phase 1 is retention only. cllama writes the history; no read API exists. Agents cannot query their own history programmatically. No prompt injection, no retrieval, no summarization. The JSONL files are accessible to operators via the host filesystem mount for offline analysis, auditing, and future tooling.
+
+## 7. Ecosystem Implementations
 
 ### The Passthrough Reference
 Clawdapus provides a reference image: `ghcr.io/mostlydev/cllama`.
