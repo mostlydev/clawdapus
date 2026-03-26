@@ -38,6 +38,7 @@ Clawdapus is infrastructure for bots the way Docker is infrastructure for applic
 6. **Compute Is a Privilege** — Every cognitive cycle is an authorized expenditure. The operator assigns models and schedules; the proxy enforces budgets and rate limits. The bot does not choose its own budget.
 7. **Think Twice, Act Once** — A reasoning model cannot be its own judge. Prompt-level guardrails are part of the same cognitive process they are trying to constrain. Governance must be executed by a separate, independent process.
 8. **Drift is an Open Metric** — We do not trust a bot's self-report. However, defining and measuring behavioral drift is complex and organization-specific. By delegating interception to a swappable governance proxy, the infrastructure avoids defining drift itself, leaving it as an open operational metric for the proxy to explore and quantify.
+9. **Memory Survives the Container** — A bot acting as a persistent presence cannot afford amnesia. Session history is captured at the proxy boundary and stored outside the runtime directory — infrastructure-owned, always present, never dependent on runner cooperation. The runner's own scratch space is separately persisted. Two surfaces, two owners, both durable.
 
 ---
 
@@ -53,6 +54,8 @@ A running Claw bifurcates cognition into two independent layers: internal execut
 4. **cllama (The Governance Proxy)** — *(Optional)* An independent, intercepting proxy that governs what the runner is allowed to ask the LLM, and amends what the LLM is allowed to reply.
 
 These layers are independently versioned, independently deployable, and independently auditable. Swap the runner without touching the persona. Swap the persona without touching the contract.
+
+Two persistence surfaces support the running bot. **Session history** is infrastructure-owned: the governance proxy captures every successful LLM turn at the network boundary and writes it to a durable directory outside the runtime tree. This happens regardless of runner type, without any runner cooperation. **Portable memory** is runner-owned: the agent's scratch and note-taking space, mounted at `/claw/memory`. Both surfaces survive container restarts and `claw up` re-runs. A bot deployed for months does not lose its conversational past when its container is recreated. See [ADR-018](docs/decisions/018-session-history-and-memory-retention.md).
 
 ### V. The Behavioral Contract
 

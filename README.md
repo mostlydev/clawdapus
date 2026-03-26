@@ -458,6 +458,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 6. **Claws are users** — standard credentials; the proxy governs intent, the service's own auth governs execution
 7. **Compute is a privilege** — operator assigns models and schedules; proxy enforces budgets and rate limits; bot doesn't choose
 8. **Think twice, act once** — a reasoning model cannot be its own judge
+9. **Memory survives the container** — session history is captured at the proxy boundary and persisted outside the runtime directory. Bots don't start amnesia-fresh after every restart. Infrastructure owns the record; the runner owns the scratch space. Two surfaces, two owners, never merged.
 
 ---
 
@@ -505,6 +506,8 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 - [`docs/decisions/014-telemetry-normalization-and-audit.md`](./docs/decisions/014-telemetry-normalization-and-audit.md) — ADR: Telemetry Normalization and `claw audit`
 - [`docs/decisions/015-claw-api-authentication-and-scoping.md`](./docs/decisions/015-claw-api-authentication-and-scoping.md) — ADR: `claw-api` Authentication and Authorization Scoping
 - [`docs/decisions/016-canonical-social-identity-and-conformance-spikes.md`](./docs/decisions/016-canonical-social-identity-and-conformance-spikes.md) — ADR: Canonical Social Identity and Conformance Spikes
+- [`docs/decisions/017-pod-defaults-and-service-self-description.md`](./docs/decisions/017-pod-defaults-and-service-self-description.md) — ADR: Pod-Level Defaults and Service Self-Description (`claw.describe`, provider-owned feeds)
+- [`docs/decisions/018-session-history-and-memory-retention.md`](./docs/decisions/018-session-history-and-memory-retention.md) — ADR: Session History and Persistent Memory Surfaces (two surfaces, two owners, phase model)
 - [`docs/UPDATING.md`](./docs/UPDATING.md) — checklist of everything to update when implementation changes
 - [`TESTING.md`](./TESTING.md) — unit, E2E, and spike test runbook
 
