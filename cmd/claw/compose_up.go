@@ -3266,8 +3266,6 @@ func dockerBuildTaggedImageDefault(imageRef, dockerfilePath, contextDir string, 
 	return nil
 }
 
-// ensureInfraImages checks that hermes-base, cllama proxy, claw-api, clawdash, and claw-wall images exist locally,
-// building them from source when missing.
 // ensurePersistentCllamaDir creates a persistent directory at podDir/<name> that
 // survives claw up resets (unlike .claw-runtime which is wiped on every up).
 // Returns the absolute path. Permissions are 0o777 so container users with
@@ -3280,6 +3278,8 @@ func ensurePersistentCllamaDir(podDir, name string) (string, error) {
 	return dir, nil
 }
 
+// ensureInfraImages checks that hermes-base, cllama proxy, claw-api, clawdash, and claw-wall images exist locally,
+// building them from source when missing.
 func ensureInfraImages(p *pod.Pod, cllamaEnabled, hermesEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
 	if hermesEnabled {
 		if err := ensureImage("hermes:latest", "hermes-base", "dockerfiles/hermes-base/Dockerfile", "dockerfiles/hermes-base"); err != nil {
