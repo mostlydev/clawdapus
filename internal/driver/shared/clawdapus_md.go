@@ -149,6 +149,16 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		}
 	}
 
+	// Communication Tools section — only when handles are configured.
+	if len(rc.Handles) > 0 {
+		b.WriteString("## Communication Tools\n\n")
+		b.WriteString("Your channels are communication tools, not output pipes. ")
+		b.WriteString("Think privately. Speak deliberately.\n\n")
+		b.WriteString("**Policy:** Your reasoning is always private and never reaches any channel. ")
+		b.WriteString("To communicate, call the appropriate tool explicitly. ")
+		b.WriteString("If you have nothing meaningful to say, return without calling any tool — silence is correct.\n\n")
+	}
+
 	// Peer Handles — sibling services' contact cards so agents can @mention each other
 	if len(rc.PeerHandles) > 0 {
 		b.WriteString("## Peer Handles\n\n")
