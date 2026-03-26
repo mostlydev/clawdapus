@@ -53,7 +53,7 @@ Current top-level commands are:
 - `claw doctor`
 - `claw init`
 - `claw agent add`
-- `claw compose`
+- `claw compose` (use this liberally instead of invoking docker directly)
 
 Useful current behavior:
 
@@ -79,7 +79,7 @@ The best end-to-end fixtures are:
 
 - `examples/quickstart/`
 - `examples/trading-desk/`
-- `examples/rollcall/`
+- `examples/rollcall/` (this must remain a full spike test)
 
 ## Current Driver Set
 
@@ -112,7 +112,7 @@ Do not assume older docs mentioning only a subset are current.
 - Runtime directories created by `Materialize()` use `0o777` (not `0o700`) so container users with different uids can write. Do not regress this.
 - All drivers set `mention_only` (or equivalent like `requireMention`, `DISCORD_REQUIRE_MENTION`) for Discord channels. Without this, multi-agent pods enter feedback loops.
 - All drivers explicitly set `HOME` in the container env map to match their config mount path. Container base images may run as root or a different user than expected.
-- `cllama/` is a git submodule pointing to a private SSH repo. Fresh `git clone` leaves it empty. Infra images (cllama, clawdash) are published to ghcr.io as public packages to avoid this for end users. `cllama/` has its own `.git` — changes require two commits: one inside `cllama/` (for feeds/proxy code), then `git add cllama && git commit` in the repo root to update the pointer. Shell working directory can silently drift to `cllama/` between commands — use absolute paths for git operations or verify with `pwd` first.
+- `cllama/` is a git submodule pointing to a public SSH repo. Fresh `git clone` leaves it empty. Infra images (cllama, clawdash) are published to ghcr.io as public packages to avoid this for end users. `cllama/` has its own `.git` — changes require two commits: one inside `cllama/` (for feeds/proxy code), then `git add cllama && git commit` in the repo root to update the pointer. Shell working directory can silently drift to `cllama/` between commands — use absolute paths for git operations or verify with `pwd` first.
 - `internal/feeds/` and other cllama internals live at `cllama/internal/`, not at the repo root.
 - `ensureImage()` in `compose_up.go` has a 3-step fallback: local image → `docker pull` → local Dockerfile build → git URL build. All steps must be considered when debugging image failures.
 - Managed services require `claw up -d` because post-apply verification is fail-closed.
@@ -122,6 +122,7 @@ Do not assume older docs mentioning only a subset are current.
 - cllama SSE endpoint for debugging provider key state: `curl -N -H "Authorization: Bearer <ui_token>" http://<host>:<port>/events` — the initial `data:` payload has `providers[name].maskedKey`; empty string means no active key loaded.
 - Hermes gateway log (inside container): `/root/.hermes/logs/gateway.log` — shows all received Discord events. Zero entries after startup means the bot is connected but not receiving messages (stale gateway session or missing `MESSAGE_CONTENT` intent).
 - cllama context mount (`agentctx`) currently holds only `AgentsMD`, `ClawdapusMD`, and `Metadata` (for bearer token auth). No outbound service credentials, no feed manifests, no decoration config.
+- cllama session history: `claw up` bind-mounts `.claw-session-history/` → `/claw/session-history` in the cllama container when cllama is enabled. cllama writes `<dir>/<agent-id>/history.jsonl` — one entry per successful 2xx completion. This is infrastructure-owned (proxy-written). Agents have no read API against it in Phase 1. Distinct from `/claw/memory`, which is runner-owned.
 - Provider API keys for cllama-managed services belong in `x-claw.cllama-env`, not regular agent `environment:` blocks.
 - For cllama-enabled `count > 1` services, bearer tokens and context are per ordinal, not per base service.
 - `compose.generated.yml` and `Dockerfile.generated` are generated artifacts. Inspect them, but do not hand-edit them as source.
