@@ -130,7 +130,7 @@ func TestFleetPageShowsCostLinkWhenCostAPIAvailable(t *testing.T) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(`{"total_cost_usd":1.2345,"total_requests":42}`)),
+				Body:       io.NopCloser(strings.NewReader(`{"total_cost_usd":1.2345,"total_requests":42,"unpriced_requests":3}`)),
 			}, nil
 		}),
 	}
@@ -148,6 +148,9 @@ func TestFleetPageShowsCostLinkWhenCostAPIAvailable(t *testing.T) {
 	}
 	if !strings.Contains(body, "Open cllama dashboard") {
 		t.Fatalf("expected costs link when API summary is available")
+	}
+	if !strings.Contains(body, "3 request(s) are missing pricing coverage") {
+		t.Fatalf("expected unpriced request warning, got body:\n%s", body)
 	}
 }
 

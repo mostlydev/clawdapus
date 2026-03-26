@@ -120,10 +120,11 @@ type fleetPageData struct {
 }
 
 type cllamaCostSummary struct {
-	TotalCostUSD float64
-	Requests     int
-	ProxyCount   int
-	Source       string
+	TotalCostUSD     float64
+	Requests         int
+	UnpricedRequests int
+	ProxyCount       int
+	Source           string
 }
 
 type dashStat struct {
@@ -1050,6 +1051,7 @@ func (h *handler) fetchCllamaCostSummaryFromAPI(ctx context.Context) (*cllamaCos
 
 		summary.TotalCostUSD += asFloat(payload["total_cost_usd"])
 		summary.Requests += asInt(payload["total_requests"])
+		summary.UnpricedRequests += asInt(payload["unpriced_requests"])
 		success++
 	}
 

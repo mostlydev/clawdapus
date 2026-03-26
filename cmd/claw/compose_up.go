@@ -456,7 +456,8 @@ func runComposeUp(podFile string) error {
 				return fmt.Errorf("service %q: read AGENTS.md for cllama context: %w", name, err)
 			}
 
-			if rc.Count > 1 {
+			agentTimezone := resolveAgentTimezone(rc.Environment, runtimeEnv)
+		if rc.Count > 1 {
 				for i := 0; i < rc.Count; i++ {
 					ordinalName := fmt.Sprintf("%s-%d", name, i)
 					ordinalRC := *rc
@@ -474,11 +475,12 @@ func runComposeUp(podFile string) error {
 						Feeds:       feeds,
 						ServiceAuth: ordinalAuth,
 						Metadata: map[string]interface{}{
-							"service": name,
-							"ordinal": i,
-							"pod":     p.Name,
-							"type":    rc.ClawType,
-							"token":   tokens[ordinalName],
+							"service":  name,
+							"ordinal":  i,
+							"pod":      p.Name,
+							"type":     rc.ClawType,
+							"token":    tokens[ordinalName],
+							"timezone": agentTimezone,
 						},
 					})
 				}
@@ -498,10 +500,11 @@ func runComposeUp(podFile string) error {
 				Feeds:       feeds,
 				ServiceAuth: svcAuth,
 				Metadata: map[string]interface{}{
-					"service": name,
-					"pod":     p.Name,
-					"type":    rc.ClawType,
-					"token":   tokens[name],
+					"service":  name,
+					"pod":      p.Name,
+					"type":     rc.ClawType,
+					"token":    tokens[name],
+					"timezone": agentTimezone,
 				},
 			})
 		}
@@ -624,7 +627,8 @@ func runComposeUp(podFile string) error {
 	}
 	fmt.Printf("[claw] wrote %s\n", generatedPath)
 
-	if err := ensureInfraImages(p, cllamaEnabled, proxies, p.ClawAPI, p.Clawdash); err != nil {
+	hermesEnabled := detectHermes(resolvedClaws)
+	if err := ensureInfraImages(p, cllamaEnabled, hermesEnabled, proxies, p.ClawAPI, p.Clawdash); err != nil {
 		return err
 	}
 
@@ -1947,6 +1951,41 @@ func detectCllama(claws map[string]*driver.ResolvedClaw) (bool, []string) {
 	return len(agents) > 0, agents
 }
 
+func detectHermes(claws map[string]*driver.ResolvedClaw) bool {
+	for _, rc := range claws {
+		if rc.ClawType == "hermes" {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveAgentTimezone(env map[string]string, runtimeEnv map[string]string) string {
+	const fallback = "UTC"
+
+	raw := strings.TrimSpace(env["TZ"])
+	if raw == "" {
+		return fallback
+	}
+
+	tz := raw
+	if strings.Contains(raw, "${") {
+		expanded, err := expandRuntimeValue(raw, runtimeEnv)
+		if err != nil {
+			return fallback
+		}
+		tz = expanded
+	}
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return fallback
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return fallback
+	}
+	return tz
+}
+
 func collectProxyTypes(claws map[string]*driver.ResolvedClaw) []string {
 	seen := make(map[string]struct{})
 	for _, rc := range claws {
@@ -3221,9 +3260,14 @@ func dockerBuildTaggedImageDefault(imageRef, dockerfilePath, contextDir string, 
 	return nil
 }
 
-// ensureInfraImages checks that cllama proxy, claw-api, clawdash, and claw-wall images exist locally,
+// ensureInfraImages checks that hermes-base, cllama proxy, claw-api, clawdash, and claw-wall images exist locally,
 // building them from source when missing.
-func ensureInfraImages(p *pod.Pod, cllamaEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
+func ensureInfraImages(p *pod.Pod, cllamaEnabled, hermesEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
+	if hermesEnabled {
+		if err := ensureImage("hermes:latest", "hermes-base", "dockerfiles/hermes-base/Dockerfile", "dockerfiles/hermes-base"); err != nil {
+			return err
+		}
+	}
 	if cllamaEnabled {
 		for _, proxy := range proxies {
 			if err := ensureImage(proxy.Image, "cllama", "cllama/Dockerfile", "cllama"); err != nil {
