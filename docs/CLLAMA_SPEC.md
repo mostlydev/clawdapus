@@ -134,6 +134,7 @@ Each line is a JSON object with the following fields:
 | `request_effective` | object | The request body as forwarded to the upstream provider, after credential swap and any model rewrite. |
 | `response` | object | See response payload below. |
 | `usage` | object | Token counts extracted from the response: `prompt_tokens` (integer), `completion_tokens` (integer). |
+| `usage.reported_cost_usd` | number (float) | Cost in USD reported by the provider; omitted when not available |
 
 **Response payload (`response` field):**
 
