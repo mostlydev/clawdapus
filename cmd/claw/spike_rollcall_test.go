@@ -84,25 +84,27 @@ func TestSpikeRollCall(t *testing.T) {
 	}
 
 	// ── Build base images (each type has its own Dockerfile) ────────────
-	// Stub runtimes (nullclaw, microclaw, nanoclaw) are always rebuilt
-	// because they include the discord-responder script which may change.
+	// Stub runtimes always rebuild because discord-responder.sh is baked in
+	// and the script may change. Real runtimes are expensive to build and
+	// are skipped when they already exist locally.
 	baseImages := []struct {
-		tag        string
-		dockerfile string
-		contextDir string // empty = use rollcall dir
+		tag          string
+		dockerfile   string
+		contextDir   string // empty = use rollcall dir
+		alwaysRebuild bool  // true for stubs that embed discord-responder.sh
 	}{
-		{"openclaw:latest", "Dockerfile.openclaw-base", ""},
-		{"nullclaw:latest", "Dockerfile.nullclaw-base", ""},
-		{"microclaw:latest", "Dockerfile.microclaw-base", ""},
-		{"nanoclaw-orchestrator:latest", "Dockerfile.nanoclaw-base", ""},
-		{"nanobot:latest", "Dockerfile.nanobot-base", ""},
-		{"picoclaw:latest", "Dockerfile.picoclaw-base", ""},
+		{"openclaw:latest", "Dockerfile.openclaw-base", "", true},
+		{"nullclaw:latest", "Dockerfile.nullclaw-base", "", true},
+		{"microclaw:latest", "Dockerfile.microclaw-base", "", true},
+		{"nanoclaw-orchestrator:latest", "Dockerfile.nanoclaw-base", "", true},
+		{"nanobot:latest", "Dockerfile.nanobot-base", "", true},
+		{"picoclaw:latest", "Dockerfile.picoclaw-base", "", true},
 		// Hermes is a real runtime — build from the canonical dockerfiles dir so
 		// patch-hermes-runtime.py and minisweagent_path.py are in the build context.
-		{"hermes:latest", "Dockerfile", filepath.Join(repoRoot, "dockerfiles", "hermes-base")},
+		{"hermes:latest", "Dockerfile", filepath.Join(repoRoot, "dockerfiles", "hermes-base"), false},
 	}
 	for _, b := range baseImages {
-		if !spikeImageExists(b.tag) {
+		if b.alwaysRebuild || !spikeImageExists(b.tag) {
 			ctxDir := dir
 			if b.contextDir != "" {
 				ctxDir = b.contextDir
