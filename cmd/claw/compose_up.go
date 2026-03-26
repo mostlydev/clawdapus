@@ -512,10 +512,15 @@ func runComposeUp(podFile string) error {
 			return fmt.Errorf("generate cllama context dir: %w", err)
 		}
 
-		// .claw-auth is a persistent sibling of .claw-runtime — claw up never wipes it.
-		authDir := filepath.Join(podDir, ".claw-auth")
-		if err := os.MkdirAll(authDir, 0o777); err != nil {
-			return fmt.Errorf("create cllama auth dir: %w", err)
+		// .claw-auth and .claw-session-history are persistent siblings of
+		// .claw-runtime — claw up never wipes them.
+		authDir, err := ensurePersistentCllamaDir(podDir, ".claw-auth")
+		if err != nil {
+			return err
+		}
+		sessionHistoryDir, err := ensurePersistentCllamaDir(podDir, ".claw-session-history")
+		if err != nil {
+			return err
 		}
 
 		// Compile seed keys from all service CllamaEnv into providers.json.
@@ -547,13 +552,14 @@ func runComposeUp(podFile string) error {
 
 		for _, proxyType := range proxyTypes {
 			proxies = append(proxies, pod.CllamaProxyConfig{
-				ProxyType:      proxyType,
-				Image:          cllama.ProxyImageRef(proxyType),
-				ContextHostDir: filepath.Join(runtimeDir, "context"),
-				AuthHostDir:    authDir,
-				DashboardPort:  cllamaDashboardPort,
-				Environment:    finalProxyEnv,
-				PodName:        p.Name,
+				ProxyType:             proxyType,
+				Image:                 cllama.ProxyImageRef(proxyType),
+				ContextHostDir:        filepath.Join(runtimeDir, "context"),
+				AuthHostDir:           authDir,
+				SessionHistoryHostDir: sessionHistoryDir,
+				DashboardPort:         cllamaDashboardPort,
+				Environment:           finalProxyEnv,
+				PodName:               p.Name,
 			})
 		}
 		fmt.Printf("[claw] cllama proxies enabled: %s (agents: %s)\n",
@@ -3262,6 +3268,18 @@ func dockerBuildTaggedImageDefault(imageRef, dockerfilePath, contextDir string, 
 
 // ensureInfraImages checks that hermes-base, cllama proxy, claw-api, clawdash, and claw-wall images exist locally,
 // building them from source when missing.
+// ensurePersistentCllamaDir creates a persistent directory at podDir/<name> that
+// survives claw up resets (unlike .claw-runtime which is wiped on every up).
+// Returns the absolute path. Permissions are 0o777 so container users with
+// different UIDs can write.
+func ensurePersistentCllamaDir(podDir, name string) (string, error) {
+	dir := filepath.Join(podDir, name)
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		return "", fmt.Errorf("create %s dir: %w", name, err)
+	}
+	return dir, nil
+}
+
 func ensureInfraImages(p *pod.Pod, cllamaEnabled, hermesEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
 	if hermesEnabled {
 		if err := ensureImage("hermes:latest", "hermes-base", "dockerfiles/hermes-base/Dockerfile", "dockerfiles/hermes-base"); err != nil {

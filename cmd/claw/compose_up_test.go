@@ -2271,3 +2271,55 @@ func TestMergeProviderSeedsWarnOnSeedOverwritesRuntime(t *testing.T) {
 		t.Errorf("seed key secret = %q, want \"sk-seed\"", seedKey.Secret)
 	}
 }
+
+func TestEnsurePersistentCllamaDir(t *testing.T) {
+	dir := t.TempDir()
+	got, err := ensurePersistentCllamaDir(dir, ".claw-auth")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := filepath.Join(dir, ".claw-auth")
+	if got != want {
+		t.Errorf("got %q; want %q", got, want)
+	}
+	fi, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("dir not created: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Error("expected directory")
+	}
+	// Check permissions (mask against 0o777 to ignore umask/OS bits)
+	if fi.Mode().Perm()&0o777 == 0 {
+		t.Error("expected writable permissions")
+	}
+}
+
+func TestEnsurePersistentCllamaDirIsOutsideRuntimeDir(t *testing.T) {
+	podDir := t.TempDir()
+	runtimeDir := filepath.Join(podDir, ".claw-runtime")
+
+	authDir, err := ensurePersistentCllamaDir(podDir, ".claw-auth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionDir, err := ensurePersistentCllamaDir(podDir, ".claw-session-history")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both dirs must be siblings of runtimeDir, not under it
+	if strings.HasPrefix(authDir, runtimeDir) {
+		t.Errorf("authDir %q is under runtimeDir %q", authDir, runtimeDir)
+	}
+	if strings.HasPrefix(sessionDir, runtimeDir) {
+		t.Errorf("sessionDir %q is under runtimeDir %q", sessionDir, runtimeDir)
+	}
+	// Both must be direct children of podDir
+	if filepath.Dir(authDir) != podDir {
+		t.Errorf("authDir parent = %q; want %q", filepath.Dir(authDir), podDir)
+	}
+	if filepath.Dir(sessionDir) != podDir {
+		t.Errorf("sessionDir parent = %q; want %q", filepath.Dir(sessionDir), podDir)
+	}
+}
