@@ -61,6 +61,14 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 	}
 
+	// Signal tool-based response delivery when channel handles are present.
+	// Agents post via explicit send_message rather than auto-routed text.
+	if len(rc.Handles) > 0 {
+		if err := shared.SetPath(config, "gateway.response_mode", "tool"); err != nil {
+			return nil, fmt.Errorf("config generation: gateway.response_mode: %w", err)
+		}
+	}
+
 	// HANDLE defaults first. CONFIGURE runs last and overrides these values.
 	for platform, h := range rc.Handles {
 		switch strings.ToLower(platform) {

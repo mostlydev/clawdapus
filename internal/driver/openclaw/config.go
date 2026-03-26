@@ -211,7 +211,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 	}
 
-	// Write agents.list once after the platform loop with all collected mention patterns.
+	// Write agents.list and responseDelivery once after the platform loop.
 	if len(rc.Handles) > 0 {
 		// Deduplicate mention patterns
 		seen := make(map[string]struct{})
@@ -231,6 +231,13 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 		if err := setPath(config, "agents.list", []interface{}{agentEntry}); err != nil {
 			return nil, fmt.Errorf("config generation: agents.list: %w", err)
+		}
+
+		// Signal tool-based response delivery: agents post via send_message rather than
+		// relying on auto-routing of text responses. Runtimes that support this key
+		// enforce tool-only mode; runtimes that don't ignore it safely.
+		if err := setPath(config, "agents.defaults.responseDelivery", "tool"); err != nil {
+			return nil, fmt.Errorf("config generation: agents.defaults.responseDelivery: %w", err)
 		}
 	}
 
@@ -451,28 +458,6 @@ func defaultModelAPIForProvider(provider string) string {
 	default:
 		return "openai-completions"
 	}
-}
-
-// getOrCreatePath navigates a dotted path in config, creating intermediate maps,
-// and returns the final map node.
-func getOrCreatePath(obj map[string]interface{}, path string) (map[string]interface{}, error) {
-	parts := strings.Split(path, ".")
-	current := obj
-	for _, part := range parts {
-		nextRaw, exists := current[part]
-		if !exists {
-			next := make(map[string]interface{})
-			current[part] = next
-			current = next
-			continue
-		}
-		next, ok := nextRaw.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("path conflict at %q: expected object, found %T", part, nextRaw)
-		}
-		current = next
-	}
-	return current, nil
 }
 
 // setPath sets a nested value in a map using a dotted path.

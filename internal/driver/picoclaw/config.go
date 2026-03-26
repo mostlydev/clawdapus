@@ -96,6 +96,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 
 		channel := map[string]interface{}{
 			"enabled": true,
+			"output":  map[string]interface{}{"mode": "tool"},
 		}
 
 		tokenVar := shared.PlatformTokenVar(platform)
