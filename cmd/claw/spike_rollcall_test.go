@@ -148,8 +148,10 @@ func TestSpikeRollCall(t *testing.T) {
 	expandedPod := spikeExpandEnvVars(spikeReadFile(t, filepath.Join(dir, "claw-pod.yml")), env)
 	generatedPath := filepath.Join(dir, "compose.generated.yml")
 	runtimeDir := filepath.Join(dir, ".claw-runtime")
+	sessionHistoryDir := filepath.Join(dir, ".claw-session-history")
 	defer os.Remove(generatedPath)
 	defer os.RemoveAll(runtimeDir)
+	defer os.RemoveAll(sessionHistoryDir)
 
 	prev := composeUpDetach
 	composeUpDetach = true
@@ -232,11 +234,24 @@ func TestSpikeRollCall(t *testing.T) {
 			t.Logf("found %s response: %q", agent.runtime, rollcallTruncate(response, 120))
 
 			rollcallAssertAuditTelemetry(t, podPath, agent.name, agent.runtime)
+			rollcallAssertSessionHistory(t, sessionHistoryDir, agent.name)
 
 			spikeWaitRunning(t, clawdashContainerID, 30*time.Second)
 			t.Log("clawdash sidecar confirmed running")
 		})
 	}
+
+	// Verify session history survived every teardown — each agent's JSONL must
+	// still exist after all seven runtimes ran and tore down in sequence.
+	t.Run("session_history_persistence", func(t *testing.T) {
+		for _, agent := range allAgents {
+			histFile := filepath.Join(sessionHistoryDir, agent.name, "history.jsonl")
+			if _, err := os.Stat(histFile); os.IsNotExist(err) {
+				t.Errorf("session history for %s (%s) missing after all runtimes completed — did not survive teardown", agent.name, agent.runtime)
+			}
+		}
+		t.Logf("session history confirmed persistent for all %d agents", len(allAgents))
+	})
 }
 
 // ── Discord helpers (rollcall-specific) ─────────────────────────────────────
@@ -452,6 +467,45 @@ func rollcallAssertAuditTelemetry(t *testing.T, spikePodPath, clawID, runtime st
 		return
 	}
 	t.Logf("claw audit: confirmed telemetry for %s (%s)", clawID, runtime)
+}
+
+func rollcallAssertSessionHistory(t *testing.T, sessionHistoryDir, agentName string) {
+	t.Helper()
+
+	histFile := filepath.Join(sessionHistoryDir, agentName, "history.jsonl")
+	data, err := os.ReadFile(histFile)
+	if err != nil {
+		t.Errorf("session history for %s not found at %s: %v", agentName, histFile, err)
+		return
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
+		t.Errorf("session history for %s is empty — no turns recorded", agentName)
+		return
+	}
+
+	var entry struct {
+		ClawID   string `json:"claw_id"`
+		TS       string `json:"ts"`
+		Response struct {
+			Format string `json:"format"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
+		t.Errorf("session history for %s: first line is not valid JSON: %v\n%s", agentName, err, lines[0])
+		return
+	}
+	if entry.ClawID != agentName {
+		t.Errorf("session history for %s: claw_id = %q, want %q", agentName, entry.ClawID, agentName)
+	}
+	if entry.TS == "" {
+		t.Errorf("session history for %s: ts field is empty", agentName)
+	}
+	if entry.Response.Format != "json" && entry.Response.Format != "sse" {
+		t.Errorf("session history for %s: response.format = %q, want \"json\" or \"sse\"", agentName, entry.Response.Format)
+	}
+	t.Logf("session history for %s: %d turn(s), format=%s, ts=%s", agentName, len(lines), entry.Response.Format, entry.TS)
 }
 
 func rollcallLogContainer(t *testing.T, name string) {
