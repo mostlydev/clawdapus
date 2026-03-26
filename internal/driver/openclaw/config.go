@@ -232,13 +232,8 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		if err := setPath(config, "agents.list", []interface{}{agentEntry}); err != nil {
 			return nil, fmt.Errorf("config generation: agents.list: %w", err)
 		}
-
-		// Signal tool-based response delivery: agents post via send_message rather than
-		// relying on auto-routing of text responses. Runtimes that support this key
-		// enforce tool-only mode; runtimes that don't ignore it safely.
-		if err := setPath(config, "agents.defaults.responseDelivery", "tool"); err != nil {
-			return nil, fmt.Errorf("config generation: agents.defaults.responseDelivery: %w", err)
-		}
+		// OpenClaw enforces tool-only communication natively when Discord handles are
+		// configured — no extra config key is needed or accepted.
 	}
 
 	// Apply CONFIGURE directives: operator overrides that take precedence over HANDLE defaults.
