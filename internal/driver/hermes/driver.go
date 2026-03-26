@@ -152,8 +152,17 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		"HERMES_HOME":             hermesHomeDir,
 		"MESSAGING_CWD":           hermesWorkspaceDir,
 		"TERMINAL_CWD":            hermesWorkspaceDir,
-		"DISCORD_REQUIRE_MENTION":  "true",
-		"DISCORD_AUTO_THREAD":      "false",
+		"DISCORD_REQUIRE_MENTION": "true",
+		"DISCORD_AUTO_THREAD":     "false",
+	}
+
+	// When Discord handles are configured, suppress auto-routing of bare text
+	// responses. Agents must use the send_message tool to post deliberately.
+	for rawPlatform := range rc.Handles {
+		if strings.ToLower(strings.TrimSpace(rawPlatform)) == "discord" {
+			env["HERMES_TOOL_ONLY_MODE"] = "1"
+			break
+		}
 	}
 
 	if modelCfg.BaseURL != "" {

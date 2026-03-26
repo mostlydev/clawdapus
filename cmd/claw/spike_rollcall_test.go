@@ -89,18 +89,25 @@ func TestSpikeRollCall(t *testing.T) {
 	baseImages := []struct {
 		tag        string
 		dockerfile string
+		contextDir string // empty = use rollcall dir
 	}{
-		{"openclaw:latest", "Dockerfile.openclaw-base"},
-		{"nullclaw:latest", "Dockerfile.nullclaw-base"},
-		{"microclaw:latest", "Dockerfile.microclaw-base"},
-		{"nanoclaw-orchestrator:latest", "Dockerfile.nanoclaw-base"},
-		{"nanobot:latest", "Dockerfile.nanobot-base"},
-		{"picoclaw:latest", "Dockerfile.picoclaw-base"},
-		{"hermes:latest", "Dockerfile.hermes-base"},
+		{"openclaw:latest", "Dockerfile.openclaw-base", ""},
+		{"nullclaw:latest", "Dockerfile.nullclaw-base", ""},
+		{"microclaw:latest", "Dockerfile.microclaw-base", ""},
+		{"nanoclaw-orchestrator:latest", "Dockerfile.nanoclaw-base", ""},
+		{"nanobot:latest", "Dockerfile.nanobot-base", ""},
+		{"picoclaw:latest", "Dockerfile.picoclaw-base", ""},
+		// Hermes is a real runtime — build from the canonical dockerfiles dir so
+		// patch-hermes-runtime.py and minisweagent_path.py are in the build context.
+		{"hermes:latest", "Dockerfile", filepath.Join(repoRoot, "dockerfiles", "hermes-base")},
 	}
 	for _, b := range baseImages {
 		if !spikeImageExists(b.tag) {
-			spikeBuildImage(t, dir, b.tag, b.dockerfile)
+			ctxDir := dir
+			if b.contextDir != "" {
+				ctxDir = b.contextDir
+			}
+			spikeBuildImage(t, ctxDir, b.tag, b.dockerfile)
 		}
 	}
 	spikeEnsureCllamaPassthroughImage(t)

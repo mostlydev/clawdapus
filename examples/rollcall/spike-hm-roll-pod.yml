@@ -1,0 +1,35 @@
+services:
+  hm-roll:
+    build:
+      context: .
+      dockerfile: agents/hm-roll/Clawfile
+    environment:
+      CLAW_RUNTIME: hermes
+      DISCORD_ALLOW_BOTS: mentions
+      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+      DISCORD_HOME_CHANNEL: "${ROLLCALL_CHANNEL_ID}"
+      GATEWAY_ALLOW_ALL_USERS: 'true'
+      HERMES_TOOL_PROGRESS_MODE: 'off'
+      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
+      ROLLCALL_CLLAMA_API_FORMAT: openai
+      ROLLCALL_CLLAMA_MODEL: openrouter/anthropic/claude-sonnet-4
+    image: rollcall-hermes:latest
+    x-claw:
+      agent: ./agents/hm-roll/AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      handles:
+        discord:
+          guilds:
+          - channels:
+            - id: "${ROLLCALL_CHANNEL_ID}"
+              name: roll-call
+            id: "${DISCORD_GUILD_ID}"
+            name: Roll Call
+          id: "${DISCORD_BOT_ID}"
+          username: hm-roll
+x-claw:
+  pod: rollcall
+  sequential-conformance: true

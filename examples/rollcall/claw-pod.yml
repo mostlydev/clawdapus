@@ -172,6 +172,7 @@ services:
       cllama: passthrough
       cllama-env:
         ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
       handles:
         discord:
           id: "${DISCORD_BOT_ID}"
@@ -186,4 +187,8 @@ services:
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
       DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
       ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
+      DISCORD_HOME_CHANNEL: "${ROLLCALL_CHANNEL_ID}"
+      GATEWAY_ALLOW_ALL_USERS: "true"
+      DISCORD_ALLOW_BOTS: "mentions"
+      HERMES_TOOL_PROGRESS_MODE: "off"
       CLAW_RUNTIME: "hermes"
