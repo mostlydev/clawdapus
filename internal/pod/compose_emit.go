@@ -14,13 +14,14 @@ import (
 )
 
 type CllamaProxyConfig struct {
-	ProxyType      string            // e.g. "passthrough", "policy"
-	Image          string            // e.g. ghcr.io/mostlydev/cllama:latest
-	ContextHostDir string            // host path for shared context dir
-	AuthHostDir    string            // host path for provider auth state
-	DashboardPort  string            // host port published to proxy UI :8081 (default "8181")
-	Environment    map[string]string // proxy-only env (e.g. CLAW_POD, provider keys)
-	PodName        string
+	ProxyType             string            // e.g. "passthrough", "policy"
+	Image                 string            // e.g. ghcr.io/mostlydev/cllama:latest
+	ContextHostDir        string            // host path for shared context dir
+	AuthHostDir           string            // host path for provider auth state
+	SessionHistoryHostDir string            // host path for session history dir (optional)
+	DashboardPort         string            // host port published to proxy UI :8081 (default "8181")
+	Environment           map[string]string // proxy-only env (e.g. CLAW_POD, provider keys)
+	PodName               string
 }
 
 type ClawdashConfig struct {
@@ -303,14 +304,22 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		for k, v := range proxy.Environment {
 			env[k] = v
 		}
+		if proxy.SessionHistoryHostDir != "" {
+			env["CLAW_SESSION_HISTORY_DIR"] = "/claw/session-history"
+		}
+
+		volumes := []string{
+			fmt.Sprintf("%s:/claw/context:ro", proxy.ContextHostDir),
+			fmt.Sprintf("%s:/claw/auth:rw", proxy.AuthHostDir),
+		}
+		if proxy.SessionHistoryHostDir != "" {
+			volumes = append(volumes, fmt.Sprintf("%s:/claw/session-history:rw", proxy.SessionHistoryHostDir))
+		}
 
 		rootServices[serviceName] = map[string]interface{}{
-			"image": proxy.Image,
-			"ports": []string{fmt.Sprintf("%s:8081", dashboardPort)}, // operator dashboard
-			"volumes": []string{
-				fmt.Sprintf("%s:/claw/context:ro", proxy.ContextHostDir),
-				fmt.Sprintf("%s:/claw/auth:rw", proxy.AuthHostDir),
-			},
+			"image":   proxy.Image,
+			"ports":   []string{fmt.Sprintf("%s:8081", dashboardPort)}, // operator dashboard
+			"volumes": volumes,
 			"environment": env,
 			"restart":     "on-failure",
 			"healthcheck": map[string]interface{}{
