@@ -777,8 +777,8 @@ func TestEmitComposeWithCllamaProxy(t *testing.T) {
 	if !strings.Contains(out, "/tmp/test/.claw-session-history:/claw/session-history:rw") {
 		t.Error("expected session history volume mount in cllama service")
 	}
-	if !strings.Contains(out, "CLAW_SESSION_HISTORY_DIR") {
-		t.Error("expected CLAW_SESSION_HISTORY_DIR env var in cllama service")
+	if !strings.Contains(out, "CLAW_SESSION_HISTORY_DIR: /claw/session-history") {
+		t.Error("expected CLAW_SESSION_HISTORY_DIR=/claw/session-history env var in cllama service")
 	}
 }
 
