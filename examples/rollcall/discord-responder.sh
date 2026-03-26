@@ -1,8 +1,9 @@
 #!/bin/sh
 # discord-responder.sh — Background process for stub runtimes.
 # Polls Discord channel via REST API, responds to mentions of DISCORD_BOT_ID.
-# When CLLAMA_TOKEN is set, makes a real LLM call through the cllama proxy
-# before posting, proving the forced inference proxy contract.
+# When CLLAMA_TOKEN is set, makes a real LLM call through the cllama proxy.
+# The LLM is given a send_message tool and instructed to use it explicitly —
+# plain text responses are private (thinking) and never reach Discord.
 #
 # Required env vars: DISCORD_BOT_TOKEN, DISCORD_BOT_ID, ROLLCALL_CHANNEL_ID, CLAW_RUNTIME
 # Optional env vars: CLLAMA_TOKEN (enables real LLM call through proxy)
@@ -24,29 +25,35 @@ UA="DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)"
 
 echo "[discord-responder] polling channel $CHANNEL_ID for mentions of $BOT_ID (runtime=$RUNTIME)" >&2
 if [ -n "$CLLAMA" ]; then
-  echo "[discord-responder] cllama token present — will route inference through proxy" >&2
+  echo "[discord-responder] cllama token present — LLM must call send_message to reach Discord" >&2
 else
   echo "[discord-responder] no cllama token — will use static response" >&2
 fi
 
-# Call cllama proxy for a real LLM response.
-# Returns the LLM text on stdout, or empty string on failure.
+# Call cllama proxy with the send_message tool. The LLM decides whether to call
+# it; if it only produces text (thinking), nothing is posted to Discord.
+# Returns the message content from the tool call on stdout, or empty string.
 call_cllama() {
   [ -n "$CLLAMA" ] || return 0
 
+  SYSTEM_PROMPT="You are a bot named ${RUNTIME} running on the ${RUNTIME} runtime.
+
+## CRITICAL: Tool-only mode
+
+Plain text responses are private thinking. They are NEVER sent to Discord.
+
+The ONLY way to communicate is by calling the send_message tool. When a message arrives, call send_message with one sentence stating your name and runtime. If you generate text without calling send_message, nobody sees it.
+
+Example: call send_message with message=\"I am ${RUNTIME}, running on the ${RUNTIME} runtime.\""
+
   case "$CLLAMA_FORMAT" in
     anthropic)
-      payload=$(cat <<ENDJSON
-{
-  "model": "$CLLAMA_MODEL",
-  "max_tokens": 80,
-  "system": "You are a bot named ${RUNTIME}. Your runtime is ${RUNTIME}. When asked to introduce yourself, say exactly: I am [your name] and I run on ${RUNTIME}. Do not say you are Claude or made by Anthropic. Do not use markdown. One sentence only.",
-  "messages": [
-    {"role": "user", "content": "Introduce yourself."}
-  ]
-}
-ENDJSON
-)
+      payload=$(printf '%s\n%s\n%s\n%s' \
+        "{\"model\":\"$CLLAMA_MODEL\",\"max_tokens\":200," \
+        "\"system\":$(printf '%s' "$SYSTEM_PROMPT" | jq -Rs '.')," \
+        "\"tools\":[{\"name\":\"send_message\",\"description\":\"Post a message to Discord. This is the ONLY way to communicate. Call this to deliver your response.\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}},\"required\":[\"message\"]}}]," \
+        "\"messages\":[{\"role\":\"user\",\"content\":\"Introduce yourself.\"}]}")
+
       resp=$(curl -s --max-time 30 \
         -H "Authorization: Bearer $CLLAMA" \
         -H "Anthropic-Version: 2023-06-01" \
@@ -54,36 +61,37 @@ ENDJSON
         -d "$payload" \
         "http://cllama:8080/v1/messages" 2>/dev/null) || { echo ""; return 0; }
 
+      echo "[discord-responder] anthropic raw response: $(printf '%s' "$resp" | head -c 400)" >&2
+
       content=$(printf '%s' "$resp" | jq -r '
-        if (.content | type) == "array" then
-          [.content[]? | select(.type == "text") | (.text // "")]
-          | join("")
-        else
-          empty
-        end
-      ' 2>/dev/null) || content=""
+        .content[]?
+        | select(.type == "tool_use" and .name == "send_message")
+        | .input.message // ""
+      ' 2>/dev/null | head -1) || content=""
       printf '%s' "$content"
       return 0
       ;;
     openai)
-      payload=$(cat <<ENDJSON
-{
-  "model": "$CLLAMA_MODEL",
-  "max_tokens": 80,
-  "messages": [
-    {"role": "system", "content": "You are a bot named ${RUNTIME}. Your runtime is ${RUNTIME}. When asked to introduce yourself, say exactly: I am [your name] and I run on ${RUNTIME}. Do not say you are Claude or made by Anthropic. Do not use markdown. One sentence only."},
-    {"role": "user", "content": "Introduce yourself."}
-  ]
-}
-ENDJSON
-)
+      payload=$(printf '%s\n%s\n%s\n%s\n%s' \
+        "{\"model\":\"$CLLAMA_MODEL\",\"max_tokens\":200," \
+        "\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"send_message\",\"description\":\"Post a message to Discord. This is the ONLY way to communicate. Call this to deliver your response.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}},\"required\":[\"message\"]}}}]," \
+        "\"messages\":[" \
+        "{\"role\":\"system\",\"content\":$(printf '%s' "$SYSTEM_PROMPT" | jq -Rs '.')}," \
+        "{\"role\":\"user\",\"content\":\"Introduce yourself.\"}]}")
+
       resp=$(curl -s --max-time 30 \
         -H "Authorization: Bearer $CLLAMA" \
         -H "Content-Type: application/json" \
         -d "$payload" \
         "http://cllama:8080/v1/chat/completions" 2>/dev/null) || { echo ""; return 0; }
 
-      content=$(printf '%s' "$resp" | jq -r '.choices[0].message.content // empty' 2>/dev/null) || content=""
+      echo "[discord-responder] openai raw response: $(printf '%s' "$resp" | head -c 400)" >&2
+
+      content=$(printf '%s' "$resp" | jq -r '
+        .choices[0].message.tool_calls[]?
+        | select(.function.name == "send_message")
+        | .function.arguments | fromjson | .message // ""
+      ' 2>/dev/null | head -1) || content=""
       printf '%s' "$content"
       return 0
       ;;
@@ -162,23 +170,26 @@ for i in $(seq 1 60); do
     # Check if we already responded (avoid duplicate responses).
     already=$(printf '%s' "$clean" | jq -r \
       --arg rt "$RUNTIME" \
+      --arg bid "$BOT_ID" \
       '[.[] | select(.author.id == $bid) | select(.content | ascii_downcase | test($rt | ascii_downcase))] | length' \
-      --arg bid "$BOT_ID" 2>/dev/null) || already=0
+      2>/dev/null) || already=0
 
     if [ "$already" -eq 0 ]; then
       echo "[discord-responder] found trigger (attempt $i), calling LLM for $RUNTIME" >&2
 
-      # Try real LLM call through cllama; fall back to static message
+      # LLM call: agent must call send_message tool to communicate.
+      # If the LLM only generates text (private thinking), llm_response is empty
+      # and nothing is posted — silence is correct behavior.
       llm_response=$(call_cllama)
       if [ -n "$llm_response" ]; then
         message="$llm_response"
-        echo "[discord-responder] got LLM response via cllama proxy" >&2
+        echo "[discord-responder] LLM called send_message via cllama proxy" >&2
       else
         message="I'm running on ${RUNTIME}. Stub runtime reporting for duty! (no cllama)"
-        echo "[discord-responder] cllama unavailable, using static fallback" >&2
+        echo "[discord-responder] cllama unavailable or no tool call, using static fallback" >&2
       fi
 
-      # Escape the message for JSON (handle quotes and backslashes)
+      # Post the message to Discord.
       escaped=$(printf '%s' "$message" | jq -Rs '.')
       send_resp=$(curl -s -w "\n%{http_code}" -X POST \
         -H "Authorization: Bot $TOKEN" \
