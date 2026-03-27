@@ -12,7 +12,7 @@ import (
 
 const (
 	updateCheckURL      = "https://api.github.com/repos/mostlydev/clawdapus/releases/latest"
-	updateCheckInterval = 24 * time.Hour
+	updateCheckInterval = time.Hour
 	updateCheckFile     = ".claw-update-check"
 )
 
