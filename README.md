@@ -393,7 +393,7 @@ $ claw skillmap crypto-crusher-0
 | [`examples/nanobot/`](./examples/nanobot/) | Minimal Nanobot driver project with generated config + Discord handle wiring |
 | [`examples/picoclaw/`](./examples/picoclaw/) | Minimal PicoClaw driver project with model-list config + Discord handle wiring |
 | [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
-| [`examples/trading-desk/`](./examples/trading-desk/) | Three agents coordinating via Discord with a mock trading API, scheduled invocations, and cllama governance proxy |
+| [`examples/trading-desk/`](./examples/trading-desk/) | Three agents coordinating via Discord with a mock trading API, scheduled invocations, desk-wide risk feeds, and cllama governance proxy |
 | [`examples/rollcall/`](./examples/rollcall/) | All 7 drivers sharing one Discord identity — driver parity fixture and end-to-end cllama validation |
 
 ---

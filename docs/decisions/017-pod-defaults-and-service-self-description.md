@@ -82,6 +82,10 @@ Operator-authored skills (policy files, includes with `mode: reference`) remain 
 
 All registration and description happens during `claw up`. No runtime self-registration endpoints. The generated compose file and runtime artifacts remain the single source of truth for what's deployed. This preserves the inspectable, diffable deployment model that is Clawdapus's core value proposition.
 
+### 7. Dockerfile-Label Inspection for Build-Services
+
+For services using local `build:` blocks without an existing image, `claw up` now inspects the configured Dockerfile for `claw.*` labels. This ensures that services sharing a single build context (e.g., a Rails app and its Sidekiq worker) can self-describe independently by pointing to different Dockerfiles, even before the images are built. This closes a compiler gap where multiple services sharing one context directory would collide on a default `.claw-describe.json`.
+
 ## Rationale
 
 **Why not runtime self-registration?** Clawdapus's value is deterministic, auditable deployment. If services register at boot, the running state diverges from the pod file. The right version is image self-description compiled by `claw up`.
