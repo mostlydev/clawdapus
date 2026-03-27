@@ -45,12 +45,14 @@ func TestConversationStoreConsumeAdvancesCursorWithoutSkipping(t *testing.T) {
 	}
 
 	quiet := store.consume("trader-0", []string{"chan-1"}, 2)
-	if len(quiet) != 0 {
-		t.Fatalf("expected quiet turn after cursor advance, got %+v", quiet)
+	// Quiet turn: no new delta, but background context returns last backgroundContextSize messages.
+	// With only 3 messages in the buffer and bgLimit=min(10,2)=2, we get the 2 most recent.
+	if len(quiet) != 2 || quiet[0].ID != "101" || quiet[1].ID != "102" {
+		t.Fatalf("expected background context on quiet turn, got %+v", quiet)
 	}
 }
 
-func TestChannelContextHandlerReturnsEmptyBodyOnQuietTurn(t *testing.T) {
+func TestChannelContextHandlerReturnsBackgroundContextOnQuietTurn(t *testing.T) {
 	store := newConversationStore(50)
 	store.merge("chan-1", []wallMessage{
 		{
@@ -93,7 +95,8 @@ func TestChannelContextHandlerReturnsEmptyBodyOnQuietTurn(t *testing.T) {
 	if secondResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", secondResp.StatusCode)
 	}
-	if len(secondBody) != 0 {
-		t.Fatalf("expected empty body on quiet turn, got %q", string(secondBody))
+	// Quiet turn: no new delta, but background context returns the last message again.
+	if !strings.Contains(string(secondBody), "latest signals") {
+		t.Fatalf("expected background context on quiet turn, got %q", string(secondBody))
 	}
 }

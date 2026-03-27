@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-const defaultResponseLimit = 20
+const (
+	defaultResponseLimit  = 20
+	backgroundContextSize = 10
+)
 
 type wallMessage struct {
 	ID        string
@@ -113,8 +116,33 @@ func (s *conversationStore) consume(consumer string, channelIDs []string, limit 
 	if len(collected) > limit {
 		collected = collected[:limit]
 	}
+
 	if len(collected) == 0 {
-		return nil
+		// No new messages since cursor — return recent background context so
+		// agents retain situational awareness during quiet periods. Cursor is
+		// not advanced; background context is re-served until new delta arrives.
+		bgLimit := backgroundContextSize
+		if bgLimit > limit {
+			bgLimit = limit
+		}
+		background := make([]wallMessage, 0)
+		for _, channelID := range channelIDs {
+			state := s.channels[channelID]
+			if state == nil {
+				continue
+			}
+			background = append(background, state.messages...)
+		}
+		sortWallMessages(background)
+		if len(background) > bgLimit {
+			background = background[len(background)-bgLimit:]
+		}
+		if len(background) == 0 {
+			return nil
+		}
+		out := make([]wallMessage, len(background))
+		copy(out, background)
+		return out
 	}
 
 	if cursorByChannel == nil {
