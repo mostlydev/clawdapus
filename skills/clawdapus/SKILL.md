@@ -143,6 +143,19 @@ services:
 - **`handles`**: Discord bot IDs, usernames, guilds. Clawdapus auto-generates `mentionPatterns`, `allowBots: true`, peer `users[]` allowlist.
 - **`surfaces`**: String form (`"channel://discord"`) = simple enable. Map form (`channel://discord: {dm: {...}}`) = routing config.
 
+## Persistence and Memory Surfaces
+
+Clawdapus provides two distinct, durable state surfaces for agents. Both survive container restarts (`claw up`) and even driver migrations (changing `CLAW_TYPE`).
+
+| Surface | Owner | Written by | Path inside container | Host path |
+|---------|-------|------------|-----------------------|-----------|
+| **Session history** | Infrastructure | cllama proxy | `/claw/session-history` | `.claw-session-history/<agent-id>/history.jsonl` |
+| **Portable memory** | Runner / Agent | Agent | `/claw/memory` | `.claw-memory/<agent-id>/memory/` |
+
+- **Session History:** A normalized JSONL record of every successful LLM turn, captured transparently at the proxy boundary. The agent does not write this; it is a passive record of the agent's interaction.
+- **Portable Memory:** The agent's own active scratchpad. Agents can read/write notes, drafts, and learned facts here.
+- **Cross-Runner Portability:** Because these paths are canonically managed by Clawdapus, you can swap an agent's `CLAW_TYPE` (e.g., migrating from OpenClaw to PicoClaw) and its memory and session history will automatically follow it into the new runtime.
+
 ## cllama Governance Proxy
 
 The proxy sits between agents and LLM providers. Agents get bearer tokens, proxy holds real API keys.

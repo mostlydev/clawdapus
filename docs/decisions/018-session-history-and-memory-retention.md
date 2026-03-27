@@ -26,8 +26,8 @@ Conflating these two surfaces causes mistakes. If session history is stored with
 
 | Surface | Owner | Written by | Path inside container | Host path | Survived by |
 |---------|-------|------------|-----------------------|-----------|-------------|
-| Session history | Infrastructure | cllama proxy | `/claw/session-history` | `<pod-dir>/.claw-session-history/` | `claw up`, container restart, `claw down` |
-| Portable memory | Runner | Agent | `/claw/memory` | `<pod-dir>/.claw-runtime/<agent-id>/memory/` (or persona dir) | Container restart only |
+| Session history | Infrastructure | cllama proxy | `/claw/session-history` | `<pod-dir>/.claw-session-history/<agent-id>/` | `claw up`, container restart, `claw down` |
+| Portable memory | Runner | Agent | `/claw/memory` | `<pod-dir>/.claw-memory/<agent-id>/memory/` (or persona dir) | `claw up`, container restart, `claw down` |
 
 These surfaces must never be merged, renamed, or crossed. The proxy does not write to runner memory. The runner does not write to session history.
 
@@ -76,14 +76,20 @@ The canonical pattern for persistent cllama state is the sibling directory along
 
 `claw up` creates `.claw-session-history/` alongside `.claw-auth/` before launching compose. The `ensurePersistentCllamaDir` helper encapsulates both.
 
-### 4. Recording rules
+### 4. Cross-Runner Portability
+
+A key design goal is **runtime portability**. An agent's identity should survive not just a container restart, but a change in the underlying driver (e.g., migrating from `openclaw` to `picoclaw` to `hermes`).
+
+To support this, Clawdapus implements opportunistic state importation (`PreparePortableMemory` and `PreparePortableHistory`). During `claw up`, before launching the container, the driver framework scans previous runner-specific state directories (like `hermes-home/memories` or `data/working_dir/sessions`) and merges them into the canonical `memory` and `history` directories. This ensures that when the operator changes the `CLAW_TYPE` in a Clawfile, the agent's accumulated knowledge and context are seamlessly carried forward into the new runtime's expected layout.
+
+### 5. Recording rules
 
 - Record only when the upstream response is 2xx. Non-2xx responses belong to the structured audit log (ADR-014), not session history.
 - Preserve both `RequestOriginal` (what the claw sent) and `RequestEffective` (what cllama forwarded after any modifications). This distinction matters for future policy analysis.
 - Append-only. Never delete or truncate entries. History grows until the operator explicitly removes it.
 - The env var `CLAW_SESSION_HISTORY_DIR` controls the base directory. Empty string means no-op — the recorder is disabled and no disk I/O occurs.
 
-### 5. Phase model
+### 6. Phase model
 
 **Phase 1 (this ADR): Retention**
 Capture and persist. No read API. No prompt decoration. The agent gains no new capabilities from session history in Phase 1 — this phase is purely about ensuring the data is not lost.

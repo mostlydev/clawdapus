@@ -69,6 +69,10 @@ A persona is a complete, portable, forkable workspace package that encapsulates 
 
 Personas are the content layer. They grow during operation and can be snapshotted.
 
+::: tip Swap the runner, keep the mind
+Because the memory and history are canonically managed by Clawdapus, you can swap the agent's runtime driver (`CLAW_TYPE` in the Clawfile) without losing its identity. You can migrate an agent from OpenClaw to PicoClaw, and its memories will automatically follow it into the new runtime's expected layout.
+:::
+
 ::: tip Personas are Portable
 A persona can be a local directory path or an OCI artifact reference. Download one, fork it, deploy it under a different contract. The persona is the identity; the contract is the mission.
 :::

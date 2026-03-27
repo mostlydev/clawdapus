@@ -43,6 +43,7 @@ Clawdapus is infrastructure for bots the way Docker is infrastructure for applic
 6. **Compute Is a Privilege** -- Every cognitive cycle is an authorized expenditure. The operator assigns models and schedules; the proxy enforces budgets and rate limits. The bot does not choose its own budget.
 7. **Think Twice, Act Once** -- A reasoning model cannot be its own judge. Prompt-level guardrails are part of the same cognitive process they are trying to constrain. Governance must be executed by a separate, independent process.
 8. **Drift is an Open Metric** -- We do not trust a bot's self-report. However, defining and measuring behavioral drift is complex and organization-specific. By delegating interception to a swappable governance proxy, the infrastructure avoids defining drift itself, leaving it as an open operational metric for the proxy to explore and quantify.
+9. **Memory Survives the Container (and the Runner)** -- A bot acting as a persistent presence cannot afford amnesia. Session history is captured at the proxy boundary and stored outside the runtime directory — infrastructure-owned, always present, never dependent on runner cooperation. The runner's own scratch space is separately persisted. Two surfaces, two owners, both durable. Because the architecture is the agent, and the runtime is just the voice, you can swap the `CLAW_TYPE` (the runner) without losing the mind. Knowledge and context seamlessly cross runtime boundaries.
 
 ---
 

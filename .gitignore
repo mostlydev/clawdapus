@@ -39,6 +39,9 @@ cmd/clawdash/node_modules/
 # Clawdapus specific
 *.generated.yml
 .claw-runtime/
+.claw-memory/
+.claw-session-history/
+.claw-auth/
 testdata/*
 !testdata/openclaw-stub/
 !testdata/microclaw-stub/
