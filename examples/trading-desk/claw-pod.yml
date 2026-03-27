@@ -9,6 +9,8 @@ x-claw:
           channels:
             - id: "${DISCORD_TRADING_FLOOR_CHANNEL}"
               name: trading-floor
+  feeds-defaults:
+    - market-context
 
 x-trading-desk:
   cllama-agent: &cllama_agent
@@ -83,6 +85,8 @@ services:
       agent: ./agents/TIVERTON.md
       # Provider keys are collected once for the shared pod-level cllama proxy.
       cllama-env: *proxy_env
+      feeds:
+        - desk-risk-context
       handles:
         discord:
           id: "${TIVERTON_DISCORD_ID}"
@@ -125,6 +129,7 @@ services:
         - source: claw-api
           path: /fleet/alerts
           ttl: 30
+        - desk-risk-context
       surfaces: *master_surfaces
       invoke:
         - schedule: "*/15 * * * *"

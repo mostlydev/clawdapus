@@ -508,3 +508,278 @@ Target: `clawdbot@tiverton:~/tiverton-house`
 - Expected effect:
   - injected Sentinel fleet alerts now age out on a 15-minute horizon instead of a full hour
   - real bursts still surface quickly, but cleared incidents stop self-echoing for most of the trading session
+
+## Step 24: Fixed Multi-Object News Analysis Array Responses
+
+- Fresh live symptom after the earlier news-analysis parser fix:
+  - at `10:20:19 EDT` the live Discord/app feed reported:
+    - `News analysis failed for ARTL, CCL, DTCX ... Error: AI response must be a JSON object, got Array`
+  - at `10:36:07 EDT` the live Sidekiq logs showed the same failure class again for:
+    - `article 12286`
+- Verification:
+  - the running `trading-api` container already had the first parser fix loaded:
+    - `/rails/app/services/news/analysis_service.rb`
+    included:
+      - `normalize_analysis_array`
+      - `collapse_complete_analyses`
+  - replaying the live failing article inside the running container showed the real model payload was not a split-field fragment array
+  - instead, the model returned a JSON array containing multiple complete analysis objects, one per sub-story in the same article payload
+- Root cause:
+  - the first parser fix handled:
+    - single-object arrays
+    - split-field arrays that can be merged into one object
+  - it still rejected arrays of multiple complete objects, even when each object individually matched the required contract
+  - OpenRouter/OpenAI occasionally emits that form for roundup articles with several materially distinct names in one story
+- Live Tiverton fix:
+  - updated:
+    - `~/tiverton-house/services/trading-api/app/services/news/analysis_service.rb`
+  - added collapse logic for arrays of complete analyses:
+    - `impact`: highest severity across returned objects
+    - `route_to`: union of all unique routes
+    - `auto_post`: `true` if any object requested it
+    - `reasoning`: unique reasoning strings joined together
+  - rebuilt and recreated:
+    - `trading-api`
+    - `sidekiq`
+- Live verification:
+  - replaying the Oxford roundup article inside the running container now returns:
+    - `success: true`
+    - `impact: HIGH`
+    - merged reasoning across the returned analysis objects
+  - the `10:40 EDT` poll completed successfully and enqueued `NewsDundasDispatchJob`
+  - last 30 minutes of Sidekiq logs show no fresh:
+    - `AI response must be a JSON object, got Array`
+  - the only remaining retry noise in that window was a transient timeout on:
+    - `article 12292`
+- Current supervised conclusion:
+  - the new array failure mode was a second distinct parser bug, now fixed live
+  - the live news-analysis path is again accepting the model outputs currently being produced by the trading workload
+
+## Step 25: Fixed OpenClaw Workspace Permissions For Inbound Discord Turns
+
+- Fresh live symptom after the OpenClaw migration:
+  - trader agents stopped answering fresh Discord mentions
+  - live OpenClaw logs on:
+    - `logan`
+    - `dundas`
+    - `weston`
+    repeatedly showed:
+      - `discord inbound worker failed: Error: EACCES: permission denied, open '/claw/SOUL.md'`
+  - the missed-response timestamps matched the user-visible silent mentions
+- Verification:
+  - fresh live container inspection showed:
+    - `/claw` existed as a tmpfs workspace
+    - it was owned by `root:root`
+    - it had mode `0755`
+    - the OpenClaw runtime user is `uid=1000(node)`
+  - the generated compose file still had:
+    - `- /claw`
+    as a bare tmpfs entry, with no ownership or mode override
+- Root cause:
+  - the OpenClaw driver comment correctly said `/claw` must be writable for runtime artifacts like `SOUL.md`
+  - but only `/app/state` had explicit tmpfs options:
+    - `mode=1777,uid=1000,gid=1000`
+  - `/claw` was left on Docker's default tmpfs ownership, which made it non-writable for the `node` user
+- Local repo fix:
+  - updated:
+    - `internal/driver/openclaw/driver.go`
+  - replaced the bare `/claw` tmpfs entry with:
+    - `/claw:mode=1777,uid=1000,gid=1000`
+  - tightened the driver unit test in:
+    - `internal/driver/openclaw/driver_test.go`
+    so the exact `/claw` tmpfs contract is asserted
+  - verified locally with:
+    - `go test ./internal/driver/openclaw`
+- Live rollout on Tiverton:
+  - synced the patched driver files into:
+    - `~/clawdapus`
+  - verified on Tiverton with:
+    - `go test ./internal/driver/openclaw`
+  - rebuilt:
+    - `~/clawdapus/bin/claw-persistent-memory`
+  - reran:
+    - `~/clawdapus/bin/claw-persistent-memory up -d`
+  - this regenerated `compose.generated.yml` and recreated the OpenClaw services
+- Live verification:
+  - fresh containers now show:
+    - `/claw` mode `1777`
+    - owner `1000:1000`
+  - direct in-container write checks now succeed:
+    - `touch /claw/SOUL.md`
+  - no further permission barrier remains for runtime workspace writes
+- Residual note:
+  - older logs also showed:
+    - `Ignoring unsupported group mention pattern`
+  - that is distinct from the `SOUL.md` permission bug
+  - single-mention replies should now be unblocked
+  - multi-target Discord mentions may still depend on separate OpenClaw mention parsing behavior
+
+## Step 26: Fixed OpenClaw Mention Regex Generation
+
+- Fresh live symptom after fixing `/claw/SOUL.md` permissions:
+  - trader agents still skipped direct Discord mentions instead of replying
+  - live OpenClaw logs showed:
+    - `pattern:"(?i)\\b@?logan\\b" ... reason:"invalid-regex"`
+    - `pattern:"(?i)\\b@?dundas\\b" ... reason:"invalid-regex"`
+    - `pattern:"(?i)\\b@?weston\\b" ... reason:"invalid-regex"`
+  - the same log sequence then showed:
+    - `discord: skipping guild message`
+    - `reason:"no-mention"`
+- Verification:
+  - this was not a model-path failure
+  - the skipped messages never reached a real user-turn completion path
+  - the mention matcher itself rejected the generated regex
+- Root cause:
+  - Clawdapus generated text mention patterns in:
+    - `internal/driver/openclaw/config.go`
+    with an inline case-insensitive prefix:
+    - `(?i)\\b@?name\\b`
+  - the running OpenClaw build already applies flags separately and treats the inline `(?i)` syntax as invalid
+  - that caused mention matching to fail before turn execution
+- Local repo fix:
+  - updated:
+    - `internal/driver/openclaw/config.go`
+  - changed generated text mention patterns from:
+    - `(?i)\\b@?name\\b`
+    to:
+    - `\\b@?name\\b`
+  - updated the OpenClaw config tests in:
+    - `internal/driver/openclaw/config_test.go`
+  - verified locally with:
+    - `go test ./internal/driver/openclaw`
+- Live rollout on Tiverton:
+  - synced the patched config generator and tests into:
+    - `~/clawdapus`
+  - verified on Tiverton with:
+    - `go test ./internal/driver/openclaw`
+  - rebuilt:
+    - `~/clawdapus/bin/claw-persistent-memory`
+  - reran:
+    - `~/clawdapus/bin/claw-persistent-memory up -d`
+- Live verification:
+  - running trader configs now contain:
+    - `\\b@?logan\\b`
+    - `\\b@?dundas\\b`
+    - `\\b@?weston\\b`
+  - the broken inline `(?i)` prefix is gone from the live `openclaw.json` files
+  - the pod is healthy after the rollout
+- Current supervised conclusion:
+  - the earlier "unsupported group mention"/`no-mention` behavior was at least partly caused by a real config-generation bug in Clawdapus
+  - fresh Discord mention handling now needs a live end-to-end retry against the corrected runtime
+
+## Step 27: Added Desk-Wide Risk Feed for Tiverton and Sentinel
+
+- Fresh product issue:
+  - `@Tiverton` reported:
+    - zero positions
+    - zero buying power
+    - zero recent fills
+  - that answer was not a model hallucination
+  - the live feed it consumed was:
+    - `http://trading-api:4000/api/v1/market_context/tiverton`
+  - the live payload for that endpoint really contained:
+    - `positions: []`
+    - `buying_power: 0.0`
+    - `wallet_size: 0.0`
+- Investigation:
+  - `trading-api`'s existing market-context path is intentionally agent-scoped
+  - live DB checks on Tiverton showed the desk itself was not flat:
+    - `logan` wallet:
+      - `wallet_size 25000`
+      - `cash 12000`
+      - `invested 13000`
+    - `gerrard` wallet:
+      - `wallet_size 25000`
+      - `cash 20000`
+      - `invested 5000`
+    - live open positions included:
+      - `logan`: `KO`, `BX`, `QCOM`
+      - `gerrard`: `EQT`
+  - conclusion:
+    - Tiverton was subscribed to the wrong feed shape
+    - the fix belongs in `trading-api` plus pod feed wiring, not in prompt text or Clawdapus role logic
+- Live `trading-api` implementation on Tiverton:
+  - added route:
+    - `GET /api/v1/desk_risk_context/:agent_id`
+  - added:
+    - `Api::V1::DeskRiskContextController`
+    - `DeskRiskContextService`
+  - the new service aggregates desk-wide trader state:
+    - trader wallets
+    - open positions
+    - pending orders
+    - recent fills
+    - exposure summary
+    - risk alerts
+  - the implementation deliberately reuses `MarketContextService` per trader rather than re-encoding portfolio math in a second path
+- Live pod wiring change on Tiverton:
+  - removed the universal `market-context` pod default
+  - introduced role-specific feed sets:
+    - traders:
+      - `market-context`
+    - `tiverton`:
+      - `desk-risk-context`
+    - `sentinel`:
+      - `desk-risk-context`
+      - `fleet-alerts`
+- Clawdapus compiler gap found during rollout:
+  - the live `trading-api` and `sidekiq` services share one Rails build context
+  - current Clawdapus descriptor discovery for plain `build:` services used only:
+    - a local image label, if an image already existed
+    - otherwise a default `.claw-describe.json` at the build-context root
+  - that made both services appear to declare the same feeds whenever the descriptor lived at the default path
+  - `claw up` then failed with:
+    - `feed name "market-context" is declared by both "trading-api" and "sidekiq"`
+- Local repo fix for the compiler gap:
+  - added Dockerfile-label inspection for plain `build:` services in:
+    - `internal/inspect/inspect.go`
+    - `cmd/claw/compose_up.go`
+  - this now reads `claw.describe` / `claw.skill.emit` from the configured Dockerfile before falling back to default build-context files
+  - added regression coverage in:
+    - `internal/inspect/inspect_test.go`
+    - `cmd/claw/compose_up_test.go`
+  - local verification:
+    - `go test ./internal/inspect ./cmd/claw`
+- Live rollout on Tiverton:
+  - synced the compiler patch into:
+    - `~/clawdapus`
+  - verified on Tiverton with:
+    - `go test ./internal/inspect ./cmd/claw`
+  - rebuilt:
+    - `~/clawdapus/bin/claw-persistent-memory`
+  - adjusted the live Rails build files so only `trading-api` self-describes:
+    - `services/trading-api/Dockerfile`
+      - keeps `LABEL claw.describe=/trading-api.claw-describe.json`
+    - `services/trading-api/Dockerfile.sidekiq`
+      - omits `claw.describe`
+    - `services/trading-api/trading-api.claw-describe.json`
+      - declares:
+        - `market-context`
+        - `desk-risk-context`
+  - reran:
+    - `~/clawdapus/bin/claw-persistent-memory up -d`
+- Live validation:
+  - pod is healthy after the rollout
+  - live feed manifests now show the intended split:
+    - `.claw-runtime/context/tiverton/feeds.json`
+      - `desk-risk-context`
+    - `.claw-runtime/context/logan/feeds.json`
+      - `market-context`
+    - `.claw-runtime/context/sentinel/feeds.json`
+      - `desk-risk-context`
+      - `fleet-alerts`
+  - direct live desk-risk payload for Tiverton now includes desk-wide risk:
+    - `logan` wallet:
+      - `wallet_size 25000`
+      - `cash 12000`
+      - `invested 13000`
+    - `gerrard` wallet:
+      - `wallet_size 25000`
+      - `cash 20000`
+      - `invested 5000`
+    - open positions:
+      - `KO`
+      - `BX`
+      - `QCOM`
+      - `EQT`
+  - this fixes the earlier "zero positions / zero buying power" desk view without changing trader-scoped `market-context`

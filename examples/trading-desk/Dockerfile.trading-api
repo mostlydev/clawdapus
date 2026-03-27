@@ -13,8 +13,10 @@ WORKDIR /app
 
 COPY mock_server.py ./
 COPY skills/trade.md ./skills/trade.md
+COPY trading-api.claw-describe.json ./trading-api.claw-describe.json
 
 LABEL claw.skill.emit=/app/skills/trade.md
+LABEL claw.describe=/app/trading-api.claw-describe.json
 
 EXPOSE 4000
 CMD ["python", "mock_server.py"]

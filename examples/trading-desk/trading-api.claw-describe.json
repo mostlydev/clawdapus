@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "description": "Trading Desk API — broker connectivity, trade execution, and market context.",
+  "feeds": [
+    {
+      "name": "market-context",
+      "path": "/api/v1/market_context/{claw_id}",
+      "ttl": 30,
+      "description": "Agent-scoped market context: open positions, wallet balance, and buying power."
+    },
+    {
+      "name": "desk-risk-context",
+      "path": "/api/v1/desk_risk_context/{claw_id}",
+      "ttl": 30,
+      "description": "Desk-wide risk context: aggregated trader wallets, open positions, exposure, and risk alerts."
+    }
+  ],
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/v1/market_context/{claw_id}",
+      "description": "Retrieve agent-scoped market context."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/desk_risk_context/{claw_id}",
+      "description": "Retrieve desk-wide risk context."
+    }
+  ]
+}
