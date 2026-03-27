@@ -109,6 +109,16 @@ Or build from source:
 go build -o bin/claw ./cmd/claw
 ```
 
+## Update
+
+Clawdapus moves fast — update frequently.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/install.sh | sh
+```
+
+`claw` checks for updates once a day and prints a notice at the end of any command when a newer release is available.
+
 ### Install AI Skill
 
 Give your coding agent full operational knowledge of Clawdapus — the `claw` CLI, Clawfile syntax, claw-pod.yml structure, cllama proxy wiring, driver semantics, and troubleshooting patterns.
