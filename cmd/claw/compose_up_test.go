@@ -1359,6 +1359,83 @@ func TestResolveServiceSurfaceSkillsUsesDescriptorMetadataAndManual(t *testing.T
 	}
 }
 
+func TestCollectServiceDescriptorsUsesPerServiceDockerfileLabelsForPlainBuildServices(t *testing.T) {
+	podDir := t.TempDir()
+	serviceDir := filepath.Join(podDir, "services", "trading-api")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatalf("mkdir service dir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile"), []byte(`
+FROM ruby:3.3
+LABEL claw.describe=/trading-api.claw-describe.json
+`), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile.sidekiq"), []byte(`
+FROM ruby:3.3
+LABEL maintainer=ops@example.com
+`), 0o644); err != nil {
+		t.Fatalf("write Dockerfile.sidekiq: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "trading-api.claw-describe.json"), []byte(`{
+  "version": 1,
+  "feeds": [
+    {
+      "name": "market-context",
+      "path": "/api/v1/market_context/{claw_id}",
+      "ttl": 180
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatalf("write descriptor: %v", err)
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"trading-api": {
+				Compose: map[string]interface{}{
+					"build": map[string]interface{}{
+						"context":    "./services/trading-api",
+						"dockerfile": "Dockerfile",
+					},
+				},
+			},
+			"sidekiq": {
+				Compose: map[string]interface{}{
+					"build": map[string]interface{}{
+						"context":    "./services/trading-api",
+						"dockerfile": "Dockerfile.sidekiq",
+					},
+				},
+			},
+		},
+	}
+
+	descriptors := map[string]*describe.ServiceDescriptor{}
+	if err := collectServiceDescriptors(podDir, p, map[string]string{}, map[string]*inspect.ClawInfo{}, descriptors); err != nil {
+		t.Fatalf("collect descriptors: %v", err)
+	}
+	if descriptors["trading-api"] == nil {
+		t.Fatal("expected trading-api descriptor from Dockerfile label")
+	}
+	if descriptors["sidekiq"] != nil {
+		t.Fatalf("expected sidekiq to remain undescribed, got %+v", descriptors["sidekiq"])
+	}
+
+	registry, err := describe.BuildFeedRegistry(descriptors)
+	if err != nil {
+		t.Fatalf("build feed registry: %v", err)
+	}
+	spec, ok := registry["market-context"]
+	if !ok {
+		t.Fatal("expected market-context feed in registry")
+	}
+	if spec.Source != "trading-api" {
+		t.Fatalf("expected trading-api to own market-context, got %q", spec.Source)
+	}
+}
+
 func testInvokeHandles() map[string]*driver.HandleInfo {
 	return map[string]*driver.HandleInfo{
 		"discord": {

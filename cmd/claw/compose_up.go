@@ -58,6 +58,7 @@ var (
 	loadDescriptorFromImage      = describe.LoadFromImage
 	loadDescriptorFromBuildCtx   = describe.LoadFromBuildContext
 	resolveBuildContextFile      = describe.ResolveBuildContextFile
+	loadDockerfileMetadata       = inspect.LoadFromDockerfile
 )
 
 var composeUpCmd = &cobra.Command{
@@ -2600,9 +2601,47 @@ func inspectServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 			return "", nil, err
 		}
 	}
+	if info == nil {
+		var err error
+		info, err = inspectBuildMetadata(podDir, svc.Compose["build"])
+		if err != nil {
+			return "", nil, err
+		}
+	}
 	imageRefs[serviceName] = imageRef
 	infos[serviceName] = info
 	return imageRef, info, nil
+}
+
+func inspectBuildMetadata(podDir string, buildRaw interface{}) (*inspect.ClawInfo, error) {
+	if buildRaw == nil {
+		return nil, nil
+	}
+
+	contextDir, err := describe.ResolveBuildContextDir(podDir, buildRaw)
+	if err != nil || contextDir == "" {
+		return nil, err
+	}
+
+	dockerfilePath, err := resolveBuildDockerfilePath(contextDir, resolveComposeBuildDockerfile(buildRaw))
+	if err != nil {
+		return nil, err
+	}
+	return loadDockerfileMetadata(dockerfilePath)
+}
+
+func resolveComposeBuildDockerfile(buildRaw interface{}) string {
+	switch raw := buildRaw.(type) {
+	case map[string]interface{}:
+		if dockerfile, ok := raw["dockerfile"].(string); ok {
+			return strings.TrimSpace(dockerfile)
+		}
+	case map[interface{}]interface{}:
+		if dockerfile, ok := raw["dockerfile"].(string); ok {
+			return strings.TrimSpace(dockerfile)
+		}
+	}
+	return ""
 }
 
 func collectServiceDescriptors(podDir string, p *pod.Pod, imageRefs map[string]string, infos map[string]*inspect.ClawInfo, descriptors map[string]*describe.ServiceDescriptor) error {
@@ -2722,7 +2761,7 @@ func builtinClawAPIDescriptor() *describe.ServiceDescriptor {
 		Version:     1,
 		Description: "Read-only governance API for fleet telemetry, health, logs, metrics, and alerts.",
 		Feeds: []describe.FeedDescriptor{{
-			Name:        "fleet-alerts",
+			Name: "fleet-alerts",
 			// Keep the pushed anomaly feed on a shorter horizon so agents do not
 			// self-report long-cleared incidents for a full hour.
 			Path:        "/fleet/alerts?since=15m",

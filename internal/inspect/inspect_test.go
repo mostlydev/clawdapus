@@ -1,6 +1,10 @@
 package inspect
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestParseLabelsExtractsClawLabels(t *testing.T) {
 	raw := map[string]string{
@@ -83,6 +87,36 @@ func TestParseLabelsExtractsSkillEmit(t *testing.T) {
 	}
 	if info.Skills[0] != "./skills/custom-workflow.md" {
 		t.Fatalf("expected skill[0] to be custom-workflow, got %q", info.Skills[0])
+	}
+}
+
+func TestLoadFromDockerfileExtractsClawLabels(t *testing.T) {
+	dir := t.TempDir()
+	dockerfilePath := filepath.Join(dir, "Dockerfile")
+	if err := os.WriteFile(dockerfilePath, []byte(`
+FROM ruby:3.3
+LABEL maintainer="ops@example.com"
+LABEL claw.describe=/app/.claw-describe.json claw.skill.emit="/app/skills/trade.md" \
+      claw.surface.0=service://trading-api
+`), 0o644); err != nil {
+		t.Fatalf("write dockerfile: %v", err)
+	}
+
+	info, err := LoadFromDockerfile(dockerfilePath)
+	if err != nil {
+		t.Fatalf("load dockerfile labels: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected claw metadata from dockerfile")
+	}
+	if info.DescribePath != "/app/.claw-describe.json" {
+		t.Fatalf("expected DescribePath from dockerfile, got %q", info.DescribePath)
+	}
+	if info.SkillEmit != "/app/skills/trade.md" {
+		t.Fatalf("expected SkillEmit from dockerfile, got %q", info.SkillEmit)
+	}
+	if len(info.Surfaces) != 1 || info.Surfaces[0] != "service://trading-api" {
+		t.Fatalf("expected service surface from dockerfile labels, got %#v", info.Surfaces)
 	}
 }
 

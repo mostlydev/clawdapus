@@ -3,11 +3,13 @@ package inspect
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/docker/docker/client"
+	"github.com/moby/buildkit/frontend/dockerfile/parser"
 )
 
 // InspectInvocation is an invocation entry parsed from a claw.invoke.N image label.
@@ -202,6 +204,81 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 	}
 
 	return info
+}
+
+func LoadFromDockerfile(path string) (*ClawInfo, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open dockerfile %q: %w", path, err)
+	}
+	defer f.Close()
+
+	parsed, err := parser.Parse(f)
+	if err != nil {
+		return nil, fmt.Errorf("parse dockerfile %q: %w", path, err)
+	}
+
+	labels := make(map[string]string)
+	for _, node := range parsed.AST.Children {
+		if !strings.EqualFold(strings.TrimSpace(node.Value), "label") {
+			continue
+		}
+		if err := collectLabelNode(labels, node); err != nil {
+			return nil, fmt.Errorf("parse LABEL in %q at line %d: %w", path, node.StartLine, err)
+		}
+	}
+	if len(labels) == 0 {
+		return nil, nil
+	}
+
+	info := ParseLabels(labels)
+	if info.ClawType == "" &&
+		info.SkillEmit == "" &&
+		info.DescribePath == "" &&
+		len(info.Surfaces) == 0 &&
+		len(info.Skills) == 0 &&
+		len(info.Configures) == 0 &&
+		len(info.Models) == 0 &&
+		len(info.Handles) == 0 &&
+		len(info.Privileges) == 0 {
+		return nil, nil
+	}
+	return info, nil
+}
+
+func collectLabelNode(labels map[string]string, node *parser.Node) error {
+	args := make([]string, 0)
+	for current := node.Next; current != nil; current = current.Next {
+		args = append(args, current.Value)
+	}
+	if len(args) == 0 {
+		return nil
+	}
+
+	for i := 0; i < len(args); {
+		if key, value, ok := strings.Cut(args[i], "="); ok && key != "" {
+			labels[key] = trimDockerfileLabelValue(value)
+			i++
+			continue
+		}
+		if i+1 >= len(args) {
+			return fmt.Errorf("odd LABEL argument count")
+		}
+		labels[args[i]] = trimDockerfileLabelValue(args[i+1])
+		i += 2
+	}
+	return nil
+}
+
+func trimDockerfileLabelValue(value string) string {
+	if len(value) >= 2 {
+		if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+			if unquoted, err := strconv.Unquote(value); err == nil {
+				return unquoted
+			}
+		}
+	}
+	return value
 }
 
 func Inspect(imageRef string) (*ClawInfo, error) {
