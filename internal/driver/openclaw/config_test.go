@@ -710,7 +710,7 @@ func TestGenerateConfigDiscordMentionPatterns(t *testing.T) {
 	}
 	hasText, hasMention := false, false
 	for _, p := range patternStrs {
-		if p == `(?i)\b@?tiverton\b` {
+		if p == `\b@?tiverton\b` {
 			hasText = true
 		}
 		if p == `<@!?123456789>` {
@@ -983,8 +983,8 @@ func TestGenerateConfigMultiPlatformMentionPatterns(t *testing.T) {
 	}
 	patterns := gc["mentionPatterns"].([]interface{})
 	// Should have patterns from BOTH platforms, not just whichever ran last.
-	// Discord contributes: (?i)\b@?multibot\b and <@!?111>
-	// Telegram contributes: (?i)\b@?multibot\b (deduped) — but no native mention
+	// Discord contributes: \b@?multibot\b and <@!?111>
+	// Telegram contributes: \b@?multibot\b (deduped) — but no native mention
 	// Minimum: 2 unique patterns (text + discord native)
 	if len(patterns) < 2 {
 		t.Errorf("expected at least 2 mention patterns from multi-platform, got %d: %v", len(patterns), patterns)
@@ -1025,12 +1025,12 @@ func TestGenerateConfigTelegramPeerHandles(t *testing.T) {
 	// Verify own bot's text pattern is present
 	hasOwnPattern := false
 	for _, p := range patterns {
-		if p == `(?i)\b@?bota\b` {
+		if p == `\b@?bota\b` {
 			hasOwnPattern = true
 		}
 	}
 	if !hasOwnPattern {
-		t.Errorf("expected own mention pattern (?i)\\b@?bota\\b in %v", patterns)
+		t.Errorf("expected own mention pattern \\b@?bota\\b in %v", patterns)
 	}
 }
 

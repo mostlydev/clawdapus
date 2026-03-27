@@ -19,6 +19,7 @@ import (
 
 type Driver struct{}
 
+const openclawWorkspaceTmpfs = "/claw:mode=1777,uid=1000,gid=1000"
 const openclawStateTmpfs = "/app/state:mode=1777,uid=1000,gid=1000"
 
 func init() {
@@ -164,7 +165,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			// /claw is the runner workspace. Keep it writable so agent turns can persist
 			// workspace artifacts like SOUL.md while read-only file mounts (AGENTS.md,
 			// CLAWDAPUS.md, skills) still layer on top of the tmpfs.
-			"/claw",
+			openclawWorkspaceTmpfs,
 			"/tmp",
 			"/run",
 			// /app/state covers all openclaw state subdirs (identity, logs, memory, agents, etc.).

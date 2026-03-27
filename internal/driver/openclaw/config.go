@@ -109,7 +109,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 					username = rc.ServiceName
 				}
 				if username != "" {
-					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`(?i)\b@?%s\b`, regexp.QuoteMeta(username)))
+					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`\b@?%s\b`, regexp.QuoteMeta(username)))
 				}
 				if h.ID != "" {
 					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`<@!?%s>`, h.ID))
@@ -165,7 +165,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 					username = rc.ServiceName
 				}
 				if username != "" {
-					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`(?i)\b@?%s\b`, regexp.QuoteMeta(username)))
+					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`\b@?%s\b`, regexp.QuoteMeta(username)))
 				}
 				if h.Username != "" {
 					agentName = strings.ToUpper(h.Username[:1]) + h.Username[1:]
@@ -191,7 +191,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 					username = rc.ServiceName
 				}
 				if username != "" {
-					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`(?i)\b@?%s\b`, regexp.QuoteMeta(username)))
+					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`\b@?%s\b`, regexp.QuoteMeta(username)))
 				}
 				if h.ID != "" {
 					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`<@%s>`, h.ID))

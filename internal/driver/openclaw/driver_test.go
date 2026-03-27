@@ -111,8 +111,8 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	for _, p := range result.Tmpfs {
 		tmpfsSet[p] = true
 	}
-	if !tmpfsSet["/claw"] {
-		t.Error("expected writable /claw tmpfs for workspace writes like SOUL.md")
+	if !tmpfsSet[openclawWorkspaceTmpfs] {
+		t.Errorf("expected writable /claw tmpfs %q for workspace writes like SOUL.md, got %v", openclawWorkspaceTmpfs, result.Tmpfs)
 	}
 	if !tmpfsSet[openclawStateTmpfs] {
 		t.Errorf("expected writable /app/state tmpfs %q, got %v", openclawStateTmpfs, result.Tmpfs)
