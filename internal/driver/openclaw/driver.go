@@ -19,6 +19,8 @@ import (
 
 type Driver struct{}
 
+const openclawStateTmpfs = "/app/state:mode=1777,uid=1000,gid=1000"
+
 func init() {
 	driver.Register("openclaw", &Driver{})
 }
@@ -38,6 +40,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	if err != nil {
 		return nil, fmt.Errorf("openclaw driver: config generation failed: %w", err)
 	}
+	memoryDir, err := shared.PreparePortableMemory(shared.ResolveStateDir(opts.RuntimeDir, opts.StateDir), opts.RuntimeDir)
+	if err != nil {
+		return nil, fmt.Errorf("openclaw driver: prepare portable memory: %w", err)
+	}
 
 	// Write config into its own subdirectory and bind-mount the whole directory.
 	// openclaw performs atomic writes by creating a temp file alongside the config
@@ -47,9 +53,15 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	if err := os.MkdirAll(configDir, 0777); err != nil {
 		return nil, fmt.Errorf("openclaw driver: create config dir: %w", err)
 	}
+	if err := os.Chmod(configDir, 0o777); err != nil {
+		return nil, fmt.Errorf("openclaw driver: chmod config dir: %w", err)
+	}
 	configPath := filepath.Join(configDir, "openclaw.json")
-	if err := os.WriteFile(configPath, configData, 0644); err != nil {
+	if err := os.WriteFile(configPath, configData, 0o666); err != nil {
 		return nil, fmt.Errorf("openclaw driver: failed to write config: %w", err)
+	}
+	if err := os.Chmod(configPath, 0o666); err != nil {
+		return nil, fmt.Errorf("openclaw driver: chmod config file: %w", err)
 	}
 
 	// Generate CLAWDAPUS.md — infrastructure context for the agent
@@ -82,6 +94,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			ContainerPath: "/claw/AGENTS.md",
 			ReadOnly:      true,
 		},
+		{
+			HostPath:      memoryDir,
+			ContainerPath: shared.PortableMemoryDir,
+			ReadOnly:      false,
+		},
 	}
 	if rc.PersonaHostPath != "" {
 		mounts = append(mounts, driver.Mount{
@@ -103,9 +120,18 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		if err := os.MkdirAll(jobsDir, 0777); err != nil {
 			return nil, fmt.Errorf("openclaw driver: create jobs dir: %w", err)
 		}
+		if err := os.Chmod(filepath.Join(opts.RuntimeDir, "state"), 0o777); err != nil {
+			return nil, fmt.Errorf("openclaw driver: chmod state dir: %w", err)
+		}
+		if err := os.Chmod(jobsDir, 0o777); err != nil {
+			return nil, fmt.Errorf("openclaw driver: chmod jobs dir: %w", err)
+		}
 		jobsPath := filepath.Join(jobsDir, "jobs.json")
-		if err := os.WriteFile(jobsPath, jobsData, 0644); err != nil {
+		if err := os.WriteFile(jobsPath, jobsData, 0o666); err != nil {
 			return nil, fmt.Errorf("openclaw driver: write jobs.json: %w", err)
+		}
+		if err := os.Chmod(jobsPath, 0o666); err != nil {
+			return nil, fmt.Errorf("openclaw driver: chmod jobs.json: %w", err)
 		}
 		mounts = append(mounts, driver.Mount{
 			// Bind-mount the directory (not the file) so openclaw can rename temp files
@@ -123,9 +149,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	})
 
 	env := map[string]string{
-		"CLAW_MANAGED":         "true",
-		"OPENCLAW_CONFIG_PATH": "/app/config/openclaw.json",
-		"OPENCLAW_STATE_DIR":   "/app/state",
+		"CLAW_MANAGED":           "true",
+		shared.PortableMemoryEnv: shared.PortableMemoryDir,
+		"OPENCLAW_CONFIG_PATH":   "/app/config/openclaw.json",
+		"OPENCLAW_STATE_DIR":     "/app/state",
 	}
 	if rc.PersonaHostPath != "" {
 		env["CLAW_PERSONA_DIR"] = "/claw/persona"
@@ -141,9 +168,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			"/tmp",
 			"/run",
 			// /app/state covers all openclaw state subdirs (identity, logs, memory, agents, etc.).
-			// The jobs.json bind mount layers on top of this tmpfs — Docker applies bind mounts
-			// after tmpfs, so /app/state/cron/jobs.json is accessible read-write as expected.
-			"/app/state",
+			// OpenClaw 2026.3.24 runs as uid/gid 1000, so the tmpfs must be writable by that user
+			// or startup will fail on /app/state/{agents,canvas}. The jobs.json bind mount layers
+			// on top of this tmpfs — Docker applies bind mounts after tmpfs, so
+			// /app/state/cron/jobs.json is accessible read-write as expected.
+			openclawStateTmpfs,
 		},
 		ReadOnly: true,
 		Restart:  "on-failure",

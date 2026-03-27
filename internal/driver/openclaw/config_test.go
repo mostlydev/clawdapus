@@ -633,6 +633,38 @@ func TestGenerateConfigDiscordAllowBots(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigPerplexityAPIKeyIsNotAutoInjectedFromEnv(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: make(map[string]string),
+		Configures: []string{
+			`openclaw config set tools.web.search.provider perplexity`,
+			`openclaw config set tools.web.search.perplexity.model sonar-pro`,
+		},
+		Environment: map[string]string{
+			"PERPLEXITY_KEY":     "${PERPLEXITY_KEY}",
+			"PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}",
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	search := config["tools"].(map[string]interface{})["web"].(map[string]interface{})["search"].(map[string]interface{})
+	if search["provider"] != "perplexity" {
+		t.Fatalf("expected search provider to be perplexity, got %v", search["provider"])
+	}
+	perplexity := search["perplexity"].(map[string]interface{})
+	if _, ok := perplexity["apiKey"]; ok {
+		t.Fatalf("expected perplexity apiKey to be omitted from generated config, got %v", perplexity["apiKey"])
+	}
+}
+
 func TestGenerateConfigDiscordMentionPatterns(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models:      make(map[string]string),
@@ -792,6 +824,53 @@ func TestGenerateConfigDiscordPeerHandlesInUsers(t *testing.T) {
 		if !got[expected] {
 			t.Errorf("expected ID %q in guild users, got %v", expected, users)
 		}
+	}
+}
+
+func TestGenerateConfigDiscordPeerHandlesResolveEnvIDs(t *testing.T) {
+	t.Setenv("OWN_DISCORD_ID", "OWN")
+	t.Setenv("PEER_ONE_DISCORD_ID", "PEER1")
+
+	rc := &driver.ResolvedClaw{
+		Models:     make(map[string]string),
+		Configures: []string{},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {
+				ID:     "${OWN_DISCORD_ID}",
+				Guilds: []driver.GuildInfo{{ID: "G1"}},
+			},
+		},
+		PeerHandles: map[string]map[string]*driver.HandleInfo{
+			"weston":   {"discord": {ID: "${PEER_ONE_DISCORD_ID}"}},
+			"sentinel": {"discord": {ID: "${MISSING_PEER_DISCORD_ID}"}},
+		},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	discord := config["channels"].(map[string]interface{})["discord"].(map[string]interface{})
+	guild := discord["guilds"].(map[string]interface{})["G1"].(map[string]interface{})
+	users, ok := guild["users"].([]interface{})
+	if !ok {
+		t.Fatal("expected guild.users array")
+	}
+	got := make(map[string]bool)
+	for _, u := range users {
+		got[u.(string)] = true
+	}
+	for _, expected := range []string{"OWN", "PEER1"} {
+		if !got[expected] {
+			t.Errorf("expected resolved ID %q in guild users, got %v", expected, users)
+		}
+	}
+	if got["${MISSING_PEER_DISCORD_ID}"] {
+		t.Fatalf("did not expect unresolved placeholder in guild users: %v", users)
 	}
 }
 

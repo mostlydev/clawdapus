@@ -103,6 +103,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			return nil, fmt.Errorf("hermes driver: create runtime dir %q: %w", dir, err)
 		}
 	}
+	memoryDir, err := shared.PreparePortableMemory(shared.ResolveStateDir(opts.RuntimeDir, opts.StateDir), opts.RuntimeDir)
+	if err != nil {
+		return nil, fmt.Errorf("hermes driver: prepare portable memory: %w", err)
+	}
 
 	if err := os.WriteFile(filepath.Join(homeDir, "config.yaml"), configData, 0o644); err != nil {
 		return nil, fmt.Errorf("hermes driver: write config.yaml: %w", err)
@@ -144,10 +148,21 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			ContainerPath: hermesWorkspaceDir,
 			ReadOnly:      false,
 		},
+		{
+			HostPath:      memoryDir,
+			ContainerPath: shared.PortableMemoryDir,
+			ReadOnly:      false,
+		},
+		{
+			HostPath:      memoryDir,
+			ContainerPath: hermesHomeDir + "/memories",
+			ReadOnly:      false,
+		},
 	}
 
 	env := map[string]string{
 		"CLAW_MANAGED":            "true",
+		shared.PortableMemoryEnv:  shared.PortableMemoryDir,
 		"HOME":                    "/root",
 		"HERMES_HOME":             hermesHomeDir,
 		"MESSAGING_CWD":           hermesWorkspaceDir,

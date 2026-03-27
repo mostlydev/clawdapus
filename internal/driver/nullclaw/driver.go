@@ -60,6 +60,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	if err != nil {
 		return nil, fmt.Errorf("nullclaw driver: config generation failed: %w", err)
 	}
+	memoryDir, err := shared.PreparePortableMemory(shared.ResolveStateDir(opts.RuntimeDir, opts.StateDir), opts.RuntimeDir)
+	if err != nil {
+		return nil, fmt.Errorf("nullclaw driver: prepare portable memory: %w", err)
+	}
 
 	homeDir := filepath.Join(opts.RuntimeDir, "nullclaw-home")
 	if err := os.MkdirAll(homeDir, 0o777); err != nil {
@@ -102,6 +106,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			ContainerPath: "/claw/CLAWDAPUS.md",
 			ReadOnly:      true,
 		},
+		{
+			HostPath:      memoryDir,
+			ContainerPath: shared.PortableMemoryDir,
+			ReadOnly:      false,
+		},
 	}
 	if rc.PersonaHostPath != "" {
 		mounts = append(mounts, driver.Mount{
@@ -112,8 +121,9 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	env := map[string]string{
-		"CLAW_MANAGED": "true",
-		"HOME":         "/nullclaw-data",
+		"CLAW_MANAGED":           "true",
+		shared.PortableMemoryEnv: shared.PortableMemoryDir,
+		"HOME":                   "/nullclaw-data",
 	}
 	if rc.PersonaHostPath != "" {
 		env["CLAW_PERSONA_DIR"] = "/claw/persona"
@@ -308,4 +318,3 @@ func listExistingCronJobs(cli *client.Client, containerID string) (map[string]st
 	}
 	return parseCronListOutput(stdout + "\n" + stderr), nil
 }
-

@@ -75,6 +75,33 @@ func TestGenerateClawdapusMDNoSurfaces(t *testing.T) {
 	}
 }
 
+func TestGenerateClawdapusMDMemorySection(t *testing.T) {
+	rc := &driver.ResolvedClaw{ServiceName: "worker", ClawType: "openclaw"}
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	if !strings.Contains(md, "## Memory") {
+		t.Fatal("expected Memory section")
+	}
+	if !strings.Contains(md, PortableMemoryDir) {
+		t.Fatal("expected portable memory mount path")
+	}
+	if !strings.Contains(md, PortableMemoryEnv) {
+		t.Fatal("expected portable memory env var")
+	}
+	if !strings.Contains(md, "/claw/MEMORY.md") {
+		t.Fatal("expected openclaw native memory alias")
+	}
+}
+
+func TestGenerateClawdapusMDHermesMemoryAlias(t *testing.T) {
+	rc := &driver.ResolvedClaw{ServiceName: "worker", ClawType: "hermes"}
+	md := GenerateClawdapusMD(rc, "test-pod")
+
+	if !strings.Contains(md, "~/.hermes/memories/") {
+		t.Fatal("expected Hermes native memory alias")
+	}
+}
+
 func TestClawdapusMDIncludesProxySection(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		ServiceName: "tiverton",

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
 
 func TestDriverRegistered(t *testing.T) {
@@ -196,6 +197,22 @@ func TestMaterializeBasic(t *testing.T) {
 	// Environment
 	if result.Environment["CLAW_MANAGED"] != "true" {
 		t.Error("expected CLAW_MANAGED=true in environment")
+	}
+	if result.Environment[shared.PortableMemoryEnv] != shared.PortableMemoryDir {
+		t.Errorf("expected %s=%s, got %q", shared.PortableMemoryEnv, shared.PortableMemoryDir, result.Environment[shared.PortableMemoryEnv])
+	}
+
+	hasPortableMemory := false
+	for _, m := range result.Mounts {
+		if m.ContainerPath == shared.PortableMemoryDir {
+			hasPortableMemory = true
+			if m.ReadOnly {
+				t.Error("portable memory mount should be writable")
+			}
+		}
+	}
+	if !hasPortableMemory {
+		t.Error("expected portable memory mount")
 	}
 }
 

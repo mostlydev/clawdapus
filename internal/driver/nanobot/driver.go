@@ -80,6 +80,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	if err != nil {
 		return nil, fmt.Errorf("nanobot driver: config generation failed: %w", err)
 	}
+	memoryDir, err := shared.PreparePortableMemory(shared.ResolveStateDir(opts.RuntimeDir, opts.StateDir), opts.RuntimeDir)
+	if err != nil {
+		return nil, fmt.Errorf("nanobot driver: prepare portable memory: %w", err)
+	}
 
 	homeDir := filepath.Join(opts.RuntimeDir, "nanobot-home")
 	if err := os.MkdirAll(homeDir, 0o777); err != nil {
@@ -130,6 +134,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			ContainerPath: "/root/.nanobot",
 			ReadOnly:      false,
 		},
+		{
+			HostPath:      memoryDir,
+			ContainerPath: shared.PortableMemoryDir,
+			ReadOnly:      false,
+		},
 	}
 	if rc.PersonaHostPath != "" {
 		mounts = append(mounts, driver.Mount{
@@ -140,8 +149,9 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	env := map[string]string{
-		"CLAW_MANAGED": "true",
-		"HOME":         "/root",
+		"CLAW_MANAGED":           "true",
+		shared.PortableMemoryEnv: shared.PortableMemoryDir,
+		"HOME":                   "/root",
 	}
 	if rc.PersonaHostPath != "" {
 		env["CLAW_PERSONA_DIR"] = "/root/.nanobot/workspace/persona"
@@ -289,4 +299,3 @@ func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
 
 	return json.MarshalIndent(store, "", "  ")
 }
-

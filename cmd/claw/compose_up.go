@@ -100,6 +100,13 @@ func runComposeUp(podFile string) error {
 		return fmt.Errorf("resolve x-claw runtime placeholders: %w", err)
 	}
 	runtimeDir := filepath.Join(podDir, ".claw-runtime")
+	memoryRoot, err := ensurePersistentCllamaDir(podDir, ".claw-memory")
+	if err != nil {
+		return err
+	}
+	if err := preMigratePortableMemory(runtimeDir, memoryRoot, p); err != nil {
+		return fmt.Errorf("migrate portable memory: %w", err)
+	}
 	if err := resetRuntimeDir(runtimeDir); err != nil {
 		return fmt.Errorf("reset runtime dir: %w", err)
 	}
@@ -457,7 +464,7 @@ func runComposeUp(podFile string) error {
 			}
 
 			agentTimezone := resolveAgentTimezone(rc.Environment, runtimeEnv)
-		if rc.Count > 1 {
+			if rc.Count > 1 {
 				for i := 0; i < rc.Count; i++ {
 					ordinalName := fmt.Sprintf("%s-%d", name, i)
 					ordinalRC := *rc
@@ -587,7 +594,11 @@ func runComposeUp(podFile string) error {
 		d := drivers[name]
 		svcRuntimeDir := serviceRuntimeDirs[name]
 
-		result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: svcRuntimeDir, PodName: p.Name})
+		result, err := d.Materialize(rc, driver.MaterializeOpts{
+			RuntimeDir: svcRuntimeDir,
+			StateDir:   filepath.Join(memoryRoot, name),
+			PodName:    p.Name,
+		})
 		if err != nil {
 			return fmt.Errorf("service %q: materialization failed: %w", name, err)
 		}
@@ -708,6 +719,20 @@ func resetRuntimeDir(path string) error {
 		return err
 	}
 	return os.MkdirAll(path, 0o700)
+}
+
+func preMigratePortableMemory(runtimeDir, memoryRoot string, p *pod.Pod) error {
+	if p == nil {
+		return nil
+	}
+	for name := range p.Services {
+		legacyRoot := filepath.Join(runtimeDir, name)
+		stateDir := filepath.Join(memoryRoot, name)
+		if _, err := shared.PreparePortableMemory(stateDir, legacyRoot); err != nil {
+			return fmt.Errorf("service %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 func runtimeConsumerServices(resolvedClaws map[string]*driver.ResolvedClaw, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) []string {
@@ -2041,7 +2066,7 @@ var seedKeyDefs = []seedKeyDef{
 
 // v2ProviderFile is the providers.json v2 on-disk shape (write path only).
 type v2ProviderFile struct {
-	Version   int                        `json:"version"`
+	Version   int                         `json:"version"`
 	Providers map[string]*v2ProviderState `json:"providers"`
 }
 
@@ -2255,8 +2280,8 @@ func loadExistingProviders(authDir string) map[string]*v2ProviderState {
 	}
 
 	var probe struct {
-		Version   int                              `json:"version"`
-		Providers map[string]json.RawMessage       `json:"providers"`
+		Version   int                        `json:"version"`
+		Providers map[string]json.RawMessage `json:"providers"`
 	}
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return out

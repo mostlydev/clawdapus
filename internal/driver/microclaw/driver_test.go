@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/shared"
 	"gopkg.in/yaml.v3"
 )
 
@@ -98,6 +99,22 @@ func TestMaterializeWritesConfigAndSeededMemory(t *testing.T) {
 	}
 	if result.Environment["MICROCLAW_CONFIG"] != "/app/config/microclaw.config.yaml" {
 		t.Fatalf("expected MICROCLAW_CONFIG env, got %q", result.Environment["MICROCLAW_CONFIG"])
+	}
+	if result.Environment[shared.PortableMemoryEnv] != shared.PortableMemoryDir {
+		t.Fatalf("expected %s=%s, got %q", shared.PortableMemoryEnv, shared.PortableMemoryDir, result.Environment[shared.PortableMemoryEnv])
+	}
+
+	foundMemoryMount := false
+	for _, mount := range result.Mounts {
+		if mount.ContainerPath == shared.PortableMemoryDir {
+			foundMemoryMount = true
+			if mount.ReadOnly {
+				t.Fatal("portable memory mount should be writable")
+			}
+		}
+	}
+	if !foundMemoryMount {
+		t.Fatal("expected portable memory mount")
 	}
 
 	cfgPath := filepath.Join(runtimeDir, "config", "microclaw.config.yaml")

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
 
 func TestValidateMissingAgentErrors(t *testing.T) {
@@ -65,6 +66,20 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	if _, err := os.Stat(configPath); err != nil {
 		t.Fatalf("config file not written at config/openclaw.json: %v", err)
 	}
+	configDirInfo, err := os.Stat(filepath.Join(dir, "config"))
+	if err != nil {
+		t.Fatalf("stat config dir: %v", err)
+	}
+	if got := configDirInfo.Mode().Perm(); got != 0o777 {
+		t.Fatalf("config dir mode = %o, want 777", got)
+	}
+	configInfo, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat config file: %v", err)
+	}
+	if got := configInfo.Mode().Perm(); got != 0o666 {
+		t.Fatalf("config file mode = %o, want 666", got)
+	}
 
 	// Result should include config mount + agent mount
 	if len(result.Mounts) < 2 {
@@ -86,8 +101,12 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	if result.Environment["OPENCLAW_STATE_DIR"] != "/app/state" {
 		t.Errorf("expected OPENCLAW_STATE_DIR=/app/state, got %q", result.Environment["OPENCLAW_STATE_DIR"])
 	}
+	if result.Environment[shared.PortableMemoryEnv] != shared.PortableMemoryDir {
+		t.Errorf("expected %s=%s, got %q", shared.PortableMemoryEnv, shared.PortableMemoryDir, result.Environment[shared.PortableMemoryEnv])
+	}
 
 	// /app/state must be a single tmpfs covering all openclaw state subdirs.
+	// The options are part of the contract because OpenClaw now runs as uid/gid 1000.
 	tmpfsSet := make(map[string]bool, len(result.Tmpfs))
 	for _, p := range result.Tmpfs {
 		tmpfsSet[p] = true
@@ -95,8 +114,8 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	if !tmpfsSet["/claw"] {
 		t.Error("expected writable /claw tmpfs for workspace writes like SOUL.md")
 	}
-	if !tmpfsSet["/app/state"] {
-		t.Error("expected single /app/state tmpfs (covers identity, logs, memory, agents, etc.)")
+	if !tmpfsSet[openclawStateTmpfs] {
+		t.Errorf("expected writable /app/state tmpfs %q, got %v", openclawStateTmpfs, result.Tmpfs)
 	}
 	if tmpfsSet["/root/.openclaw"] {
 		t.Error("unexpected tmpfs /root/.openclaw — should use /app/state now")
@@ -104,6 +123,60 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 
 	if result.Restart != "on-failure" {
 		t.Errorf("expected restart=on-failure, got %q", result.Restart)
+	}
+
+	foundMemoryMount := false
+	for _, mount := range result.Mounts {
+		if mount.ContainerPath == shared.PortableMemoryDir {
+			foundMemoryMount = true
+			if mount.ReadOnly {
+				t.Fatal("portable memory mount should be writable")
+			}
+		}
+	}
+	if !foundMemoryMount {
+		t.Fatal("expected portable memory mount")
+	}
+}
+
+func TestMaterializeUsesStateDirForPortableMemory(t *testing.T) {
+	runtimeDir := t.TempDir()
+	stateDir := t.TempDir()
+	agentFile := filepath.Join(runtimeDir, "AGENTS.md")
+	if err := os.WriteFile(agentFile, []byte("# Contract"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Driver{}
+	rc := &driver.ResolvedClaw{
+		ClawType:      "openclaw",
+		Agent:         "AGENTS.md",
+		AgentHostPath: agentFile,
+		Models:        map[string]string{"primary": "anthropic/claude-sonnet-4"},
+	}
+	result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := filepath.Join(stateDir, "memory")
+	found := false
+	for _, mount := range result.Mounts {
+		if mount.ContainerPath == shared.PortableMemoryDir {
+			found = true
+			if mount.HostPath != want {
+				t.Fatalf("portable memory host path = %q, want %q", mount.HostPath, want)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected portable memory mount")
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "memory", "MEMORY.md")); err != nil {
+		t.Fatalf("expected persistent state memory file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeDir, "memory")); !os.IsNotExist(err) {
+		t.Fatalf("runtime memory dir should not be materialized when StateDir is set, got err=%v", err)
 	}
 }
 
@@ -202,6 +275,20 @@ func TestMaterializeJobsDirMountedNotFile(t *testing.T) {
 	jobsPath := filepath.Join(dir, "state", "cron", "jobs.json")
 	if _, err := os.Stat(jobsPath); err != nil {
 		t.Fatalf("jobs.json not written at state/cron/jobs.json: %v", err)
+	}
+	jobsDirInfo, err := os.Stat(filepath.Join(dir, "state", "cron"))
+	if err != nil {
+		t.Fatalf("stat jobs dir: %v", err)
+	}
+	if got := jobsDirInfo.Mode().Perm(); got != 0o777 {
+		t.Fatalf("jobs dir mode = %o, want 777", got)
+	}
+	jobsInfo, err := os.Stat(jobsPath)
+	if err != nil {
+		t.Fatalf("stat jobs.json: %v", err)
+	}
+	if got := jobsInfo.Mode().Perm(); got != 0o666 {
+		t.Fatalf("jobs.json mode = %o, want 666", got)
 	}
 
 	// The mount target must be the cron/ DIRECTORY, not the jobs.json file.

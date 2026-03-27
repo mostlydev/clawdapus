@@ -88,6 +88,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	if err != nil {
 		return nil, fmt.Errorf("picoclaw driver: config generation failed: %w", err)
 	}
+	memoryDir, err := shared.PreparePortableMemory(shared.ResolveStateDir(opts.RuntimeDir, opts.StateDir), opts.RuntimeDir)
+	if err != nil {
+		return nil, fmt.Errorf("picoclaw driver: prepare portable memory: %w", err)
+	}
 
 	homeDir := filepath.Join(opts.RuntimeDir, "picoclaw-home")
 	if err := os.MkdirAll(homeDir, 0o777); err != nil {
@@ -138,6 +142,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			ContainerPath: picoclawHomeDir,
 			ReadOnly:      false,
 		},
+		{
+			HostPath:      memoryDir,
+			ContainerPath: shared.PortableMemoryDir,
+			ReadOnly:      false,
+		},
 	}
 	if rc.PersonaHostPath != "" {
 		mounts = append(mounts, driver.Mount{
@@ -148,10 +157,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	env := map[string]string{
-		"CLAW_MANAGED":    "true",
-		"HOME":            "/home/picoclaw",
-		"PICOCLAW_HOME":   picoclawHomeDir,
-		"PICOCLAW_CONFIG": picoclawHomeDir + "/config.json",
+		"CLAW_MANAGED":           "true",
+		shared.PortableMemoryEnv: shared.PortableMemoryDir,
+		"HOME":                   "/home/picoclaw",
+		"PICOCLAW_HOME":          picoclawHomeDir,
+		"PICOCLAW_CONFIG":        picoclawHomeDir + "/config.json",
 	}
 	if rc.PersonaHostPath != "" {
 		env["CLAW_PERSONA_DIR"] = picoclawWorkspaceDir + "/persona"
@@ -388,4 +398,3 @@ func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
 
 	return json.MarshalIndent(store, "", "  ")
 }
-

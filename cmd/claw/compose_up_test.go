@@ -2307,6 +2307,10 @@ func TestEnsurePersistentCllamaDirIsOutsideRuntimeDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	memoryDir, err := ensurePersistentCllamaDir(podDir, ".claw-memory")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Both dirs must be siblings of runtimeDir, not under it
 	if strings.HasPrefix(authDir, runtimeDir) {
@@ -2315,11 +2319,50 @@ func TestEnsurePersistentCllamaDirIsOutsideRuntimeDir(t *testing.T) {
 	if strings.HasPrefix(sessionDir, runtimeDir) {
 		t.Errorf("sessionDir %q is under runtimeDir %q", sessionDir, runtimeDir)
 	}
+	if strings.HasPrefix(memoryDir, runtimeDir) {
+		t.Errorf("memoryDir %q is under runtimeDir %q", memoryDir, runtimeDir)
+	}
 	// Both must be direct children of podDir
 	if filepath.Dir(authDir) != podDir {
 		t.Errorf("authDir parent = %q; want %q", filepath.Dir(authDir), podDir)
 	}
 	if filepath.Dir(sessionDir) != podDir {
 		t.Errorf("sessionDir parent = %q; want %q", filepath.Dir(sessionDir), podDir)
+	}
+	if filepath.Dir(memoryDir) != podDir {
+		t.Errorf("memoryDir parent = %q; want %q", filepath.Dir(memoryDir), podDir)
+	}
+}
+
+func TestPreMigratePortableMemoryCopiesServiceRuntimeState(t *testing.T) {
+	podDir := t.TempDir()
+	runtimeDir := filepath.Join(podDir, ".claw-runtime")
+	memoryRoot := filepath.Join(podDir, ".claw-memory")
+	legacyDir := filepath.Join(runtimeDir, "tiverton", "hermes-home", "memories")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(memoryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "MEMORY.md"), []byte("legacy desk note"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"tiverton": {},
+		},
+	}
+	if err := preMigratePortableMemory(runtimeDir, memoryRoot, p); err != nil {
+		t.Fatalf("preMigratePortableMemory returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(memoryRoot, "tiverton", "memory", "MEMORY.md"))
+	if err != nil {
+		t.Fatalf("read migrated memory: %v", err)
+	}
+	if string(data) != "legacy desk note" {
+		t.Fatalf("unexpected migrated memory: %q", string(data))
 	}
 }

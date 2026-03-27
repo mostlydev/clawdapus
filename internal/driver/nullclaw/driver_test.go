@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
 
 func TestDriverRegistered(t *testing.T) {
@@ -143,6 +144,7 @@ func TestMaterializeMounts(t *testing.T) {
 	var imageHomeMount *driver.Mount
 	var agentMount *driver.Mount
 	var clawdapusMount *driver.Mount
+	var memoryMount *driver.Mount
 	for i := range result.Mounts {
 		m := &result.Mounts[i]
 		switch m.ContainerPath {
@@ -154,6 +156,8 @@ func TestMaterializeMounts(t *testing.T) {
 			agentMount = m
 		case "/claw/CLAWDAPUS.md":
 			clawdapusMount = m
+		case shared.PortableMemoryDir:
+			memoryMount = m
 		}
 	}
 
@@ -169,6 +173,9 @@ func TestMaterializeMounts(t *testing.T) {
 	if clawdapusMount == nil || !clawdapusMount.ReadOnly {
 		t.Fatal("expected readonly /claw/CLAWDAPUS.md mount")
 	}
+	if memoryMount == nil || memoryMount.ReadOnly {
+		t.Fatal("expected writable portable memory mount")
+	}
 }
 
 func TestMaterializeEnvironment(t *testing.T) {
@@ -181,6 +188,9 @@ func TestMaterializeEnvironment(t *testing.T) {
 	}
 	if result.Environment["CLAW_MANAGED"] != "true" {
 		t.Fatalf("expected CLAW_MANAGED=true, got %q", result.Environment["CLAW_MANAGED"])
+	}
+	if result.Environment[shared.PortableMemoryEnv] != shared.PortableMemoryDir {
+		t.Fatalf("expected %s=%s, got %q", shared.PortableMemoryEnv, shared.PortableMemoryDir, result.Environment[shared.PortableMemoryEnv])
 	}
 }
 

@@ -275,12 +275,16 @@ func parseConfigSetCommand(cmd string) (string, interface{}, error) {
 // peer handles, sorted for deterministic output.
 func platformBotIDs(rc *driver.ResolvedClaw, platform string) []string {
 	seen := make(map[string]struct{})
-	if h := rc.Handles[platform]; h != nil && h.ID != "" {
-		seen[h.ID] = struct{}{}
+	if h := rc.Handles[platform]; h != nil {
+		if id := shared.ResolveEnvToken(h.ID); id != "" {
+			seen[id] = struct{}{}
+		}
 	}
 	for _, peerHandles := range rc.PeerHandles {
-		if ph, ok := peerHandles[platform]; ok && ph != nil && ph.ID != "" {
-			seen[ph.ID] = struct{}{}
+		if ph, ok := peerHandles[platform]; ok && ph != nil {
+			if id := shared.ResolveEnvToken(ph.ID); id != "" {
+				seen[id] = struct{}{}
+			}
 		}
 	}
 	ids := make([]string, 0, len(seen))
@@ -458,4 +462,31 @@ func defaultModelAPIForProvider(provider string) string {
 // setPath sets a nested value in a map using a dotted path.
 func setPath(obj map[string]interface{}, path string, value interface{}) error {
 	return shared.SetPath(obj, path, value)
+}
+
+func getNestedPath(root map[string]interface{}, path ...string) (interface{}, bool) {
+	var current interface{} = root
+	for _, key := range path {
+		next, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		current, ok = next[key]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func firstRawEnvRef(env map[string]string, keys ...string) string {
+	if env == nil {
+		return ""
+	}
+	for _, key := range keys {
+		if raw := strings.TrimSpace(env[key]); raw != "" {
+			return raw
+		}
+	}
+	return ""
 }

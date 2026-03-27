@@ -21,8 +21,8 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/mostlydev/clawdapus/internal/audit"
-	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
 	"github.com/mostlydev/clawdapus/internal/clawapi"
+	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	_ "github.com/mostlydev/clawdapus/internal/driver/hermes"
 	_ "github.com/mostlydev/clawdapus/internal/driver/microclaw"
@@ -44,13 +44,13 @@ type apiHandler struct {
 }
 
 type serviceStatus struct {
-	Service      string `json:"service"`
-	Count        int    `json:"count"`
-	Running      int    `json:"running"`
-	Status       string `json:"status"`
-	Detail       string `json:"detail,omitempty"`
-	Uptime       string `json:"uptime,omitempty"`
-	ClawType     string `json:"claw_type,omitempty"`
+	Service      string   `json:"service"`
+	Count        int      `json:"count"`
+	Running      int      `json:"running"`
+	Status       string   `json:"status"`
+	Detail       string   `json:"detail,omitempty"`
+	Uptime       string   `json:"uptime,omitempty"`
+	ClawType     string   `json:"claw_type,omitempty"`
 	ComposeNames []string `json:"compose_names,omitempty"`
 }
 
@@ -116,7 +116,7 @@ func (h *apiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	statuses, err := h.collectStatus(r.Context(), principal)
+	statuses, err := h.collectStatus(r.Context(), principal, true)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -243,7 +243,7 @@ func (h *apiHandler) authorize(w http.ResponseWriter, r *http.Request, verb, tar
 	return principal, true
 }
 
-func (h *apiHandler) collectStatus(ctx context.Context, principal *clawapi.Principal) ([]serviceStatus, error) {
+func (h *apiHandler) collectStatus(ctx context.Context, principal *clawapi.Principal, useDriverProbe bool) ([]serviceStatus, error) {
 	containers, err := h.listPodContainers(ctx)
 	if err != nil {
 		return nil, err
@@ -276,22 +276,24 @@ func (h *apiHandler) collectStatus(ctx context.Context, principal *clawapi.Princ
 				}
 			}
 			ctrStatus, ctrDetail := containerHealth(info)
-			if ctrType := info.Config.Labels["claw.type"]; ctrType != "" {
-				if d, err := driver.Lookup(ctrType); err == nil {
-					health, healthErr := d.HealthProbe(driver.ContainerRef{
-						ContainerID: ctr.ID,
-						ServiceName: composeServiceName(ctr),
-					})
-					if healthErr != nil {
-						ctrStatus = "error"
-						ctrDetail = healthErr.Error()
-					} else if health != nil {
-						if health.OK {
-							ctrStatus = "healthy"
-						} else {
-							ctrStatus = "unhealthy"
+			if useDriverProbe {
+				if ctrType := info.Config.Labels["claw.type"]; ctrType != "" {
+					if d, err := driver.Lookup(ctrType); err == nil {
+						health, healthErr := d.HealthProbe(driver.ContainerRef{
+							ContainerID: ctr.ID,
+							ServiceName: composeServiceName(ctr),
+						})
+						if healthErr != nil {
+							ctrStatus = "error"
+							ctrDetail = healthErr.Error()
+						} else if health != nil {
+							if health.OK {
+								ctrStatus = "healthy"
+							} else {
+								ctrStatus = "unhealthy"
+							}
+							ctrDetail = health.Detail
 						}
-						ctrDetail = health.Detail
 					}
 				}
 			}
@@ -370,7 +372,7 @@ func (h *apiHandler) collectMetrics(ctx context.Context, principal *clawapi.Prin
 }
 
 func (h *apiHandler) collectAlerts(ctx context.Context, principal *clawapi.Principal, since time.Time) ([]alert, error) {
-	statuses, err := h.collectStatus(ctx, principal)
+	statuses, err := h.collectStatus(ctx, principal, false)
 	if err != nil {
 		return nil, err
 	}

@@ -27,6 +27,12 @@ func TestBaseImageProvider(t *testing.T) {
 	if !strings.Contains(dockerfile, "/usr/local/bin/openclaw-entrypoint.sh") {
 		t.Fatal("Dockerfile should install the entrypoint outside /claw")
 	}
+	if !strings.Contains(dockerfile, `ln -snf "$CLAW_MEMORY_DIR/MEMORY.md" /claw/MEMORY.md`) {
+		t.Fatal("Dockerfile should bridge shared memory into /claw/MEMORY.md")
+	}
+	if !strings.Contains(dockerfile, `ln -snf "$CLAW_MEMORY_DIR/MEMORY.md" /claw/memory.md`) {
+		t.Fatal("Dockerfile should bridge shared memory into /claw/memory.md")
+	}
 	if strings.Contains(dockerfile, `ENTRYPOINT ["/usr/bin/tini", "--", "/claw/entrypoint.sh"]`) {
 		t.Fatal("Dockerfile should not place the runtime entrypoint under /claw")
 	}

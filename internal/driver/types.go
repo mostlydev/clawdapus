@@ -143,6 +143,7 @@ type GeneratedSkill struct {
 
 type MaterializeOpts struct {
 	RuntimeDir string // host directory for generated artifacts
+	StateDir   string // host directory for durable writable state
 	PodName    string // pod name for context injection (CLAWDAPUS.md)
 }
 

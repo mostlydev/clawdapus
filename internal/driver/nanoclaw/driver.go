@@ -42,6 +42,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	if podName == "" {
 		podName = rc.ServiceName
 	}
+	memoryDir, err := shared.PreparePortableMemory(shared.ResolveStateDir(opts.RuntimeDir, opts.StateDir), opts.RuntimeDir)
+	if err != nil {
+		return nil, fmt.Errorf("nanoclaw driver: prepare portable memory: %w", err)
+	}
 
 	// Combine agent contract + CLAWDAPUS.md into single CLAUDE.md.
 	// Flows: orchestrator groups/main/ → agent-runner /workspace/group/CLAUDE.md → SDK auto-loads.
@@ -59,6 +63,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	mounts := []driver.Mount{
 		{HostPath: combinedPath, ContainerPath: "/workspace/groups/main/CLAUDE.md", ReadOnly: true},
 		{HostPath: "/var/run/docker.sock", ContainerPath: "/var/run/docker.sock", ReadOnly: false},
+		{HostPath: memoryDir, ContainerPath: shared.PortableMemoryDir, ReadOnly: false},
 	}
 	if rc.PersonaHostPath != "" {
 		mounts = append(mounts, driver.Mount{
@@ -69,7 +74,8 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	env := map[string]string{
-		"CLAW_MANAGED": "true",
+		"CLAW_MANAGED":           "true",
+		shared.PortableMemoryEnv: shared.PortableMemoryDir,
 	}
 	if rc.PersonaHostPath != "" {
 		env["CLAW_PERSONA_DIR"] = "/workspace/container/persona"

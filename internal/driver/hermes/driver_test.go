@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
 
 func TestDriverRegistered(t *testing.T) {
@@ -174,6 +175,32 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	}
 	if result.Environment["TERMINAL_CWD"] != hermesWorkspaceDir {
 		t.Fatalf("unexpected TERMINAL_CWD: %q", result.Environment["TERMINAL_CWD"])
+	}
+	if result.Environment[shared.PortableMemoryEnv] != shared.PortableMemoryDir {
+		t.Fatalf("unexpected %s: %q", shared.PortableMemoryEnv, result.Environment[shared.PortableMemoryEnv])
+	}
+
+	hasPortableMemoryMount := false
+	hasHermesMemoryMount := false
+	for _, mount := range result.Mounts {
+		switch mount.ContainerPath {
+		case shared.PortableMemoryDir:
+			hasPortableMemoryMount = true
+			if mount.ReadOnly {
+				t.Fatal("portable memory mount should be writable")
+			}
+		case hermesHomeDir + "/memories":
+			hasHermesMemoryMount = true
+			if mount.ReadOnly {
+				t.Fatal("Hermes memories mount should be writable")
+			}
+		}
+	}
+	if !hasPortableMemoryMount {
+		t.Fatal("expected portable memory mount")
+	}
+	if !hasHermesMemoryMount {
+		t.Fatal("expected Hermes memories mount")
 	}
 
 	// Default SOUL.md should be written when no persona is configured

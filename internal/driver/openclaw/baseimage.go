@@ -22,6 +22,13 @@ if [ -x /claw/configure.sh ]; then
     /claw/configure.sh
 fi
 
+if [ -n "${CLAW_MEMORY_DIR:-}" ]; then
+    mkdir -p "$CLAW_MEMORY_DIR"
+    touch "$CLAW_MEMORY_DIR/MEMORY.md"
+    ln -snf "$CLAW_MEMORY_DIR/MEMORY.md" /claw/MEMORY.md
+    ln -snf "$CLAW_MEMORY_DIR/MEMORY.md" /claw/memory.md
+fi
+
 # Start gateway as a background process so we can run startup tasks before
 # handing off. Using & + wait keeps tini (PID 1) in control of the process.
 openclaw gateway --port 18789 --bind loopback &

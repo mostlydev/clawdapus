@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/shared"
 )
 
 func TestDriverRegistered(t *testing.T) {
@@ -152,16 +153,26 @@ func TestMaterializeWritesConfigAndSeededAgents(t *testing.T) {
 	if result.Environment["PICOCLAW_CONFIG"] != picoclawHomeDir+"/config.json" {
 		t.Fatalf("unexpected PICOCLAW_CONFIG: %q", result.Environment["PICOCLAW_CONFIG"])
 	}
+	if result.Environment[shared.PortableMemoryEnv] != shared.PortableMemoryDir {
+		t.Fatalf("expected %s=%s, got %q", shared.PortableMemoryEnv, shared.PortableMemoryDir, result.Environment[shared.PortableMemoryEnv])
+	}
 
 	var homeMount *driver.Mount
+	var memoryMount *driver.Mount
 	for i := range result.Mounts {
 		m := &result.Mounts[i]
 		if m.ContainerPath == picoclawHomeDir {
 			homeMount = m
 		}
+		if m.ContainerPath == shared.PortableMemoryDir {
+			memoryMount = m
+		}
 	}
 	if homeMount == nil || homeMount.ReadOnly {
 		t.Fatal("expected writable /home/picoclaw/.picoclaw mount")
+	}
+	if memoryMount == nil || memoryMount.ReadOnly {
+		t.Fatal("expected writable portable memory mount")
 	}
 }
 

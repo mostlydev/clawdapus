@@ -88,6 +88,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	if podName == "" {
 		podName = rc.ServiceName
 	}
+	memoryDir, err := shared.PreparePortableMemory(shared.ResolveStateDir(opts.RuntimeDir, opts.StateDir), opts.RuntimeDir)
+	if err != nil {
+		return nil, fmt.Errorf("microclaw driver: prepare portable memory: %w", err)
+	}
 
 	cfg, err := generateConfig(rc)
 	if err != nil {
@@ -152,6 +156,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			ContainerPath: "/claw-data",
 			ReadOnly:      false,
 		},
+		{
+			HostPath:      memoryDir,
+			ContainerPath: shared.PortableMemoryDir,
+			ReadOnly:      false,
+		},
 	}
 	if rc.PersonaHostPath != "" {
 		mounts = append(mounts, driver.Mount{
@@ -162,8 +171,9 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	env := map[string]string{
-		"CLAW_MANAGED":     "true",
-		"MICROCLAW_CONFIG": "/app/config/microclaw.config.yaml",
+		"CLAW_MANAGED":           "true",
+		shared.PortableMemoryEnv: shared.PortableMemoryDir,
+		"MICROCLAW_CONFIG":       "/app/config/microclaw.config.yaml",
 	}
 	if rc.PersonaHostPath != "" {
 		env["CLAW_PERSONA_DIR"] = "/claw-data/persona"
@@ -341,7 +351,6 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 	return cfg, nil
 }
 
-
 func discordAllowedChannels(h *driver.HandleInfo) []uint64 {
 	if h == nil {
 		return nil
@@ -428,4 +437,3 @@ func parseConfigSetCommand(cmd string) (string, interface{}, error) {
 	}
 	return path, value, nil
 }
-

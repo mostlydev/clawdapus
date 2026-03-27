@@ -38,6 +38,21 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		b.WriteString("\n")
 	}
 
+	b.WriteString("## Memory\n\n")
+	b.WriteString("Your portable cross-driver memory directory is mounted separately from the runner workspace.\n\n")
+	b.WriteString(fmt.Sprintf("- **Mount:** `%s`\n", PortableMemoryDir))
+	b.WriteString(fmt.Sprintf("- **Env:** `%s`\n", PortableMemoryEnv))
+	b.WriteString("- **Shared files:** `MEMORY.md` for durable agent notes, `USER.md` for user-specific preferences\n")
+	b.WriteString("- **Working notes:** dated files like `2026-03-26.md` when you need a running log\n")
+	b.WriteString("- **Portability:** this directory is intended to survive claw-type changes for the same service\n")
+	switch rc.ClawType {
+	case "hermes":
+		b.WriteString("- **Native alias:** `~/.hermes/memories/` reads and writes the same files\n")
+	case "openclaw":
+		b.WriteString("- **Native alias:** `/claw/MEMORY.md` resolves to the shared `MEMORY.md` file\n")
+	}
+	b.WriteString("\n")
+
 	// Surfaces
 	b.WriteString("## Surfaces\n\n")
 	if len(rc.Surfaces) == 0 {
