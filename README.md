@@ -458,7 +458,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 6. **Claws are users** — standard credentials; the proxy governs intent, the service's own auth governs execution
 7. **Compute is a privilege** — operator assigns models and schedules; proxy enforces budgets and rate limits; bot doesn't choose
 8. **Think twice, act once** — a reasoning model cannot be its own judge
-9. **Memory survives the container** — session history is captured at the proxy boundary and persisted outside the runtime directory. Bots don't start amnesia-fresh after every restart. Infrastructure owns the record; the runner owns the scratch space. Two surfaces, two owners, never merged.
+9. **Memory survives the container (and the runner)** — session history is captured at the proxy boundary and persisted outside the runtime directory. Bots don't start amnesia-fresh after every restart. Infrastructure owns the record; the runner owns the scratch space. Two surfaces, two owners, never merged. Because the architecture is the agent, you can swap the runtime (`CLAW_TYPE`) without losing the mind; knowledge seamlessly crosses driver boundaries.
 
 ---
 
