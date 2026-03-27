@@ -53,6 +53,25 @@ func TestMergeResolvedSkills(t *testing.T) {
 	}
 }
 
+func TestBuiltinClawAPIDescriptorUsesShortFleetAlertsFeedWindow(t *testing.T) {
+	descriptor := builtinClawAPIDescriptor()
+	if descriptor == nil {
+		t.Fatal("expected builtin claw-api descriptor")
+	}
+	if len(descriptor.Feeds) != 1 {
+		t.Fatalf("expected 1 builtin feed, got %d", len(descriptor.Feeds))
+	}
+	if got := descriptor.Feeds[0].Name; got != "fleet-alerts" {
+		t.Fatalf("feed name = %q; want fleet-alerts", got)
+	}
+	if got := descriptor.Feeds[0].Path; got != "/fleet/alerts?since=15m" {
+		t.Fatalf("feed path = %q; want /fleet/alerts?since=15m", got)
+	}
+	if got := descriptor.Endpoints[3].Path; got != "/fleet/alerts" {
+		t.Fatalf("endpoint path = %q; want /fleet/alerts", got)
+	}
+}
+
 func TestResolveSkillEmitWritesFile(t *testing.T) {
 	tmpDir := t.TempDir()
 

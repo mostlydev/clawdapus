@@ -2723,7 +2723,9 @@ func builtinClawAPIDescriptor() *describe.ServiceDescriptor {
 		Description: "Read-only governance API for fleet telemetry, health, logs, metrics, and alerts.",
 		Feeds: []describe.FeedDescriptor{{
 			Name:        "fleet-alerts",
-			Path:        "/fleet/alerts",
+			// Keep the pushed anomaly feed on a shorter horizon so agents do not
+			// self-report long-cleared incidents for a full hour.
+			Path:        "/fleet/alerts?since=15m",
 			TTL:         30,
 			Description: "Threshold-based fleet alert summaries for the pod.",
 		}},

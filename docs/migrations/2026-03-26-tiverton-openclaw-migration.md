@@ -475,3 +475,36 @@ Target: `clawdbot@tiverton:~/tiverton-house`
 - Current supervised conclusion:
   - Sentinel's earlier "blank fleet-alerts feed" claim was caused by a real timeout in `claw-api`, not by missing pod wiring
   - the feed path is now fast enough for injected context
+
+## Step 23: Shorten Sentinel Fleet-Alerts Feed Horizon
+
+- Fresh live symptom after the `claw-api` timeout fix:
+  - Sentinel still reported:
+    - `sentinel self-observation anomaly: own fleet-alerts feed error rate 43.8% (7/16 fetches failing)`
+- Verification:
+  - direct authenticated requests from the running Sentinel container to:
+    - `http://claw-api:8080/fleet/alerts`
+    now complete consistently in about `0.022s` to `0.032s`
+  - current generated feed manifest for Sentinel still pointed at:
+    - `http://claw-api:8080/fleet/alerts`
+    with no `since` query override
+  - `cllama` logs show the failing `fleet-alerts` fetches happened at `09:37–09:38 EDT`
+  - the current `claw-api` container was recreated at `09:41 EDT`
+  - later Sentinel `fleet-alerts` fetches at `09:42`, `09:53`, and `10:08 EDT` all returned `200`
+- Root cause:
+  - this was not a continuing outage
+  - Sentinel was reading a real but stale one-hour alert window that still included the pre-fix timeout burst
+  - the built-in `fleet-alerts` feed path used the endpoint default horizon (`since=1h` fallback in `handleAlerts`)
+- Local repo fix:
+  - changed the built-in `claw-api` descriptor feed path in `cmd/claw/compose_up.go` from:
+    - `/fleet/alerts`
+    to:
+    - `/fleet/alerts?since=15m`
+  - kept the direct API endpoint contract unchanged:
+    - `GET /fleet/alerts`
+    still defaults to one hour unless the caller supplies `since`
+  - added a focused regression test in:
+    - `cmd/claw/compose_up_test.go`
+- Expected effect:
+  - injected Sentinel fleet alerts now age out on a 15-minute horizon instead of a full hour
+  - real bursts still surface quickly, but cleared incidents stop self-echoing for most of the trading session
