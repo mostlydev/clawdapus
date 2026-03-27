@@ -56,6 +56,20 @@ Message `@quickstart-bot` in your Discord server. The bot responds through the p
 
 `claw up` resolves `${...}` placeholders inside `x-claw` metadata from your shell environment and the pod-local `.env` file before it generates runtime config. You do not need to duplicate handle IDs, guild IDs, or channel IDs into service `environment:` just to make driver config generation work.
 
+Supported x-claw placeholder forms match shell-style parameter expansion:
+- `${VAR}` required
+- `${VAR:-default}` default when unset or empty
+- `${VAR-default}` default when unset
+- `${VAR:?message}` fail when unset or empty
+- `${VAR?message}` fail when unset
+- `${VAR:+value}` substitute `value` when set and non-empty
+- `${VAR+value}` substitute `value` when set
+
+Built-in x-claw variables:
+- `REPO_ROOT` defaults to the pod directory passed to `claw up`
+
+This placeholder expansion is specific to `x-claw` metadata. Standard Compose fields still use normal Docker Compose `.env` interpolation rules.
+
 For multi-agent pods, declare shared chat topology once under `x-claw.handles-defaults` and keep each service's `x-claw.handles` block focused on service-specific identity such as bot ID and username.
 
 See [`examples/quickstart/`](./examples/quickstart/) for the full walkthrough, Telegram/Slack alternatives, and migration from existing OpenClaw.
@@ -94,6 +108,16 @@ Or build from source:
 ```bash
 go build -o bin/claw ./cmd/claw
 ```
+
+## Update
+
+Clawdapus moves fast — update frequently.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/install.sh | sh
+```
+
+`claw` checks for updates once a day and prints a notice at the end of any command when a newer release is available.
 
 ### Install AI Skill
 

@@ -56,6 +56,22 @@ func TestParseSurfaceOpaqueURI(t *testing.T) {
 	}
 }
 
+func TestParseSurfaceHostWithPlaceholder(t *testing.T) {
+	s, err := ParseSurface("host://${REPO_ROOT}/storage/shared read-write")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Scheme != "host" {
+		t.Fatalf("expected scheme=host, got %q", s.Scheme)
+	}
+	if s.Target != "${REPO_ROOT}/storage/shared" {
+		t.Fatalf("expected placeholder target to survive parsing, got %q", s.Target)
+	}
+	if s.AccessMode != "read-write" {
+		t.Fatalf("expected access=read-write, got %q", s.AccessMode)
+	}
+}
+
 func TestParseSurfaceEmptyReturnsError(t *testing.T) {
 	_, err := ParseSurface("")
 	if err == nil {

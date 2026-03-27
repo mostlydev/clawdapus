@@ -16,20 +16,9 @@ func ParseSurface(raw string) (driver.ResolvedSurface, error) {
 		return driver.ResolvedSurface{}, fmt.Errorf("empty surface declaration")
 	}
 
-	parsed, err := url.Parse(parts[0])
+	scheme, target, err := parseSurfaceURI(parts[0])
 	if err != nil {
-		return driver.ResolvedSurface{}, fmt.Errorf("invalid surface URI %q: %w", parts[0], err)
-	}
-
-	scheme := parsed.Scheme
-	target := parsed.Host
-	switch {
-	case parsed.Host != "" && parsed.Path != "":
-		target = parsed.Host + parsed.Path
-	case parsed.Host == "" && parsed.Path != "":
-		target = parsed.Path
-	case target == "":
-		target = parsed.Opaque
+		return driver.ResolvedSurface{}, err
 	}
 
 	if scheme == "" || target == "" {
@@ -46,6 +35,34 @@ func ParseSurface(raw string) (driver.ResolvedSurface, error) {
 		Target:     target,
 		AccessMode: accessMode,
 	}, nil
+}
+
+func parseSurfaceURI(raw string) (string, string, error) {
+	if scheme, target, ok := strings.Cut(raw, "://"); ok {
+		scheme = strings.TrimSpace(scheme)
+		if scheme == "" || target == "" {
+			return "", "", fmt.Errorf("surface URI %q must have scheme and target", raw)
+		}
+		return scheme, target, nil
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid surface URI %q: %w", raw, err)
+	}
+
+	scheme := parsed.Scheme
+	target := parsed.Host
+	switch {
+	case parsed.Host != "" && parsed.Path != "":
+		target = parsed.Host + parsed.Path
+	case parsed.Host == "" && parsed.Path != "":
+		target = parsed.Path
+	case target == "":
+		target = parsed.Opaque
+	}
+
+	return scheme, target, nil
 }
 
 // parseChannelSurfaceMap parses a map-form channel surface entry.

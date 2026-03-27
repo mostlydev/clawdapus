@@ -1448,6 +1448,9 @@ func loadRuntimeEnv(podDir string) (map[string]string, error) {
 		}
 		env[entry[:eq]] = entry[eq+1:]
 	}
+	if strings.TrimSpace(env["REPO_ROOT"]) == "" {
+		env["REPO_ROOT"] = podDir
+	}
 	return env, nil
 }
 
