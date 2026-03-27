@@ -45,7 +45,7 @@ Required variables:
 - `DISCORD_GUILD_ID`
 - `ROLLCALL_CHANNEL_ID`
 - `DISCORD_WEBHOOK_URL`
-- `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`
+- `XAI_API_KEY` or `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`
 
 `DISCORD_WEBHOOK_URL` is required because the spike posts the trigger message via
 webhook rather than as a bot user. That avoids agents ignoring the message as

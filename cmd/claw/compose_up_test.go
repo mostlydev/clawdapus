@@ -1779,6 +1779,59 @@ func TestMergeProviderSeedsWritesV2File(t *testing.T) {
 	}
 }
 
+func TestMergeProviderSeedsWritesXAIProvider(t *testing.T) {
+	dir := t.TempDir()
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"trader": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"XAI_API_KEY": "xai-primary",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+
+	var probe struct {
+		Providers map[string]struct {
+			BaseURL string `json:"base_url"`
+			Keys    []struct {
+				ID     string `json:"id"`
+				Secret string `json:"secret"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatalf("parse providers.json: %v", err)
+	}
+
+	xai, ok := probe.Providers["xai"]
+	if !ok {
+		t.Fatal("xai missing from output")
+	}
+	if xai.BaseURL != "https://api.x.ai/v1" {
+		t.Fatalf("expected xai base URL, got %q", xai.BaseURL)
+	}
+	if len(xai.Keys) != 1 {
+		t.Fatalf("expected 1 xai key, got %d", len(xai.Keys))
+	}
+	if xai.Keys[0].ID != "seed:XAI_API_KEY" {
+		t.Fatalf("expected xai key id seed:XAI_API_KEY, got %q", xai.Keys[0].ID)
+	}
+	if xai.Keys[0].Secret != "xai-primary" {
+		t.Fatalf("expected xai secret preserved, got %q", xai.Keys[0].Secret)
+	}
+}
+
 func TestMergeProviderSeedsPreservesExistingRuntimeKeys(t *testing.T) {
 	dir := t.TempDir()
 

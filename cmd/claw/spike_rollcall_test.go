@@ -54,11 +54,15 @@ func TestSpikeRollCall(t *testing.T) {
 	if env["DISCORD_BOT_ID"] == "" {
 		t.Skip("DISCORD_BOT_ID not set — skipping")
 	}
-	if env["OPENROUTER_API_KEY"] == "" && env["ANTHROPIC_API_KEY"] == "" {
+	if env["OPENROUTER_API_KEY"] == "" && env["ANTHROPIC_API_KEY"] == "" && env["XAI_API_KEY"] == "" {
 		t.Skip("No LLM API key set — skipping")
 	}
+	xaiKey := strings.TrimSpace(env["XAI_API_KEY"])
 	anthropicKey := strings.TrimSpace(env["ANTHROPIC_API_KEY"])
 	openrouterKey := strings.TrimSpace(env["OPENROUTER_API_KEY"])
+	if _, ok := env["XAI_API_KEY"]; !ok {
+		env["XAI_API_KEY"] = ""
+	}
 	if _, ok := env["ANTHROPIC_API_KEY"]; !ok {
 		env["ANTHROPIC_API_KEY"] = ""
 	}
@@ -78,7 +82,7 @@ func TestSpikeRollCall(t *testing.T) {
 	botToken := env["DISCORD_BOT_TOKEN"]
 	botID := env["DISCORD_BOT_ID"]
 	webhookURL := env["DISCORD_WEBHOOK_URL"]
-	proxyRequest := chooseRollcallProxyRequest(t, anthropicKey, openrouterKey)
+	proxyRequest := chooseRollcallProxyRequest(t, xaiKey, anthropicKey, openrouterKey)
 	if webhookURL == "" {
 		t.Fatal("DISCORD_WEBHOOK_URL not set in rollcall/.env")
 	}
@@ -88,10 +92,10 @@ func TestSpikeRollCall(t *testing.T) {
 	// and the script may change. Real runtimes are expensive to build and
 	// are skipped when they already exist locally.
 	baseImages := []struct {
-		tag          string
-		dockerfile   string
-		contextDir   string // empty = use rollcall dir
-		alwaysRebuild bool  // true for stubs that embed discord-responder.sh
+		tag           string
+		dockerfile    string
+		contextDir    string // empty = use rollcall dir
+		alwaysRebuild bool   // true for stubs that embed discord-responder.sh
 	}{
 		{"openclaw:latest", "Dockerfile.openclaw-base", "", true},
 		{"nullclaw:latest", "Dockerfile.nullclaw-base", "", true},
@@ -274,11 +278,14 @@ type rollcallProxyRequest struct {
 	CllamaEnv map[string]string
 }
 
-func chooseRollcallProxyRequest(t *testing.T, anthropicKey, openrouterKey string) rollcallProxyRequest {
+func chooseRollcallProxyRequest(t *testing.T, xaiKey, anthropicKey, openrouterKey string) rollcallProxyRequest {
 	t.Helper()
 
 	cfg := rollcallProxyRequest{
 		CllamaEnv: make(map[string]string),
+	}
+	if xaiKey != "" {
+		cfg.CllamaEnv["XAI_API_KEY"] = xaiKey
 	}
 	if anthropicKey != "" {
 		cfg.CllamaEnv["ANTHROPIC_API_KEY"] = anthropicKey
@@ -288,6 +295,9 @@ func chooseRollcallProxyRequest(t *testing.T, anthropicKey, openrouterKey string
 	}
 
 	switch {
+	case xaiKey != "":
+		cfg.APIFormat = "openai"
+		cfg.Model = "xai/grok-4-1-fast-reasoning"
 	case anthropicKey != "":
 		cfg.APIFormat = "anthropic"
 		cfg.Model = "claude-sonnet-4"

@@ -2062,6 +2062,8 @@ var seedKeyDefs = []seedKeyDef{
 	{"OPENAI_API_KEY", "openai", "seed:OPENAI_API_KEY", "primary"},
 	{"OPENAI_API_KEY_1", "openai", "seed:OPENAI_API_KEY_1", "backup-1"},
 	{"OPENAI_API_KEY_2", "openai", "seed:OPENAI_API_KEY_2", "backup-2"},
+	{"XAI_API_KEY", "xai", "seed:XAI_API_KEY", "primary"},
+	{"XAI_API_KEY_1", "xai", "seed:XAI_API_KEY_1", "backup-1"},
 	{"ANTHROPIC_API_KEY", "anthropic", "seed:ANTHROPIC_API_KEY", "primary"},
 	{"ANTHROPIC_API_KEY_1", "anthropic", "seed:ANTHROPIC_API_KEY_1", "backup-1"},
 	{"OPENROUTER_API_KEY", "openrouter", "seed:OPENROUTER_API_KEY", "primary"},
@@ -2098,6 +2100,7 @@ type v2KeyEntry struct {
 
 var defaultBaseURLs = map[string]string{
 	"openai":     "https://api.openai.com/v1",
+	"xai":        "https://api.x.ai/v1",
 	"anthropic":  "https://api.anthropic.com/v1",
 	"openrouter": "https://openrouter.ai/api/v1",
 }
@@ -2147,6 +2150,7 @@ func mergeProviderSeeds(authDir string, p *pod.Pod) error {
 	// Also collect base URLs from cllama-env.
 	baseURLEnvMap := map[string]string{
 		"OPENAI_BASE_URL":     "openai",
+		"XAI_BASE_URL":        "xai",
 		"ANTHROPIC_BASE_URL":  "anthropic",
 		"OPENROUTER_BASE_URL": "openrouter",
 	}
