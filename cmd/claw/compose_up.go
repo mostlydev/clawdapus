@@ -482,14 +482,14 @@ func runComposeUp(podFile string) error {
 						ClawdapusMD: md,
 						Feeds:       feeds,
 						ServiceAuth: ordinalAuth,
-						Metadata: map[string]interface{}{
+						Metadata: cllama.InjectCompiledModelPolicy(map[string]any{
 							"service":  name,
 							"ordinal":  i,
 							"pod":      p.Name,
 							"type":     rc.ClawType,
 							"token":    tokens[ordinalName],
 							"timezone": agentTimezone,
-						},
+						}, rc.Models),
 					})
 				}
 				continue
@@ -507,13 +507,13 @@ func runComposeUp(podFile string) error {
 				ClawdapusMD: md,
 				Feeds:       feeds,
 				ServiceAuth: svcAuth,
-				Metadata: map[string]interface{}{
+				Metadata: cllama.InjectCompiledModelPolicy(map[string]any{
 					"service":  name,
 					"pod":      p.Name,
 					"type":     rc.ClawType,
 					"token":    tokens[name],
 					"timezone": agentTimezone,
-				},
+				}, rc.Models),
 			})
 		}
 		if err := cllama.GenerateContextDir(runtimeDir, contextInputs); err != nil {
