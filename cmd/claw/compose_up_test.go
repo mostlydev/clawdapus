@@ -251,6 +251,32 @@ func TestResolveRuntimePlaceholdersSupportsLowercaseNamesAndDefaults(t *testing.
 	}
 }
 
+func TestResolveRuntimePlaceholdersProvidesRepoRootByDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"bot": {
+				Claw: &pod.ClawBlock{
+					Surfaces: []driver.ResolvedSurface{{
+						Scheme: "host",
+						Target: "${REPO_ROOT}/storage/shared",
+					}},
+				},
+			},
+		},
+	}
+
+	if err := resolveRuntimePlaceholders(tmpDir, p); err != nil {
+		t.Fatalf("resolveRuntimePlaceholders: %v", err)
+	}
+
+	if got := p.Services["bot"].Claw.Surfaces[0].Target; got != filepath.Join(tmpDir, "storage/shared") {
+		t.Fatalf("expected REPO_ROOT to default to pod dir, got %q", got)
+	}
+}
+
 func TestResolveRuntimePlaceholdersRejectsUnresolvedPlaceholders(t *testing.T) {
 	p := &pod.Pod{
 		Name: "test-pod",
