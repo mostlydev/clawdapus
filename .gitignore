@@ -13,6 +13,7 @@ openclaw/workspaces/*/logs/
 /bin/
 /claw
 /claw-api
+/build/
 Dockerfile.generated
 
 # Standard Go ignores
