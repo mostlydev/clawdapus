@@ -12,7 +12,7 @@ import (
 
 const (
 	updateCheckURL      = "https://api.github.com/repos/mostlydev/clawdapus/releases/latest"
-	updateCheckInterval = time.Hour
+	updateCheckInterval = 24 * time.Hour
 	updateCheckFile     = ".claw-update-check"
 )
 
@@ -117,5 +117,5 @@ func maybeNotifyUpdate() {
 }
 
 func printUpdateNotice(latest string) {
-	fmt.Fprintf(os.Stderr, "\n  Update available: v%s → v%s  (run: claw update)\n\n", version, latest)
+	fmt.Fprintf(os.Stderr, "\n  Update available: v%s → v%s\n  Run: curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/install.sh | sh\n\n", version, latest)
 }

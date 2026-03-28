@@ -114,10 +114,10 @@ go build -o bin/claw ./cmd/claw
 Clawdapus moves fast — update frequently.
 
 ```bash
-claw update
+curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/install.sh | sh
 ```
 
-`claw` checks for updates once a day and prints a notice when a newer release is available.
+`claw` checks for updates once a day and prints a notice at the end of any command when a newer release is available.
 
 ### Install AI Skill
 
