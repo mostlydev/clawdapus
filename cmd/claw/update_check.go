@@ -12,7 +12,7 @@ import (
 
 const (
 	updateCheckURL      = "https://api.github.com/repos/mostlydev/clawdapus/releases/latest"
-	updateCheckInterval = 24 * time.Hour
+	updateCheckInterval = time.Hour
 	updateCheckFile     = ".claw-update-check"
 )
 
@@ -91,7 +91,7 @@ func writeCache(c *updateCheckCache) {
 }
 
 // maybeNotifyUpdate prints an update notice if a newer release is available.
-// Checks at most once per day; never blocks on network errors.
+// Checks at most once per hour; never blocks on network errors.
 func maybeNotifyUpdate() {
 	if version == "dev" {
 		return
@@ -117,5 +117,5 @@ func maybeNotifyUpdate() {
 }
 
 func printUpdateNotice(latest string) {
-	fmt.Fprintf(os.Stderr, "\n  Update available: v%s → v%s\n  Run: curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/install.sh | sh\n\n", version, latest)
+	fmt.Fprintf(os.Stderr, "\n  Update available: v%s → v%s  (run: claw update)\n\n", version, latest)
 }
