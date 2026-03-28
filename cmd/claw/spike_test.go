@@ -107,7 +107,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	spikeBuildImage(t, dir, "trading-desk-microclaw:latest", "Clawfile.microclaw")
 	spikeBuildImage(t, dir, "trading-desk-hermes:latest", "Clawfile.hermes")
 	spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
-	spikeEnsureCllamaPassthroughImage(t)
+	spikeEnsureCllamaPassthroughImage(t, repoRoot)
 
 	// Write a pre-expanded spike pod YAML so Go YAML parser sees real IDs.
 	rawPod := spikeReadFile(t, filepath.Join(dir, "claw-pod.yml"))
@@ -833,16 +833,26 @@ func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 }
 
 // spikeEnsureCllamaPassthroughImage guarantees a local image exists for
-// ghcr.io/mostlydev/cllama:latest. It tries, in order:
-//  1. Skip if the image already exists locally.
-//  2. Build from the GitHub cllama repo.
-//  3. Fall back to a stub image (healthcheck-only, no real proxy).
-func spikeEnsureCllamaPassthroughImage(t *testing.T) {
+// ghcr.io/mostlydev/cllama:latest. For spike coverage we prefer the local
+// submodule under test over any cached image, then fall back to GitHub, then
+// finally to a stub image if no real build is possible.
+func spikeEnsureCllamaPassthroughImage(t *testing.T, repoRoot string) {
 	t.Helper()
 	const tag = "ghcr.io/mostlydev/cllama:latest"
-	if spikeImageExists(tag) {
-		t.Logf("cllama image already exists")
-		return
+
+	localContext := filepath.Join(repoRoot, "cllama")
+	localDockerfile := filepath.Join(localContext, "Dockerfile")
+	if repoRoot != "" {
+		if _, err := os.Stat(localDockerfile); err == nil {
+			t.Logf("building local cllama image from %s", localContext)
+			cmd := exec.Command("docker", "build", "-t", tag, localContext)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Logf("built local cllama image from working tree")
+				return
+			}
+			t.Logf("local cllama build failed, falling back to GitHub: %v\n%s", err, out)
+		}
 	}
 
 	// Try building from the GitHub repo.

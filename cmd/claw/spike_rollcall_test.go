@@ -116,7 +116,7 @@ func TestSpikeRollCall(t *testing.T) {
 			spikeBuildImage(t, ctxDir, b.tag, b.dockerfile)
 		}
 	}
-	spikeEnsureCllamaPassthroughImage(t)
+	spikeEnsureCllamaPassthroughImage(t, repoRoot)
 
 	// Build agent images (Clawfile on top of base)
 	agentImages := []struct {
