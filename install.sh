@@ -40,7 +40,7 @@ info "Latest release: ${TAG}"
 
 # --- Download tarball and checksums ---
 VERSION="${TAG#v}"
-TARBALL="claw_${VERSION}_${OS}_${ARCH}.tar.gz"
+TARBALL="clawdapus_${VERSION}_${OS}_${ARCH}.tar.gz"
 BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
 
 TMPDIR="$(mktemp -d)"
