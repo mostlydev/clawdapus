@@ -211,9 +211,6 @@ func validateMemory(memory *MemoryDescriptor) error {
 	if memory == nil {
 		return nil
 	}
-	if memory.Recall == nil && memory.Retain == nil && memory.Forget == nil {
-		return fmt.Errorf("memory: at least one of recall or retain must be declared")
-	}
 	if memory.Recall == nil && memory.Retain == nil {
 		return fmt.Errorf("memory: at least one of recall or retain must be declared")
 	}
