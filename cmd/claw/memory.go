@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -68,6 +69,8 @@ type backfillComposeService struct {
 	Ports []any `yaml:"ports"`
 }
 
+const defaultMemoryBackfillTimeout = 10 * time.Second
+
 var memoryCmd = &cobra.Command{
 	Use:   "memory",
 	Short: "Operate on configured memory services",
@@ -97,17 +100,15 @@ var memoryBackfillCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if err := validateSharedBackfillTargetShape(targets, strings.TrimSpace(memoryBackfillURL) != ""); err != nil {
+			return err
+		}
 		retainURL, err := resolveMemoryBackfillURL(generatedPath, targets[0].Manifest, memoryBackfillURL)
 		if err != nil {
 			return err
 		}
 
-		token := strings.TrimSpace(memoryBackfillToken)
-		if token == "" && targets[0].Manifest.Auth != nil && strings.EqualFold(targets[0].Manifest.Auth.Type, "bearer") {
-			token = targets[0].Manifest.Auth.Token
-		}
-
-		summary, err := replayMemoryBackfill(cmd.OutOrStdout(), retainURL, token, targets, after, limit)
+		summary, err := replayMemoryBackfill(cmd.OutOrStdout(), retainURL, strings.TrimSpace(memoryBackfillToken), targets, after, limit)
 		if err != nil {
 			return err
 		}
@@ -226,11 +227,31 @@ func discoverMemoryBackfillTargets(podDir, memoryService string, requestedAgents
 	return targets, nil
 }
 
+// Unlike `claw history export`, a backfill limit of 0 means "replay all"
+// because this command is primarily used for full rebuilds and recovery.
 func normalizeBackfillLimit(limit int) (int, error) {
 	if limit < 0 {
 		return 0, fmt.Errorf("limit must be >= 0")
 	}
 	return limit, nil
+}
+
+func validateSharedBackfillTargetShape(targets []memoryBackfillTarget, urlOverride bool) error {
+	if len(targets) == 0 {
+		return nil
+	}
+	first := targets[0].Manifest
+	firstPath := manifestRetainPath(first)
+	for _, target := range targets[1:] {
+		currentPath := manifestRetainPath(target.Manifest)
+		if !urlOverride && target.Manifest.BaseURL != first.BaseURL {
+			return fmt.Errorf("memory service %q has inconsistent base URLs across subscribed agents; pass --url to override", first.Service)
+		}
+		if currentPath != firstPath {
+			return fmt.Errorf("memory service %q has inconsistent retain paths across subscribed agents", first.Service)
+		}
+	}
+	return nil
 }
 
 func resolveMemoryBackfillURL(composePath string, manifest memoryManifestFile, override string) (string, error) {
@@ -421,10 +442,10 @@ type backfillRetainRequest struct {
 
 func replayMemoryBackfill(stdout io.Writer, retainURL, authToken string, targets []memoryBackfillTarget, after *time.Time, limit int) (memoryBackfillSummary, error) {
 	var summary memoryBackfillSummary
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{}
 
 	for _, target := range targets {
-		replayed, err := replayHistoryFileToMemory(client, retainURL, authToken, target, after, limit)
+		replayed, err := replayHistoryFileToMemory(client, retainURL, effectiveBackfillAuthToken(authToken, target.Manifest), backfillRetainTimeout(target.Manifest), target, after, limit)
 		if err != nil {
 			return summary, fmt.Errorf("backfill %q: %w", target.AgentID, err)
 		}
@@ -440,7 +461,24 @@ func replayMemoryBackfill(stdout io.Writer, retainURL, authToken string, targets
 	return summary, nil
 }
 
-func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string, target memoryBackfillTarget, after *time.Time, limit int) (int, error) {
+func effectiveBackfillAuthToken(override string, manifest memoryManifestFile) string {
+	if strings.TrimSpace(override) != "" {
+		return strings.TrimSpace(override)
+	}
+	if manifest.Auth != nil && strings.EqualFold(manifest.Auth.Type, "bearer") {
+		return manifest.Auth.Token
+	}
+	return ""
+}
+
+func backfillRetainTimeout(manifest memoryManifestFile) time.Duration {
+	if manifest.Retain != nil && manifest.Retain.TimeoutMS > 0 {
+		return time.Duration(manifest.Retain.TimeoutMS) * time.Millisecond
+	}
+	return defaultMemoryBackfillTimeout
+}
+
+func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string, timeout time.Duration, target memoryBackfillTarget, after *time.Time, limit int) (int, error) {
 	f, err := os.Open(target.HistoryPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -458,34 +496,23 @@ func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string,
 		if len(line) == 0 {
 			continue
 		}
-		if after != nil || limit > 0 {
-			meta, err := parseHistoryEntryHeader(line)
-			if err != nil {
-				return replayed, err
-			}
-			if after != nil {
-				ts, err := time.Parse(time.RFC3339, meta.TS)
-				if err != nil {
-					return replayed, fmt.Errorf("parse history timestamp %q: %w", meta.TS, err)
-				}
-				if !ts.After(*after) {
-					continue
-				}
-			}
-			if limit > 0 && replayed >= limit {
-				break
-			}
-			if err := postRetainBackfill(client, retainURL, authToken, target, meta.RequestedModel, line); err != nil {
-				return replayed, err
-			}
-			replayed++
-			continue
-		}
 		meta, err := parseHistoryEntryHeader(line)
 		if err != nil {
 			return replayed, err
 		}
-		if err := postRetainBackfill(client, retainURL, authToken, target, meta.RequestedModel, line); err != nil {
+		if limit > 0 && replayed >= limit {
+			break
+		}
+		if after != nil {
+			ts, err := time.Parse(time.RFC3339, meta.TS)
+			if err != nil {
+				return replayed, fmt.Errorf("parse history timestamp %q: %w", meta.TS, err)
+			}
+			if !ts.After(*after) {
+				continue
+			}
+		}
+		if err := postRetainBackfill(client, retainURL, authToken, timeout, target, meta.RequestedModel, line); err != nil {
 			return replayed, err
 		}
 		replayed++
@@ -504,7 +531,7 @@ func parseHistoryEntryHeader(line []byte) (historyEntryHeader, error) {
 	return header, nil
 }
 
-func postRetainBackfill(client *http.Client, retainURL, authToken string, target memoryBackfillTarget, requestedModel string, rawEntry []byte) error {
+func postRetainBackfill(client *http.Client, retainURL, authToken string, timeout time.Duration, target memoryBackfillTarget, requestedModel string, rawEntry []byte) error {
 	payload, err := json.Marshal(backfillRetainRequest{
 		AgentID:  target.AgentID,
 		Pod:      target.Pod,
@@ -515,7 +542,10 @@ func postRetainBackfill(client *http.Client, retainURL, authToken string, target
 		return fmt.Errorf("marshal retain payload: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, retainURL, bytes.NewReader(payload))
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, retainURL, bytes.NewReader(payload))
 	if err != nil {
 		return fmt.Errorf("build retain request: %w", err)
 	}
@@ -541,6 +571,10 @@ func postRetainBackfill(client *http.Client, retainURL, authToken string, target
 	return nil
 }
 
+// backfillMetadata intentionally mirrors only the stable subset of live retain
+// metadata. Replay is derived from the ledger, so it does not attempt to
+// reconstruct transient per-request state beyond fields that materially affect
+// memory indexing or policy.
 func backfillMetadata(metadata map[string]any, requestedModel string) map[string]any {
 	if metadata == nil {
 		return nil
