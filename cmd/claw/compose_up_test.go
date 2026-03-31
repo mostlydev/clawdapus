@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/clawapi"
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/describe"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/openclaw"
@@ -2184,6 +2185,219 @@ func TestBuildFeedManifestProjectsBearerAuthFromServiceEnv(t *testing.T) {
 	}
 	if feeds[0].Auth != "real-token" {
 		t.Fatalf("expected projected bearer auth, got %q", feeds[0].Auth)
+	}
+}
+
+func TestResolveToolSubscriptionsSupportsAllAndSubset(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					Tools: []pod.ToolPolicyEntry{
+						{Service: "trading-api", Allow: []string{"all"}},
+						{Service: "analytics", Allow: []string{"get_summary"}},
+					},
+				},
+			},
+		},
+	}
+
+	registry := describe.ToolRegistry{
+		"trading-api": {
+			{Name: "get_market_context", Service: "trading-api"},
+			{Name: "get_positions", Service: "trading-api"},
+		},
+		"analytics": {
+			{Name: "get_summary", Service: "analytics"},
+			{Name: "get_report", Service: "analytics"},
+		},
+	}
+
+	resolved, err := resolveToolSubscriptions(p, registry)
+	if err != nil {
+		t.Fatalf("resolveToolSubscriptions: %v", err)
+	}
+	got := resolved["analyst"]
+	if len(got) != 3 {
+		t.Fatalf("expected 3 resolved tools, got %+v", got)
+	}
+	if got[0].Service != "trading-api" || got[1].Service != "trading-api" || got[2].Name != "get_summary" {
+		t.Fatalf("unexpected resolved tool order: %+v", got)
+	}
+}
+
+func TestResolveToolSubscriptionsRejectsUnknownTool(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					Tools: []pod.ToolPolicyEntry{
+						{Service: "trading-api", Allow: []string{"missing_tool"}},
+					},
+				},
+			},
+		},
+	}
+
+	registry := describe.ToolRegistry{
+		"trading-api": {
+			{Name: "get_market_context", Service: "trading-api"},
+		},
+	}
+
+	if _, err := resolveToolSubscriptions(p, registry); err == nil {
+		t.Fatal("expected unknown tool error")
+	}
+}
+
+func TestResolveMemorySubscriptionsRejectsMissingCapability(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					Memory: &pod.MemoryEntry{Service: "team-memory", TimeoutMS: 300},
+				},
+			},
+		},
+	}
+
+	if _, err := resolveMemorySubscriptions(p, map[string]*describe.ServiceDescriptor{
+		"team-memory": {Version: 2},
+	}); err == nil {
+		t.Fatal("expected missing memory capability error")
+	}
+}
+
+func TestBuildToolManifestEntriesNamescopesAndProjectsAuth(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Environment: map[string]string{
+					"TRADING_API_TOKEN": "${TRADING_API_TOKEN}",
+				},
+				Claw: &pod.ClawBlock{},
+			},
+			"trading-api": {
+				Expose: []string{"4000"},
+			},
+		},
+	}
+
+	tools, err := buildToolManifestEntries(
+		p,
+		map[string]*describe.ServiceDescriptor{
+			"trading-api": {
+				Version: 2,
+				Auth: &describe.AuthDescriptor{
+					Type: "bearer",
+					Env:  "TRADING_API_TOKEN",
+				},
+			},
+		},
+		map[string]string{
+			"TRADING_API_TOKEN": "real-token",
+		},
+		"analyst",
+		[]describe.ToolSpec{{
+			Name:        "get_market_context",
+			Service:     "trading-api",
+			Description: "Retrieve market context",
+			InputSchema: map[string]interface{}{"type": "object"},
+			HTTP: &describe.ToolHTTP{
+				Method: "GET",
+				Path:   "/api/v1/market_context/{claw_id}",
+			},
+		}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("buildToolManifestEntries: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool entry, got %+v", tools)
+	}
+	if tools[0].Name != "trading-api.get_market_context" {
+		t.Fatalf("expected namespaced tool name, got %+v", tools[0])
+	}
+	if tools[0].Execution.BaseURL != "http://trading-api:4000" {
+		t.Fatalf("unexpected tool base URL: %+v", tools[0].Execution)
+	}
+	if tools[0].Execution.Auth == nil || tools[0].Execution.Auth.Token != "real-token" {
+		t.Fatalf("expected projected auth token, got %+v", tools[0].Execution.Auth)
+	}
+}
+
+func TestBuildMemoryManifestEntryUsesProjectedServiceAuth(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{},
+			},
+			"team-memory": {
+				Expose: []string{"8081"},
+			},
+		},
+	}
+
+	entry, err := buildMemoryManifestEntry(
+		p,
+		map[string]*describe.ServiceDescriptor{
+			"team-memory": {
+				Version: 2,
+				Memory: &describe.MemoryDescriptor{
+					Recall: &describe.MemoryEndpoint{Path: "/recall"},
+					Retain: &describe.MemoryEndpoint{Path: "/retain"},
+				},
+			},
+		},
+		nil,
+		"analyst",
+		&resolvedMemorySubscription{
+			Service: "team-memory",
+			Config:  &pod.MemoryEntry{Service: "team-memory", TimeoutMS: 450},
+		},
+		[]cllama.ServiceAuthEntry{{
+			Service:  "team-memory",
+			AuthType: "bearer",
+			Token:    "memory-token",
+		}},
+	)
+	if err != nil {
+		t.Fatalf("buildMemoryManifestEntry: %v", err)
+	}
+	if entry == nil || entry.Service != "team-memory" {
+		t.Fatalf("unexpected memory entry: %+v", entry)
+	}
+	if entry.BaseURL != "http://team-memory:8081" {
+		t.Fatalf("unexpected memory base URL: %+v", entry)
+	}
+	if entry.Recall == nil || entry.Recall.TimeoutMS != 450 {
+		t.Fatalf("unexpected recall config: %+v", entry)
+	}
+	if entry.Auth == nil || entry.Auth.Token != "memory-token" {
+		t.Fatalf("expected projected memory auth, got %+v", entry.Auth)
+	}
+}
+
+func TestBuildServiceSurfaceInfoOmitsEndpointsWhenToolsDeclared(t *testing.T) {
+	info := buildServiceSurfaceInfo(&describe.ServiceDescriptor{
+		Version:     2,
+		Description: "Trading API",
+		Tools: []describe.ToolDescriptor{{
+			Name:        "get_market_context",
+			Description: "Retrieve market context",
+			InputSchema: map[string]interface{}{"type": "object"},
+		}},
+		Endpoints: []describe.EndpointDescriptor{{
+			Method: "GET",
+			Path:   "/api/v1/market_context",
+		}},
+	})
+	if info == nil {
+		t.Fatal("expected surface info")
+	}
+	if len(info.Endpoints) != 0 {
+		t.Fatalf("expected endpoints to be suppressed when tools are declared, got %+v", info.Endpoints)
 	}
 }
 
