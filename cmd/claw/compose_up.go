@@ -42,6 +42,9 @@ const (
 	conversationWallFeedLimit    = 20
 	conversationWallInternalPort = "8080"
 	conversationWallDockerfile   = "dockerfiles/claw-wall/Dockerfile"
+	clawInternalNetworkName      = "claw-internal"
+	historyReplayAuthService     = "cllama-history"
+	historyReplayBaseURL         = "http://cllama:8080/history"
 )
 
 var (
@@ -363,6 +366,9 @@ func runComposeUp(podFile string) error {
 	if err != nil {
 		return err
 	}
+	if err := attachCapabilityProvidersToInternalNetwork(p, resolvedTools, resolvedMemory); err != nil {
+		return err
+	}
 	for name, rc := range resolvedClaws {
 		svc := p.Services[name]
 		if svc == nil || svc.Claw == nil {
@@ -382,6 +388,10 @@ func runComposeUp(podFile string) error {
 	proxies := make([]pod.CllamaProxyConfig, 0)
 	cllamaDashboardPort := envOrDefault("CLLAMA_UI_PORT", "8181")
 	if cllamaEnabled {
+		historyReplayAuth, err := prepareHistoryReplayRuntime(p, resolvedClaws, resolvedMemory)
+		if err != nil {
+			return err
+		}
 		proxyTypes := collectProxyTypes(resolvedClaws)
 		if len(proxyTypes) > 1 {
 			return fmt.Errorf("multi-proxy chaining not yet supported: found proxy types %v; Phase 4 supports one proxy type per pod", proxyTypes)
@@ -482,7 +492,10 @@ func runComposeUp(podFile string) error {
 					ordinalName := fmt.Sprintf("%s-%d", name, i)
 					ordinalRC := *rc
 					ordinalRC.ServiceName = ordinalName
-					ordinalAuth := lookupServiceAuth(clawAPIAuth, ordinalName)
+					ordinalAuth := mergeServiceAuthEntries(
+						lookupServiceAuth(clawAPIAuth, ordinalName),
+						lookupServiceAuth(historyReplayAuth, ordinalName),
+					)
 					feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, ordinalName, ordinalAuth)
 					if err != nil {
 						return fmt.Errorf("service %q: build feed manifest: %w", ordinalName, err)
@@ -517,7 +530,10 @@ func runComposeUp(podFile string) error {
 				continue
 			}
 
-			svcAuth := lookupServiceAuth(clawAPIAuth, name)
+			svcAuth := mergeServiceAuthEntries(
+				lookupServiceAuth(clawAPIAuth, name),
+				lookupServiceAuth(historyReplayAuth, name),
+			)
 			feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, name, svcAuth)
 			if err != nil {
 				return fmt.Errorf("service %q: build feed manifest: %w", name, err)
@@ -1170,6 +1186,50 @@ func buildMemoryManifestEntry(p *pod.Pod, descriptors map[string]*describe.Servi
 	return entry, nil
 }
 
+func attachCapabilityProvidersToInternalNetwork(p *pod.Pod, resolvedTools map[string][]describe.ToolSpec, resolvedMemory map[string]*resolvedMemorySubscription) error {
+	if p == nil {
+		return nil
+	}
+
+	providers := make(map[string]struct{})
+	for _, svc := range p.Services {
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		for _, feed := range svc.Claw.Feeds {
+			if feed.Unresolved || strings.TrimSpace(feed.Source) == "" {
+				continue
+			}
+			providers[feed.Source] = struct{}{}
+		}
+	}
+	for _, tools := range resolvedTools {
+		for _, tool := range tools {
+			if strings.TrimSpace(tool.Service) == "" {
+				continue
+			}
+			providers[tool.Service] = struct{}{}
+		}
+	}
+	for _, memory := range resolvedMemory {
+		if memory == nil || strings.TrimSpace(memory.Service) == "" {
+			continue
+		}
+		providers[memory.Service] = struct{}{}
+	}
+
+	for provider := range providers {
+		svc := p.Services[provider]
+		if svc == nil {
+			continue
+		}
+		if err := ensureServiceOnNetwork(svc, clawInternalNetworkName); err != nil {
+			return fmt.Errorf("attach capability provider network: %w", err)
+		}
+	}
+	return nil
+}
+
 func resolveFeedAuthFromServiceEnv(env map[string]string, descriptor *describe.ServiceDescriptor, runtimeEnv map[string]string) (string, error) {
 	if descriptor == nil || descriptor.Auth == nil || descriptor.Auth.Type != "bearer" || descriptor.Auth.Env == "" {
 		return "", nil
@@ -1584,6 +1644,57 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 	return serviceAuth, nil
 }
 
+func prepareHistoryReplayRuntime(p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw, resolvedMemory map[string]*resolvedMemorySubscription) (map[string]cllama.ServiceAuthEntry, error) {
+	if p == nil || len(resolvedMemory) == 0 {
+		return nil, nil
+	}
+
+	serviceAgents := make(map[string][]string)
+	for consumer, memory := range resolvedMemory {
+		if memory == nil || strings.TrimSpace(memory.Service) == "" {
+			continue
+		}
+		count := 1
+		if rc := resolvedClaws[consumer]; rc != nil && rc.Count > 0 {
+			count = rc.Count
+		}
+		serviceAgents[memory.Service] = append(serviceAgents[memory.Service], expandedServiceNames(consumer, count)...)
+	}
+	if len(serviceAgents) == 0 {
+		return nil, nil
+	}
+
+	serviceAuth := make(map[string]cllama.ServiceAuthEntry)
+	for serviceName, agentIDs := range serviceAgents {
+		svc := p.Services[serviceName]
+		if svc == nil {
+			return nil, fmt.Errorf("history replay target %q not found in pod services", serviceName)
+		}
+
+		token := cllama.GenerateToken(serviceName + "-history")
+		agents := uniqueSortedStrings(agentIDs)
+		if svc.Environment == nil {
+			svc.Environment = make(map[string]string)
+		}
+		svc.Environment["CLAW_HISTORY_URL"] = historyReplayBaseURL
+		svc.Environment["CLAW_HISTORY_TOKEN"] = token
+		svc.Environment["CLAW_HISTORY_AGENT_IDS"] = strings.Join(agents, ",")
+		if err := ensureServiceOnNetwork(svc, clawInternalNetworkName); err != nil {
+			return nil, fmt.Errorf("service %q: attach history replay network: %w", serviceName, err)
+		}
+
+		for _, agentID := range agents {
+			serviceAuth[agentID] = cllama.ServiceAuthEntry{
+				Service:   historyReplayAuthService,
+				AuthType:  "bearer",
+				Token:     token,
+				Principal: serviceName,
+			}
+		}
+	}
+	return serviceAuth, nil
+}
+
 func lookupServiceAuth(entries map[string]cllama.ServiceAuthEntry, agentID string) []cllama.ServiceAuthEntry {
 	if len(entries) == 0 {
 		return nil
@@ -1593,6 +1704,83 @@ func lookupServiceAuth(entries map[string]cllama.ServiceAuthEntry, agentID strin
 		return nil
 	}
 	return []cllama.ServiceAuthEntry{entry}
+}
+
+func mergeServiceAuthEntries(groups ...[]cllama.ServiceAuthEntry) []cllama.ServiceAuthEntry {
+	if len(groups) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	merged := make([]cllama.ServiceAuthEntry, 0)
+	for _, group := range groups {
+		for _, entry := range group {
+			key := entry.Service + "\x00" + entry.AuthType + "\x00" + entry.Token
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, entry)
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
+func ensureServiceOnNetwork(svc *pod.Service, network string) error {
+	if svc == nil {
+		return nil
+	}
+	if svc.Compose == nil {
+		svc.Compose = make(map[string]interface{})
+	}
+	networks, err := appendComposeNetwork(svc.Compose["networks"], network)
+	if err != nil {
+		return err
+	}
+	svc.Compose["networks"] = networks
+	return nil
+}
+
+func appendComposeNetwork(base interface{}, network string) (interface{}, error) {
+	switch tv := base.(type) {
+	case nil:
+		return []string{network}, nil
+	case []string:
+		out := append([]string(nil), tv...)
+		for _, existing := range out {
+			if existing == network {
+				return out, nil
+			}
+		}
+		return append(out, network), nil
+	case []interface{}:
+		out := make([]interface{}, 0, len(tv)+1)
+		found := false
+		for _, item := range tv {
+			out = append(out, item)
+			if s, ok := item.(string); ok && s == network {
+				found = true
+			}
+		}
+		if !found {
+			out = append(out, network)
+		}
+		return out, nil
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(tv)+1)
+		for key, value := range tv {
+			out[key] = value
+		}
+		if _, ok := out[network]; !ok {
+			out[network] = nil
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("unsupported networks value type %T", base)
+	}
 }
 
 func discordServiceUserIDs(p *pod.Pod, serviceNames []string, expand func(string) string) ([]string, error) {

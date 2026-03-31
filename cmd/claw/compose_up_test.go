@@ -2379,6 +2379,107 @@ func TestBuildMemoryManifestEntryUsesProjectedServiceAuth(t *testing.T) {
 	}
 }
 
+func TestAttachCapabilityProvidersToInternalNetworkAddsProviderServices(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					Feeds: []pod.FeedEntry{{Name: "market", Source: "market-feed", Path: "/feed", TTL: 30}},
+				},
+			},
+			"market-feed": {Compose: map[string]interface{}{}},
+			"tool-api":    {Compose: map[string]interface{}{}},
+			"team-memory": {Compose: map[string]interface{}{}},
+		},
+	}
+
+	err := attachCapabilityProvidersToInternalNetwork(
+		p,
+		map[string][]describe.ToolSpec{
+			"analyst": {{Name: "get_market", Service: "tool-api"}},
+		},
+		map[string]*resolvedMemorySubscription{
+			"analyst": {Service: "team-memory", Config: &pod.MemoryEntry{Service: "team-memory", TimeoutMS: 300}},
+		},
+	)
+	if err != nil {
+		t.Fatalf("attachCapabilityProvidersToInternalNetwork: %v", err)
+	}
+
+	for _, name := range []string{"market-feed", "tool-api", "team-memory"} {
+		networks, ok := p.Services[name].Compose["networks"].([]string)
+		if !ok || len(networks) != 1 || networks[0] != clawInternalNetworkName {
+			t.Fatalf("expected %s on %s, got %#v", name, clawInternalNetworkName, p.Services[name].Compose["networks"])
+		}
+	}
+}
+
+func TestPrepareHistoryReplayRuntimeProjectsReplayAuthAndEnv(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					Memory: &pod.MemoryEntry{Service: "team-memory", TimeoutMS: 300},
+				},
+			},
+			"researcher": {
+				Claw: &pod.ClawBlock{
+					Count:  2,
+					Memory: &pod.MemoryEntry{Service: "team-memory", TimeoutMS: 300},
+				},
+			},
+			"team-memory": {
+				Environment: map[string]string{},
+				Compose:     map[string]interface{}{},
+			},
+		},
+	}
+
+	auth, err := prepareHistoryReplayRuntime(
+		p,
+		map[string]*driver.ResolvedClaw{
+			"analyst":    {Count: 1},
+			"researcher": {Count: 2},
+		},
+		map[string]*resolvedMemorySubscription{
+			"analyst":    {Service: "team-memory", Config: &pod.MemoryEntry{Service: "team-memory", TimeoutMS: 300}},
+			"researcher": {Service: "team-memory", Config: &pod.MemoryEntry{Service: "team-memory", TimeoutMS: 300}},
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepareHistoryReplayRuntime: %v", err)
+	}
+
+	env := p.Services["team-memory"].Environment
+	if env["CLAW_HISTORY_URL"] != historyReplayBaseURL {
+		t.Fatalf("unexpected CLAW_HISTORY_URL: %q", env["CLAW_HISTORY_URL"])
+	}
+	if env["CLAW_HISTORY_TOKEN"] == "" {
+		t.Fatal("expected CLAW_HISTORY_TOKEN to be injected")
+	}
+	if env["CLAW_HISTORY_AGENT_IDS"] != "analyst,researcher-0,researcher-1" {
+		t.Fatalf("unexpected CLAW_HISTORY_AGENT_IDS: %q", env["CLAW_HISTORY_AGENT_IDS"])
+	}
+
+	networks, ok := p.Services["team-memory"].Compose["networks"].([]string)
+	if !ok || len(networks) != 1 || networks[0] != clawInternalNetworkName {
+		t.Fatalf("expected team-memory on %s, got %#v", clawInternalNetworkName, p.Services["team-memory"].Compose["networks"])
+	}
+
+	for _, agentID := range []string{"analyst", "researcher-0", "researcher-1"} {
+		entry, ok := auth[agentID]
+		if !ok {
+			t.Fatalf("expected replay auth for %s", agentID)
+		}
+		if entry.Service != historyReplayAuthService || entry.AuthType != "bearer" || entry.Principal != "team-memory" {
+			t.Fatalf("unexpected auth entry for %s: %+v", agentID, entry)
+		}
+		if entry.Token != env["CLAW_HISTORY_TOKEN"] {
+			t.Fatalf("expected %s token to match projected env token", agentID)
+		}
+	}
+}
+
 func TestBuildServiceSurfaceInfoOmitsEndpointsWhenToolsDeclared(t *testing.T) {
 	info := buildServiceSurfaceInfo(&describe.ServiceDescriptor{
 		Version:     2,
