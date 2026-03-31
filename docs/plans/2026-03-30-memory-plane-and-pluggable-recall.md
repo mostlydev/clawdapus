@@ -142,6 +142,10 @@ Completed:
 - automatic attachment of declared feed/tool/memory provider services to `claw-internal`
 - pre-turn recall and post-turn best-effort retain hooks in `cllama`
 - provider-format-aware memory injection for OpenAI-style and Anthropic-style requests
+- structured `memory_op` telemetry in `cllama` for:
+  - recall skipped, succeeded, timed out, and failed outcomes
+  - retain skipped, succeeded, timed out, and failed outcomes
+  - latency, HTTP status, block count, and injected byte count where applicable
 - operator replay UX via `claw memory backfill`, which:
   - discovers subscribed agents from generated context
   - replays the immutable local ledger back through the memory retain contract
@@ -151,8 +155,8 @@ Completed:
 Still open:
 
 - tombstone/forget flow and replay hygiene
-- dedicated success telemetry for memory operations
 - a more scalable replay path than forward-scanning large JSONL files
+- retain/recall policy filtering and policy-removal accounting
 - ADR-020 mediated tool runtime
 
 That means the plan should now be read as:
