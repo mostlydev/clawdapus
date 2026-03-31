@@ -124,6 +124,41 @@ This parallel should be treated as core architectural framing, not as an inciden
 
 ---
 
+## Implementation Status (2026-03-31)
+
+This branch now implements the core memory-plane substrate that this plan was proposing.
+
+Completed:
+
+- descriptor `version: 2` support for `tools[]` and `memory`
+- pod grammar for `x-claw.tools`, `x-claw.memory`, `tools-defaults`, and `memory-defaults`
+- compiled `tools.json` and `memory.json` manifests in the per-agent `cllama` context
+- a scoped `cllama` history read API at `GET /history/{agentID}`
+- dedicated replay auth projection for subscribed memory services via:
+  - `service-auth/cllama-history.json` in agent context
+  - `CLAW_HISTORY_URL`
+  - `CLAW_HISTORY_TOKEN`
+  - `CLAW_HISTORY_AGENT_IDS`
+- automatic attachment of declared feed/tool/memory provider services to `claw-internal`
+- pre-turn recall and post-turn best-effort retain hooks in `cllama`
+- provider-format-aware memory injection for OpenAI-style and Anthropic-style requests
+
+Still open:
+
+- operator replay UX such as `claw memory backfill`
+- tombstone/forget flow and replay hygiene
+- dedicated success telemetry for memory operations
+- a more scalable replay path than forward-scanning large JSONL files
+- ADR-020 mediated tool runtime
+
+That means the plan should now be read as:
+
+- architectural rationale for the memory plane
+- explanation of the boundaries that remain important
+- checklist of the remaining hardening and operator-facing work
+
+---
+
 ## Problem Statement
 
 Without a shared memory plane, users are pushed toward runner-local memory systems:
@@ -906,6 +941,10 @@ The architecture should therefore assume a future explicit backfill path, likely
 - a dedicated CLI flow such as `claw memory backfill`
 - backend idempotency or replay markers so the same ledger can be consumed safely more than once
 
+The first of these now exists in-tree, and subscribed memory services receive a dedicated replay token plus history URL projection.
+
+What still does **not** exist is the operator-facing replay UX. A memory service can rebuild from the ledger, but the repo does not yet provide the final `claw memory backfill` workflow.
+
 The retain webhook is the low-latency path. Backfill is the durability path for new or recovering services.
 
 ---
@@ -946,6 +985,8 @@ Clawdapus should not attempt to disable runner-native memory features globally. 
 
 ### Milestone 1: Complete ADR-018 Phase 2 and define backfill
 
+Status: mostly complete on this branch.
+
 Add the self-scoped history read surface to `cllama`.
 
 Benefits:
@@ -957,7 +998,15 @@ Benefits:
 
 This milestone should also define the expected operational backfill flow for new or recovering memory services.
 
+What remains here is mostly operator UX and replay ergonomics:
+
+- `claw memory backfill`
+- replay markers or idempotency guidance
+- better large-history replay performance
+
 ### Milestone 2: Add the memory capability and `cllama` hooks
+
+Status: core complete on this branch.
 
 Implement:
 
@@ -973,6 +1022,13 @@ Implement:
 - memory-specific observability events
 
 This is the first full end-to-end memory plane.
+
+The main remaining gaps are:
+
+- success-path observability for recall and retain
+- governed forget/tombstone semantics
+- policy filtering on retain and recall
+- any optional payload-bounding refinements beyond the current fixed request shape
 
 ### Milestone 3: Reference adapter and governance hardening
 
@@ -1035,6 +1091,12 @@ The proxy should send a fixed request shape with only simple numeric payload bou
 
 We should avoid a richer negotiated vocabulary here unless real implementations prove it necessary.
 
+Current implementation note:
+
+- the branch currently sends the full inbound `messages` payload and, for Anthropic requests, the top-level `system` field
+- this is acceptable as a first implementation because the service may ignore what it does not need
+- if payload size becomes a practical problem, bounded recent-context shaping can be added later without changing the core contract
+
 ### 2. Should recall responses support categories?
 
 Probably yes, eventually.
@@ -1064,6 +1126,12 @@ For the first implementation, best-effort in-process dispatch is likely enough b
 Long-term, the stable read API is cleaner.
 
 Short-term, direct ledger reading may be acceptable for local prototypes.
+
+Current implementation note:
+
+- the stable read API now exists
+- subscribed memory services also receive a dedicated replay auth projection
+- direct filesystem scraping should therefore be treated as a prototype shortcut, not as the intended supported path
 
 ### 6. How should affect fit into the model?
 
