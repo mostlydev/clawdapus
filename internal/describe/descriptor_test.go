@@ -126,6 +126,10 @@ func TestParseDescriptorRejectsInvalidV2CapabilityShape(t *testing.T) {
 			data: `{"version":2,"tools":[{"name":"lookup","description":"Lookup","inputSchema":{"type":"object"},"http":{"method":"trace","path":"/lookup"}}]}`,
 		},
 		{
+			name: "missing tool http",
+			data: `{"version":2,"tools":[{"name":"lookup","description":"Lookup","inputSchema":{"type":"object"}}]}`,
+		},
+		{
 			name: "memory forget only",
 			data: `{"version":2,"memory":{"forget":{"path":"/forget"}}}`,
 		},

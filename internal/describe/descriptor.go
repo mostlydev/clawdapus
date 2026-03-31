@@ -182,7 +182,7 @@ func validateTools(tools []ToolDescriptor) error {
 			return fmt.Errorf("tools[%d]: inputSchema.type must be \"object\"", i)
 		}
 		if tool.HTTP == nil {
-			continue
+			return fmt.Errorf("tools[%d]: http is required", i)
 		}
 		tool.HTTP.Method = strings.ToUpper(strings.TrimSpace(tool.HTTP.Method))
 		tool.HTTP.Path = strings.TrimSpace(tool.HTTP.Path)
