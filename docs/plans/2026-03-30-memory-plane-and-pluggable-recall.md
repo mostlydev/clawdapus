@@ -142,10 +142,14 @@ Completed:
 - automatic attachment of declared feed/tool/memory provider services to `claw-internal`
 - pre-turn recall and post-turn best-effort retain hooks in `cllama`
 - provider-format-aware memory injection for OpenAI-style and Anthropic-style requests
+- operator replay UX via `claw memory backfill`, which:
+  - discovers subscribed agents from generated context
+  - replays the immutable local ledger back through the memory retain contract
+  - auto-resolves a host-published retain URL when possible
+  - supports explicit `--url` override when the memory service remains internal-only
 
 Still open:
 
-- operator replay UX such as `claw memory backfill`
 - tombstone/forget flow and replay hygiene
 - dedicated success telemetry for memory operations
 - a more scalable replay path than forward-scanning large JSONL files
@@ -941,11 +945,22 @@ The architecture should therefore assume a future explicit backfill path, likely
 - a dedicated CLI flow such as `claw memory backfill`
 - backend idempotency or replay markers so the same ledger can be consumed safely more than once
 
-The first of these now exists in-tree, and subscribed memory services receive a dedicated replay token plus history URL projection.
+The first two now exist in-tree:
 
-What still does **not** exist is the operator-facing replay UX. A memory service can rebuild from the ledger, but the repo does not yet provide the final `claw memory backfill` workflow.
+- `cllama` exposes a scoped history read API
+- subscribed memory services receive dedicated replay token plus history URL projection
+- operators can trigger replay with `claw memory backfill`
 
 The retain webhook is the low-latency path. Backfill is the durability path for new or recovering services.
+
+The current CLI shape is deliberately pragmatic:
+
+- it uses the local immutable ledger as the replay source
+- it replays through the memory service's declared `retain` endpoint
+- it auto-discovers a host URL when the service publishes a host port
+- it allows `--url` override when the service is reachable some other way
+
+That is enough to make replay operational today without adding a second memory-specific control plane. A future backend-native replay trigger may still be worth adding later.
 
 ---
 
@@ -985,7 +1000,7 @@ Clawdapus should not attempt to disable runner-native memory features globally. 
 
 ### Milestone 1: Complete ADR-018 Phase 2 and define backfill
 
-Status: mostly complete on this branch.
+Status: functionally complete on this branch, with scaling and idempotency work still open.
 
 Add the self-scoped history read surface to `cllama`.
 
@@ -1000,7 +1015,6 @@ This milestone should also define the expected operational backfill flow for new
 
 What remains here is mostly operator UX and replay ergonomics:
 
-- `claw memory backfill`
 - replay markers or idempotency guidance
 - better large-history replay performance
 
