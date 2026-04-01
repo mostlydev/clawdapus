@@ -128,6 +128,11 @@ This parallel should be treated as core architectural framing, not as an inciden
 
 This branch now implements the core memory-plane substrate that this plan was proposing.
 
+This plan should now be read alongside ADR-021 as its implementation-status companion:
+
+- ADR-021 carries the architectural decision
+- this document tracks implementation status, intentional deviations, and remaining work
+
 Completed:
 
 - descriptor `version: 2` support for `tools[]` and `memory`
@@ -158,6 +163,17 @@ Still open:
 - a more scalable replay path than forward-scanning large JSONL files
 - retain/recall policy filtering and policy-removal accounting
 - ADR-020 mediated tool runtime
+
+Implemented with minor intentional drift from the first sketch:
+
+- recall currently sends the full inbound `messages` payload and, for Anthropic requests, the top-level `system` field rather than pre-shaping a smaller recent-message slice
+- `claw memory backfill` currently replays the local immutable ledger through the memory service's declared `retain` endpoint rather than through a backend-native replay control plane
+
+These are implementation-shape choices, not architectural deviations. They preserve the core model:
+
+- `cllama` owns orchestration
+- the ledger remains the source of truth
+- the memory backend remains swappable behind the same contract
 
 That means the plan should now be read as:
 
@@ -1017,6 +1033,13 @@ Benefits:
 
 This milestone should also define the expected operational backfill flow for new or recovering memory services.
 
+Current branch status:
+
+- `GET /history/{agentID}` exists as the scoped history read surface
+- subscribed memory services receive dedicated replay credentials
+- `claw memory backfill` provides an operator-facing replay path today
+- replay currently uses the local immutable ledger as its source and the memory service's `retain` endpoint as its sink
+
 What remains here is mostly operator UX and replay ergonomics:
 
 - replay markers or idempotency guidance
@@ -1024,7 +1047,7 @@ What remains here is mostly operator UX and replay ergonomics:
 
 ### Milestone 2: Add the memory capability and `cllama` hooks
 
-Status: core complete on this branch.
+Status: functionally complete on this branch, with governance hardening still open.
 
 Implement:
 
@@ -1043,7 +1066,6 @@ This is the first full end-to-end memory plane.
 
 The main remaining gaps are:
 
-- success-path observability for recall and retain
 - governed forget/tombstone semantics
 - policy filtering on retain and recall
 - any optional payload-bounding refinements beyond the current fixed request shape
@@ -1085,7 +1107,7 @@ This is not a full implementation checklist, but it identifies the likely change
 - `internal/cllama/context.go`
 - `internal/pod/compose_emit.go`
 - `docs/CLLAMA_SPEC.md`
-- a new ADR once the plan is accepted
+- `docs/decisions/021-memory-plane-and-pluggable-recall.md`
 
 ### cllama submodule
 
@@ -1114,6 +1136,7 @@ Current implementation note:
 - the branch currently sends the full inbound `messages` payload and, for Anthropic requests, the top-level `system` field
 - this is acceptable as a first implementation because the service may ignore what it does not need
 - if payload size becomes a practical problem, bounded recent-context shaping can be added later without changing the core contract
+- this means the architecture is implemented, but one of the intended payload-tightening refinements remains open
 
 ### 2. Should recall responses support categories?
 
@@ -1177,10 +1200,15 @@ The first version should therefore treat:
 
 - `agent_id`
 - `pod`
-- bounded recent messages
+- recent conversation context
 - whatever stable metadata is already present
 
 as the minimum recall input.
+
+Current implementation note:
+
+- the branch currently forwards full inbound request messages as that recent conversation context
+- richer stitching metadata is still future work
 
 Richer stitching metadata may require later surface-specific propagation through headers, request bodies, or runner config.
 
@@ -1201,9 +1229,9 @@ This plan does not propose:
 
 ---
 
-## Decision Shape For A Future ADR
+## Decision Shape Captured In ADR-021
 
-If this plan is accepted, the future ADR should probably decide the following:
+ADR-021 now captures the main architectural decisions this plan was arguing for:
 
 1. Memory is a first-class Clawdapus plane with compile-time wiring.
 2. `cllama` owns pre-turn recall orchestration and post-turn retain orchestration.
@@ -1217,10 +1245,10 @@ If this plan is accepted, the future ADR should probably decide the following:
 
 ## Recommended Next Step
 
-The next document should likely be an ADR that:
+The next implementation work should focus on the remaining hardening gaps:
 
-- cites ADR-018 and ADR-020 explicitly as prior art
-- resolves the descriptor versioning question
-- treats backfill as a first-class operation
-- defines the fixed recall and retain wire contracts
-- states clearly that the memory plane is for derived durable state, not transcript tails
+- replay markers or idempotency guidance for safe repeated backfill
+- retain-side and recall-side policy filtering
+- governed forget/tombstone semantics and replay hygiene
+- improved replay scalability for large ledgers
+- a boring reference memory adapter that proves the contract end to end
