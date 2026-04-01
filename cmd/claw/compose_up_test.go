@@ -926,6 +926,77 @@ func TestResolveManagedServiceImageBuildOnlyClawfile(t *testing.T) {
 	}
 }
 
+func TestResolveManagedServiceImageRebuildsClawfileBuildWhenTagExistsLocally(t *testing.T) {
+	tmpDir := t.TempDir()
+	clawfilePath := filepath.Join(tmpDir, "agents", "shared", "OpenClawfile")
+	if err := os.MkdirAll(filepath.Dir(clawfilePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(clawfilePath, []byte("FROM alpine\nCLAW_TYPE openclaw\nAGENT AGENTS.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &pod.Service{
+		Image: "ghcr.io/example/bot:latest",
+		Compose: map[string]interface{}{
+			"build": map[string]interface{}{
+				"context":    ".",
+				"dockerfile": filepath.ToSlash(filepath.Join("agents", "shared", "OpenClawfile")),
+			},
+		},
+	}
+	p := &pod.Pod{Name: "Research Pod"}
+
+	prevExists := imageExistsLocally
+	prevGenerate := generateClawDockerfile
+	prevBuildGenerated := buildGeneratedImage
+	prevDockerBuild := dockerBuildTaggedImage
+	defer func() {
+		imageExistsLocally = prevExists
+		generateClawDockerfile = prevGenerate
+		buildGeneratedImage = prevBuildGenerated
+		dockerBuildTaggedImage = prevDockerBuild
+	}()
+
+	imageExistsLocally = func(image string) bool { return image == svc.Image }
+	generatedPath := filepath.Join(tmpDir, "Dockerfile.generated")
+	generateClawDockerfile = func(path string) (string, error) {
+		if path != clawfilePath {
+			t.Fatalf("expected Clawfile path %q, got %q", clawfilePath, path)
+		}
+		return generatedPath, nil
+	}
+	var built bool
+	buildGeneratedImage = func(path, tag, contextDir string) error {
+		built = true
+		if path != generatedPath {
+			t.Fatalf("expected generated path %q, got %q", generatedPath, path)
+		}
+		if tag != svc.Image {
+			t.Fatalf("expected built tag %q, got %q", svc.Image, tag)
+		}
+		if contextDir != tmpDir {
+			t.Fatalf("expected build context %q, got %q", tmpDir, contextDir)
+		}
+		return nil
+	}
+	dockerBuildTaggedImage = func(string, string, string, map[string]buildArgValue, string) error {
+		t.Fatal("unexpected plain docker build for Clawfile build")
+		return nil
+	}
+
+	imageRef, err := resolveManagedServiceImage(tmpDir, p, "bot", svc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if imageRef != svc.Image {
+		t.Fatalf("expected image ref %q, got %q", svc.Image, imageRef)
+	}
+	if !built {
+		t.Fatal("expected managed image build to run even when the tagged image already exists locally")
+	}
+}
+
 func TestResolveManagedServiceImageBuildsPlainDockerfile(t *testing.T) {
 	tmpDir := t.TempDir()
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")

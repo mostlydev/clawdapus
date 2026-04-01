@@ -3028,10 +3028,6 @@ type buildArgValue struct {
 
 func resolveManagedServiceImage(podDir string, p *pod.Pod, serviceName string, svc *pod.Service) (string, error) {
 	imageRef := strings.TrimSpace(svc.Image)
-	if imageRef != "" && imageExistsLocally(imageRef) {
-		return imageRef, nil
-	}
-
 	cfg, err := parseServiceBuildConfig(svc.Compose["build"])
 	if err != nil {
 		return "", fmt.Errorf("service %q: parse build: %w", serviceName, err)
@@ -3040,6 +3036,9 @@ func resolveManagedServiceImage(podDir string, p *pod.Pod, serviceName string, s
 	if cfg == nil {
 		if imageRef == "" {
 			return "", fmt.Errorf("service %q: claw-managed services require image: or build:", serviceName)
+		}
+		if imageExistsLocally(imageRef) {
+			return imageRef, nil
 		}
 		return "", fmt.Errorf("service %q: image %q not found locally and no build config declared", serviceName, imageRef)
 	}
@@ -3051,10 +3050,6 @@ func resolveManagedServiceImage(podDir string, p *pod.Pod, serviceName string, s
 			svc.Compose = make(map[string]interface{})
 		}
 		svc.Compose["image"] = imageRef
-	}
-
-	if imageExistsLocally(imageRef) {
-		return imageRef, nil
 	}
 
 	fmt.Printf("[claw] %s: building image %s for inspection\n", serviceName, imageRef)
