@@ -84,10 +84,16 @@ The (potentially amended) response is returned to the agent container.
 The `cllama` proxy MUST emit structured JSON logs to `stdout`. Clawdapus collects these logs for the `claw audit` command.
 
 Logs must contain the following fields:
-- `timestamp`: ISO-8601.
+- `ts`: ISO-8601 UTC timestamp.
 - `claw_id`: The calling agent.
-- `type`: `request`, `response`, `intervention`, or `drift_score`.
-- `intervention_reason`: If the proxy modified a prompt, dropped a tool, or amended a response, it must describe *why*, referencing the specific policy module or `enforce` rule that triggered the intervention.
+- `type`: one of `request`, `response`, `error`, `intervention`, `feed_fetch`, `provider_pool`, or `memory_op`.
+- `intervention`: If the proxy modified a prompt or routing decision, it describes why.
+
+Event-specific fields may also be present:
+- `status_code`, `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd` for request/response/error events
+- `feed_name`, `feed_url` for feed fetch events
+- `provider`, `key_id`, `action`, `reason`, `cooldown_until` for provider-pool events
+- `memory_service`, `memory_op`, `memory_status`, `memory_blocks`, `memory_bytes`, `memory_removed` for memory telemetry events
 
 ## 6. Session History
 
