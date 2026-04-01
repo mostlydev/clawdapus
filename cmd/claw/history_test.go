@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,33 @@ func TestExportHistoryFileAppliesAfterAndLimit(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], `"2026-03-31T12:01:00Z"`) {
 		t.Fatalf("unexpected exported line: %q", lines[0])
+	}
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
+		t.Fatalf("parse exported entry: %v", err)
+	}
+	if entry["id"] == "" {
+		t.Fatalf("expected exported entry ID, got %+v", entry)
+	}
+}
+
+func TestEnsureHistoryEntryIDHydratesLegacyLine(t *testing.T) {
+	line := []byte(`{"ts":"2026-03-31T12:00:00Z","claw_id":"agent-1","requested_model":"openai/gpt-4o"}`)
+
+	withID, header, err := ensureHistoryEntryID(line)
+	if err != nil {
+		t.Fatalf("ensureHistoryEntryID: %v", err)
+	}
+	if header.ID == "" {
+		t.Fatalf("expected hydrated ID, got %+v", header)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(withID, &decoded); err != nil {
+		t.Fatalf("parse hydrated line: %v", err)
+	}
+	if decoded["id"] == "" {
+		t.Fatalf("expected hydrated line to include id, got %+v", decoded)
 	}
 }
 

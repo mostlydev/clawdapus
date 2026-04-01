@@ -128,6 +128,7 @@ Each line is a JSON object with the following fields:
 | Field | Type | Description |
 |---|---|---|
 | `version` | integer | Schema version. Currently `1`. |
+| `id` | string | Stable source-event ID for replay and deduplication. |
 | `ts` | string | RFC3339 timestamp of when the response was received. |
 | `claw_id` | string | Agent ID that issued the request. |
 | `path` | string | Request path (e.g., `/v1/chat/completions`). |

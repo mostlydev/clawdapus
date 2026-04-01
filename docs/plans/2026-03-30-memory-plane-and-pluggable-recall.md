@@ -156,12 +156,18 @@ Completed:
   - replays the immutable local ledger back through the memory retain contract
   - auto-resolves a host-published retain URL when possible
   - supports explicit `--url` override when the memory service remains internal-only
+- stable source-event IDs on session-history entries, propagated through:
+  - live `retain` payloads
+  - `GET /history/{agentID}`
+  - `claw memory backfill`
+  - `claw history export`
 
 Still open:
 
 - tombstone/forget flow and replay hygiene
 - a more scalable replay path than forward-scanning large JSONL files
 - retain/recall policy filtering and policy-removal accounting
+- backend dedupe conventions beyond the stable source-event ID contract
 - ADR-020 mediated tool runtime
 
 Implemented with minor intentional drift from the first sketch:
@@ -963,13 +969,14 @@ The architecture should therefore assume a future explicit backfill path, likely
 
 - a `cllama` history read API suitable for replay consumers
 - a dedicated CLI flow such as `claw memory backfill`
-- backend idempotency or replay markers so the same ledger can be consumed safely more than once
+- stable source-event IDs plus backend dedupe so the same ledger can be consumed safely more than once
 
 The first two now exist in-tree:
 
 - `cllama` exposes a scoped history read API
 - subscribed memory services receive dedicated replay token plus history URL projection
 - operators can trigger replay with `claw memory backfill`
+- history entries now carry stable source-event IDs, and legacy entries are hydrated with those IDs on read/export/replay
 
 The retain webhook is the low-latency path. Backfill is the durability path for new or recovering services.
 
@@ -1020,7 +1027,7 @@ Clawdapus should not attempt to disable runner-native memory features globally. 
 
 ### Milestone 1: Complete ADR-018 Phase 2 and define backfill
 
-Status: functionally complete on this branch, with scaling and idempotency work still open.
+Status: functionally complete on this branch, with scaling work and backend dedupe guidance still open.
 
 Add the self-scoped history read surface to `cllama`.
 
@@ -1042,7 +1049,7 @@ Current branch status:
 
 What remains here is mostly operator UX and replay ergonomics:
 
-- replay markers or idempotency guidance
+- backend dedupe guidance on top of the stable source-event ID contract
 - better large-history replay performance
 
 ### Milestone 2: Add the memory capability and `cllama` hooks
@@ -1247,7 +1254,7 @@ ADR-021 now captures the main architectural decisions this plan was arguing for:
 
 The next implementation work should focus on the remaining hardening gaps:
 
-- replay markers or idempotency guidance for safe repeated backfill
+- backend dedupe guidance for safe repeated backfill beyond the stable source-event ID contract
 - retain-side and recall-side policy filtering
 - governed forget/tombstone semantics and replay hygiene
 - improved replay scalability for large ledgers

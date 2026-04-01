@@ -56,11 +56,6 @@ type memoryBackfillTarget struct {
 	Manifest    memoryManifestFile
 }
 
-type historyEntryHeader struct {
-	TS             string `json:"ts"`
-	RequestedModel string `json:"requested_model"`
-}
-
 type backfillComposeFile struct {
 	Services map[string]backfillComposeService `yaml:"services"`
 }
@@ -496,7 +491,7 @@ func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string,
 		if len(line) == 0 {
 			continue
 		}
-		meta, err := parseHistoryEntryHeader(line)
+		lineWithID, meta, err := ensureHistoryEntryID(line)
 		if err != nil {
 			return replayed, err
 		}
@@ -512,7 +507,7 @@ func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string,
 				continue
 			}
 		}
-		if err := postRetainBackfill(client, retainURL, authToken, timeout, target, meta.RequestedModel, line); err != nil {
+		if err := postRetainBackfill(client, retainURL, authToken, timeout, target, meta.RequestedModel, lineWithID); err != nil {
 			return replayed, err
 		}
 		replayed++
@@ -521,14 +516,6 @@ func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string,
 		return replayed, err
 	}
 	return replayed, nil
-}
-
-func parseHistoryEntryHeader(line []byte) (historyEntryHeader, error) {
-	var header historyEntryHeader
-	if err := json.Unmarshal(line, &header); err != nil {
-		return historyEntryHeader{}, fmt.Errorf("parse history entry: %w", err)
-	}
-	return header, nil
 }
 
 func postRetainBackfill(client *http.Client, retainURL, authToken string, timeout time.Duration, target memoryBackfillTarget, requestedModel string, rawEntry []byte) error {

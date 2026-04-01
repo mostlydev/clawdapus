@@ -189,6 +189,9 @@ func TestReplayHistoryFileToMemory(t *testing.T) {
 	if entry["claw_id"] != "analyst" {
 		t.Fatalf("unexpected replayed entry: %+v", entry)
 	}
+	if entry["id"] == "" {
+		t.Fatalf("expected replayed entry ID, got %+v", entry)
+	}
 }
 
 func TestReplayHistoryFileToMemoryHonorsLimit(t *testing.T) {
@@ -223,6 +226,43 @@ func TestReplayHistoryFileToMemoryHonorsLimit(t *testing.T) {
 	}
 	if replayed != 1 || calls != 1 {
 		t.Fatalf("expected 1 replayed entry and call, got replayed=%d calls=%d", replayed, calls)
+	}
+}
+
+func TestReplayHistoryFileToMemoryHydratesLegacyEntryIDs(t *testing.T) {
+	dir := t.TempDir()
+	historyPath := filepath.Join(dir, "history.jsonl")
+	if err := os.WriteFile(historyPath, []byte(`{"ts":"2026-03-31T12:00:00Z","claw_id":"analyst","requested_model":"m1"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	retainCh := make(chan map[string]any, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode retain payload: %v", err)
+		}
+		retainCh <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	target := memoryBackfillTarget{
+		AgentID:     "analyst",
+		HistoryPath: historyPath,
+		Manifest: memoryManifestFile{
+			Service: "team-memory",
+			Retain:  &memoryOpEntry{Path: "/retain"},
+		},
+	}
+	if _, err := replayHistoryFileToMemory(srv.Client(), srv.URL, "", backfillRetainTimeout(target.Manifest), target, nil, 1); err != nil {
+		t.Fatalf("replayHistoryFileToMemory: %v", err)
+	}
+
+	payload := <-retainCh
+	entry := payload["entry"].(map[string]any)
+	if entry["id"] == "" {
+		t.Fatalf("expected hydrated backfill entry ID, got %+v", entry)
 	}
 }
 

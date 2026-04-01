@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -103,17 +103,15 @@ func exportHistoryFile(w io.Writer, historyPath string, after *time.Time, limit 
 	scanner := bufio.NewScanner(f)
 	emitted := 0
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(strings.TrimSpace(string(line))) == 0 {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
 			continue
 		}
+		lineWithID, meta, err := ensureHistoryEntryID(line)
+		if err != nil {
+			return err
+		}
 		if after != nil {
-			var meta struct {
-				TS string `json:"ts"`
-			}
-			if err := json.Unmarshal(line, &meta); err != nil {
-				return fmt.Errorf("parse history entry: %w", err)
-			}
 			ts, err := time.Parse(time.RFC3339, strings.TrimSpace(meta.TS))
 			if err != nil {
 				return fmt.Errorf("parse history timestamp %q: %w", meta.TS, err)
@@ -122,7 +120,7 @@ func exportHistoryFile(w io.Writer, historyPath string, after *time.Time, limit 
 				continue
 			}
 		}
-		if _, err := fmt.Fprintln(w, string(line)); err != nil {
+		if _, err := fmt.Fprintln(w, string(lineWithID)); err != nil {
 			return err
 		}
 		emitted++
