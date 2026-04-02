@@ -154,6 +154,12 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		shared.PortableMemoryEnv: shared.PortableMemoryDir,
 		"OPENCLAW_CONFIG_PATH":   "/app/config/openclaw.json",
 		"OPENCLAW_STATE_DIR":     "/app/state",
+		// SHIM(openclaw/openclaw#29736): exec-approvals path resolution uses OPENCLAW_HOME
+		// to expand ~/.openclaw/exec-approvals.{json,sock} before OPENCLAW_STATE_DIR is
+		// consulted. Without this the approval layer tries to mkdir inside the read-only
+		// container home dir and every exec tool call fails with ENOENT. Remove once the
+		// upstream issue is resolved and we've bumped past the fixed release.
+		"OPENCLAW_HOME": "/app/state",
 	}
 	if rc.PersonaHostPath != "" {
 		env["CLAW_PERSONA_DIR"] = "/claw/persona"

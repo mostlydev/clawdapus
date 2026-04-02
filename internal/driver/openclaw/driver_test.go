@@ -101,6 +101,10 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	if result.Environment["OPENCLAW_STATE_DIR"] != "/app/state" {
 		t.Errorf("expected OPENCLAW_STATE_DIR=/app/state, got %q", result.Environment["OPENCLAW_STATE_DIR"])
 	}
+	// Shim for openclaw/openclaw#29736: exec-approvals resolves paths via OPENCLAW_HOME.
+	if result.Environment["OPENCLAW_HOME"] != "/app/state" {
+		t.Errorf("expected OPENCLAW_HOME=/app/state (shim for openclaw#29736), got %q", result.Environment["OPENCLAW_HOME"])
+	}
 	if result.Environment[shared.PortableMemoryEnv] != shared.PortableMemoryDir {
 		t.Errorf("expected %s=%s, got %q", shared.PortableMemoryEnv, shared.PortableMemoryDir, result.Environment[shared.PortableMemoryEnv])
 	}
