@@ -124,7 +124,7 @@ This parallel should be treated as core architectural framing, not as an inciden
 
 ---
 
-## Implementation Status (2026-03-31)
+## Implementation Status (2026-04-01)
 
 This branch now implements the core memory-plane substrate that this plan was proposing.
 
@@ -162,13 +162,31 @@ Completed:
   - `claw memory backfill`
   - `claw history export`
 
+Important ADR-020 status note:
+
+- the compiler side of the capability wave is now present for tools:
+  - descriptor `version: 2` accepts `tools[]`
+  - `x-claw.tools` is parsed and normalized
+  - `claw up` writes `tools.json`
+  - `CLAWDAPUS.md` lists managed tools
+- the mediated runtime side is still not landed:
+  - `cllama` does not yet load `tools.json`
+  - `cllama` does not yet inject managed tools into upstream requests
+  - `cllama` does not yet intercept tool calls or run the mediated execution loop
+  - session history does not yet emit ADR-020 `tool_trace` / mediated-tool status records
+
 Still open:
 
+- ADR-020 mediated tool runtime, specifically:
+  - `tools.json` loading in `cllama` agent context
+  - managed-tool injection and runner-tool replacement rules
+  - mediated execution loop for HTTP-backed tools
+  - mediated tool audit/history fields such as `tool_trace` and failure status
+- validation or native projection for non-`cllama` services that declare `x-claw.tools` or `x-claw.memory`
 - tombstone/forget flow and replay hygiene
 - a more scalable replay path than forward-scanning large JSONL files
 - retain/recall policy filtering and policy-removal accounting
 - backend dedupe conventions beyond the stable source-event ID contract
-- ADR-020 mediated tool runtime
 
 Implemented with minor intentional drift from the first sketch:
 
@@ -1252,10 +1270,17 @@ ADR-021 now captures the main architectural decisions this plan was arguing for:
 
 ## Recommended Next Step
 
-The next implementation work should focus on the remaining hardening gaps:
+The next implementation work should be split explicitly by ADR:
 
-- backend dedupe guidance for safe repeated backfill beyond the stable source-event ID contract
-- retain-side and recall-side policy filtering
-- governed forget/tombstone semantics and replay hygiene
-- improved replay scalability for large ledgers
-- a boring reference memory adapter that proves the contract end to end
+- ADR-020 runtime phase:
+  - load `tools.json` in `cllama`
+  - inject managed tools into upstream requests
+  - intercept and execute mediated tool calls
+  - record mediated tool rounds in history/audit output
+  - either fail fast for non-`cllama` capability consumers or add a real native projection path
+- ADR-021 hardening phase:
+  - backend dedupe guidance for safe repeated backfill beyond the stable source-event ID contract
+  - retain-side and recall-side policy filtering
+  - governed forget/tombstone semantics and replay hygiene
+  - improved replay scalability for large ledgers
+  - a boring reference memory adapter that proves the contract end to end
