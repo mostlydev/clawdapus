@@ -28,10 +28,16 @@ outline: deep
 
 ## Unreleased
 
-- **`claw skill install`** — installs the clawdapus-cli skill to `~/.claude/skills/` and `~/.agents/skills/`, giving Claude Code, Codex, Gemini, and OpenCode full operational knowledge of the claw CLI. Auto-updates on every `claw` invocation when a newer binary is installed.
-- **Skill install paths updated** — README now uses proper `.agents/skills/` directory convention for Codex/Gemini/OpenCode instead of appending to flat config files.
+<!-- Nothing yet -->
 
-## v0.5.0 <Badge type="tip" text="Latest" /> {#v0-5-0}
+## v0.5.1 <Badge type="tip" text="Latest" /> {#v0-5-1}
+
+*2026-04-03*
+
+- **`body_key` in tool descriptors** — `claw.describe` v2 tool HTTP specs now support a `body_key` field that wraps tool arguments under a named JSON key in the request body (e.g. `"body_key": "trade"` sends `{"trade": {...args}}`). Validated at parse time for POST/PUT/PATCH only, propagated through the manifest, and executed by cllama proxy v0.3.0.
+- **`claw skill install`** — new command installs the clawdapus-cli skill to `~/.claude/skills/` and `~/.agents/skills/`, giving Claude Code, Codex, Gemini, and OpenCode full operational knowledge of the claw CLI. Auto-updates on every `claw` invocation when a newer binary is installed.
+
+## v0.5.0 {#v0-5-0}
 
 *2026-04-03*
 
