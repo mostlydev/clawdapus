@@ -2554,13 +2554,15 @@ func TestBuildToolManifestEntriesNamescopesAndProjectsAuth(t *testing.T) {
 		},
 		"analyst",
 		[]describe.ToolSpec{{
-			Name:        "get_market_context",
+			Name:        "propose_trade",
 			Service:     "trading-api",
-			Description: "Retrieve market context",
+			Description: "Submit trade proposal",
 			InputSchema: map[string]interface{}{"type": "object"},
 			HTTP: &describe.ToolHTTP{
-				Method: "GET",
-				Path:   "/api/v1/market_context/{claw_id}",
+				Method:  "POST",
+				Path:    "/api/v1/trades",
+				Body:    "json",
+				BodyKey: "trade",
 			},
 		}},
 		nil,
@@ -2571,7 +2573,7 @@ func TestBuildToolManifestEntriesNamescopesAndProjectsAuth(t *testing.T) {
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool entry, got %+v", tools)
 	}
-	if tools[0].Name != "trading-api.get_market_context" {
+	if tools[0].Name != "trading-api.propose_trade" {
 		t.Fatalf("expected namespaced tool name, got %+v", tools[0])
 	}
 	if tools[0].Execution.BaseURL != "http://trading-api:4000" {
@@ -2579,6 +2581,9 @@ func TestBuildToolManifestEntriesNamescopesAndProjectsAuth(t *testing.T) {
 	}
 	if tools[0].Execution.Auth == nil || tools[0].Execution.Auth.Token != "real-token" {
 		t.Fatalf("expected projected auth token, got %+v", tools[0].Execution.Auth)
+	}
+	if tools[0].Execution.BodyKey != "trade" {
+		t.Fatalf("expected propagated body key, got %+v", tools[0].Execution)
 	}
 }
 

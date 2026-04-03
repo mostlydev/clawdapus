@@ -53,6 +53,7 @@ type ToolExecution struct {
 	BaseURL   string     `json:"base_url"`
 	Method    string     `json:"method"`
 	Path      string     `json:"path"`
+	BodyKey   string     `json:"body_key,omitempty"`
 	Auth      *AuthEntry `json:"auth,omitempty"`
 }
 

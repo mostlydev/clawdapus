@@ -46,9 +46,10 @@ type ToolDescriptor struct {
 }
 
 type ToolHTTP struct {
-	Method string `json:"method"`
-	Path   string `json:"path"`
-	Body   string `json:"body,omitempty"`
+	Method  string `json:"method"`
+	Path    string `json:"path"`
+	Body    string `json:"body,omitempty"`
+	BodyKey string `json:"body_key,omitempty"`
 }
 
 type MemoryDescriptor struct {
@@ -187,6 +188,7 @@ func validateTools(tools []ToolDescriptor) error {
 		tool.HTTP.Method = strings.ToUpper(strings.TrimSpace(tool.HTTP.Method))
 		tool.HTTP.Path = strings.TrimSpace(tool.HTTP.Path)
 		tool.HTTP.Body = strings.ToLower(strings.TrimSpace(tool.HTTP.Body))
+		tool.HTTP.BodyKey = strings.TrimSpace(tool.HTTP.BodyKey)
 		switch tool.HTTP.Method {
 		case "GET", "POST", "PUT", "PATCH", "DELETE":
 		default:
@@ -202,6 +204,13 @@ func validateTools(tools []ToolDescriptor) error {
 		case "", "json":
 		default:
 			return fmt.Errorf("tools[%d]: http.body %q is unsupported", i, tool.HTTP.Body)
+		}
+		if tool.HTTP.BodyKey != "" {
+			switch tool.HTTP.Method {
+			case "POST", "PUT", "PATCH":
+			default:
+				return fmt.Errorf("tools[%d]: http.body_key requires POST, PUT, or PATCH", i)
+			}
 		}
 	}
 	return nil

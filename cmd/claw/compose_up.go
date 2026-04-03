@@ -1188,6 +1188,7 @@ func buildToolManifestEntries(p *pod.Pod, descriptors map[string]*describe.Servi
 				BaseURL:   baseURL,
 				Method:    tool.HTTP.Method,
 				Path:      tool.HTTP.Path,
+				BodyKey:   tool.HTTP.BodyKey,
 				Auth:      auth,
 			},
 		})

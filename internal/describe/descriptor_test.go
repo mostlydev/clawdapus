@@ -48,7 +48,7 @@ func TestParseDescriptorV2SupportsToolsAndMemory(t *testing.T) {
 	    "name": " search_memory ",
 	    "description": " Search memory ",
 	    "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}},
-	    "http": {"method": "post", "path": " /recall ", "body": "JSON"}
+	    "http": {"method": "post", "path": " /recall ", "body": "JSON", "body_key": " recall "}
 	  }],
 	  "memory": {
 	    "recall": {"path": " /recall "},
@@ -78,6 +78,9 @@ func TestParseDescriptorV2SupportsToolsAndMemory(t *testing.T) {
 	}
 	if got := descriptor.Tools[0].HTTP.Body; got != "json" {
 		t.Fatalf("expected normalized http body, got %q", got)
+	}
+	if got := descriptor.Tools[0].HTTP.BodyKey; got != "recall" {
+		t.Fatalf("expected trimmed http body_key, got %q", got)
 	}
 	if got := descriptor.Memory.Recall.Path; got != "/recall" {
 		t.Fatalf("expected trimmed recall path, got %q", got)
@@ -128,6 +131,14 @@ func TestParseDescriptorRejectsInvalidV2CapabilityShape(t *testing.T) {
 		{
 			name: "missing tool http",
 			data: `{"version":2,"tools":[{"name":"lookup","description":"Lookup","inputSchema":{"type":"object"}}]}`,
+		},
+		{
+			name: "body key on get",
+			data: `{"version":2,"tools":[{"name":"lookup","description":"Lookup","inputSchema":{"type":"object"},"http":{"method":"get","path":"/lookup","body_key":"lookup"}}]}`,
+		},
+		{
+			name: "body key on delete",
+			data: `{"version":2,"tools":[{"name":"lookup","description":"Lookup","inputSchema":{"type":"object"},"http":{"method":"delete","path":"/lookup","body_key":"lookup"}}]}`,
 		},
 		{
 			name: "memory forget only",

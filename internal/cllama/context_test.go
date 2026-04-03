@@ -94,15 +94,16 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 			URL:    "http://claw-api:8080/fleet/alerts",
 		}},
 		Tools: []ToolManifestEntry{{
-			Name:        "trading-api.get_market_context",
-			Description: "Retrieve market context",
+			Name:        "trading-api.propose_trade",
+			Description: "Submit trade proposal",
 			InputSchema: map[string]interface{}{"type": "object"},
 			Execution: ToolExecution{
 				Transport: "http",
 				Service:   "trading-api",
 				BaseURL:   "http://trading-api:4000",
-				Method:    "GET",
-				Path:      "/api/v1/market_context/{claw_id}",
+				Method:    "POST",
+				Path:      "/api/v1/trades",
+				BodyKey:   "trade",
 				Auth:      &AuthEntry{Type: "bearer", Token: "service-token"},
 			},
 		}},
@@ -157,6 +158,10 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 	tools := toolsManifest["tools"].([]interface{})
 	if len(tools) != 1 {
 		t.Fatalf("unexpected tools manifest payload: %v", toolsManifest)
+	}
+	execution := tools[0].(map[string]interface{})["execution"].(map[string]interface{})
+	if execution["body_key"] != "trade" {
+		t.Fatalf("unexpected tools execution payload: %v", execution)
 	}
 
 	memoryRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "memory.json"))
