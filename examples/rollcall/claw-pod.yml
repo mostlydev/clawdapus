@@ -5,6 +5,14 @@ x-claw:
   sequential-conformance: true
 
 services:
+  mem-svc:
+    image: rollcall-memory-stub:latest
+    build:
+      context: ../../testdata/memory-stub
+      dockerfile: Dockerfile
+    expose:
+      - "8080"
+
   oc-roll:
     image: rollcall-openclaw:latest
     build:
@@ -16,6 +24,9 @@ services:
       cllama-env:
         OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
         ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      memory:
+        service: mem-svc
+        timeout-ms: 1000
       handles:
         discord:
           id: "${DISCORD_BOT_ID}"

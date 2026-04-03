@@ -168,11 +168,16 @@ Completed:
   - bounded mediation with `max_rounds`, per-tool timeout, total timeout, and response size limits
   - structured tool error feedback back into the model within the mediated loop
   - synthetic downstream SSE re-streaming when the runner requested `stream: true`
+- managed Anthropic-format tool presentation and mediation in `cllama`, including:
+  - replacement of outgoing runner-local `tools` / `tool_choice` with compiled managed tools
+  - HTTP execution of declared managed tools via `tool_use` / `tool_result`
+  - synthetic downstream SSE re-streaming when the runner requested `stream: true`
 - ADR-020 session-history extensions for mediated requests, including:
   - `status`
   - `usage.total_rounds`
   - `tool_trace`
 - bounded cross-turn continuity for managed OpenAI-compatible tools by reinjecting the hidden assistant/tool transcript into later upstream requests
+- bounded cross-turn continuity for managed Anthropic tools by reinjecting the hidden assistant/tool transcript into later upstream requests
 
 Important ADR-020 status note:
 
@@ -181,21 +186,20 @@ Important ADR-020 status note:
   - `x-claw.tools` is parsed and normalized
   - `claw up` writes `tools.json`
   - `CLAWDAPUS.md` lists managed tools
-- the mediated runtime side is now substantially landed for OpenAI-compatible requests:
+- the mediated runtime side is now substantially landed for OpenAI-compatible and Anthropic-format requests:
   - `cllama` loads `tools.json`
-  - `cllama` injects managed tools into upstream OpenAI-compatible requests
-  - `cllama` executes managed HTTP tools in a bounded mediation loop
+  - `cllama` injects managed tools into upstream OpenAI-compatible and Anthropic requests
+  - `cllama` executes managed HTTP tools in a bounded mediation loop across both provider formats
   - session history emits `tool_trace` and mediated `status` for these turns
   - downstream streaming requests are satisfied by synthetic SSE re-streaming after mediation completes
+  - hidden mediated tool rounds are preserved across later turns for both request formats
 - the remaining ADR-020 runtime gap is now concentrated in:
-  - Anthropic tool parity (`tool_use` / `tool_result`)
   - transport-level keepalive/progress comments during long mediated streaming requests
   - audit-plane/operator polish (`claw audit` mediated-tool reporting)
 
 Still open:
 
 - ADR-020 remaining runtime work, specifically:
-  - Anthropic-format tool mediation (`tool_use` / `tool_result`) and a unified dual-format execution path
   - transport keepalive/progress comments for long managed streaming requests
   - `claw audit` mediated-tool reporting and related operator polish
 - validation or native projection for non-`cllama` services that declare `x-claw.tools` or `x-claw.memory`

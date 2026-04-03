@@ -273,15 +273,21 @@ Every request through the proxy produces a structured JSON log entry on stdout. 
 
 | Field | Description |
 |-------|-------------|
-| `timestamp` | ISO-8601 timestamp. |
+| `ts` | ISO-8601 UTC timestamp. |
 | `claw_id` | The calling agent's identifier. |
-| `type` | Event type: `request`, `response`, `error`, `intervention`. |
+| `type` | Event type: `request`, `response`, `error`, `intervention`, `feed_fetch`, `provider_pool`, `memory_op`. |
 | `intervention` | Why the proxy modified a prompt, dropped a tool, or amended a response. References the specific policy module or rule. |
 | `model` | The model used for the request. |
 | `tokens_in` | Input token count. |
 | `tokens_out` | Output token count. |
-| `cost` | Estimated cost for the request/response pair. |
-| `latency` | Request duration. |
+| `cost_usd` | Estimated cost for the request/response pair. |
+| `latency_ms` | Request duration in milliseconds. |
+
+Event-specific fields may also be present depending on `type`:
+- `status_code`, `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd` — request/response/error events
+- `feed_name`, `feed_url` — feed fetch events
+- `provider`, `key_id`, `action`, `reason`, `cooldown_until` — provider pool events
+- `memory_service`, `memory_op`, `memory_status`, `memory_blocks`, `memory_bytes`, `memory_removed` — memory telemetry events
 
 Every request/response pair produces two log events: one with `type: "request"` on ingress and one with `type: "response"` on egress. Error events use `type: "error"`. Intervention events use `type: "intervention"`. Token counts and cost estimates are extracted from the provider's response headers or body and attached to the response event.
 
@@ -290,8 +296,8 @@ Every request/response pair produces two log events: one with `type: "request"` 
 The reference implementation has a few known divergences from the spec document:
 
 - The `intervention` field is typed as `*string` with no `omitempty` tag. Every event emits `"intervention": null`, even when no intervention occurred. This is intentional -- it ensures log parsers can rely on the field always being present.
-- The implementation emits four `type` values: `request`, `response`, `error`, and `intervention`. The spec (section 5) omits `error` from its type enum and lists `drift_score` instead.
-- The spec uses the field name `intervention_reason` where the reference logger uses `intervention`.
+- The implementation uses `ts` for the timestamp field. The spec (section 5) previously listed `timestamp`.
+- The spec (section 5) omits `error` from its type enum and uses `intervention_reason` where the reference logger uses `intervention`.
 
 These divergences are documented here as practical guidance. The reference implementation is the source of truth for runtime behavior.
 
@@ -408,6 +414,6 @@ Current constraints to be aware of:
 - **Passthrough only.** The `cllama-policy` proxy type (full bidirectional interception with prompt decoration, tool scoping, and response amendment) is future work. The reference implementation does identity, routing, and cost tracking.
 - **No per-turn hooks.** The Clawdapus `Driver` interface has four methods (`Validate`, `Materialize`, `PostApply`, `HealthProbe`) -- all run once at deploy/startup. There is no per-turn or per-request hook. Any per-request context enrichment must go through cllama or a runner-native mechanism.
 - **Intervention field quirk.** The cllama logger emits `"intervention": null` on every event (the field has no `omitempty` tag). This is expected behavior, not a missing value.
-- **Spec divergences.** The specification uses `intervention_reason` and omits `error` from its type enum. The reference implementation uses `intervention` and emits `error` as a log type. Consumers should handle both.
+- **Spec divergences.** The specification uses `intervention_reason` where the reference implementation uses `intervention`, and omits `error` from its type enum. The `ts` timestamp field replaced `timestamp`. Consumers should handle both forms.
 
 See the full [cllama specification on GitHub](https://github.com/mostlydev/clawdapus/blob/master/docs/CLLAMA_SPEC.md) for the formal standard.

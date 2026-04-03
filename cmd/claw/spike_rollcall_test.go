@@ -106,6 +106,8 @@ func TestSpikeRollCall(t *testing.T) {
 		// Hermes is a real runtime — build from the canonical dockerfiles dir so
 		// patch-hermes-runtime.py and minisweagent_path.py are in the build context.
 		{"hermes:latest", "Dockerfile", filepath.Join(repoRoot, "dockerfiles", "hermes-base"), false},
+		// Memory stub — shared infrastructure service used by capability-wave agents.
+		{"rollcall-memory-stub:latest", "Dockerfile", filepath.Join(repoRoot, "testdata", "memory-stub"), false},
 	}
 	for _, b := range baseImages {
 		if b.alwaysRebuild || !spikeImageExists(b.tag) {
@@ -240,6 +242,11 @@ func TestSpikeRollCall(t *testing.T) {
 			rollcallAssertAuditTelemetry(t, podPath, agent.name, agent.runtime)
 			rollcallAssertSessionHistory(t, sessionHistoryDir, agent.name)
 
+			// oc-roll has memory configured — confirm memory_op telemetry fired.
+			if agent.name == "oc-roll" {
+				rollcallAssertMemoryTelemetry(t, cllamaContainerID, agent.name)
+			}
+
 			spikeWaitRunning(t, clawdashContainerID, 30*time.Second)
 			t.Log("clawdash sidecar confirmed running")
 		})
@@ -332,9 +339,25 @@ func rollcallSingleServicePod(t *testing.T, expandedPod, serviceName string, pro
 		t.Fatalf("rollcall service %q is not a map", serviceName)
 	}
 	rollcallInjectProxyRequest(t, selectedMap, proxyRequest)
-	doc["services"] = map[string]interface{}{
-		serviceName: selectedMap,
+
+	// Keep the selected agent plus any infrastructure services (services without
+	// an x-claw.agent field, e.g. mem-svc). This allows capability-wave features
+	// like memory to be exercised without restructuring the pod fixture.
+	kept := map[string]interface{}{serviceName: selectedMap}
+	for name, svc := range services {
+		if name == serviceName {
+			continue
+		}
+		svcMap, ok := svc.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		xClaw, _ := svcMap["x-claw"].(map[string]interface{})
+		if xClaw == nil || xClaw["agent"] == nil {
+			kept[name] = svc
+		}
 	}
+	doc["services"] = kept
 
 	out, err := yaml.Marshal(doc)
 	if err != nil {
@@ -496,11 +519,15 @@ func rollcallAssertSessionHistory(t *testing.T, sessionHistoryDir, agentName str
 	}
 
 	var entry struct {
+		ID       string `json:"id"`
+		Version  int    `json:"version"`
 		ClawID   string `json:"claw_id"`
 		TS       string `json:"ts"`
+		Status   string `json:"status"`
 		Response struct {
 			Format string `json:"format"`
 		} `json:"response"`
+		ToolTrace []json.RawMessage `json:"tool_trace,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
 		t.Errorf("session history for %s: first line is not valid JSON: %v\n%s", agentName, err, lines[0])
@@ -515,7 +542,53 @@ func rollcallAssertSessionHistory(t *testing.T, sessionHistoryDir, agentName str
 	if entry.Response.Format != "json" && entry.Response.Format != "sse" {
 		t.Errorf("session history for %s: response.format = %q, want \"json\" or \"sse\"", agentName, entry.Response.Format)
 	}
-	t.Logf("session history for %s: %d turn(s), format=%s, ts=%s", agentName, len(lines), entry.Response.Format, entry.TS)
+	if !strings.HasPrefix(entry.ID, "hist1_") {
+		t.Errorf("session history for %s: id = %q, want hist1_ prefix (EnsureID not called)", agentName, entry.ID)
+	}
+	if entry.Version != 1 {
+		t.Errorf("session history for %s: version = %d, want 1", agentName, entry.Version)
+	}
+	t.Logf("session history for %s: %d turn(s), format=%s, ts=%s, id=%s, tool_rounds=%d",
+		agentName, len(lines), entry.Response.Format, entry.TS, entry.ID[:min(len(entry.ID), 20)], len(entry.ToolTrace))
+}
+
+// rollcallAssertMemoryTelemetry reads the cllama container logs and confirms
+// that at least one memory_op event (recall or retain) was emitted for the
+// given agent. It is called only for agents that have memory configured.
+func rollcallAssertMemoryTelemetry(t *testing.T, cllamaContainerID, agentName string) {
+	t.Helper()
+
+	out, err := exec.Command("docker", "logs", cllamaContainerID).CombinedOutput()
+	if err != nil {
+		t.Logf("warning: could not read cllama logs for memory telemetry check: %v", err)
+		return
+	}
+
+	var recallSeen, retainSeen bool
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, `"type":"memory_op"`) && !strings.Contains(line, `"type": "memory_op"`) {
+			continue
+		}
+		if strings.Contains(line, `"`+agentName+`"`) {
+			if strings.Contains(line, `"recall"`) {
+				recallSeen = true
+			}
+			if strings.Contains(line, `"retain"`) {
+				retainSeen = true
+			}
+		}
+	}
+
+	if !recallSeen {
+		t.Errorf("cllama logs: no memory_op recall event found for agent %s", agentName)
+	} else {
+		t.Logf("cllama logs: memory_op recall confirmed for %s", agentName)
+	}
+	if !retainSeen {
+		t.Errorf("cllama logs: no memory_op retain event found for agent %s", agentName)
+	} else {
+		t.Logf("cllama logs: memory_op retain confirmed for %s", agentName)
+	}
 }
 
 func rollcallLogContainer(t *testing.T, name string) {
