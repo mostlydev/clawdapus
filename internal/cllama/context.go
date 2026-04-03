@@ -13,6 +13,8 @@ type AgentContextInput struct {
 	ClawdapusMD string
 	Metadata    map[string]interface{}
 	Feeds       []FeedManifestEntry
+	Tools       []ToolManifestEntry
+	Memory      *MemoryManifestEntry
 	ServiceAuth []ServiceAuthEntry
 }
 
@@ -32,9 +34,64 @@ type ServiceAuthEntry struct {
 	Principal string `json:"principal,omitempty"`
 }
 
+type AuthEntry struct {
+	Type  string `json:"type"`
+	Token string `json:"token,omitempty"`
+}
+
+type ToolManifestEntry struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	InputSchema map[string]interface{} `json:"inputSchema"`
+	Annotations map[string]interface{} `json:"annotations,omitempty"`
+	Execution   ToolExecution          `json:"execution"`
+}
+
+type ToolExecution struct {
+	Transport string     `json:"transport"`
+	Service   string     `json:"service"`
+	BaseURL   string     `json:"base_url"`
+	Method    string     `json:"method"`
+	Path      string     `json:"path"`
+	Auth      *AuthEntry `json:"auth,omitempty"`
+}
+
+type ToolManifest struct {
+	Version int                 `json:"version"`
+	Tools   []ToolManifestEntry `json:"tools"`
+	Policy  ToolPolicy          `json:"policy"`
+}
+
+type ToolPolicy struct {
+	MaxRounds        int `json:"max_rounds"`
+	TimeoutPerToolMS int `json:"timeout_per_tool_ms"`
+	TotalTimeoutMS   int `json:"total_timeout_ms"`
+}
+
+type MemoryManifestEntry struct {
+	Version int        `json:"version"`
+	Service string     `json:"service"`
+	BaseURL string     `json:"base_url"`
+	Recall  *MemoryOp  `json:"recall,omitempty"`
+	Retain  *MemoryOp  `json:"retain,omitempty"`
+	Forget  *MemoryOp  `json:"forget,omitempty"`
+	Auth    *AuthEntry `json:"auth,omitempty"`
+}
+
+type MemoryOp struct {
+	Path      string `json:"path"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
+}
+
+var DefaultToolPolicy = ToolPolicy{
+	MaxRounds:        8,
+	TimeoutPerToolMS: 30000,
+	TotalTimeoutMS:   120000,
+}
+
 // GenerateContextDir writes per-agent context files under:
 //
-//	<runtimeDir>/context/<agent-id>/{AGENTS.md,CLAWDAPUS.md,metadata.json,feeds.json,service-auth/...}
+//	<runtimeDir>/context/<agent-id>/{AGENTS.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,service-auth/...}
 func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 	for _, agent := range agents {
 		if agent.AgentID == "" {
@@ -70,6 +127,30 @@ func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 			}
 			if err := os.WriteFile(filepath.Join(agentDir, "feeds.json"), append(feedsJSON, '\n'), 0644); err != nil {
 				return fmt.Errorf("write feeds.json for %q: %w", agent.AgentID, err)
+			}
+		}
+
+		if len(agent.Tools) > 0 {
+			toolsJSON, err := json.MarshalIndent(ToolManifest{
+				Version: 1,
+				Tools:   agent.Tools,
+				Policy:  DefaultToolPolicy,
+			}, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal tools for %q: %w", agent.AgentID, err)
+			}
+			if err := os.WriteFile(filepath.Join(agentDir, "tools.json"), append(toolsJSON, '\n'), 0644); err != nil {
+				return fmt.Errorf("write tools.json for %q: %w", agent.AgentID, err)
+			}
+		}
+
+		if agent.Memory != nil {
+			memoryJSON, err := json.MarshalIndent(agent.Memory, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal memory for %q: %w", agent.AgentID, err)
+			}
+			if err := os.WriteFile(filepath.Join(agentDir, "memory.json"), append(memoryJSON, '\n'), 0644); err != nil {
+				return fmt.Errorf("write memory.json for %q: %w", agent.AgentID, err)
 			}
 		}
 

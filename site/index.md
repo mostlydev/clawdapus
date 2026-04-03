@@ -110,3 +110,4 @@ claw health -f claw-pod.yml  # ✓ all healthy
 6. **Claws are users** — standard credentials; the proxy governs intent, the service's own auth governs execution
 7. **Compute is a privilege** — operator assigns models and schedules; proxy enforces budgets
 8. **Think twice, act once** — a reasoning model cannot be its own judge
+9. **Memory survives the container (and the runner)** — session history is captured at the proxy boundary and persisted outside the runtime directory. Swap the runtime without losing the mind. The architecture is moving toward an ambient memory plane: pluggable memory services deriving durable state from the retained record, recalled automatically into future inference turns.

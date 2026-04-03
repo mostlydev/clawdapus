@@ -43,7 +43,7 @@ Clawdapus is infrastructure for bots the way Docker is infrastructure for applic
 6. **Compute Is a Privilege** -- Every cognitive cycle is an authorized expenditure. The operator assigns models and schedules; the proxy enforces budgets and rate limits. The bot does not choose its own budget.
 7. **Think Twice, Act Once** -- A reasoning model cannot be its own judge. Prompt-level guardrails are part of the same cognitive process they are trying to constrain. Governance must be executed by a separate, independent process.
 8. **Drift is an Open Metric** -- We do not trust a bot's self-report. However, defining and measuring behavioral drift is complex and organization-specific. By delegating interception to a swappable governance proxy, the infrastructure avoids defining drift itself, leaving it as an open operational metric for the proxy to explore and quantify.
-9. **Memory Survives the Container (and the Runner)** -- A bot acting as a persistent presence cannot afford amnesia. Session history is captured at the proxy boundary and stored outside the runtime directory — infrastructure-owned, always present, never dependent on runner cooperation. The runner's own scratch space is separately persisted. Two surfaces, two owners, both durable. Because the architecture is the agent, and the runtime is just the voice, you can swap the `CLAW_TYPE` (the runner) without losing the mind. Knowledge and context seamlessly cross runtime boundaries.
+9. **Memory Survives the Container (and the Runner)** -- A bot acting as a persistent presence cannot afford amnesia. Session history is captured at the proxy boundary and stored outside the runtime directory — infrastructure-owned, always present, never dependent on runner cooperation. The runner's own scratch space is separately persisted. Two surfaces, two owners, both durable. Because the architecture is the agent, and the runtime is just the voice, you can swap the `CLAW_TYPE` (the runner) without losing the mind. Knowledge and context seamlessly cross runtime boundaries. But retention alone is not memory. The architecture is moving toward an **ambient memory plane**: pluggable memory services deriving durable state from the retained record, and the governance proxy recalling relevant context back into the inference stream on future turns — automatically, without the agent asking.
 
 ---
 
@@ -91,6 +91,12 @@ Isolation is achieved by strictly separating secrets. The proxy holds the real L
 
 **Transport (Shared Pod Proxy):**
 By default, Clawdapus deploys shared governance proxy service(s) per pod, named by type (`cllama-<type>`). It uses the Bearer Token to resolve which agent is making the request, dynamically loads that agent's specific contract, and applies the policy. This drastically reduces resource overhead for multi-agent fleets while enabling pod-wide compute budgeting.
+
+### VIII. Persistence and Memory
+
+Two persistence surfaces support the running bot. **Session history** is infrastructure-owned: the governance proxy captures every successful LLM turn at the network boundary and writes it to a durable directory outside the runtime tree. This happens regardless of runner type, without any runner cooperation. **Portable memory** is runner-owned: the agent's scratch and note-taking space, mounted at `/claw/memory`. Both surfaces survive container restarts and `claw up` re-runs. A bot deployed for months does not lose its conversational past when its container is recreated.
+
+A planned **ambient memory plane** builds on these surfaces. Pluggable memory services consume the session history ledger and derive durable state — facts, commitments, episodic summaries, project context. The governance proxy recalls that state into future inference turns automatically. Memory recall is query-aware: unlike feeds, which deliver the same cached content regardless of conversation, recall is shaped by the current inference request. Memory intelligence — embeddings, ranking, summarization, graph extraction — lives in swappable services behind a stable contract, not in the proxy or the runner. See [ADR-021](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/021-memory-plane-and-pluggable-recall.md).
 
 ---
 

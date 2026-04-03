@@ -66,6 +66,7 @@ export default defineConfig({
           { text: 'Clawfile', link: '/guide/clawfile' },
           { text: 'Pod YAML', link: '/guide/pod-yaml' },
           { text: 'cllama Governance Proxy', link: '/guide/cllama' },
+          { text: 'Memory Plane', link: '/guide/memory' },
           { text: 'Surfaces & Skills', link: '/guide/surfaces-and-skills' },
           { text: 'Compilation Principles', link: '/guide/compilation-principles' },
           { text: 'Social Topology', link: '/guide/social-topology' },

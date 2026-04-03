@@ -44,6 +44,8 @@ type ClawBlock struct {
 	Count        int
 	Handles      map[string]*driver.HandleInfo // platform → contact card
 	Feeds        []FeedEntry
+	Tools        []ToolPolicyEntry
+	Memory       *MemoryEntry
 	Include      []IncludeEntry
 	Surfaces     []driver.ResolvedSurface
 	Skills       []string
@@ -69,6 +71,16 @@ type FeedEntry struct {
 	TTL         int
 	Description string
 	Unresolved  bool
+}
+
+type ToolPolicyEntry struct {
+	Service string
+	Allow   []string
+}
+
+type MemoryEntry struct {
+	Service   string
+	TimeoutMS int
 }
 
 type IncludeEntry struct {

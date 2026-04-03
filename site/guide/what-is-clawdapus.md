@@ -43,6 +43,7 @@ It is the layer below the framework. The layer above the operating system.
 6. **Claws are users** -- standard credentials; the proxy governs intent, the service's own auth governs execution.
 7. **Compute is a privilege** -- the operator assigns models and schedules; the proxy enforces budgets and rate limits.
 8. **Think twice, act once** -- a reasoning model cannot be its own judge. Governance runs in a separate process.
+9. **Memory survives the container (and the runner)** -- session history is captured at the proxy boundary and persisted outside the runtime directory. Swap the runtime without losing the mind. The architecture is moving toward an ambient memory plane: pluggable memory services deriving durable state from the retained record, recalled automatically into future inference turns.
 
 ## Master Claw
 
@@ -108,7 +109,8 @@ Tracked mutation is evolution. Untracked mutation is drift. Ad hoc capability-bu
 | Phase 4.7 -- Nanobot + PicoClaw + NullClaw + MicroClaw drivers | Done |
 | Phase 4.8 -- Hermes driver + shared helper extraction | Done |
 | Phase 4.9 -- Peer handles, mention safety, healthcheck passthrough | Done |
-| Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds | Design |
+| Phase 4.10 -- Memory capability plane: subscriptions, backfill, history IDs | Done |
+| Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds, ambient recall | Design |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
 
 ## Next Steps
