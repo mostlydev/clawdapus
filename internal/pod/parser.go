@@ -63,6 +63,8 @@ type rawClawBlock struct {
 	Count     int                    `yaml:"count"`
 	Handles   map[string]interface{} `yaml:"handles"`
 	Feeds     []rawFeedEntry         `yaml:"feeds"`
+	Tools     []rawToolPolicyEntry   `yaml:"tools"`
+	Memory    *rawMemoryEntry        `yaml:"memory"`
 	Include   []rawIncludeEntry      `yaml:"include"`
 	Surfaces  []interface{}          `yaml:"surfaces"`
 	Skills    []string               `yaml:"skills"`
@@ -77,6 +79,16 @@ type rawFeedEntry struct {
 	TTL         int    `yaml:"ttl"`
 	Description string `yaml:"description"`
 	Unresolved  bool   `yaml:"-"`
+}
+
+type rawToolPolicyEntry struct {
+	Service string      `yaml:"service"`
+	Allow   interface{} `yaml:"allow"`
+}
+
+type rawMemoryEntry struct {
+	Service   string `yaml:"service"`
+	TimeoutMS *int   `yaml:"timeout-ms"`
 }
 
 type rawIncludeEntry struct {
@@ -211,6 +223,14 @@ func Parse(r io.Reader) (*Pod, error) {
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse feeds: %w", name, err)
 			}
+			tools, err := parseTools(svc.XClaw.Tools)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: parse tools: %w", name, err)
+			}
+			memory, err := parseMemory(svc.XClaw.Memory)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: parse memory: %w", name, err)
+			}
 			invoke := make([]InvokeEntry, 0, len(svc.XClaw.Invoke))
 			for _, rawInv := range svc.XClaw.Invoke {
 				if rawInv.Schedule == "" || rawInv.Message == "" {
@@ -235,6 +255,8 @@ func Parse(r io.Reader) (*Pod, error) {
 				Count:       count,
 				Handles:     handles,
 				Feeds:       feeds,
+				Tools:       tools,
+				Memory:      memory,
 				Include:     include,
 				Surfaces:    parsedSurfaces,
 				Skills:      skills,
@@ -419,6 +441,99 @@ func parseFeeds(rawFeeds []rawFeedEntry) ([]FeedEntry, error) {
 	return out, nil
 }
 
+func parseTools(rawTools []rawToolPolicyEntry) ([]ToolPolicyEntry, error) {
+	if len(rawTools) == 0 {
+		return nil, nil
+	}
+
+	out := make([]ToolPolicyEntry, 0, len(rawTools))
+	for i, raw := range rawTools {
+		service := strings.TrimSpace(raw.Service)
+		if service == "" {
+			return nil, fmt.Errorf("tool policy %d: service is required", i)
+		}
+		allow, err := parseToolAllow(raw.Allow)
+		if err != nil {
+			return nil, fmt.Errorf("tool policy %d: %w", i, err)
+		}
+		out = append(out, ToolPolicyEntry{
+			Service: service,
+			Allow:   allow,
+		})
+	}
+	return out, nil
+}
+
+func parseToolAllow(raw interface{}) ([]string, error) {
+	if raw == nil {
+		return []string{"all"}, nil
+	}
+
+	var allow []string
+	switch v := raw.(type) {
+	case string:
+		allow = []string{v}
+	case []string:
+		allow = append([]string(nil), v...)
+	case []interface{}:
+		allow = make([]string, 0, len(v))
+		for i, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("allow[%d] must be a string, got %T", i, item)
+			}
+			allow = append(allow, s)
+		}
+	default:
+		return nil, fmt.Errorf("allow must be a string or list, got %T", raw)
+	}
+
+	if len(allow) == 0 {
+		return nil, fmt.Errorf("allow must not be empty")
+	}
+
+	normalized := make([]string, 0, len(allow))
+	hasAll := false
+	for i, item := range allow {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return nil, fmt.Errorf("allow[%d] must not be empty", i)
+		}
+		if item == "all" {
+			hasAll = true
+		}
+		normalized = append(normalized, item)
+	}
+	if hasAll && len(normalized) > 1 {
+		return nil, fmt.Errorf(`allow "all" must not be combined with named tools`)
+	}
+	return normalized, nil
+}
+
+func parseMemory(raw *rawMemoryEntry) (*MemoryEntry, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	service := strings.TrimSpace(raw.Service)
+	if service == "" {
+		return nil, fmt.Errorf("service is required")
+	}
+
+	timeoutMS := 300
+	if raw.TimeoutMS != nil {
+		if *raw.TimeoutMS <= 0 {
+			return nil, fmt.Errorf("timeout-ms must be > 0")
+		}
+		timeoutMS = *raw.TimeoutMS
+	}
+
+	return &MemoryEntry{
+		Service:   service,
+		TimeoutMS: timeoutMS,
+	}, nil
+}
+
 func (r *rawFeedEntry) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.ScalarNode:
@@ -442,6 +557,28 @@ func (r *rawFeedEntry) UnmarshalYAML(node *yaml.Node) error {
 	}
 }
 
+func (r *rawToolPolicyEntry) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.TrimSpace(node.Value) == "" {
+			return fmt.Errorf("tool service must not be empty")
+		}
+		r.Service = strings.TrimSpace(node.Value)
+		r.Allow = nil
+		return nil
+	case yaml.MappingNode:
+		type alias rawToolPolicyEntry
+		var parsed alias
+		if err := node.Decode(&parsed); err != nil {
+			return err
+		}
+		*r = rawToolPolicyEntry(parsed)
+		return nil
+	default:
+		return fmt.Errorf("tool entry must be a string or mapping, got %s", yamlKindString(node.Kind))
+	}
+}
+
 func expandPodDefaults(root map[string]interface{}) error {
 	if len(root) == 0 {
 		return nil
@@ -459,6 +596,8 @@ func expandPodDefaults(root map[string]interface{}) error {
 		CllamaDefaults:   deepCopyMapOrNil(rawXClaw["cllama-defaults"]),
 		SurfacesDefaults: deepCopySliceOrNil(rawXClaw["surfaces-defaults"]),
 		FeedsDefaults:    deepCopySliceOrNil(rawXClaw["feeds-defaults"]),
+		ToolsDefaults:    deepCopySliceOrNil(rawXClaw["tools-defaults"]),
+		MemoryDefaults:   deepCopyMapOrNil(rawXClaw["memory-defaults"]),
 		SkillsDefaults:   deepCopySliceOrNil(rawXClaw["skills-defaults"]),
 	}
 
@@ -499,6 +638,8 @@ type podDefaults struct {
 	CllamaDefaults   map[string]interface{}
 	SurfacesDefaults []interface{}
 	FeedsDefaults    []interface{}
+	ToolsDefaults    []interface{}
+	MemoryDefaults   map[string]interface{}
 	SkillsDefaults   []interface{}
 }
 
@@ -510,6 +651,12 @@ func applyRawPodDefaults(raw map[string]interface{}, defaults podDefaults) error
 		return err
 	}
 	if err := applyRawListDefaults(raw, "feeds", defaults.FeedsDefaults); err != nil {
+		return err
+	}
+	if err := applyRawListDefaults(raw, "tools", defaults.ToolsDefaults); err != nil {
+		return err
+	}
+	if err := applyRawObjectDefault(raw, "memory", defaults.MemoryDefaults); err != nil {
 		return err
 	}
 	if err := applyRawListDefaults(raw, "skills", defaults.SkillsDefaults); err != nil {
@@ -586,6 +733,17 @@ func applyRawListDefaults(raw map[string]interface{}, key string, defaults []int
 	expanded = append(expanded, deepCopyInterfaces(defaults)...)
 	expanded = append(expanded, deepCopyInterfaces(serviceList[spreadIdx+1:])...)
 	raw[key] = expanded
+	return nil
+}
+
+func applyRawObjectDefault(raw map[string]interface{}, key string, defaults map[string]interface{}) error {
+	if len(defaults) == 0 {
+		return nil
+	}
+	if _, present := raw[key]; present {
+		return nil
+	}
+	raw[key] = deepCopyMap(defaults)
 	return nil
 }
 

@@ -93,6 +93,32 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 			TTL:    30,
 			URL:    "http://claw-api:8080/fleet/alerts",
 		}},
+		Tools: []ToolManifestEntry{{
+			Name:        "trading-api.get_market_context",
+			Description: "Retrieve market context",
+			InputSchema: map[string]interface{}{"type": "object"},
+			Execution: ToolExecution{
+				Transport: "http",
+				Service:   "trading-api",
+				BaseURL:   "http://trading-api:4000",
+				Method:    "GET",
+				Path:      "/api/v1/market_context/{claw_id}",
+				Auth:      &AuthEntry{Type: "bearer", Token: "service-token"},
+			},
+		}},
+		Memory: &MemoryManifestEntry{
+			Version: 1,
+			Service: "team-memory",
+			BaseURL: "http://team-memory:8080",
+			Recall: &MemoryOp{
+				Path:      "/recall",
+				TimeoutMS: 300,
+			},
+			Retain: &MemoryOp{
+				Path: "/retain",
+			},
+			Auth: &AuthEntry{Type: "bearer", Token: "memory-token"},
+		},
 		ServiceAuth: []ServiceAuthEntry{{
 			Service:   "claw-api",
 			AuthType:  "bearer",
@@ -115,6 +141,34 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 	}
 	if len(feeds) != 1 || feeds[0]["name"] != "fleet-alerts" {
 		t.Fatalf("unexpected feeds payload: %v", feeds)
+	}
+
+	toolsRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "tools.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var toolsManifest map[string]interface{}
+	if err := json.Unmarshal(toolsRaw, &toolsManifest); err != nil {
+		t.Fatal(err)
+	}
+	if toolsManifest["version"].(float64) != 1 {
+		t.Fatalf("unexpected tools manifest version: %v", toolsManifest)
+	}
+	tools := toolsManifest["tools"].([]interface{})
+	if len(tools) != 1 {
+		t.Fatalf("unexpected tools manifest payload: %v", toolsManifest)
+	}
+
+	memoryRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "memory.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var memory map[string]interface{}
+	if err := json.Unmarshal(memoryRaw, &memory); err != nil {
+		t.Fatal(err)
+	}
+	if memory["service"] != "team-memory" {
+		t.Fatalf("unexpected memory manifest payload: %v", memory)
 	}
 
 	authRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "service-auth", "claw-api.json"))

@@ -350,6 +350,7 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Identity resolution:** Single proxy serves an entire pod. Bearer tokens resolve which agent is calling.
 - **Cost accounting:** Extracts token usage from every response, multiplies by pricing table, tracks per agent/provider/model.
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
+- **Planned ambient memory:** The architecture is moving toward querying pluggable memory services before each inference turn, injecting relevant derived context — facts, commitments, summaries — into the prompt automatically. Memory intelligence will live in swappable services, not in the proxy.
 - **Operator dashboard:** Real-time web UI at host port 8181 by default (container `:8081`) — agent activity, provider status, cost breakdown.
 
 The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
@@ -482,7 +483,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 6. **Claws are users** — standard credentials; the proxy governs intent, the service's own auth governs execution
 7. **Compute is a privilege** — operator assigns models and schedules; proxy enforces budgets and rate limits; bot doesn't choose
 8. **Think twice, act once** — a reasoning model cannot be its own judge
-9. **Memory survives the container (and the runner)** — session history is captured at the proxy boundary and persisted outside the runtime directory. Bots don't start amnesia-fresh after every restart. Infrastructure owns the record; the runner owns the scratch space. Two surfaces, two owners, never merged. Because the architecture is the agent, you can swap the runtime (`CLAW_TYPE`) without losing the mind; knowledge seamlessly crosses driver boundaries.
+9. **Memory survives the container (and the runner)** — session history is captured at the proxy boundary and persisted outside the runtime directory. Bots don't start amnesia-fresh after every restart. Infrastructure owns the record; the runner owns the scratch space. Two surfaces, two owners, never merged. Because the architecture is the agent, you can swap the runtime (`CLAW_TYPE`) without losing the mind; knowledge seamlessly crosses driver boundaries. Retention is only half of memory. The architecture is moving toward an **ambient memory plane**: pluggable memory services deriving durable state from the retained record, and the proxy recalling relevant context into future inference turns automatically. The agent would not manage its own long-term memory — infrastructure would.
 
 ---
 
