@@ -26,7 +26,7 @@ outline: deep
 | Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012-015) |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
 
-## Unreleased
+## v0.5.0 <Badge type="tip" text="Latest" /> {#v0-5-0}
 
 *2026-04-03*
 
@@ -35,8 +35,49 @@ outline: deep
 - **Cross-turn continuity for mediated tools** — hidden managed tool rounds are preserved across later turns so the upstream model sees the effective transcript that produced the runner-visible assistant reply.
 - **Memory plane hardening** — pre-turn recall and post-turn retain hooks are live in `cllama`, with structured `memory_op` telemetry, stable session-history entry IDs, governed `claw memory forget`, tombstone-aware replay, indexed `--after` backfill reads, and retain/recall policy-removal accounting.
 - **Reference memory adapter** — Clawdapus now ships a file-backed reference memory service under `examples/reference-memory` that dedupes by stable `entry.id`, honors forget tombstones, and is used by the rollcall example plus the capability-wave spike path.
+- **Site branding refresh** — new octopus glyph mark with regenerated favicons across all sizes.
 
-## v0.3.6 <Badge type="tip" text="Latest" /> {#v0-3-6}
+## v0.4.3 {#v0-4-3}
+
+*2026-03-28*
+
+- **cllama model policy enforcement** — `claw up` compiles per-service model policies from pod YAML; cllama enforces allowed models, providers, and xAI seed support at the proxy layer.
+- **`claw update` subcommand** — self-update via the install script with hourly check during active development.
+- **`REPO_ROOT` surface placeholders** — volume surface paths now support `REPO_ROOT` substitution.
+- Cross-runner memory portability formalized in docs.
+
+## v0.4.2 {#v0-4-2}
+
+*2026-03-27*
+
+- **Session history** — `claw up` creates a persistent `.claw-session-history/` directory bind-mounted into cllama; proxy writes per-agent `history.jsonl` with `reported_cost_usd` on every 2xx completion. Survives container restarts and driver migrations.
+- **Descriptor discovery from Dockerfile labels** — `claw inspect` reads `.claw-describe.json` from image labels, not just the filesystem.
+- **Portable history importer** for trading-desk example feeds.
+- Fixes: OpenClaw mention regex and workspace permissions, claw-api alert window, claw-wall quiet-turn context.
+- ADR-018: session history and memory retention — two surfaces, two owners.
+
+## v0.4.1 {#v0-4-1}
+
+*2026-03-26*
+
+- **Communication tools contract** — all 7 runtimes now enforce private thinking + explicit `send_message` delivery. Agent reasoning never reaches Discord automatically.
+  - Hermes: `HERMES_TOOL_ONLY_MODE` injected by driver; runtime patches suppress text auto-routing
+  - OpenClaw: already enforced natively
+  - NullClaw, MicroClaw, NanoClaw, NanoBot, PicoClaw: `discord-responder.sh` passes a `send_message` tool to the LLM
+- **Spike test hardened** — `TestSpikeRollCall` always rebuilds stub base images; 7/7 runtimes pass end-to-end.
+
+## v0.4.0 {#v0-4-0}
+
+*2026-03-26*
+
+- **Hermes tool-only mode** — Hermes agents communicate exclusively via `send_message` tool calls when Discord handles are configured.
+- **`hermes-base` image** — real runtime build replaces rollcall stub. `patch-hermes-runtime.py` applies compatibility fixes at build time: disabled intents, non-blocking slash-command sync, reply-mention suppression, `tool_choice=required` on first turn.
+- **`claw up` auto-builds `hermes:latest`** via `ensureInfraImages`.
+- **cllama v0.2.3** — unpriced request tracking, reported cost passthrough, timezone context injection.
+- **clawdash** — surfaces `unpriced_requests` with amber warning in fleet page.
+- **CLAWDAPUS.md** — adds `## Communication Tools` section with private-thinking policy when handles are configured.
+
+## v0.3.6 {#v0-3-6}
 
 *2026-03-23*
 
