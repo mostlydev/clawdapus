@@ -99,10 +99,10 @@ type memoryStore struct {
 }
 
 type agentMemories struct {
-	entries     map[string]storedMemory
-	order       []string
-	tombstones  map[string]memoryTombstone
-	tombstoned  map[string]struct{}
+	entries    map[string]storedMemory
+	order      []string
+	tombstones map[string]memoryTombstone
+	tombstoned map[string]struct{}
 }
 
 type scoredMemory struct {
@@ -355,31 +355,40 @@ func (s *memoryStore) recall(req memoryRecallRequest) ([]memoryBlock, error) {
 		return nil, errors.New("agent_id is required")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	agent, ok := s.agents[agentID]
-	if !ok || len(agent.order) == 0 {
-		return nil, nil
-	}
-
 	queryText := normalizeSpace(strings.Join([]string{
 		flattenStructuredText(req.Messages),
 		flattenStructuredText(req.System),
 	}, " "))
 	queryTokens := tokenize(queryText)
 
-	scored := make([]scoredMemory, 0, len(agent.order))
-	for i := len(agent.order) - 1; i >= 0; i-- {
-		record, ok := agent.entries[agent.order[i]]
+	s.mu.Lock()
+	agent, ok := s.agents[agentID]
+	if !ok || len(agent.order) == 0 {
+		s.mu.Unlock()
+		return nil, nil
+	}
+
+	// Snapshot the current retained entries under lock, then do ranking work after
+	// unlock so recall scoring does not block concurrent retain/forget operations.
+	records := make([]scoredMemory, 0, len(agent.order))
+	for i, entryID := range agent.order {
+		record, ok := agent.entries[entryID]
 		if !ok {
 			continue
 		}
-		score := matchScore(queryTokens, record.SearchText)
-		scored = append(scored, scoredMemory{record: record, score: score, index: i})
+		records = append(records, scoredMemory{record: record, index: i})
 	}
-	if len(scored) == 0 {
+	s.mu.Unlock()
+
+	if len(records) == 0 {
 		return nil, nil
+	}
+
+	scored := make([]scoredMemory, 0, len(records))
+	for i := len(records) - 1; i >= 0; i-- {
+		record := records[i]
+		record.score = matchScore(queryTokens, record.record.SearchText)
+		scored = append(scored, record)
 	}
 
 	if len(queryTokens) > 0 {
