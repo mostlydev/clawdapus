@@ -838,6 +838,104 @@ func TestValidateClawAPIDeclarationsAllowsDeclarationsWithMaster(t *testing.T) {
 	}
 }
 
+func TestValidateManagedCapabilityDeclarationsAllowsCllamaManagedService(t *testing.T) {
+	const yaml = `
+x-claw:
+  pod: capabilities-pod
+
+services:
+  analyst:
+    image: analyst:latest
+    x-claw:
+      agent: ./AGENTS.md
+      cllama: passthrough
+      tools:
+        - trading-api
+      memory:
+        service: team-memory
+`
+
+	p, err := pod.Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	err = validateManagedCapabilityDeclarations(p, map[string]*driver.ResolvedClaw{
+		"analyst": {Cllama: []string{"passthrough"}},
+	})
+	if err != nil {
+		t.Fatalf("expected cllama-managed service to pass validation, got: %v", err)
+	}
+}
+
+func TestValidateManagedCapabilityDeclarationsRejectsNonCllamaServiceLevelDeclarations(t *testing.T) {
+	const yaml = `
+x-claw:
+  pod: capabilities-pod
+
+services:
+  analyst:
+    image: analyst:latest
+    x-claw:
+      agent: ./AGENTS.md
+      tools:
+        - trading-api
+      memory:
+        service: team-memory
+`
+
+	p, err := pod.Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	err = validateManagedCapabilityDeclarations(p, map[string]*driver.ResolvedClaw{
+		"analyst": {},
+	})
+	if err == nil {
+		t.Fatal("expected non-cllama capability declaration error")
+	}
+	for _, want := range []string{"service \"analyst\"", "x-claw.tools", "x-claw.memory", "x-claw.cllama"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected %q in error, got: %v", want, err)
+		}
+	}
+}
+
+func TestValidateManagedCapabilityDeclarationsRejectsInheritedDefaultsWithoutCllama(t *testing.T) {
+	const yaml = `
+x-claw:
+  pod: defaults-pod
+  tools-defaults:
+    - service: trading-api
+  memory-defaults:
+    service: team-memory
+
+services:
+  worker:
+    image: worker:latest
+    x-claw:
+      agent: ./AGENTS.md
+`
+
+	p, err := pod.Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	err = validateManagedCapabilityDeclarations(p, map[string]*driver.ResolvedClaw{
+		"worker": {},
+	})
+	if err == nil {
+		t.Fatal("expected inherited non-cllama capability declaration error")
+	}
+	for _, want := range []string{"service \"worker\"", "x-claw.tools", "x-claw.memory"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected %q in error, got: %v", want, err)
+		}
+	}
+}
+
 func TestMergedPortsExposeOnly(t *testing.T) {
 	merged := mergedPorts([]string{"80"}, nil)
 	if len(merged) != 1 || merged[0] != "80" {

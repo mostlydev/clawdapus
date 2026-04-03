@@ -340,6 +340,9 @@ func runComposeUp(podFile string) error {
 	}
 
 	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
+	if err := validateManagedCapabilityDeclarations(p, resolvedClaws); err != nil {
+		return err
+	}
 	if err := injectConversationWall(p, resolvedClaws); err != nil {
 		return err
 	}
@@ -761,6 +764,52 @@ func validateClawAPIDeclarations(p *pod.Pod) error {
 		}
 	}
 	return nil
+}
+
+// validateManagedCapabilityDeclarations ensures x-claw.tools and x-claw.memory
+// are only accepted on services that actually run behind cllama today. Without
+// cllama, these declarations compile into no runtime artifacts, which makes
+// them silent no-ops rather than an intentional native projection path.
+func validateManagedCapabilityDeclarations(p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw) error {
+	if p == nil {
+		return nil
+	}
+	for name, svc := range p.Services {
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+
+		capabilities := unsupportedManagedCapabilityList(svc.Claw)
+		if len(capabilities) == 0 {
+			continue
+		}
+
+		if rc := resolvedClaws[name]; rc != nil && len(rc.Cllama) > 0 {
+			continue
+		}
+
+		return fmt.Errorf(
+			"service %q: %s require x-claw.cllama on the consuming service; native projection for non-cllama services is not implemented",
+			name,
+			strings.Join(capabilities, " and "),
+		)
+	}
+	return nil
+}
+
+func unsupportedManagedCapabilityList(claw *pod.ClawBlock) []string {
+	if claw == nil {
+		return nil
+	}
+
+	capabilities := make([]string, 0, 2)
+	if len(claw.Tools) > 0 {
+		capabilities = append(capabilities, "x-claw.tools")
+	}
+	if claw.Memory != nil {
+		capabilities = append(capabilities, "x-claw.memory")
+	}
+	return capabilities
 }
 
 func resetRuntimeDir(path string) error {

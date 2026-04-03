@@ -186,6 +186,7 @@ Important ADR-020 status note:
   - `x-claw.tools` is parsed and normalized
   - `claw up` writes `tools.json`
   - `CLAWDAPUS.md` lists managed tools
+  - `claw up` now fails fast when non-`cllama` services declare `x-claw.tools` or `x-claw.memory`, rather than accepting silent no-op capability config
 - the mediated runtime side is now substantially landed for OpenAI-compatible and Anthropic-format requests:
   - `cllama` loads `tools.json`
   - `cllama` injects managed tools into upstream OpenAI-compatible and Anthropic requests
@@ -202,7 +203,6 @@ Still open:
 - ADR-020 remaining runtime work, specifically:
   - transport keepalive/progress comments for long managed streaming requests
   - `claw audit` mediated-tool reporting and related operator polish
-- validation or native projection for non-`cllama` services that declare `x-claw.tools` or `x-claw.memory`
 - tombstone/forget flow and replay hygiene
 - a more scalable replay path than forward-scanning large JSONL files
 - retain/recall policy filtering and policy-removal accounting
