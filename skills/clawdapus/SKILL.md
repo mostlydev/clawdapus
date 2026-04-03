@@ -1,6 +1,6 @@
 ---
 name: clawdapus
-description: Use when working with the claw CLI, Clawfiles, claw-pod.yml, cllama proxy, or deploying AI agent containers with Clawdapus. Use when you see CLAW_TYPE, AGENT, MODEL, CLLAMA, CONFIGURE, INVOKE, SURFACE, HANDLE, TRACK, SKILL, or PRIVILEGE directives. Use when diagnosing agent startup failures, credential starvation, config injection, or governance proxy issues.
+description: Use when working with the claw CLI, Clawfiles, claw-pod.yml, cllama proxy, or deploying AI agent containers with Clawdapus. Use when you see CLAW_TYPE, AGENT, MODEL, CLLAMA, CONFIGURE, INVOKE, SURFACE, HANDLE, TRACK, SKILL, or PRIVILEGE directives. Use when diagnosing agent startup failures, credential starvation, config injection, governance proxy issues, managed tool mediation, or memory plane problems.
 ---
 
 # Clawdapus — Operational Skill
@@ -21,17 +21,38 @@ claw build -t <image> <path>        # Clawfile -> Dockerfile.generated -> docker
 claw inspect <image>                 # show claw.* labels from built image
 
 # Pod lifecycle (mirrors docker compose UX)
-claw up [-f <pod>.yml] [-d]      # parse pod, enforce drivers, emit compose.generated.yml, launch
-claw down [-f <pod>.yml]         # tear down
-claw ps [-f <pod>.yml]           # container status
-claw logs [-f <pod>.yml] [svc]   # stream logs
-claw health [-f <pod>.yml]       # driver health probes
-claw compose <cmd> [args]        # passthrough: any docker compose subcommand
+claw up [-f <pod>.yml] [-d]         # parse pod, enforce drivers, emit compose.generated.yml, launch
+claw down [-f <pod>.yml]            # tear down
+claw ps [-f <pod>.yml]              # container status
+claw logs [-f <pod>.yml] [svc]      # stream logs (--follow)
+claw health [-f <pod>.yml]          # driver health probes
+claw compose <cmd> [args]           # passthrough: any docker compose subcommand
+
+# Scaffold
+claw init [dir]                     # interactive project scaffold
+claw agent add [name]               # add agent service to existing pod
+
+# Observability
+claw audit [--since <dur>] [--claw <id>] [--type <type>] [--json]
+                                    # summarize cllama telemetry from container logs
+                                    # types: request, response, error, intervention,
+                                    #        feed_fetch, provider_pool, tool_call
+
+# Session history & memory
+claw history export <agent-id>      # export session history as NDJSON
+    [--after <RFC3339>] [--limit N]
+claw memory backfill <mem-svc>      # replay retained history to memory service
+    [--after <RFC3339>] [--limit N] [--agent <id>]
+claw memory forget <mem-svc>        # forget entries by ID with governed tombstones
+    --entry-id <id> --agent <id> [--reason <text>]
+
+# Maintenance
+claw update                         # re-run install.sh to update binary
 ```
 
 Lifecycle commands block if `claw-pod.yml` is newer than `compose.generated.yml` — run `claw up` to regenerate. `claw down` is exempt.
 
-`-f` locates `compose.generated.yml` next to the pod file. Without `-f`, `claw up` uses `./claw-pod.yml`; other lifecycle commands (`down`/`ps`/`logs`/`health`) look for `compose.generated.yml` in the current directory.
+`-f` locates `compose.generated.yml` next to the pod file. Without `-f`, `claw up` uses `./claw-pod.yml`; other lifecycle commands look for `compose.generated.yml` in the current directory.
 
 ## Clawfile Reference
 
@@ -47,6 +68,7 @@ MODEL primary openrouter/anthropic/claude-sonnet-4
 MODEL fallback anthropic/claude-haiku-3-5
 
 CLLAMA passthrough                          # governance proxy type
+PERSONA ./personas/trader                   # identity materialization (local or OCI)
 
 HANDLE discord                              # platform identity declaration
 INVOKE 15 8 * * 1-5  pre-market             # cron schedule (5-field + name)
@@ -64,19 +86,20 @@ PRIVILEGE runtime claw-user
 
 ### Directive Details
 
-| Directive | Purpose | Build → Runtime |
+| Directive | Purpose | Build -> Runtime |
 |-----------|---------|-----------------|
-| `CLAW_TYPE <type>` | Selects driver (`openclaw`, `nanoclaw`, `generic`). Determines HOW enforcement happens. | Label → driver selection |
-| `AGENT <file>` | Behavioral contract. **Must exist on host or startup fails.** Mounted read-only. | Label → `:ro` bind mount |
-| `MODEL <slot> <provider/model>` | Named model slot. Multiple allowed. Format: `provider/model-name`. | Label → driver config injection |
-| `CLLAMA <type>` | Governance proxy. Currently only `passthrough`. Multiple allowed in data model but runtime enforces max 1. | Label → proxy sidecar wiring |
-| `HANDLE <platform>` | Platform identity (`discord`, `slack`). Broadcasts agent ID to all pod services as `CLAW_HANDLE_*` env vars. | Label → driver config + pod env |
+| `CLAW_TYPE <type>` | Selects driver. Determines HOW enforcement happens. | Label -> driver selection |
+| `AGENT <file>` | Behavioral contract. **Must exist on host or startup fails.** Mounted read-only. | Label -> `:ro` bind mount |
+| `MODEL <slot> <provider/model>` | Named model slot. Multiple allowed. Format: `provider/model-name`. | Label -> driver config injection |
+| `CLLAMA <type>` | Governance proxy. Currently only `passthrough`. Runtime enforces max 1. | Label -> proxy sidecar wiring |
+| `PERSONA <path>` | Identity materialization. Local refs copied with traversal hardening; non-local pulled as OCI artifacts. Sets `CLAW_PERSONA_DIR` only when present. | Label -> runtime materialization |
+| `HANDLE <platform>` | Platform identity (`discord`, `slack`, `telegram`). Broadcasts agent ID as `CLAW_HANDLE_*` env vars. | Label -> driver config + pod env |
 | `INVOKE <cron> <name>` | System cron in `/etc/cron.d/claw`. Bot cannot modify. | Baked into image |
-| `SURFACE <scheme>://<target> [mode]` | Infrastructure boundary. See Surface Taxonomy. | Label → compose wiring |
-| `SKILL <file>` | Reference markdown mounted read-only into runner skill directory. | Label → host path validation + mount |
+| `SURFACE <scheme>://<target> [mode]` | Infrastructure boundary. See Surface Taxonomy. | Label -> compose wiring |
+| `SKILL <file>` | Reference markdown mounted read-only into runner skill directory. | Label -> host path validation + mount |
 | `CONFIGURE <cmd>` | **Runs at startup** via `/claw/configure.sh`. For init-time config mutations. NOT build time. | Generates script |
 | `TRACK <pkg-managers>` | Installs wrappers for `apt`, `pip`, `npm` to log mutations. | Build-time install |
-| `PRIVILEGE <mode> <user>` | Maps privilege modes to user specs. | Label → Docker user/security |
+| `PRIVILEGE <mode> <user>` | Maps privilege modes to user specs. | Label -> Docker user/security |
 
 ## Surface Taxonomy
 
@@ -97,6 +120,24 @@ Extended docker-compose. Claw config lives under `x-claw:` (Docker ignores this 
 ```yaml
 x-claw:
   pod: my-pod                        # optional pod name
+  # Pod-level defaults (services inherit; override or extend with ...)
+  cllama-defaults: passthrough
+  handles-defaults:
+    discord:
+      id: "${BOT_DISCORD_ID}"
+      username: "my-bot"
+      guilds: [...]
+  surfaces-defaults:
+    - "service://trading-api"
+  feeds-defaults:
+    - fleet-alerts
+  skills-defaults:
+    - ./skills/shared-runbook.md
+  tools-defaults:
+    - trading-api
+  memory-defaults:
+    service: team-memory
+    timeout-ms: 300
 
 services:
   my-agent:
@@ -127,6 +168,17 @@ services:
               allow_from: ["USER_ID"]
       skills:
         - ./skills/custom-runbook.md
+      feeds:
+        - fleet-alerts               # short-form feed name (resolved from feed registry)
+      tools:                          # v0.5.0: managed tool subscriptions (cllama-only)
+        - trading-api                 # scalar = subscribe to ALL tools from this service
+        - service: analytics          # map form = named allow list
+          allow:
+            - get_summary
+            - get_report
+      memory:                         # v0.5.0: ambient memory subscription (cllama-only)
+        service: team-memory
+        timeout-ms: 450              # recall timeout per turn (default 300ms)
       invoke:                         # pod-level scheduled tasks
         - schedule: "*/30 * * * *"
           name: "Heartbeat"
@@ -142,6 +194,50 @@ services:
 - **`cllama-env`**: Provider API keys for the proxy. These go ONLY here — never in agent `environment:`. Credential starvation enforced.
 - **`handles`**: Discord bot IDs, usernames, guilds. Clawdapus auto-generates `mentionPatterns`, `allowBots: true`, peer `users[]` allowlist.
 - **`surfaces`**: String form (`"channel://discord"`) = simple enable. Map form (`channel://discord: {dm: {...}}`) = routing config.
+- **`tools`**: Requires `cllama` on the consuming service. Services must publish tools via `claw.describe` descriptor v2. `allow: all` (implicit for scalar form) passes every tool; named lists are validated against the tool registry.
+- **`memory`**: Requires `cllama` on the consuming service. Target service must declare `memory` in its `claw.describe` descriptor v2.
+- **Pod defaults**: `*-defaults` at pod level are inherited by all services. Declaring the field at service level replaces the default. Use `...` spread token to extend list-type defaults (surfaces, feeds, skills, tools). Memory defaults are object-form (no spread — presence of `memory:` at service level replaces entirely; `memory: null` suppresses).
+
+## Service Self-Description (claw.describe)
+
+Services declare capabilities via a `.claw-describe.json` file (embedded in the image or discovered from Dockerfile labels). `claw up` extracts descriptors and compiles them into pod-global registries.
+
+### Descriptor v2
+
+```json
+{
+  "version": 2,
+  "service": "trading-api",
+  "feeds": [
+    {"name": "market-data", "path": "/feeds/market", "ttl": "5m"}
+  ],
+  "tools": [
+    {
+      "name": "execute_trade",
+      "description": "Execute a market order",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ticker": {"type": "string"},
+          "action": {"type": "string", "enum": ["buy", "sell"]},
+          "quantity": {"type": "integer"}
+        },
+        "required": ["ticker", "action", "quantity"]
+      },
+      "http": {"method": "POST", "path": "/trade", "body": "json"}
+    }
+  ],
+  "memory": {
+    "recall": {"path": "/recall"},
+    "retain": {"path": "/retain"},
+    "forget": {"path": "/forget"}
+  }
+}
+```
+
+- **`tools`**: Each requires `name`, `description`, `inputSchema` (JSON Schema, `type: "object"`), and `http` (`method`, `path`, optional `body`). Duplicate tool names within a service are a hard error.
+- **`memory`**: At least one of `recall` or `retain` required. All paths must start with `/`.
+- **`feeds`**: Unchanged from v1. Short-form names in `x-claw.feeds` resolve against the feed registry.
 
 ## Persistence and Memory Surfaces
 
@@ -152,9 +248,54 @@ Clawdapus provides two distinct, durable state surfaces for agents. Both survive
 | **Session history** | Infrastructure | cllama proxy | `/claw/session-history` | `.claw-session-history/<agent-id>/history.jsonl` |
 | **Portable memory** | Runner / Agent | Agent | `/claw/memory` | `.claw-memory/<agent-id>/memory/` |
 
-- **Session History:** A normalized JSONL record of every successful LLM turn, captured transparently at the proxy boundary. The agent does not write this; it is a passive record of the agent's interaction.
+- **Session History:** Normalized JSONL record of every successful LLM turn, captured transparently at the proxy boundary. The agent does not write this. Fields include `reported_cost_usd`, `tool_trace` (for managed tool calls), and `memory_op` (for recall/retain operations).
 - **Portable Memory:** The agent's own active scratchpad. Agents can read/write notes, drafts, and learned facts here.
 - **Cross-Runner Portability:** Because these paths are canonically managed by Clawdapus, you can swap an agent's `CLAW_TYPE` (e.g., migrating from OpenClaw to PicoClaw) and its memory and session history will automatically follow it into the new runtime.
+
+### Ambient Memory (v0.5.0)
+
+When a service subscribes to a memory service via `x-claw.memory`, cllama performs:
+
+- **Pre-turn recall**: Before each inference turn, cllama queries the memory service's `/recall` endpoint and injects relevant context.
+- **Post-turn retain**: After each turn, cllama sends the conversation to the memory service's `/retain` endpoint for storage.
+- **Governed forget**: `claw memory forget` sends tombstone requests to `/forget` and records local tombstones so subsequent backfills skip those entries.
+
+`claw up` compiles `memory.json` into each subscribing agent's cllama context directory with endpoint URLs, auth tokens, and timeout configuration.
+
+### Managed Tool Mediation (v0.5.0)
+
+When a service subscribes to tools via `x-claw.tools`, cllama performs bounded HTTP tool execution within the inference turn:
+
+- Tools are injected into the LLM request as available tool definitions
+- When the model calls a tool, cllama executes the HTTP request against the providing service
+- Tool results are fed back to the model for up to 8 rounds (configurable)
+- `tool_trace` entries appear in session history for auditability
+- Works with both OpenAI-compatible and Anthropic-format requests
+- Supports synthetic SSE re-streaming when the runner requested streaming
+
+`claw up` compiles `tools.json` into each subscribing agent's cllama context directory:
+
+```json
+{
+  "version": 1,
+  "tools": [...],
+  "policy": {
+    "max_rounds": 8,
+    "timeout_per_tool_ms": 30000,
+    "total_timeout_ms": 120000
+  }
+}
+```
+
+## Communication Tools Contract
+
+All 7 runtimes enforce private thinking + explicit `send_message` delivery — agent reasoning never reaches Discord automatically.
+
+- **Hermes**: `HERMES_TOOL_ONLY_MODE=1` injected when Discord handles are present; runtime patches suppress text auto-routing
+- **OpenClaw**: enforced natively
+- **NullClaw, MicroClaw, NanoClaw, NanoBot, PicoClaw**: `discord-responder.sh` passes a `send_message` tool to the LLM; only posts to Discord when the tool is called
+
+CLAWDAPUS.md includes a `## Communication Tools` section with private-thinking policy whenever handles are configured.
 
 ## cllama Governance Proxy
 
@@ -165,8 +306,10 @@ The proxy sits between agents and LLM providers. Agents get bearer tokens, proxy
 1. Agent calls `http://cllama-passthrough:8080/v1/chat/completions` with bearer token
 2. Proxy resolves agent identity from token (`<agent-id>:<48-hex-secret>`)
 3. Proxy routes to correct provider, swaps bearer token for real API key
-4. Proxy extracts token usage, tracks cost, emits audit log
-5. Response streamed back to agent transparently
+4. If tools are configured, proxy injects tool definitions and handles bounded tool execution loops
+5. If memory is configured, proxy runs pre-turn recall and post-turn retain
+6. Proxy extracts token usage, tracks cost, emits audit log
+7. Response streamed back to agent transparently
 
 ### Bearer token format
 
@@ -179,6 +322,8 @@ The proxy sits between agents and LLM providers. Agents get bearer tokens, proxy
   metadata.json     # token, pod, service, type
   AGENTS.md         # compiled behavioral contract
   CLAWDAPUS.md      # infrastructure map
+  tools.json        # managed tool manifest (when tools subscribed)
+  memory.json       # memory service config (when memory subscribed)
 ```
 
 ### Provider support
@@ -188,6 +333,7 @@ The proxy sits between agents and LLM providers. Agents get bearer tokens, proxy
 | OpenAI | Bearer | `openai/gpt-4o` |
 | Anthropic | X-Api-Key | `anthropic/claude-sonnet-4` |
 | OpenRouter | Bearer | `openrouter/anthropic/claude-sonnet-4` |
+| xAI | Bearer | `xai/grok-3` |
 | Ollama | None | `ollama/llama3` |
 
 ### Credential starvation enforcement
@@ -197,6 +343,10 @@ The proxy sits between agents and LLM providers. Agents get bearer tokens, proxy
 - Image ENV layer is inspected too — baked keys fail preflight
 - Agent only knows its bearer token. No keys, no bypass.
 
+### claw-wall sidecar
+
+Auto-injected by `claw up` when any cllama-enabled service has Discord channel IDs. Polls Discord channels and serves incremental message history to agents. Per-consumer cursors ensure agents only see new messages since their last turn. The service name `claw-wall` is reserved — declaring it in `claw-pod.yml` is a hard error.
+
 ## Generated Artifacts
 
 | File | Purpose | Location |
@@ -204,18 +354,27 @@ The proxy sits between agents and LLM providers. Agents get bearer tokens, proxy
 | `Dockerfile.generated` | Transpiled Clawfile | Next to Clawfile |
 | `compose.generated.yml` | Final compose with all enforcement | Next to claw-pod.yml |
 | `CLAWDAPUS.md` | Per-agent infrastructure map | Mounted into container |
+| `AGENTS.effective.md` | Merged contract + CLAWDAPUS.md (OpenClaw) | Mounted into container |
 | `CLAUDE.md` | Combined contract + CLAWDAPUS.md (NanoClaw) | Mounted into container |
 | `openclaw.json` | Generated runner config (OpenClaw) | Bind-mounted directory |
-| `jobs.json` | Cron schedule for INVOKE tasks | `/app/state/cron/` |
-| `surface-<name>.md` | Service/channel skill files | Runner skill directory |
+| `config.yaml` / `.env` | Generated runner config (Hermes) | Bind-mounted directory |
+| `jobs.json` | Cron schedule for INVOKE tasks | Runner state directory |
+| `tools.json` | Managed tool manifest per agent | cllama context directory |
+| `memory.json` | Memory service config per agent | cllama context directory |
 
 ## Drivers
 
-| Driver | Runner | Config method | Notes |
-|--------|--------|--------------|-------|
-| `openclaw` | OpenClaw | JSON5-aware Go-native patching | Primary driver. Skills flat in `/claw/skills/`. |
-| `nanoclaw` | Claude Agent SDK | Combined CLAUDE.md | Requires `PRIVILEGE docker-socket true`. Skills in `/workspace/skills/<name>/SKILL.md`. |
-| `generic` | Any | Minimal (env + mounts only) | No config injection. |
+| Driver | CLAW_TYPE | Runner | Config method | Notes |
+|--------|-----------|--------|--------------|-------|
+| OpenClaw | `openclaw` | OpenClaw | JSON5 Go-native patching -> `openclaw.json` | Primary driver. Read-only container. Docker exec health probe. |
+| Hermes | `hermes` | Hermes (Python) | `config.yaml` + `.env` | Discord/Telegram/Slack. `HERMES_TOOL_ONLY_MODE`. Requires at least one handle. |
+| NanoBot | `nanobot` | Nanobot (Node.js) | `config.json` | Cron via `jobs.json`. Merged AGENTS.md. |
+| NanoClaw | `nanoclaw` | Claude Agent SDK | Combined `CLAUDE.md` | Requires `PRIVILEGE docker-socket true`. Mounts Docker socket. |
+| PicoClaw | `picoclaw` | PicoClaw | `config.json` | HTTP `/health` + `/ready` probe. Read-only container. |
+| MicroClaw | `microclaw` | MicroClaw (YAML) | `microclaw.config.yaml` | Built-in web UI on port 10961. No INVOKE support. |
+| NullClaw | `nullclaw` | NullClaw (HTTP) | `config.json` | Cron via `PostApply` exec (not pre-written). Read-only container. |
+
+All drivers set `CLAW_MANAGED=true`, explicit `HOME`, and `DISCORD_REQUIRE_MENTION` (or equivalent) to prevent feedback loops.
 
 ## Fail-Closed Semantics
 
@@ -225,16 +384,18 @@ Clawdapus refuses to start containers when:
 - Driver post-apply verification fails
 - Unsupported surface scheme for the driver
 - Credential starvation violated (API keys in agent env or image)
+- `tools` or `memory` declared without `cllama` on the service
+- Managed service requires `claw up -d` (detached mode)
 
 **This is by design. If enforcement can't be confirmed, the container doesn't run.**
 
 ## Skill Mounting
 
-- Image-level: `SKILL <file>` → `claw.skill.N` labels
+- Image-level: `SKILL <file>` -> `claw.skill.N` labels
 - Pod-level: `x-claw.skills: [./file.md]` — merges with image skills by basename (pod wins)
-- Generated: `surface-<name>.md` for service and channel surfaces
+- Generated: service skills from `claw.describe` mounted at `/claw/skills/` with CLAWDAPUS.md pointer
 - Precedence: pod > image > generated
-- Duplicate basenames across same layer → validation error
+- Duplicate basenames across same layer -> validation error
 
 ## Troubleshooting
 
@@ -267,20 +428,43 @@ Clawdapus refuses to start containers when:
 - Dashboard at port 8081 of proxy container
 - Check `/claw/context/<agent-id>/metadata.json` has correct token
 - Proxy logs are structured JSON on stdout
+- SSE debug endpoint: `curl -N -H "Authorization: Bearer <ui_token>" http://<host>:<port>/events`
+
+### Managed tools not working
+- Verify the provider service has a `claw.describe` descriptor with `version: 2` and `tools[]`
+- Check `tools.json` in `.claw-runtime/context/<agent-id>/`
+- `claw audit --type tool_call` shows tool execution traces
+- Both consumer and provider must be on the `claw-internal` network (auto-wired by `claw up`)
+- Declaring `tools:` without `cllama:` is a hard error
+
+### Memory not working
+- Verify the memory service has a `claw.describe` descriptor with `memory` block
+- Check `memory.json` in `.claw-runtime/context/<agent-id>/`
+- `claw audit` shows `memory_op` telemetry entries
+- `claw memory backfill` replays history to a memory service for bootstrapping
+- `claw memory forget --entry-id <id>` writes tombstones; subsequent backfills skip those entries
+- Declaring `memory:` without `cllama:` is a hard error
 
 ## Working Examples
 
 | Example | Path | What it demonstrates |
 |---------|------|---------------------|
-| Single agent | `examples/openclaw/` | Discord handle, skill emit, service surface |
-| Multi-agent | `examples/multi-claw/` | Shared volume, different access modes |
-| Trading desk | `examples/trading-desk/` | 3 agents, cllama proxy, scheduling, credential starvation |
+| Quickstart | `examples/quickstart/` | Single governed OpenClaw Discord bot |
+| Trading desk | `examples/trading-desk/` | 5-driver fleet, pod defaults, invoke schedules, `claw.describe` |
+| Rollcall | `examples/rollcall/` | 7-driver parity test, sequential-conformance, memory wiring |
+| Master Claw | `examples/master-claw/` | Fleet governance, `claw-api` auto-inject, feeds with bearer auth |
+| Multi-claw | `examples/multi-claw/` | Shared volume surfaces, Slack handle, non-claw sidecar |
+| Nanobot | `examples/nanobot/` | Minimal nanobot driver setup |
+| PicoClaw | `examples/picoclaw/` | Minimal picoclaw driver setup |
+| OpenClaw | `examples/openclaw/` | Multi-channel Discord guild config |
+| Reference memory | `examples/reference-memory/` | ADR-021 memory contract reference implementation (Go HTTP service) |
 
 ## Architecture Key Points
 
-- `claw build` transpiles Clawfile → standard Dockerfile → `docker build` → OCI image
-- `claw up` parses pod YAML → driver enforcement → `compose.generated.yml` → `docker compose`
+- `claw build` transpiles Clawfile -> standard Dockerfile -> `docker build` -> OCI image
+- `claw up` parses pod YAML -> driver enforcement -> `compose.generated.yml` -> `docker compose`
 - **docker compose is the sole lifecycle authority**. Docker SDK is read-only.
 - Two-pass loop in compose_up: Pass 1 inspect+resolve all services + cllama wiring, Pass 2 materialize
+- After feed resolution: `resolveToolSubscriptions` and `resolveMemorySubscriptions` wire capability providers into the internal network and compile manifests into cllama context
 - Generated files are inspectable build artifacts, not hand-edited
 - `claw-internal` Docker network is NOT `internal: true` — agents need egress for APIs
