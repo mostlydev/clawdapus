@@ -187,3 +187,10 @@ The spike tests are the heavy end-to-end path. They build images, run Docker, an
 - When changing runtime behavior, update tests in the same area if they exist.
 - If a behavior is reflected in generated artifacts, inspect both the source logic and the generated output expectations in tests.
 - Be careful with the working tree: this repo is often mid-change, and unrelated files may already be modified.
+
+## Public Site (clawdapus.dev)
+
+- Site is a VitePress app at `site/`. Not a submodule — it lives in this repo.
+- Auto-deploys to `clawdapus.dev` on merge to master when `site/**` changes (`.github/workflows/deploy-site.yml`).
+- Sidebar/nav config: `site/.vitepress/config.mts`. Guide pages: `site/guide/`. Top-level pages: `site/index.md`, `site/manifesto.md`, `site/changelog.md`.
+- **Changelog:** `site/changelog.md` is manually maintained. Release notes do NOT sync from GitHub releases automatically — add an entry to `site/changelog.md` when cutting a release or landing significant features on master.
