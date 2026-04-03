@@ -156,6 +156,7 @@ Completed:
   - replays the immutable local ledger back through the memory retain contract
   - auto-resolves a host-published retain URL when possible
   - supports explicit `--url` override when the memory service remains internal-only
+  - maintains a lightweight append-only checkpoint index so `--after` replays do not always rescan from byte zero
 - governed operator forget UX via `claw memory forget`, which:
   - targets stable session-history source-event IDs
   - dispatches the declared memory-service `forget` endpoint when present
@@ -165,6 +166,7 @@ Completed:
   - `GET /history/{agentID}`
   - `claw memory backfill`
   - `claw history export`
+- `history export`, `claw memory backfill`, and `GET /history/{agentID}` now use the same per-agent `history.index.json` checkpoint sidecar to seek near `after` timestamps instead of always forward-scanning the full ledger
 - tombstone-aware replay hygiene in `claw memory backfill`, so forgotten source-event IDs are not re-retained on later rebuilds
 - `cllama` now loads `tools.json` into typed agent context
 - managed OpenAI-compatible tool presentation and mediation in `cllama`, including:
@@ -205,7 +207,6 @@ Important ADR-020 status note:
 
 Still open:
 
-- a more scalable replay path than forward-scanning large JSONL files
 - retain/recall policy filtering and policy-removal accounting
 - backend dedupe conventions beyond the stable source-event ID contract
 
@@ -1085,11 +1086,11 @@ Current branch status:
 - subscribed memory services receive dedicated replay credentials
 - `claw memory backfill` provides an operator-facing replay path today
 - replay currently uses the local immutable ledger as its source and the memory service's `retain` endpoint as its sink
+- a lightweight `history.index.json` checkpoint sidecar now lets `GET /history`, `claw history export`, and `claw memory backfill --after` seek near the requested timestamp without always rescanning the whole ledger
 
-What remains here is mostly replay ergonomics and scalability:
+What remains here is mostly operator guidance and backend contract hardening:
 
 - backend dedupe guidance on top of the stable source-event ID contract
-- better large-history replay performance
 
 ### Milestone 2: Add the memory capability and `cllama` hooks
 
@@ -1299,6 +1300,4 @@ The next implementation work should be split explicitly by ADR:
 - ADR-021 hardening phase:
   - backend dedupe guidance for safe repeated backfill beyond the stable source-event ID contract
   - retain-side and recall-side policy filtering
-  - governed forget/tombstone semantics and replay hygiene
-  - improved replay scalability for large ledgers
   - a boring reference memory adapter that proves the contract end to end

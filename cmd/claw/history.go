@@ -100,6 +100,16 @@ func exportHistoryFile(w io.Writer, historyPath string, after *time.Time, limit 
 	}
 	defer f.Close()
 
+	startOffset, err := historyReadStartOffset(historyPath, after)
+	if err != nil {
+		return err
+	}
+	if startOffset > 0 {
+		if _, err := f.Seek(startOffset, io.SeekStart); err != nil {
+			return err
+		}
+	}
+
 	scanner := bufio.NewScanner(f)
 	emitted := 0
 	for scanner.Scan() {

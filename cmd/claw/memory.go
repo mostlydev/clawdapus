@@ -607,6 +607,16 @@ func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string,
 	}
 	defer f.Close()
 
+	startOffset, err := historyReadStartOffset(target.HistoryPath, after)
+	if err != nil {
+		return 0, err
+	}
+	if startOffset > 0 {
+		if _, err := f.Seek(startOffset, io.SeekStart); err != nil {
+			return 0, err
+		}
+	}
+
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	replayed := 0

@@ -67,6 +67,64 @@ func TestExportHistoryFileAppliesAfterAndLimit(t *testing.T) {
 	if entry["id"] == "" {
 		t.Fatalf("expected exported entry ID, got %+v", entry)
 	}
+	indexPath := historyIndexPath(historyPath)
+	if _, err := os.Stat(indexPath); err != nil {
+		t.Fatalf("expected history index file %q to exist: %v", indexPath, err)
+	}
+}
+
+func TestHistoryReadStartOffsetUsesCheckpointIndex(t *testing.T) {
+	dir := t.TempDir()
+	historyPath := filepath.Join(dir, "history.jsonl")
+	var content strings.Builder
+	base := time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < historyIndexCheckpointEvery*3; i++ {
+		content.WriteString(`{"ts":"`)
+		content.WriteString(base.Add(time.Duration(i) * time.Minute).Format(time.RFC3339))
+		content.WriteString(`","claw_id":"agent-1"}` + "\n")
+	}
+	if err := os.WriteFile(historyPath, []byte(content.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	after := base.Add(time.Duration(historyIndexCheckpointEvery*2) * time.Minute)
+	offset, err := historyReadStartOffset(historyPath, &after)
+	if err != nil {
+		t.Fatalf("historyReadStartOffset: %v", err)
+	}
+	if offset <= 0 {
+		t.Fatalf("expected indexed start offset > 0, got %d", offset)
+	}
+}
+
+func TestEnsureHistoryIndexAppendsIncrementally(t *testing.T) {
+	dir := t.TempDir()
+	historyPath := filepath.Join(dir, "history.jsonl")
+	base := time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC)
+
+	initial := `{"ts":"` + base.Format(time.RFC3339) + `","claw_id":"agent-1"}` + "\n"
+	if err := os.WriteFile(historyPath, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	index, err := ensureHistoryIndex(historyPath)
+	if err != nil {
+		t.Fatalf("ensureHistoryIndex(initial): %v", err)
+	}
+	if index.EntryCount != 1 {
+		t.Fatalf("expected 1 indexed entry, got %+v", index)
+	}
+
+	appended := initial + `{"ts":"` + base.Add(time.Minute).Format(time.RFC3339) + `","claw_id":"agent-1"}` + "\n"
+	if err := os.WriteFile(historyPath, []byte(appended), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	index, err = ensureHistoryIndex(historyPath)
+	if err != nil {
+		t.Fatalf("ensureHistoryIndex(appended): %v", err)
+	}
+	if index.EntryCount != 2 {
+		t.Fatalf("expected appended index entry count 2, got %+v", index)
+	}
 }
 
 func TestEnsureHistoryEntryIDHydratesLegacyLine(t *testing.T) {
