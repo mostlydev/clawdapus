@@ -26,6 +26,10 @@ outline: deep
 | Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012-015) |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
 
+## Unreleased
+
+<!-- Nothing yet -->
+
 ## v0.5.0 <Badge type="tip" text="Latest" /> {#v0-5-0}
 
 *2026-04-03*
