@@ -194,14 +194,12 @@ Important ADR-020 status note:
   - session history emits `tool_trace` and mediated `status` for these turns
   - `claw audit` now merges session-history-derived `tool_call` events with proxy logs, so operators can see managed tool activity and failures without manual ledger inspection
   - downstream streaming requests are satisfied by synthetic SSE re-streaming after mediation completes
+  - long-running managed streaming requests now emit transport-level SSE keepalive/progress comments while the hidden tool loop is in flight
   - hidden mediated tool rounds are preserved across later turns for both request formats
-- the remaining ADR-020 runtime gap is now concentrated in:
-  - transport-level keepalive/progress comments during long mediated streaming requests
+- the first-wave ADR-020 runtime slices are now effectively landed for the mediated `cllama` path; later ADR-020 work is mostly native-projection and broader roadmap follow-through
 
 Still open:
 
-- ADR-020 remaining runtime work, specifically:
-  - transport keepalive/progress comments for long managed streaming requests
 - tombstone/forget flow and replay hygiene
 - a more scalable replay path than forward-scanning large JSONL files
 - retain/recall policy filtering and policy-removal accounting
