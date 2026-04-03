@@ -1,5 +1,5 @@
 ---
-name: clawdapus
+name: clawdapus-cli
 description: Use when working with the claw CLI, Clawfiles, claw-pod.yml, cllama proxy, or deploying AI agent containers with Clawdapus. Use when you see CLAW_TYPE, AGENT, MODEL, CLLAMA, CONFIGURE, INVOKE, SURFACE, HANDLE, TRACK, SKILL, or PRIVILEGE directives. Use when diagnosing agent startup failures, credential starvation, config injection, governance proxy issues, managed tool mediation, or memory plane problems.
 ---
 

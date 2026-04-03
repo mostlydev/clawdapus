@@ -1,5 +1,5 @@
 ---
-name: release
+name: clawdapus-release
 description: >
   Automates cutting a Clawdapus release: determines the next semver version,
   backfills any missing changelog entries from GitHub releases, writes the new
