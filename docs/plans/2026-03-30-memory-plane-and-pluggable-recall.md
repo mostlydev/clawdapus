@@ -196,6 +196,11 @@ Completed:
   - `tool_trace`
 - bounded cross-turn continuity for managed OpenAI-compatible tools by reinjecting the hidden assistant/tool transcript into later upstream requests
 - bounded cross-turn continuity for managed Anthropic tools by reinjecting the hidden assistant/tool transcript into later upstream requests
+- a live capability-wave spike in `cmd/claw/spike_capability_wave_live_test.go`, which drives one real Discord turn through:
+  - managed tool mediation
+  - session-history `tool_trace`
+  - `claw audit` telemetry
+  - memory recall/retain telemetry in the same turn
 
 Important ADR-020 status note:
 

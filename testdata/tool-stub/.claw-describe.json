@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "description": "Capability-wave tool stub for live mediation spikes.",
+  "tools": [
+    {
+      "name": "get_runtime_context",
+      "description": "Retrieve the current runtime context for the authenticated claw before replying.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/runtime_context/{claw_id}"
+      },
+      "annotations": {
+        "readOnly": true
+      }
+    }
+  ]
+}
