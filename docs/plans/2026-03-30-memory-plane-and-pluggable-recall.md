@@ -124,7 +124,7 @@ This parallel should be treated as core architectural framing, not as an inciden
 
 ---
 
-## Implementation Status (2026-04-01)
+## Implementation Status (2026-04-03)
 
 This branch now implements the core memory-plane substrate that this plan was proposing.
 
@@ -161,6 +161,18 @@ Completed:
   - `GET /history/{agentID}`
   - `claw memory backfill`
   - `claw history export`
+- `cllama` now loads `tools.json` into typed agent context
+- managed OpenAI-compatible tool presentation and mediation in `cllama`, including:
+  - replacement of outgoing runner-local `tools[]` with compiled managed tools
+  - HTTP execution of declared managed tools
+  - bounded mediation with `max_rounds`, per-tool timeout, total timeout, and response size limits
+  - structured tool error feedback back into the model within the mediated loop
+  - synthetic downstream SSE re-streaming when the runner requested `stream: true`
+- ADR-020 session-history extensions for mediated requests, including:
+  - `status`
+  - `usage.total_rounds`
+  - `tool_trace`
+- bounded cross-turn continuity for managed OpenAI-compatible tools by reinjecting the hidden assistant/tool transcript into later upstream requests
 
 Important ADR-020 status note:
 
@@ -169,19 +181,23 @@ Important ADR-020 status note:
   - `x-claw.tools` is parsed and normalized
   - `claw up` writes `tools.json`
   - `CLAWDAPUS.md` lists managed tools
-- the mediated runtime side is still not landed:
-  - `cllama` does not yet load `tools.json`
-  - `cllama` does not yet inject managed tools into upstream requests
-  - `cllama` does not yet intercept tool calls or run the mediated execution loop
-  - session history does not yet emit ADR-020 `tool_trace` / mediated-tool status records
+- the mediated runtime side is now substantially landed for OpenAI-compatible requests:
+  - `cllama` loads `tools.json`
+  - `cllama` injects managed tools into upstream OpenAI-compatible requests
+  - `cllama` executes managed HTTP tools in a bounded mediation loop
+  - session history emits `tool_trace` and mediated `status` for these turns
+  - downstream streaming requests are satisfied by synthetic SSE re-streaming after mediation completes
+- the remaining ADR-020 runtime gap is now concentrated in:
+  - Anthropic tool parity (`tool_use` / `tool_result`)
+  - transport-level keepalive/progress comments during long mediated streaming requests
+  - audit-plane/operator polish (`claw audit` mediated-tool reporting)
 
 Still open:
 
-- ADR-020 mediated tool runtime, specifically:
-  - `tools.json` loading in `cllama` agent context
-  - managed-tool injection and runner-tool replacement rules
-  - mediated execution loop for HTTP-backed tools
-  - mediated tool audit/history fields such as `tool_trace` and failure status
+- ADR-020 remaining runtime work, specifically:
+  - Anthropic-format tool mediation (`tool_use` / `tool_result`) and a unified dual-format execution path
+  - transport keepalive/progress comments for long managed streaming requests
+  - `claw audit` mediated-tool reporting and related operator polish
 - validation or native projection for non-`cllama` services that declare `x-claw.tools` or `x-claw.memory`
 - tombstone/forget flow and replay hygiene
 - a more scalable replay path than forward-scanning large JSONL files
