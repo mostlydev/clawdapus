@@ -1,0 +1,1 @@
+../../skills/clawdapus/SKILL.md
