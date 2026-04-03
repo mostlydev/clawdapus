@@ -126,17 +126,12 @@ Give your coding agent full operational knowledge of Clawdapus — the `claw` CL
 SKILL_URL="https://raw.githubusercontent.com/mostlydev/clawdapus/master/skills/clawdapus/SKILL.md"
 
 # Claude Code
-mkdir -p ~/.claude/skills/clawdapus
-curl -sSL "$SKILL_URL" -o ~/.claude/skills/clawdapus/SKILL.md
+mkdir -p ~/.claude/skills/clawdapus-cli
+curl -sSL "$SKILL_URL" -o ~/.claude/skills/clawdapus-cli/SKILL.md
 
-# Codex CLI
-curl -sSL "$SKILL_URL" >> ~/.codex/AGENTS.md
-
-# Gemini CLI
-curl -sSL "$SKILL_URL" >> ~/.gemini/GEMINI.md
-
-# OpenCode
-curl -sSL "$SKILL_URL" >> AGENTS.md
+# Codex CLI / Gemini CLI (shared .agents/skills/ convention)
+mkdir -p .agents/skills/clawdapus-cli
+curl -sSL "$SKILL_URL" -o .agents/skills/clawdapus-cli/SKILL.md
 
 # Cursor / Windsurf / other .cursorrules-based agents
 curl -sSL "$SKILL_URL" >> .cursorrules
