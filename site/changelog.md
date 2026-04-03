@@ -26,6 +26,16 @@ outline: deep
 | Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012-015) |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
 
+## Unreleased
+
+*2026-04-03*
+
+- **Capability wave: compiled tools + memory manifests** (ADRs 020 and 021) — `claw up` now compiles `tools.json` and `memory.json` into each managed `cllama` context from descriptor `version: 2` service capabilities.
+- **Managed tool mediation in cllama** — OpenAI-compatible and Anthropic-format requests now support bounded managed HTTP tool execution, structured tool error feedback, session-history `tool_trace`, and synthetic downstream SSE re-streaming when the runner requested streaming.
+- **Cross-turn continuity for mediated tools** — hidden managed tool rounds are preserved across later turns so the upstream model sees the effective transcript that produced the runner-visible assistant reply.
+- **Memory plane substrate** — pre-turn recall and post-turn retain hooks are live in `cllama`, with structured `memory_op` telemetry, stable session-history entry IDs, `GET /history/{agentID}`, and `claw memory backfill` for replay into subscribed memory services.
+- **Capability-wave spike coverage** — rollcall and capability-wave spike coverage now exercise the memory plane end to end, including successful recall/retain telemetry against the memory stub across all runtimes.
+
 ## v0.3.6 <Badge type="tip" text="Latest" /> {#v0-3-6}
 
 *2026-03-23*
