@@ -1,7 +1,7 @@
 # ADR-020: Compiled Tool Plane with Native and Mediated Execution Modes
 
 **Date:** 2026-03-29
-**Status:** Draft
+**Status:** Implemented (mediated path — Phase 3 + Phase 4 complete; see implementation notes below)
 **Depends on:** ADR-007 (Credential Starvation), ADR-017 (Service Self-Description), ADR-019 (Model Policy Authority)
 **Amends:** ADR-018 (Session History) — extends the recording contract to include tool execution traces and failed requests
 **Evolves:** ADR-004 (Service Surface Skills) — skills remain as behavioral guidance; tools add a callable interface
@@ -546,3 +546,30 @@ This is the critical path for the mediated compatibility layer. Consider subdivi
 - Dynamic tool filtering (time-based, alert-driven)
 - Expand runner-side MCP/client config coverage across drivers
 - Graduate `native` mode per runner only when audit parity exists
+
+## Implementation Status (2026-04-03)
+
+The capability-evolution wave (this ADR + ADR-021) landed together. Current status:
+
+**Shipped (mediated path, Phases 1–4):**
+- `claw.describe` version 2 with `tools[]` parsing
+- `x-claw.tools` / `tools-defaults:` pod grammar with deny-by-default semantics
+- `tools.json` compiled into each subscribing agent's cllama context directory
+- `CLAWDAPUS.md` `## Tools` section listing managed tool names and descriptions
+- Hard error at `claw up` time when non-cllama services declare `x-claw.tools` or `x-claw.memory`
+- cllama loads `tools.json` and injects managed tools into OpenAI-compatible upstream requests
+- cllama loads `tools.json` and injects managed tools into Anthropic-format upstream requests
+- Bounded mediation loop with `max_rounds`, per-tool timeout, total timeout, and `max_tool_result_bytes` truncation
+- Structured tool error feedback within the mediated loop
+- Synthetic SSE re-streaming when the runner requested streaming
+- SSE keepalive/progress comments during long mediated loops
+- Cross-turn continuity: hidden tool rounds reinjected into subsequent upstream requests (both formats)
+- Session history `tool_trace`, `status`, and `usage.total_rounds` extensions
+- `claw audit` merges session-history `tool_call` events with proxy log events
+
+**Not yet shipped:**
+- Phase 2: native projection / runner-side MCP config generation
+- Phase 5: MCP client in cllama, baked `.claw-tools.json` support, `claw discover`
+- Phase 6: `parallel_safe` annotation, dynamic filtering, native mode graduation
+
+See `docs/plans/2026-03-30-memory-plane-and-pluggable-recall.md` for the companion implementation-status document covering both ADR-020 and ADR-021.

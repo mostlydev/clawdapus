@@ -22,21 +22,25 @@ outline: deep
 | Phase 4.7 -- Nanobot + PicoClaw + NullClaw + MicroClaw drivers | Done |
 | Phase 4.8 -- Hermes driver + shared helper extraction | Done |
 | Phase 4.9 -- Peer handles, mention safety, healthcheck passthrough | Done |
+| Phase 4.10 -- Capability evolution wave: compiled tools + memory plane | Done (ADRs 020-021) |
 | Phase 4.6 -- Unified worker architecture (config, provision, diagnostic) | Design |
 | Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012-015) |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
 
-## Unreleased
+## v0.4.0 <Badge type="tip" text="Latest" /> {#v0-4-0}
 
 *2026-04-03*
 
-- **Capability wave: compiled tools + memory manifests** (ADRs 020 and 021) — `claw up` now compiles `tools.json` and `memory.json` into each managed `cllama` context from descriptor `version: 2` service capabilities.
-- **Managed tool mediation in cllama** — OpenAI-compatible and Anthropic-format requests now support bounded managed HTTP tool execution, structured tool error feedback, session-history `tool_trace`, and synthetic downstream SSE re-streaming when the runner requested streaming.
-- **Cross-turn continuity for mediated tools** — hidden managed tool rounds are preserved across later turns so the upstream model sees the effective transcript that produced the runner-visible assistant reply.
-- **Memory plane hardening** — pre-turn recall and post-turn retain hooks are live in `cllama`, with structured `memory_op` telemetry, stable session-history entry IDs, governed `claw memory forget`, tombstone-aware replay, indexed `--after` backfill reads, and retain/recall policy-removal accounting.
-- **Reference memory adapter** — Clawdapus now ships a file-backed reference memory service under `examples/reference-memory` that dedupes by stable `entry.id`, honors forget tombstones, and is used by the rollcall example plus the capability-wave spike path.
+- **Capability wave: compiled tools + memory** (ADRs 020 and 021) — `claw up` now compiles `tools.json` and `memory.json` per agent from `claw.describe` version 2 service descriptors. Non-cllama services that declare `x-claw.tools` or `x-claw.memory` are a hard error at compile time.
+- **Managed tool mediation** — cllama injects compiled managed tool schemas into upstream LLM requests (OpenAI-compatible and Anthropic formats), intercepts `tool_call` responses, executes them against the declared service, and loops until terminal text. Runners receive only the final text. Streaming runners receive synthetic SSE re-streaming after mediation completes; long mediated loops emit SSE keepalive comments.
+- **Cross-turn tool continuity** — hidden managed tool rounds are reinjected into subsequent upstream requests so the LLM sees the effective transcript that produced each runner-visible reply.
+- **Memory plane** — pre-turn recall and post-turn best-effort retain hooks live in cllama. `memory_op` telemetry events carry recall/retain outcome, latency, block count, injected bytes, and policy-removal counts. Secret-shaped values are scrubbed from both retain payloads and recalled blocks before they reach the model.
+- **`claw memory backfill`** — replays the durable session ledger into a memory service's `retain` endpoint. Supports `--after` (indexed, no full-rescan), `--limit`, `--agent`, `--url`, and `--auth-token`. Tombstone-aware: forgotten entry IDs are skipped.
+- **`claw memory forget`** — dispatches the service's `forget` endpoint and writes infra-owned tombstones under `.claw-memory-tombstones/`. Later backfill runs honor tombstones and skip re-retain.
+- **`claw audit` tool events** — session-history `tool_call` events are merged with proxy log events so managed tool activity and failures are visible without manual ledger inspection.
+- **Reference memory adapter** — `examples/reference-memory/` ships a file-backed reference implementation: idempotent retain by `entry.id`, tombstone-aware forget, recent/token-matching recall. Used by rollcall and capability-wave spike.
 
-## v0.3.6 <Badge type="tip" text="Latest" /> {#v0-3-6}
+## v0.3.6 {#v0-3-6}
 
 *2026-03-23*
 

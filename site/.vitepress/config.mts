@@ -43,7 +43,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/what-is-clawdapus' },
       {
-        text: 'v0.3.5',
+        text: 'v0.4.0',
         items: [
           { text: 'Changelog', link: '/changelog' },
           { text: 'Manifesto', link: '/manifesto' },
@@ -66,6 +66,7 @@ export default defineConfig({
           { text: 'Clawfile', link: '/guide/clawfile' },
           { text: 'Pod YAML', link: '/guide/pod-yaml' },
           { text: 'cllama Governance Proxy', link: '/guide/cllama' },
+          { text: 'Managed Tools', link: '/guide/tools' },
           { text: 'Memory Plane', link: '/guide/memory' },
           { text: 'Surfaces & Skills', link: '/guide/surfaces-and-skills' },
           { text: 'Compilation Principles', link: '/guide/compilation-principles' },
