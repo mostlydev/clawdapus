@@ -27,6 +27,11 @@ var (
 	memoryBackfillURL   string
 	memoryBackfillToken string
 	memoryBackfillAgent []string
+	memoryForgetURL     string
+	memoryForgetToken   string
+	memoryForgetAgent   []string
+	memoryForgetEntryID []string
+	memoryForgetReason  string
 
 	runComposeOutputCommand = runComposeOutputCommandDefault
 )
@@ -45,10 +50,12 @@ type memoryManifestFile struct {
 	Service string           `json:"service"`
 	BaseURL string           `json:"base_url"`
 	Retain  *memoryOpEntry   `json:"retain,omitempty"`
+	Forget  *memoryOpEntry   `json:"forget,omitempty"`
 	Auth    *memoryAuthEntry `json:"auth,omitempty"`
 }
 
-type memoryBackfillTarget struct {
+type memoryTarget struct {
+	PodDir      string
 	AgentID     string
 	HistoryPath string
 	Pod         string
@@ -65,6 +72,17 @@ type backfillComposeService struct {
 }
 
 const defaultMemoryBackfillTimeout = 10 * time.Second
+
+const memoryForgetTombstoneVersion = 1
+
+type memoryForgetTombstone struct {
+	Version       int    `json:"version"`
+	TS            string `json:"ts"`
+	AgentID       string `json:"agent_id"`
+	MemoryService string `json:"memory_service"`
+	EntryID       string `json:"entry_id"`
+	Reason        string `json:"reason,omitempty"`
+}
 
 var memoryCmd = &cobra.Command{
 	Use:   "memory",
@@ -115,7 +133,57 @@ var memoryBackfillCmd = &cobra.Command{
 			retainURL,
 		)
 		if summary.SkippedAgents > 0 {
-			fmt.Fprintf(cmd.OutOrStdout(), "Skipped %d agent%s with no matching history entries\n", summary.SkippedAgents, countPlural(summary.SkippedAgents))
+			fmt.Fprintf(cmd.OutOrStdout(), "Skipped %d agent%s with no eligible history entries\n", summary.SkippedAgents, countPlural(summary.SkippedAgents))
+		}
+		return nil
+	},
+}
+
+var memoryForgetCmd = &cobra.Command{
+	Use:   "forget <memory-service>",
+	Short: "Forget retained memory by stable session-history entry ID",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(memoryForgetAgent) == 0 {
+			return fmt.Errorf("at least one --agent is required")
+		}
+
+		entryIDs, err := normalizeForgetEntryIDs(memoryForgetEntryID)
+		if err != nil {
+			return err
+		}
+
+		generatedPath, err := resolveComposeGeneratedPath()
+		if err != nil {
+			return err
+		}
+		podDir := filepath.Dir(generatedPath)
+
+		targets, err := discoverMemoryForgetTargets(podDir, args[0], memoryForgetAgent)
+		if err != nil {
+			return err
+		}
+		if err := validateSharedMemoryTargetShape(targets, strings.TrimSpace(memoryForgetURL) != "", "forget"); err != nil {
+			return err
+		}
+		forgetURL, err := resolveMemoryForgetURL(generatedPath, targets[0].Manifest, memoryForgetURL)
+		if err != nil {
+			return err
+		}
+
+		summary, err := forgetMemoryEntries(cmd.OutOrStdout(), forgetURL, strings.TrimSpace(memoryForgetToken), targets, entryIDs, strings.TrimSpace(memoryForgetReason))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Forgot %d entr%s across %d agent%s via %s\n",
+			summary.Entries,
+			entryPlural(summary.Entries),
+			summary.Agents,
+			countPlural(summary.Agents),
+			forgetURL,
+		)
+		if summary.AlreadyForgotten > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "Skipped %d already-tombstoned entr%s\n", summary.AlreadyForgotten, entryPlural(summary.AlreadyForgotten))
 		}
 		return nil
 	},
@@ -127,7 +195,21 @@ type memoryBackfillSummary struct {
 	SkippedAgents int
 }
 
-func discoverMemoryBackfillTargets(podDir, memoryService string, requestedAgents []string) ([]memoryBackfillTarget, error) {
+type memoryForgetSummary struct {
+	Entries          int
+	Agents           int
+	AlreadyForgotten int
+}
+
+func discoverMemoryBackfillTargets(podDir, memoryService string, requestedAgents []string) ([]memoryTarget, error) {
+	return discoverMemoryTargets(podDir, memoryService, requestedAgents, "retain")
+}
+
+func discoverMemoryForgetTargets(podDir, memoryService string, requestedAgents []string) ([]memoryTarget, error) {
+	return discoverMemoryTargets(podDir, memoryService, requestedAgents, "forget")
+}
+
+func discoverMemoryTargets(podDir, memoryService string, requestedAgents []string, operation string) ([]memoryTarget, error) {
 	contextRoot := filepath.Join(podDir, ".claw-runtime", "context")
 	entries, err := os.ReadDir(contextRoot)
 	if err != nil {
@@ -147,7 +229,7 @@ func discoverMemoryBackfillTargets(podDir, memoryService string, requestedAgents
 	}
 	foundRequested := make(map[string]struct{}, len(requested))
 
-	targets := make([]memoryBackfillTarget, 0)
+	targets := make([]memoryTarget, 0)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -175,8 +257,8 @@ func discoverMemoryBackfillTargets(podDir, memoryService string, requestedAgents
 		if manifest.Service != memoryService {
 			continue
 		}
-		if manifest.Retain == nil || strings.TrimSpace(manifest.Retain.Path) == "" {
-			return nil, fmt.Errorf("memory service %q has no retain endpoint for agent %q", memoryService, agentID)
+		if manifestOperationPath(manifest, operation) == "" {
+			return nil, fmt.Errorf("memory service %q has no %s endpoint for agent %q", memoryService, operation, agentID)
 		}
 
 		metaPath := filepath.Join(contextRoot, agentID, "metadata.json")
@@ -189,7 +271,8 @@ func discoverMemoryBackfillTargets(podDir, memoryService string, requestedAgents
 			return nil, fmt.Errorf("parse metadata for %q: %w", agentID, err)
 		}
 
-		targets = append(targets, memoryBackfillTarget{
+		targets = append(targets, memoryTarget{
+			PodDir:      podDir,
 			AgentID:     agentID,
 			HistoryPath: filepath.Join(podDir, ".claw-session-history", agentID, "history.jsonl"),
 			Pod:         stringFromMap(metadata, "pod"),
@@ -231,31 +314,43 @@ func normalizeBackfillLimit(limit int) (int, error) {
 	return limit, nil
 }
 
-func validateSharedBackfillTargetShape(targets []memoryBackfillTarget, urlOverride bool) error {
+func validateSharedBackfillTargetShape(targets []memoryTarget, urlOverride bool) error {
+	return validateSharedMemoryTargetShape(targets, urlOverride, "retain")
+}
+
+func validateSharedMemoryTargetShape(targets []memoryTarget, urlOverride bool, operation string) error {
 	if len(targets) == 0 {
 		return nil
 	}
 	first := targets[0].Manifest
-	firstPath := manifestRetainPath(first)
+	firstPath := manifestOperationPath(first, operation)
 	for _, target := range targets[1:] {
-		currentPath := manifestRetainPath(target.Manifest)
+		currentPath := manifestOperationPath(target.Manifest, operation)
 		if !urlOverride && target.Manifest.BaseURL != first.BaseURL {
 			return fmt.Errorf("memory service %q has inconsistent base URLs across subscribed agents; pass --url to override", first.Service)
 		}
 		if currentPath != firstPath {
-			return fmt.Errorf("memory service %q has inconsistent retain paths across subscribed agents", first.Service)
+			return fmt.Errorf("memory service %q has inconsistent %s paths across subscribed agents", first.Service, operation)
 		}
 	}
 	return nil
 }
 
 func resolveMemoryBackfillURL(composePath string, manifest memoryManifestFile, override string) (string, error) {
-	retainPath := manifestRetainPath(manifest)
-	if retainPath == "" {
-		return "", fmt.Errorf("memory manifest has no retain endpoint")
+	return resolveMemoryOperationURL(composePath, manifest, override, "retain")
+}
+
+func resolveMemoryForgetURL(composePath string, manifest memoryManifestFile, override string) (string, error) {
+	return resolveMemoryOperationURL(composePath, manifest, override, "forget")
+}
+
+func resolveMemoryOperationURL(composePath string, manifest memoryManifestFile, override, operation string) (string, error) {
+	opPath := manifestOperationPath(manifest, operation)
+	if opPath == "" {
+		return "", fmt.Errorf("memory manifest has no %s endpoint", operation)
 	}
 	if strings.TrimSpace(override) != "" {
-		return joinRetainURL(override, retainPath)
+		return joinMemoryOperationURL(override, opPath)
 	}
 
 	baseURL, err := url.Parse(strings.TrimSpace(manifest.BaseURL))
@@ -275,18 +370,28 @@ func resolveMemoryBackfillURL(composePath string, manifest memoryManifestFile, o
 	return (&url.URL{
 		Scheme: "http",
 		Host:   hostPort,
-		Path:   retainPath,
+		Path:   opPath,
 	}).String(), nil
 }
 
-func manifestRetainPath(manifest memoryManifestFile) string {
-	if manifest.Retain == nil {
+func manifestOperationPath(manifest memoryManifestFile, operation string) string {
+	switch operation {
+	case "retain":
+		if manifest.Retain == nil {
+			return ""
+		}
+		return strings.TrimSpace(manifest.Retain.Path)
+	case "forget":
+		if manifest.Forget == nil {
+			return ""
+		}
+		return strings.TrimSpace(manifest.Forget.Path)
+	default:
 		return ""
 	}
-	return strings.TrimSpace(manifest.Retain.Path)
 }
 
-func joinRetainURL(raw, retainPath string) (string, error) {
+func joinMemoryOperationURL(raw, opPath string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return "", fmt.Errorf("parse --url: %w", err)
@@ -295,7 +400,7 @@ func joinRetainURL(raw, retainPath string) (string, error) {
 		return "", fmt.Errorf("--url must include scheme and host")
 	}
 	if strings.TrimSpace(u.Path) == "" || u.Path == "/" {
-		u.Path = retainPath
+		u.Path = opPath
 	}
 	return u.String(), nil
 }
@@ -435,12 +540,24 @@ type backfillRetainRequest struct {
 	Entry    json.RawMessage `json:"entry"`
 }
 
-func replayMemoryBackfill(stdout io.Writer, retainURL, authToken string, targets []memoryBackfillTarget, after *time.Time, limit int) (memoryBackfillSummary, error) {
+type memoryForgetRequest struct {
+	AgentID  string         `json:"agent_id"`
+	Pod      string         `json:"pod,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	EntryIDs []string       `json:"entry_ids"`
+	Reason   string         `json:"reason,omitempty"`
+}
+
+func replayMemoryBackfill(stdout io.Writer, retainURL, authToken string, targets []memoryTarget, after *time.Time, limit int) (memoryBackfillSummary, error) {
 	var summary memoryBackfillSummary
 	client := &http.Client{}
 
 	for _, target := range targets {
-		replayed, err := replayHistoryFileToMemory(client, retainURL, effectiveBackfillAuthToken(authToken, target.Manifest), backfillRetainTimeout(target.Manifest), target, after, limit)
+		tombstones, err := loadMemoryTombstoneIDSet(target.PodDir, target.AgentID, target.Manifest.Service)
+		if err != nil {
+			return summary, fmt.Errorf("load tombstones for %q: %w", target.AgentID, err)
+		}
+		replayed, err := replayHistoryFileToMemory(client, retainURL, effectiveMemoryAuthToken(authToken, target.Manifest), backfillRetainTimeout(target.Manifest), target, tombstones, after, limit)
 		if err != nil {
 			return summary, fmt.Errorf("backfill %q: %w", target.AgentID, err)
 		}
@@ -456,7 +573,7 @@ func replayMemoryBackfill(stdout io.Writer, retainURL, authToken string, targets
 	return summary, nil
 }
 
-func effectiveBackfillAuthToken(override string, manifest memoryManifestFile) string {
+func effectiveMemoryAuthToken(override string, manifest memoryManifestFile) string {
 	if strings.TrimSpace(override) != "" {
 		return strings.TrimSpace(override)
 	}
@@ -473,7 +590,14 @@ func backfillRetainTimeout(manifest memoryManifestFile) time.Duration {
 	return defaultMemoryBackfillTimeout
 }
 
-func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string, timeout time.Duration, target memoryBackfillTarget, after *time.Time, limit int) (int, error) {
+func forgetTimeout(manifest memoryManifestFile) time.Duration {
+	if manifest.Forget != nil && manifest.Forget.TimeoutMS > 0 {
+		return time.Duration(manifest.Forget.TimeoutMS) * time.Millisecond
+	}
+	return defaultMemoryBackfillTimeout
+}
+
+func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string, timeout time.Duration, target memoryTarget, tombstones map[string]struct{}, after *time.Time, limit int) (int, error) {
 	f, err := os.Open(target.HistoryPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -498,6 +622,9 @@ func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string,
 		if limit > 0 && replayed >= limit {
 			break
 		}
+		if _, forgotten := tombstones[meta.ID]; forgotten {
+			continue
+		}
 		if after != nil {
 			ts, err := time.Parse(time.RFC3339, meta.TS)
 			if err != nil {
@@ -518,7 +645,7 @@ func replayHistoryFileToMemory(client *http.Client, retainURL, authToken string,
 	return replayed, nil
 }
 
-func postRetainBackfill(client *http.Client, retainURL, authToken string, timeout time.Duration, target memoryBackfillTarget, requestedModel string, rawEntry []byte) error {
+func postRetainBackfill(client *http.Client, retainURL, authToken string, timeout time.Duration, target memoryTarget, requestedModel string, rawEntry []byte) error {
 	payload, err := json.Marshal(backfillRetainRequest{
 		AgentID:  target.AgentID,
 		Pod:      target.Pod,
@@ -556,6 +683,268 @@ func postRetainBackfill(client *http.Client, retainURL, authToken string, timeou
 		return fmt.Errorf("retain returned status %d: %s", resp.StatusCode, msg)
 	}
 	return nil
+}
+
+func normalizeForgetEntryIDs(raw []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(raw))
+	entryIDs := make([]string, 0, len(raw))
+	for _, entryID := range raw {
+		entryID = strings.TrimSpace(entryID)
+		if entryID == "" {
+			continue
+		}
+		if _, exists := seen[entryID]; exists {
+			continue
+		}
+		seen[entryID] = struct{}{}
+		entryIDs = append(entryIDs, entryID)
+	}
+	if len(entryIDs) == 0 {
+		return nil, fmt.Errorf("at least one --entry-id is required")
+	}
+	return entryIDs, nil
+}
+
+func forgetMemoryEntries(stdout io.Writer, forgetURL, authToken string, targets []memoryTarget, entryIDs []string, reason string) (memoryForgetSummary, error) {
+	var summary memoryForgetSummary
+	client := &http.Client{}
+
+	for _, target := range targets {
+		existing, err := loadMemoryForgetTombstones(target.PodDir, target.AgentID, target.Manifest.Service)
+		if err != nil {
+			return summary, fmt.Errorf("load tombstones for %q: %w", target.AgentID, err)
+		}
+
+		pending := filterUntombstonedEntryIDs(entryIDs, existing)
+		summary.AlreadyForgotten += len(entryIDs) - len(pending)
+		if len(pending) == 0 {
+			continue
+		}
+
+		if err := ensureForgetEntryIDsExist(target.HistoryPath, pending); err != nil {
+			return summary, fmt.Errorf("forget %q: %w", target.AgentID, err)
+		}
+		if err := postForgetRequest(client, forgetURL, effectiveMemoryAuthToken(authToken, target.Manifest), forgetTimeout(target.Manifest), target, pending, reason); err != nil {
+			return summary, fmt.Errorf("forget %q: %w", target.AgentID, err)
+		}
+		if err := appendMemoryForgetTombstones(target.PodDir, target, pending, reason, time.Now().UTC()); err != nil {
+			return summary, fmt.Errorf("forget %q: write tombstones: %w", target.AgentID, err)
+		}
+
+		summary.Agents++
+		summary.Entries += len(pending)
+		fmt.Fprintf(stdout, "Forgot %d entr%s for %s\n", len(pending), entryPlural(len(pending)), target.AgentID)
+	}
+
+	return summary, nil
+}
+
+func ensureForgetEntryIDsExist(historyPath string, entryIDs []string) error {
+	f, err := os.Open(historyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no session history found at %q", historyPath)
+		}
+		return err
+	}
+	defer f.Close()
+
+	needed := make(map[string]struct{}, len(entryIDs))
+	for _, entryID := range entryIDs {
+		needed[entryID] = struct{}{}
+	}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		_, meta, err := ensureHistoryEntryID(line)
+		if err != nil {
+			return err
+		}
+		delete(needed, meta.ID)
+		if len(needed) == 0 {
+			return nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if len(needed) == 0 {
+		return nil
+	}
+
+	missing := make([]string, 0, len(needed))
+	for entryID := range needed {
+		missing = append(missing, entryID)
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("history does not contain entry id%s %s", countPlural(len(missing)), strings.Join(missing, ", "))
+}
+
+func postForgetRequest(client *http.Client, forgetURL, authToken string, timeout time.Duration, target memoryTarget, entryIDs []string, reason string) error {
+	payload, err := json.Marshal(memoryForgetRequest{
+		AgentID:  target.AgentID,
+		Pod:      target.Pod,
+		Metadata: forgetMetadata(target.Metadata),
+		EntryIDs: append([]string(nil), entryIDs...),
+		Reason:   reason,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal forget payload: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, forgetURL, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("build forget request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if strings.TrimSpace(authToken) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(authToken))
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send forget request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = http.StatusText(resp.StatusCode)
+		}
+		return fmt.Errorf("forget returned status %d: %s", resp.StatusCode, msg)
+	}
+	return nil
+}
+
+func forgetMetadata(metadata map[string]any) map[string]any {
+	if metadata == nil {
+		return nil
+	}
+	out := map[string]any{
+		"service": stringFromMap(metadata, "service"),
+		"type":    stringFromMap(metadata, "type"),
+		"path":    "forget",
+	}
+	if timezone := stringFromMap(metadata, "timezone"); timezone != "" {
+		out["timezone"] = timezone
+	}
+	return out
+}
+
+func loadMemoryTombstoneIDSet(podDir, agentID, memoryService string) (map[string]struct{}, error) {
+	entries, err := loadMemoryForgetTombstones(podDir, agentID, memoryService)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]struct{}, len(entries))
+	for entryID := range entries {
+		ids[entryID] = struct{}{}
+	}
+	return ids, nil
+}
+
+func loadMemoryForgetTombstones(podDir, agentID, memoryService string) (map[string]memoryForgetTombstone, error) {
+	entries := make(map[string]memoryForgetTombstone)
+	if strings.TrimSpace(podDir) == "" {
+		return entries, nil
+	}
+
+	path := memoryForgetTombstonePath(podDir, agentID)
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return entries, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var tombstone memoryForgetTombstone
+		if err := json.Unmarshal(line, &tombstone); err != nil {
+			return nil, fmt.Errorf("parse tombstone entry: %w", err)
+		}
+		if strings.TrimSpace(tombstone.MemoryService) != memoryService {
+			continue
+		}
+		entryID := strings.TrimSpace(tombstone.EntryID)
+		if entryID == "" {
+			continue
+		}
+		entries[entryID] = tombstone
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func appendMemoryForgetTombstones(podDir string, target memoryTarget, entryIDs []string, reason string, now time.Time) error {
+	if strings.TrimSpace(podDir) == "" {
+		return fmt.Errorf("memory tombstone pod dir is required")
+	}
+
+	path := memoryForgetTombstonePath(podDir, target.AgentID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o666)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	for _, entryID := range entryIDs {
+		line, err := json.Marshal(memoryForgetTombstone{
+			Version:       memoryForgetTombstoneVersion,
+			TS:            now.Format(time.RFC3339),
+			AgentID:       target.AgentID,
+			MemoryService: target.Manifest.Service,
+			EntryID:       entryID,
+			Reason:        reason,
+		})
+		if err != nil {
+			return fmt.Errorf("marshal tombstone entry: %w", err)
+		}
+		if _, err := f.Write(append(line, '\n')); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func filterUntombstonedEntryIDs(entryIDs []string, existing map[string]memoryForgetTombstone) []string {
+	if len(existing) == 0 {
+		return append([]string(nil), entryIDs...)
+	}
+	pending := make([]string, 0, len(entryIDs))
+	for _, entryID := range entryIDs {
+		if _, ok := existing[entryID]; ok {
+			continue
+		}
+		pending = append(pending, entryID)
+	}
+	return pending
+}
+
+func memoryForgetTombstonePath(podDir, agentID string) string {
+	return filepath.Join(podDir, ".claw-memory-tombstones", agentID, "tombstones.jsonl")
 }
 
 // backfillMetadata intentionally mirrors only the stable subset of live retain
@@ -608,11 +997,17 @@ func runComposeOutputCommandDefault(args ...string) ([]byte, error) {
 }
 
 func init() {
+	memoryForgetCmd.Flags().StringVar(&memoryForgetURL, "url", "", "Override the memory forget endpoint URL (defaults to the published service URL)")
+	memoryForgetCmd.Flags().StringVar(&memoryForgetToken, "auth-token", "", "Override the bearer token used for the memory forget endpoint")
+	memoryForgetCmd.Flags().StringSliceVar(&memoryForgetAgent, "agent", nil, "Restrict forget to specific agent IDs")
+	memoryForgetCmd.Flags().StringSliceVar(&memoryForgetEntryID, "entry-id", nil, "Stable session-history entry ID to forget (repeatable)")
+	memoryForgetCmd.Flags().StringVar(&memoryForgetReason, "reason", "", "Optional governed reason recorded with the tombstone")
 	memoryBackfillCmd.Flags().StringVar(&memoryBackfillAfter, "after", "", "Only replay entries after this RFC3339 timestamp")
 	memoryBackfillCmd.Flags().IntVar(&memoryBackfillLimit, "limit", 0, "Maximum entries to replay per agent (0 means all)")
 	memoryBackfillCmd.Flags().StringVar(&memoryBackfillURL, "url", "", "Override the memory retain endpoint URL (defaults to the published service URL)")
 	memoryBackfillCmd.Flags().StringVar(&memoryBackfillToken, "auth-token", "", "Override the bearer token used for the memory retain endpoint")
 	memoryBackfillCmd.Flags().StringSliceVar(&memoryBackfillAgent, "agent", nil, "Restrict backfill to specific agent IDs")
+	memoryCmd.AddCommand(memoryForgetCmd)
 	memoryCmd.AddCommand(memoryBackfillCmd)
 	rootCmd.AddCommand(memoryCmd)
 }

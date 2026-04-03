@@ -156,11 +156,16 @@ Completed:
   - replays the immutable local ledger back through the memory retain contract
   - auto-resolves a host-published retain URL when possible
   - supports explicit `--url` override when the memory service remains internal-only
+- governed operator forget UX via `claw memory forget`, which:
+  - targets stable session-history source-event IDs
+  - dispatches the declared memory-service `forget` endpoint when present
+  - writes append-only infra-owned tombstones instead of mutating `history.jsonl`
 - stable source-event IDs on session-history entries, propagated through:
   - live `retain` payloads
   - `GET /history/{agentID}`
   - `claw memory backfill`
   - `claw history export`
+- tombstone-aware replay hygiene in `claw memory backfill`, so forgotten source-event IDs are not re-retained on later rebuilds
 - `cllama` now loads `tools.json` into typed agent context
 - managed OpenAI-compatible tool presentation and mediation in `cllama`, including:
   - replacement of outgoing runner-local `tools[]` with compiled managed tools
@@ -200,7 +205,6 @@ Important ADR-020 status note:
 
 Still open:
 
-- tombstone/forget flow and replay hygiene
 - a more scalable replay path than forward-scanning large JSONL files
 - retain/recall policy filtering and policy-removal accounting
 - backend dedupe conventions beyond the stable source-event ID contract
@@ -1082,7 +1086,7 @@ Current branch status:
 - `claw memory backfill` provides an operator-facing replay path today
 - replay currently uses the local immutable ledger as its source and the memory service's `retain` endpoint as its sink
 
-What remains here is mostly operator UX and replay ergonomics:
+What remains here is mostly replay ergonomics and scalability:
 
 - backend dedupe guidance on top of the stable source-event ID contract
 - better large-history replay performance
@@ -1108,7 +1112,6 @@ This is the first full end-to-end memory plane.
 
 The main remaining gaps are:
 
-- governed forget/tombstone semantics
 - policy filtering on retain and recall
 - any optional payload-bounding refinements beyond the current fixed request shape
 
@@ -1118,8 +1121,6 @@ Implement:
 
 - retain-side filtering
 - recall-side filtering
-- optional `forget` path
-- tombstone-aware replay semantics
 - alerting for repeated memory-service failures
 
 Provide a small baseline image, likely:
