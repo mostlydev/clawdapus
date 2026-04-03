@@ -13,7 +13,22 @@ Core docs:
 - `docs/CLLAMA_SPEC.md` — cllama proxy contract
 - `docs/decisions/` — ADRs
 - `docs/plans/` — implementation plans and historical design notes
-- [GitHub Project Board](https://github.com/users/mostlydev/projects/2) — prioritized roadmap (kanban). Update issue status on the board when starting and completing work.
+- [GitHub Project Board](https://github.com/users/mostlydev/projects/2) — prioritized roadmap (kanban).
+
+## Issue-First Workflow
+
+All planned work is tracked as GitHub issues and prioritized on the [project board](https://github.com/users/mostlydev/projects/2). This applies to agents and human collaborators alike.
+
+**Before starting any non-trivial task:**
+1. Find the relevant issue on the project board. If none exists, **create one first** — do not start work without an issue.
+2. The issue must contain enough context for any model (or human) to resume cold: motivation, constraints, key design decisions, and open questions. A future collaborator with no prior context should be able to pick it up from the issue alone.
+3. Move the issue to **In Progress** before beginning.
+4. Do the work on a branch or worktree tied to that issue.
+5. Move the issue to **Done** (or close it) when the work lands on master.
+
+**Planning goes into issues.** Design notes, constraints, open questions, and sub-tasks belong in the issue body or comments — not in local plan files, unless the plan is large enough to warrant a `docs/plans/` document (linked from the issue).
+
+**The project board is the single source of truth for priorities.** Column order within a status column reflects relative priority. Work the top item unless there is a blocking reason not to.
 
 ## Compilation Principles
 
