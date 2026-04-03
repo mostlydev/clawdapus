@@ -16,6 +16,7 @@ var rootCmd = &cobra.Command{
 	Short:        "Infrastructure-layer governance for AI agent containers",
 	SilenceUsage: true,
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
+		maybeSyncSkill()
 		maybeNotifyUpdate()
 	},
 }

@@ -16,6 +16,9 @@ openclaw/workspaces/*/logs/
 /build/
 Dockerfile.generated
 
+# Embedded skill data (generated at build time)
+cmd/claw/skill_data/
+
 # Standard Go ignores
 *.exe
 *.exe~

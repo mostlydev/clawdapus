@@ -123,13 +123,21 @@ claw update
 Give your coding agent full operational knowledge of Clawdapus — the `claw` CLI, Clawfile syntax, claw-pod.yml structure, cllama proxy wiring, driver semantics, and troubleshooting patterns.
 
 ```bash
+# Recommended: installs to ~/.claude/skills/ and ~/.agents/skills/
+# Auto-updates whenever you update the claw binary.
+claw skill install
+```
+
+Or install manually:
+
+```bash
 SKILL_URL="https://raw.githubusercontent.com/mostlydev/clawdapus/master/skills/clawdapus/SKILL.md"
 
-# Claude Code
+# Claude Code / OpenCode
 mkdir -p ~/.claude/skills/clawdapus-cli
 curl -sSL "$SKILL_URL" -o ~/.claude/skills/clawdapus-cli/SKILL.md
 
-# Codex CLI / Gemini CLI (shared .agents/skills/ convention)
+# Codex CLI / Gemini CLI / OpenCode (shared .agents/skills/ convention)
 mkdir -p .agents/skills/clawdapus-cli
 curl -sSL "$SKILL_URL" -o .agents/skills/clawdapus-cli/SKILL.md
 

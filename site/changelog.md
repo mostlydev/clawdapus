@@ -28,7 +28,8 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **`claw skill install`** — installs the clawdapus-cli skill to `~/.claude/skills/` and `~/.agents/skills/`, giving Claude Code, Codex, Gemini, and OpenCode full operational knowledge of the claw CLI. Auto-updates on every `claw` invocation when a newer binary is installed.
+- **Skill install paths updated** — README now uses proper `.agents/skills/` directory convention for Codex/Gemini/OpenCode instead of appending to flat config files.
 
 ## v0.5.0 <Badge type="tip" text="Latest" /> {#v0-5-0}
 
