@@ -13,7 +13,7 @@ Core docs:
 - `docs/CLLAMA_SPEC.md` — cllama proxy contract
 - `docs/decisions/` — ADRs
 - `docs/plans/` — implementation plans and historical design notes
-- [GitHub Project Board](https://github.com/users/mostlydev/projects/3) — prioritized roadmap (kanban).
+- [GitHub Project Board](https://github.com/users/mostlydev/projects/2) — prioritized roadmap (kanban).
   Workflow:
   - move an issue to `In progress` when actively working on it
   - use `Ready` only for work that is queued up but not yet being worked
