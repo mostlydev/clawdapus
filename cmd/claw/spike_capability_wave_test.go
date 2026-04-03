@@ -44,7 +44,7 @@ func TestSpikeCapabilityWaveArtifacts(t *testing.T) {
 	agentTag := fmt.Sprintf("claw-spike-cwav-agent:%d", time.Now().UnixNano())
 	memTag := fmt.Sprintf("claw-spike-cwav-mem:%d", time.Now().UnixNano())
 	spikeBuildImage(t, filepath.Join(repoRoot, "testdata", "openclaw-stub"), agentTag, "Clawfile")
-	spikeBuildImage(t, filepath.Join(repoRoot, "testdata", "memory-stub"), memTag, "Dockerfile")
+	spikeBuildImage(t, filepath.Join(repoRoot, "examples", "reference-memory"), memTag, "Dockerfile")
 	t.Cleanup(func() {
 		exec.Command("docker", "image", "rm", "-f", agentTag, memTag).CombinedOutput()
 	})
@@ -160,7 +160,7 @@ services:
 		t.Logf("service %s: running (container %s)", svc, id[:min(len(id), 12)])
 	}
 
-	// The memory stub has an HTTP healthcheck — confirm it goes healthy.
+	// The reference memory adapter has an HTTP healthcheck — confirm it goes healthy.
 	out, err := exec.Command("docker", "compose", "-f", composePath, "ps", "-q", "mem-svc").Output()
 	if err == nil {
 		if id := strings.TrimSpace(string(out)); id != "" {

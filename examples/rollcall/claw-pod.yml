@@ -6,9 +6,9 @@ x-claw:
 
 services:
   mem-svc:
-    image: rollcall-memory-stub:latest
+    image: rollcall-reference-memory:latest
     build:
-      context: ../../testdata/memory-stub
+      context: ../../examples/reference-memory
       dockerfile: Dockerfile
     expose:
       - "8080"

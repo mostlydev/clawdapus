@@ -1383,14 +1383,19 @@ func TestEnsureImageFallsBackToRemoteBuildWithoutRepoRoot(t *testing.T) {
 func TestResolveServiceSurfaceSkillsLeavesUndescribedServicesInlineOnly(t *testing.T) {
 	prevExists := imageExistsLocally
 	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
 	defer func() {
 		imageExistsLocally = prevExists
 		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
 	}()
 
 	imageExistsLocally = func(string) bool { return true }
 	inspectClawImage = func(string) (*inspect.ClawInfo, error) {
 		return &inspect.ClawInfo{}, nil
+	}
+	loadDescriptorFromImage = func(string, string) (*describe.ServiceDescriptor, error) {
+		return nil, os.ErrNotExist
 	}
 
 	tmpDir := t.TempDir()
@@ -1438,16 +1443,21 @@ func TestResolveServiceSurfaceSkillsLeavesUndescribedServicesInlineOnly(t *testi
 func TestResolveServiceSurfaceSkillsPrefersTargetEmit(t *testing.T) {
 	prevExists := imageExistsLocally
 	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
 	prevExtract := extractServiceSkillFromImage
 	defer func() {
 		imageExistsLocally = prevExists
 		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
 		extractServiceSkillFromImage = prevExtract
 	}()
 
 	imageExistsLocally = func(string) bool { return true }
 	inspectClawImage = func(imageRef string) (*inspect.ClawInfo, error) {
 		return &inspect.ClawInfo{SkillEmit: "/app/skills/trade.md"}, nil
+	}
+	loadDescriptorFromImage = func(string, string) (*describe.ServiceDescriptor, error) {
+		return nil, os.ErrNotExist
 	}
 	extractServiceSkillFromImage = func(imageRef string, skillEmitPath string) ([]byte, error) {
 		if imageRef != "example/trading-api:latest" {
@@ -1629,6 +1639,82 @@ LABEL maintainer=ops@example.com
 	}
 	if spec.Source != "trading-api" {
 		t.Fatalf("expected trading-api to own market-context, got %q", spec.Source)
+	}
+}
+
+func TestResolveServiceMetadataUsesDefaultImageDescriptorPathWhenLabelMissing(t *testing.T) {
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
+	defer func() {
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
+	}()
+
+	imageExistsLocally = func(string) bool { return true }
+	inspectClawImage = func(imageRef string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{}, nil
+	}
+	loadDescriptorFromImage = func(imageRef, descriptorPath string) (*describe.ServiceDescriptor, error) {
+		if imageRef != "example/reference-memory:latest" {
+			t.Fatalf("unexpected image ref: %q", imageRef)
+		}
+		if descriptorPath != "/.claw-describe.json" {
+			t.Fatalf("expected default image descriptor path, got %q", descriptorPath)
+		}
+		return &describe.ServiceDescriptor{
+			Version:     2,
+			Description: "Reference memory",
+			Memory:      &describe.MemoryDescriptor{Retain: &describe.MemoryEndpoint{Path: "/retain"}},
+		}, nil
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"mem-svc": {Image: "example/reference-memory:latest"},
+		},
+	}
+
+	_, _, descriptor, err := resolveServiceMetadata(t.TempDir(), p, "mem-svc", p.Services["mem-svc"], map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if descriptor == nil || descriptor.Memory == nil || descriptor.Memory.Retain == nil {
+		t.Fatalf("expected default image descriptor to load memory capability, got %+v", descriptor)
+	}
+}
+
+func TestResolveServiceMetadataIgnoresMissingImplicitImageDescriptor(t *testing.T) {
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
+	defer func() {
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
+	}()
+
+	imageExistsLocally = func(string) bool { return true }
+	inspectClawImage = func(imageRef string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{}, nil
+	}
+	loadDescriptorFromImage = func(string, string) (*describe.ServiceDescriptor, error) {
+		return nil, os.ErrNotExist
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"sidecar": {Image: "example/sidecar:latest"},
+		},
+	}
+
+	_, _, descriptor, err := resolveServiceMetadata(t.TempDir(), p, "sidecar", p.Services["sidecar"], map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err != nil {
+		t.Fatalf("expected missing implicit image descriptor to be ignored, got %v", err)
+	}
+	if descriptor != nil {
+		t.Fatalf("expected nil descriptor when implicit image descriptor is absent, got %+v", descriptor)
 	}
 }
 

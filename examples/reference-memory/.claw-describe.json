@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "description": "Reference memory adapter for dedupe, recall, and forget replay hygiene",
+  "memory": {
+    "recall": { "path": "/recall" },
+    "retain": { "path": "/retain" },
+    "forget": { "path": "/forget" }
+  }
+}

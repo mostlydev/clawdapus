@@ -1,21 +1,25 @@
 # Memory Plane
 
-Session history gives you retention. The memory plane gives you recall.
+Session history gives you an immutable ledger. The memory plane turns that ledger into durable, query-aware recall.
 
-Clawdapus captures every successful LLM turn at the proxy boundary and writes it to a durable ledger — regardless of runner type, outside the runtime tree. That ledger is the raw material. A **memory service** consumes it: deriving facts, commitments, episodic summaries, or embeddings, and surfacing relevant context back into future inference turns automatically.
+Clawdapus captures every successful LLM turn at the proxy boundary and writes it to session history regardless of runner type. A memory service consumes those retained entries, derives useful summaries or facts, and returns relevant context on later turns.
 
-Unlike [feeds](/guide/surfaces-and-skills), which deliver the same cached content on every turn, memory recall is query-aware — shaped by the current conversation, not a fixed snapshot.
+Unlike [feeds](/guide/surfaces-and-skills), memory recall is shaped by the current conversation. Unlike tools, memory recall and retain are infrastructure-driven rather than model-invoked.
 
 ## Architecture
 
 The memory plane follows the same compiled-capability pattern as feeds and tools:
 
-1. A memory service self-describes via `claw.describe`, advertising its `recall`, `retain`, and `forget` endpoints.
-2. An agent subscribes in `claw-pod.yml` by naming the service.
-3. `claw up` resolves the service's base URL and compiles a `memory.json` manifest into the agent's context directory.
-4. The governance proxy reads the manifest and orchestrates request-time recall before inference and post-turn retention after a response.
+1. A memory service self-describes via `claw.describe`, advertising `recall`, `retain`, and optional `forget` endpoints.
+2. An agent subscribes in `claw-pod.yml` by naming the memory service.
+3. `claw up` resolves the service URL and compiles a per-agent `memory.json` manifest into the managed context directory.
+4. `cllama` reads that manifest and orchestrates:
+   - pre-turn `recall`
+   - post-turn best-effort `retain`
+   - governed operator `forget`
+5. `claw memory backfill` can replay the immutable ledger into the service's `retain` endpoint.
 
-The memory implementation lives entirely in the memory service. The proxy provides the orchestration contract. Swap the memory backend — embeddings, graph, keyword, summarization — without changing any agent or pod configuration.
+The memory implementation remains entirely external. Swap embeddings, summaries, graph memory, or a boring keyword store without changing agent config.
 
 ## Declaring a Memory Service
 
@@ -23,19 +27,26 @@ A service becomes a memory provider by including a `memory` block in its `claw.d
 
 ```json
 {
+  "version": 2,
   "memory": {
-    "retain": { "path": "/memory/retain" },
-    "recall": { "path": "/memory/recall" },
-    "forget": { "path": "/memory/forget" }
+    "retain": { "path": "/retain" },
+    "recall": { "path": "/recall" },
+    "forget": { "path": "/forget" }
   }
 }
 ```
 
-All three endpoints are optional. A service that only ingests history (no recall) declares only `retain`. A service that supports read-only recall without write declares only `recall`.
+All three endpoints are optional:
+
+- declare only `retain` if the service is ingest-only
+- declare only `recall` if the service is read-only
+- declare `forget` when you want governed tombstone handling
+
+When the descriptor lives at the default image path `/.claw-describe.json`, no explicit `claw.describe` label is required. Use the label only when the descriptor lives somewhere else inside the image.
 
 ## Subscribing in Pod YAML
 
-An agent subscribes to a memory service using the `memory` field in its `x-claw` block:
+An agent subscribes to a memory service with the `memory` field in its `x-claw` block:
 
 ```yaml
 services:
@@ -46,21 +57,24 @@ services:
       cllama: passthrough
       memory:
         service: mem-svc
-        timeout-ms: 5000   # optional, default 300ms
+        timeout-ms: 5000
 
   mem-svc:
-    image: my-memory-service:latest
+    image: reference-memory:latest
+    build:
+      context: ./examples/reference-memory
+      dockerfile: Dockerfile
     expose:
       - "8080"
 ```
 
-`service` is the compose service name of the memory provider. The service must have an image with a valid `claw.describe` descriptor declaring memory capabilities.
+`service` is the compose service name of the memory provider. The service must declare memory capability in its descriptor.
 
-`timeout-ms` controls how long the proxy waits for recall before proceeding without it. Defaults to 300ms. Set higher for slower or network-remote memory backends.
+`timeout-ms` controls how long `cllama` waits for hot-path recall before proceeding without it. The default is 300ms.
 
 ### Pod-Level Defaults
 
-Use `memory-defaults` at the pod level to share memory configuration across services:
+Use `memory-defaults` at pod level to share one memory relationship across multiple agents:
 
 ```yaml
 x-claw:
@@ -74,20 +88,18 @@ services:
     x-claw:
       agent: ./agents/analyst/AGENTS.md
       cllama: passthrough
-      # inherits memory-defaults
 
   researcher:
     x-claw:
       agent: ./agents/researcher/AGENTS.md
       cllama: passthrough
-      # inherits memory-defaults
 ```
 
 ## What claw up Compiles
 
-During `claw up`, Clawdapus resolves the memory service descriptor and generates a `memory.json` manifest in each subscribing agent's context directory:
+During `claw up`, Clawdapus generates `memory.json` in each subscribing agent's context directory:
 
-```
+```text
 .claw-runtime/context/
 └── analyst/
     ├── AGENTS.md
@@ -95,67 +107,121 @@ During `claw up`, Clawdapus resolves the memory service descriptor and generates
     ├── metadata.json
     ├── feeds.json
     ├── tools.json
-    └── memory.json      ← compiled memory manifest
+    └── memory.json
 ```
 
-The manifest contains:
+The manifest contains the resolved base URL, declared endpoint paths, timeouts, and projected auth:
 
 ```json
 {
   "version": 1,
   "service": "mem-svc",
   "base_url": "http://mem-svc:8080",
-  "recall":  { "path": "/memory/recall",  "timeout_ms": 5000 },
-  "retain":  { "path": "/memory/retain",  "timeout_ms": 5000 },
-  "forget":  { "path": "/memory/forget",  "timeout_ms": 5000 },
+  "recall": { "path": "/recall", "timeout_ms": 5000 },
+  "retain": { "path": "/retain", "timeout_ms": 5000 },
+  "forget": { "path": "/forget", "timeout_ms": 5000 },
   "auth": { "type": "bearer", "token": "..." }
 }
 ```
 
-The `base_url` is resolved from the service's `expose` port. The `auth` block is populated if the memory service declares auth requirements in its descriptor. Agents never see this file directly — the proxy reads it.
+Agents do not read this manifest directly. `cllama` does.
 
-## Backfilling History
+## Runtime Behavior
 
-When you add a memory service to an existing pod, or swap memory backends, you can replay the retained session history into the new service's `retain` endpoint:
+### Recall
+
+Before inference, `cllama` POSTs a request shaped by the current turn to the service's `recall` endpoint. The returned `memories[]` block is injected into the prompt stream before the model call.
+
+`cllama` also applies governance policy on the returned blocks:
+
+- blocked transcript-tail kinds and sources are dropped
+- blank or over-budget recall blocks are dropped
+- secret-shaped values are redacted before injection
+- `memory_op` telemetry records how many blocks were removed by policy
+
+### Retain
+
+After a successful completion, `cllama` asynchronously POSTs the normalized session-history entry to the service's `retain` endpoint.
+
+Retain is best-effort:
+
+- the turn is already durable in `history.jsonl`
+- retain failures do not fail the user-visible inference response
+- secret-shaped values in retained request/response payloads are scrubbed before the memory backend receives them
+- retain metadata and telemetry include `policy_removed` / `memory_removed` counts when redactions happened upstream
+
+### Forget
+
+Operators can tombstone retained entries without mutating the immutable session ledger:
 
 ```bash
-claw memory backfill <memory-service>
+claw memory forget mem-svc --entry-id hist1_abc123 --reason "operator request"
 ```
 
-This reads each subscribing agent's `history.jsonl` ledger and POSTs the entries to the service's retain endpoint in order.
+This dispatches the service's `forget` endpoint when declared and also records infra-owned tombstones locally so later backfill does not resurrect forgotten entries by accident.
 
-### Flags
+### Backfill
 
-| Flag | Description |
-|------|-------------|
-| `--after <RFC3339>` | Only replay entries after this timestamp |
-| `--limit <n>` | Maximum entries to replay per agent (0 means all) |
-| `--url <url>` | Override the retain endpoint URL (e.g., when the service isn't running via compose) |
-| `--auth-token <token>` | Override the bearer token for the retain endpoint |
-
-### Examples
-
-Backfill all history:
+When you add or swap memory services, replay the durable ledger into the service's `retain` endpoint:
 
 ```bash
 claw memory backfill mem-svc
 ```
 
-Backfill only the last week:
+Useful flags:
 
-```bash
-claw memory backfill mem-svc --after 2026-03-27T00:00:00Z
-```
+| Flag | Description |
+|------|-------------|
+| `--after <RFC3339>` | Replay only entries after this timestamp |
+| `--limit <n>` | Maximum entries to replay per agent (0 means all) |
+| `--agent <id>` | Restrict replay to one or more agent IDs |
+| `--url <url>` | Override the retain endpoint URL |
+| `--auth-token <token>` | Override the bearer token used for retain |
 
-Backfill into a standalone service (not running inside compose):
+Backfill uses the same stable session-history `entry.id` values as live retain, and it honors local forget tombstones. Indexed `--after` reads avoid rescanning the ledger from byte zero on every replay.
 
-```bash
-claw memory backfill mem-svc --url http://localhost:9090/memory/retain
-```
+## Dedupe Contract for Memory Backends
+
+The stable session-history `entry.id` is the idempotency key for the memory plane.
+
+Backends should follow these rules:
+
+1. Treat `retain` as idempotent by `(agent_id, entry.id)`.
+2. Expect the same `entry.id` to arrive from both live retain and later replay/backfill.
+3. Do not create duplicate memory rows or duplicate recall blocks for repeated `retain` of the same entry.
+4. Treat `forget` as a tombstone, not a destructive rewrite of session history.
+5. Once an `entry.id` is forgotten, later replay/backfill of that same `entry.id` must remain a no-op.
+6. Never return tombstoned entries from `recall`.
+
+This is what makes replay safe and backend swaps boring.
+
+## Reference Memory Adapter
+
+Clawdapus ships a deliberately small reference adapter at [`examples/reference-memory`](https://github.com/mostlydev/clawdapus/tree/master/examples/reference-memory).
+
+It is intentionally boring:
+
+- file-backed under `MEMORY_REF_DIR` (default `/data/reference-memory`)
+- one retained record per stable `entry.id`
+- duplicate retain is a no-op
+- forget writes tombstones
+- replay of a tombstoned `entry.id` stays suppressed
+- recall returns a few recent or token-matching summaries
+
+The rollcall example and the capability-wave spike both build this adapter, so the shipped example path exercises the same contract described above.
 
 ## Telemetry
 
-Memory operations emit structured log events through the cllama proxy. Look for `type: "memory_op"` in audit output:
+Memory operations emit structured `memory_op` log events through `cllama`. Look for:
+
+- `memory_service`
+- `memory_op`
+- `memory_status`
+- `memory_blocks`
+- `memory_bytes`
+- `memory_removed`
+
+Example:
 
 ```json
 {
@@ -164,14 +230,11 @@ Memory operations emit structured log events through the cllama proxy. Look for 
   "type": "memory_op",
   "memory_service": "mem-svc",
   "memory_op": "recall",
-  "memory_status": "ok",
-  "memory_blocks": 4,
-  "memory_bytes": 1842
+  "memory_status": "succeeded",
+  "memory_blocks": 3,
+  "memory_bytes": 1482,
+  "memory_removed": 1
 }
 ```
 
-See the [cllama guide](/guide/cllama#telemetry-and-audit) for the full telemetry field reference.
-
-## What's Planned
-
-The recall side of the ambient memory plane is still in design. The current release compiles memory manifests and supports backfill. The proxy-side orchestration — automatic pre-turn recall and post-turn retention — is the next step. See [ADR-021](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/021-memory-plane-and-pluggable-recall.md) for the full design.
+`claw audit` surfaces these normalized memory events alongside other proxy telemetry.

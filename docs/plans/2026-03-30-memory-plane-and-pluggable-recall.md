@@ -161,6 +161,11 @@ Completed:
   - targets stable session-history source-event IDs
   - dispatches the declared memory-service `forget` endpoint when present
   - writes append-only infra-owned tombstones instead of mutating `history.jsonl`
+- a boring reference memory adapter under `examples/reference-memory`, which:
+  - dedupes by stable `(agent_id, entry.id)`
+  - persists forget tombstones and suppresses later replay of forgotten entries
+  - provides simple recent / token-matching recall over retained summaries
+  - is used by the rollcall example and the capability-wave spike path
 - retain-side and recall-side policy enforcement in `cllama`, which:
   - drops blocked recall sources and kinds such as raw transcript tails
   - enforces bounded recall block-count and text-byte budgets before injection
@@ -211,10 +216,13 @@ Important ADR-020 status note:
   - hidden mediated tool rounds are preserved across later turns for both request formats
 - the first-wave ADR-020 runtime slices are now effectively landed for the mediated `cllama` path; later ADR-020 work is mostly native-projection and broader roadmap follow-through
 
-Still open:
+The first ADR-021 hardening wave is now effectively landed:
 
-- backend dedupe conventions beyond the stable source-event ID contract
-- a boring reference memory adapter that exercises retain, recall, forget, and replay against the current contract
+- stable source-event IDs define the replay/dedupe contract
+- forget is represented as tombstones rather than ledger mutation
+- backfill honors those tombstones and indexed `after` reads
+- retain/recall policy filtering is observable in telemetry
+- the repo now ships a small reference adapter that follows the contract end to end
 
 Implemented with minor intentional drift from the first sketch:
 
@@ -1303,6 +1311,6 @@ The next implementation work should be split explicitly by ADR:
   - intercept and execute mediated tool calls
   - record mediated tool rounds in history/audit output
   - either fail fast for non-`cllama` capability consumers or add a real native projection path
-- ADR-021 hardening phase:
-  - backend dedupe guidance for safe repeated backfill beyond the stable source-event ID contract
-  - a boring reference memory adapter that proves the contract end to end
+- ADR-021 later follow-through:
+  - improve retrieval quality and ranking beyond the boring reference adapter
+  - add backend-specific recall heuristics only where they do not change the core contract

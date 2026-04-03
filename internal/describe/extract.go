@@ -149,6 +149,9 @@ func extractFileFromImage(imageRef, path string) ([]byte, error) {
 
 	reader, _, err := docker.CopyFromContainer(context.Background(), resp.ID, path)
 	if err != nil {
+		if isMissingImagePathError(err) {
+			return nil, fmt.Errorf("%w: copy %q from %q", os.ErrNotExist, path, imageRef)
+		}
 		return nil, fmt.Errorf("copy %q from %q: %w", path, imageRef, err)
 	}
 	defer reader.Close()
@@ -157,7 +160,7 @@ func extractFileFromImage(imageRef, path string) ([]byte, error) {
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
-			return nil, fmt.Errorf("file %q not found in tar stream from %q", path, imageRef)
+			return nil, fmt.Errorf("%w: file %q not found in tar stream from %q", os.ErrNotExist, path, imageRef)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read tar from %q: %w", imageRef, err)
@@ -171,4 +174,13 @@ func extractFileFromImage(imageRef, path string) ([]byte, error) {
 		}
 		return content, nil
 	}
+}
+
+func isMissingImagePathError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "no such file or directory") ||
+		strings.Contains(text, "could not find the file")
 }

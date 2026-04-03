@@ -322,6 +322,13 @@ It does **not** justify mutating the append-only ledger in place.
 
 Instead, forgetting requires tombstone or redaction metadata that future replay and backfill paths honor.
 
+Retain idempotency is keyed by the stable session-history `entry.id` within an agent scope:
+
+- live retain and later replay/backfill may deliver the same `entry.id` more than once
+- duplicate retain for the same `(agent_id, entry.id)` must be a no-op rather than a second derived memory row
+- forget tombstones must suppress later recall of that `entry.id`
+- replay/backfill of a tombstoned `entry.id` must remain a no-op rather than resurrecting forgotten material
+
 ### 10. Memory traffic must be observable
 
 Memory mediation is part of the governed request path and must emit structured telemetry.

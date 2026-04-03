@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -3060,14 +3061,21 @@ func resolveServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 	}
 
 	var descriptor *describe.ServiceDescriptor
-	if info != nil && strings.TrimSpace(info.DescribePath) != "" && imageRef != "" {
+	if imageRef != "" {
+		descriptorPath, implicitDescriptorPath := resolvedImageDescriptorPath(info)
 		if imageExistsLocally(imageRef) {
-			descriptor, err = loadDescriptorFromImage(imageRef, info.DescribePath)
+			descriptor, err = loadDescriptorFromImage(imageRef, descriptorPath)
 			if err != nil {
-				return "", nil, nil, fmt.Errorf("load descriptor from image: %w", err)
+				if !(implicitDescriptorPath && errors.Is(err, os.ErrNotExist)) {
+					return "", nil, nil, fmt.Errorf("load descriptor from image: %w", err)
+				}
+			} else {
+				descriptors[serviceName] = descriptor
+				return imageRef, info, descriptor, nil
 			}
 		}
 	}
+
 	if descriptor == nil && svc != nil {
 		descriptorPath := ""
 		if info != nil {
@@ -3081,6 +3089,13 @@ func resolveServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 
 	descriptors[serviceName] = descriptor
 	return imageRef, info, descriptor, nil
+}
+
+func resolvedImageDescriptorPath(info *inspect.ClawInfo) (string, bool) {
+	if info != nil && strings.TrimSpace(info.DescribePath) != "" {
+		return strings.TrimSpace(info.DescribePath), false
+	}
+	return "/" + describe.DefaultDescriptorFile, true
 }
 
 func inspectServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *pod.Service, imageRefs map[string]string, infos map[string]*inspect.ClawInfo) (string, *inspect.ClawInfo, error) {
