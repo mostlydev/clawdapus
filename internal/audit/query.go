@@ -88,6 +88,13 @@ func Summarize(events []Event) Summary {
 			} else if event.Error != "" {
 				agent.FeedErrors++
 			}
+		case "tool_call":
+			agent.ToolCalls++
+			summary.ToolCalls++
+			if toolEventFailed(event) {
+				agent.ToolErrors++
+				summary.ToolErrors++
+			}
 		case "provider_pool":
 			agent.ProviderPoolEvents++
 			summary.ProviderPoolEvents++
@@ -115,4 +122,17 @@ func Summarize(events []Event) Summary {
 	})
 	summary.Agents = agents
 	return summary
+}
+
+func toolEventFailed(event Event) bool {
+	if event.FinalStatus == "error" || event.Error != "" {
+		return true
+	}
+	if event.StatusCode != nil && *event.StatusCode >= 400 {
+		return true
+	}
+	if event.FinalStatusCode != nil && *event.FinalStatusCode >= 400 {
+		return true
+	}
+	return false
 }

@@ -192,17 +192,16 @@ Important ADR-020 status note:
   - `cllama` injects managed tools into upstream OpenAI-compatible and Anthropic requests
   - `cllama` executes managed HTTP tools in a bounded mediation loop across both provider formats
   - session history emits `tool_trace` and mediated `status` for these turns
+  - `claw audit` now merges session-history-derived `tool_call` events with proxy logs, so operators can see managed tool activity and failures without manual ledger inspection
   - downstream streaming requests are satisfied by synthetic SSE re-streaming after mediation completes
   - hidden mediated tool rounds are preserved across later turns for both request formats
 - the remaining ADR-020 runtime gap is now concentrated in:
   - transport-level keepalive/progress comments during long mediated streaming requests
-  - audit-plane/operator polish (`claw audit` mediated-tool reporting)
 
 Still open:
 
 - ADR-020 remaining runtime work, specifically:
   - transport keepalive/progress comments for long managed streaming requests
-  - `claw audit` mediated-tool reporting and related operator polish
 - tombstone/forget flow and replay hygiene
 - a more scalable replay path than forward-scanning large JSONL files
 - retain/recall policy filtering and policy-removal accounting

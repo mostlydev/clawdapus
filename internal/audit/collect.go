@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -89,6 +91,51 @@ func parseServiceLogs(serviceName string, readers ...io.Reader) ([]Event, int, e
 	return events, skipped, nil
 }
 
+func CollectSessionHistoryEvents(baseDir string, since time.Time) ([]Event, int, error) {
+	if stringsTrimSpace(baseDir) == "" {
+		return nil, 0, nil
+	}
+	baseDir = filepath.Clean(baseDir)
+
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, 0, nil
+		}
+		return nil, 0, fmt.Errorf("read session history dir %q: %w", baseDir, err)
+	}
+
+	events := make([]Event, 0)
+	skipped := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		historyPath := filepath.Join(baseDir, entry.Name(), "history.jsonl")
+		f, err := os.Open(historyPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, skipped, fmt.Errorf("open session history %q: %w", historyPath, err)
+		}
+
+		parsed, sourceSkipped, parseErr := ParseSessionHistoryReader(f)
+		_ = f.Close()
+		if parseErr != nil {
+			return nil, skipped + sourceSkipped, fmt.Errorf("parse session history %q: %w", historyPath, parseErr)
+		}
+		skipped += sourceSkipped
+		for _, event := range parsed {
+			if !since.IsZero() && event.Timestamp.Before(since) {
+				continue
+			}
+			events = append(events, event)
+		}
+	}
+	return events, skipped, nil
+}
+
 func formatSince(since time.Time) string {
 	if since.IsZero() {
 		return ""
@@ -105,4 +152,8 @@ func compareStrings(left, right string) int {
 	default:
 		return 0
 	}
+}
+
+func stringsTrimSpace(value string) string {
+	return string(bytes.TrimSpace([]byte(value)))
 }

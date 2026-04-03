@@ -99,6 +99,101 @@ func TestSummarizeCountsFeedFetches(t *testing.T) {
 	}
 }
 
+func TestNormalizeSessionHistoryLineOpenAIManagedTool(t *testing.T) {
+	line := `{"version":1,"id":"hist1_abc","status":"ok","ts":"2026-04-03T12:00:00Z","claw_id":"tiverton","path":"/v1/chat/completions","requested_model":"xai/grok-4.1-fast","effective_provider":"xai","effective_model":"xai/grok-4.1-fast","status_code":200,"usage":{"prompt_tokens":120,"completion_tokens":40,"total_rounds":2},"tool_trace":[{"round":1,"tool_calls":[{"name":"trading-api.get_market_context","service":"trading-api","latency_ms":87,"status_code":200,"result":{"ok":true,"data":{"balance":5000}}}]}]}`
+	events, err := NormalizeSessionHistoryLine([]byte(line))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 tool event, got %+v", events)
+	}
+	event := events[0]
+	if event.Type != "tool_call" || event.ToolName != "trading-api.get_market_context" {
+		t.Fatalf("unexpected tool event: %+v", event)
+	}
+	if event.ToolService != "trading-api" || event.FinalStatus != "ok" {
+		t.Fatalf("unexpected tool metadata: %+v", event)
+	}
+	if event.SessionEntryID != "hist1_abc" {
+		t.Fatalf("expected session entry id hist1_abc, got %+v", event)
+	}
+	if event.StatusCode == nil || *event.StatusCode != 200 {
+		t.Fatalf("expected tool status_code 200, got %+v", event)
+	}
+	if event.FinalStatusCode == nil || *event.FinalStatusCode != 200 {
+		t.Fatalf("expected final status_code 200, got %+v", event)
+	}
+	if event.TotalRounds == nil || *event.TotalRounds != 2 {
+		t.Fatalf("expected total_rounds 2, got %+v", event)
+	}
+	if event.ToolRound == nil || *event.ToolRound != 1 {
+		t.Fatalf("expected tool_round 1, got %+v", event)
+	}
+}
+
+func TestNormalizeSessionHistoryLineAnthropicManagedToolFailure(t *testing.T) {
+	line := `{"version":1,"id":"hist1_def","status":"error","ts":"2026-04-03T12:05:00Z","claw_id":"nano-bot","path":"/v1/messages","requested_model":"anthropic/claude-sonnet-4","effective_provider":"anthropic","effective_model":"anthropic/claude-sonnet-4","status_code":502,"response":{"format":"json","json":{"error":{"message":"tool result rejected"}}},"usage":{"prompt_tokens":140,"completion_tokens":30,"total_rounds":2},"tool_trace":[{"round":1,"tool_calls":[{"name":"trading-api.get_market_context","service":"trading-api","latency_ms":145,"status_code":504,"result":{"ok":false,"error":"backend timeout"}}]}]}`
+	events, err := NormalizeSessionHistoryLine([]byte(line))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 tool event, got %+v", events)
+	}
+	event := events[0]
+	if event.FinalStatus != "error" {
+		t.Fatalf("expected final_status error, got %+v", event)
+	}
+	if event.Error != "backend timeout" {
+		t.Fatalf("expected tool error backend timeout, got %+v", event)
+	}
+	if event.FinalStatusCode == nil || *event.FinalStatusCode != 502 {
+		t.Fatalf("expected final status code 502, got %+v", event)
+	}
+	if event.StatusCode == nil || *event.StatusCode != 504 {
+		t.Fatalf("expected tool status code 504, got %+v", event)
+	}
+}
+
+func TestParseSessionHistoryReaderSkipsNonMediatedEntries(t *testing.T) {
+	raw := strings.NewReader(
+		"{\"version\":1,\"ts\":\"2026-04-03T12:00:00Z\",\"claw_id\":\"plain\",\"status\":\"ok\"}\n" +
+			"{\"version\":1,\"id\":\"hist1_ghi\",\"status\":\"ok\",\"ts\":\"2026-04-03T12:01:00Z\",\"claw_id\":\"plain\",\"status_code\":200,\"usage\":{\"total_rounds\":2},\"tool_trace\":[{\"round\":1,\"tool_calls\":[{\"name\":\"svc.tool\",\"service\":\"svc\",\"status_code\":200}]}]}\n",
+	)
+	events, skipped, err := ParseSessionHistoryReader(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if skipped != 0 {
+		t.Fatalf("expected 0 skipped lines, got %d", skipped)
+	}
+	if len(events) != 1 || events[0].ToolName != "svc.tool" {
+		t.Fatalf("unexpected tool events: %+v", events)
+	}
+}
+
+func TestSummarizeCountsManagedToolCalls(t *testing.T) {
+	events := []Event{
+		{ClawID: "weston", Type: "tool_call", ToolName: "svc.ok", FinalStatus: "ok"},
+		{ClawID: "weston", Type: "tool_call", ToolName: "svc.fail", FinalStatus: "error"},
+	}
+	summary := Summarize(events)
+	if len(summary.Agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(summary.Agents))
+	}
+	agent := summary.Agents[0]
+	if agent.ToolCalls != 2 {
+		t.Fatalf("expected 2 tool calls, got %+v", agent)
+	}
+	if agent.ToolErrors != 1 {
+		t.Fatalf("expected 1 tool error, got %+v", agent)
+	}
+	if summary.ToolCalls != 2 || summary.ToolErrors != 1 {
+		t.Fatalf("unexpected tool totals: %+v", summary)
+	}
+}
+
 func ptrInt(v int) *int {
 	return &v
 }

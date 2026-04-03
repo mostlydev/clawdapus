@@ -17,6 +17,13 @@ type Event struct {
 	FeedName           string    `json:"feed_name,omitempty"`
 	FeedURL            string    `json:"feed_url,omitempty"`
 	SourceService      string    `json:"source_service,omitempty"`
+	SessionEntryID     string    `json:"session_entry_id,omitempty"`
+	FinalStatus        string    `json:"final_status,omitempty"`
+	FinalStatusCode    *int      `json:"final_status_code,omitempty"`
+	TotalRounds        *int      `json:"total_rounds,omitempty"`
+	ToolName           string    `json:"tool_name,omitempty"`
+	ToolService        string    `json:"tool_service,omitempty"`
+	ToolRound          *int      `json:"tool_round,omitempty"`
 	// provider_pool event fields
 	Provider      string `json:"provider,omitempty"`
 	KeyID         string `json:"key_id,omitempty"`
@@ -26,20 +33,22 @@ type Event struct {
 }
 
 type AgentSummary struct {
-	ClawID              string         `json:"claw_id"`
-	Requests            int            `json:"requests"`
-	Responses           int            `json:"responses"`
-	Errors              int            `json:"errors"`
-	Interventions       int            `json:"interventions"`
-	TokensIn            int            `json:"tokens_in"`
-	TokensOut           int            `json:"tokens_out"`
-	CostUSD             float64        `json:"cost_usd"`
-	ModelUsage          map[string]int `json:"model_usage,omitempty"`
-	FeedFetches         int            `json:"feed_fetches"`
-	FeedErrors          int            `json:"feed_errors"`
-	ProviderPoolEvents  int            `json:"provider_pool_events,omitempty"`
-	FirstTimestamp      time.Time      `json:"first_timestamp,omitempty"`
-	LastTimestamp       time.Time      `json:"last_timestamp,omitempty"`
+	ClawID             string         `json:"claw_id"`
+	Requests           int            `json:"requests"`
+	Responses          int            `json:"responses"`
+	Errors             int            `json:"errors"`
+	Interventions      int            `json:"interventions"`
+	TokensIn           int            `json:"tokens_in"`
+	TokensOut          int            `json:"tokens_out"`
+	CostUSD            float64        `json:"cost_usd"`
+	ModelUsage         map[string]int `json:"model_usage,omitempty"`
+	FeedFetches        int            `json:"feed_fetches"`
+	FeedErrors         int            `json:"feed_errors"`
+	ToolCalls          int            `json:"tool_calls,omitempty"`
+	ToolErrors         int            `json:"tool_errors,omitempty"`
+	ProviderPoolEvents int            `json:"provider_pool_events,omitempty"`
+	FirstTimestamp     time.Time      `json:"first_timestamp,omitempty"`
+	LastTimestamp      time.Time      `json:"last_timestamp,omitempty"`
 }
 
 type Summary struct {
@@ -51,5 +60,7 @@ type Summary struct {
 	TokensIn           int            `json:"tokens_in"`
 	TokensOut          int            `json:"tokens_out"`
 	CostUSD            float64        `json:"cost_usd"`
+	ToolCalls          int            `json:"tool_calls,omitempty"`
+	ToolErrors         int            `json:"tool_errors,omitempty"`
 	ProviderPoolEvents int            `json:"provider_pool_events,omitempty"`
 }

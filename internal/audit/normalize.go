@@ -17,16 +17,9 @@ func NormalizeLine(line []byte) (*Event, error) {
 		return nil, err
 	}
 
-	ts := strings.TrimSpace(stringField(raw, "timestamp"))
-	if ts == "" {
-		ts = strings.TrimSpace(stringField(raw, "ts"))
-	}
-	if ts == "" {
-		return nil, fmt.Errorf("missing timestamp")
-	}
-	parsedTS, err := time.Parse(time.RFC3339, ts)
+	parsedTS, err := parseRawTimestamp(raw)
 	if err != nil {
-		return nil, fmt.Errorf("parse timestamp %q: %w", ts, err)
+		return nil, err
 	}
 
 	eventType := strings.TrimSpace(stringField(raw, "type"))
@@ -74,6 +67,97 @@ func NormalizeLine(line []byte) (*Event, error) {
 	return event, nil
 }
 
+func NormalizeSessionHistoryLine(line []byte) ([]Event, error) {
+	var raw map[string]any
+	if err := json.Unmarshal(line, &raw); err != nil {
+		return nil, err
+	}
+
+	toolTrace, ok := sliceField(raw, "tool_trace")
+	if !ok || len(toolTrace) == 0 {
+		return nil, nil
+	}
+
+	parsedTS, err := parseRawTimestamp(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	model := strings.TrimSpace(stringField(raw, "effective_model"))
+	if model == "" {
+		model = strings.TrimSpace(stringField(raw, "requested_model"))
+	}
+	clawID := strings.TrimSpace(stringField(raw, "claw_id"))
+	sessionEntryID := strings.TrimSpace(stringField(raw, "id"))
+	finalStatus := strings.TrimSpace(stringField(raw, "status"))
+	finalStatusCode, hasFinalStatusCode := intField(raw, "status_code")
+	totalRounds, hasTotalRounds := 0, false
+	if usage, ok := mapField(raw, "usage"); ok {
+		totalRounds, hasTotalRounds = intField(usage, "total_rounds")
+	}
+	responseError := extractSessionHistoryResponseError(raw)
+
+	events := make([]Event, 0)
+	for _, roundValue := range toolTrace {
+		roundMap, ok := roundValue.(map[string]any)
+		if !ok {
+			continue
+		}
+		roundNumber, hasRoundNumber := intField(roundMap, "round")
+		toolCalls, ok := sliceField(roundMap, "tool_calls")
+		if !ok || len(toolCalls) == 0 {
+			continue
+		}
+
+		for _, callValue := range toolCalls {
+			callMap, ok := callValue.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			event := Event{
+				Timestamp:      parsedTS,
+				ClawID:         clawID,
+				Type:           "tool_call",
+				Model:          model,
+				SourceService:  "session-history",
+				SessionEntryID: sessionEntryID,
+				FinalStatus:    finalStatus,
+				ToolName:       strings.TrimSpace(stringField(callMap, "name")),
+				ToolService:    strings.TrimSpace(stringField(callMap, "service")),
+			}
+			if latencyMS, ok := int64Field(callMap, "latency_ms"); ok {
+				event.LatencyMS = &latencyMS
+			}
+			if statusCode, ok := intField(callMap, "status_code"); ok {
+				event.StatusCode = &statusCode
+			}
+			if hasRoundNumber {
+				value := roundNumber
+				event.ToolRound = &value
+			}
+			if hasTotalRounds {
+				value := totalRounds
+				event.TotalRounds = &value
+			}
+			if hasFinalStatusCode {
+				value := finalStatusCode
+				event.FinalStatusCode = &value
+			}
+			if errText := extractToolResultError(callMap); errText != "" {
+				event.Error = errText
+			} else {
+				event.Error = responseError
+			}
+			if event.ToolName == "" {
+				continue
+			}
+			events = append(events, event)
+		}
+	}
+	return events, nil
+}
+
 func ParseReader(r io.Reader) ([]Event, int, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxScanTokenSize)
@@ -96,6 +180,45 @@ func ParseReader(r io.Reader) ([]Event, int, error) {
 		return nil, skipped, err
 	}
 	return events, skipped, nil
+}
+
+func ParseSessionHistoryReader(r io.Reader) ([]Event, int, error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxScanTokenSize)
+
+	events := make([]Event, 0)
+	skipped := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		normalized, err := NormalizeSessionHistoryLine([]byte(line))
+		if err != nil {
+			skipped++
+			continue
+		}
+		events = append(events, normalized...)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, skipped, err
+	}
+	return events, skipped, nil
+}
+
+func parseRawTimestamp(raw map[string]any) (time.Time, error) {
+	ts := strings.TrimSpace(stringField(raw, "timestamp"))
+	if ts == "" {
+		ts = strings.TrimSpace(stringField(raw, "ts"))
+	}
+	if ts == "" {
+		return time.Time{}, fmt.Errorf("missing timestamp")
+	}
+	parsedTS, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse timestamp %q: %w", ts, err)
+	}
+	return parsedTS, nil
 }
 
 func stringField(raw map[string]any, key string) string {
@@ -154,4 +277,64 @@ func float64Field(raw map[string]any, key string) (float64, bool) {
 		return float64(v), true
 	}
 	return 0, false
+}
+
+func mapField(raw map[string]any, key string) (map[string]any, bool) {
+	value, ok := raw[key]
+	if !ok || value == nil {
+		return nil, false
+	}
+	m, ok := value.(map[string]any)
+	return m, ok
+}
+
+func sliceField(raw map[string]any, key string) ([]any, bool) {
+	value, ok := raw[key]
+	if !ok || value == nil {
+		return nil, false
+	}
+	s, ok := value.([]any)
+	return s, ok
+}
+
+func extractToolResultError(call map[string]any) string {
+	result, ok := mapField(call, "result")
+	if !ok {
+		return ""
+	}
+	if errText, ok := nullableStringField(result, "error"); ok {
+		return strings.TrimSpace(errText)
+	}
+	if errObj, ok := mapField(result, "error"); ok {
+		if message, ok := nullableStringField(errObj, "message"); ok {
+			return strings.TrimSpace(message)
+		}
+	}
+	if message, ok := nullableStringField(result, "message"); ok {
+		return strings.TrimSpace(message)
+	}
+	return ""
+}
+
+func extractSessionHistoryResponseError(raw map[string]any) string {
+	response, ok := mapField(raw, "response")
+	if !ok {
+		return ""
+	}
+	payload, ok := mapField(response, "json")
+	if !ok {
+		return ""
+	}
+	if errText, ok := nullableStringField(payload, "error"); ok {
+		return strings.TrimSpace(errText)
+	}
+	if errObj, ok := mapField(payload, "error"); ok {
+		if message, ok := nullableStringField(errObj, "message"); ok {
+			return strings.TrimSpace(message)
+		}
+	}
+	if message, ok := nullableStringField(payload, "message"); ok {
+		return strings.TrimSpace(message)
+	}
+	return ""
 }
