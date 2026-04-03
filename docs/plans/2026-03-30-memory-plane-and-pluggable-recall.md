@@ -161,6 +161,12 @@ Completed:
   - targets stable session-history source-event IDs
   - dispatches the declared memory-service `forget` endpoint when present
   - writes append-only infra-owned tombstones instead of mutating `history.jsonl`
+- retain-side and recall-side policy enforcement in `cllama`, which:
+  - drops blocked recall sources and kinds such as raw transcript tails
+  - enforces bounded recall block-count and text-byte budgets before injection
+  - redacts secret-shaped values from recalled memory blocks before they are injected into model context
+  - scrubs secret-shaped values from retained request/response payloads before they are handed to the memory backend
+  - records policy-removal / redaction counts in retain metadata and `memory_op` telemetry
 - stable source-event IDs on session-history entries, propagated through:
   - live `retain` payloads
   - `GET /history/{agentID}`
@@ -207,8 +213,8 @@ Important ADR-020 status note:
 
 Still open:
 
-- retain/recall policy filtering and policy-removal accounting
 - backend dedupe conventions beyond the stable source-event ID contract
+- a boring reference memory adapter that exercises retain, recall, forget, and replay against the current contract
 
 Implemented with minor intentional drift from the first sketch:
 
@@ -1299,5 +1305,4 @@ The next implementation work should be split explicitly by ADR:
   - either fail fast for non-`cllama` capability consumers or add a real native projection path
 - ADR-021 hardening phase:
   - backend dedupe guidance for safe repeated backfill beyond the stable source-event ID contract
-  - retain-side and recall-side policy filtering
   - a boring reference memory adapter that proves the contract end to end
