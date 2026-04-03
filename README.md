@@ -1,6 +1,5 @@
 # ![Clawdapus Logo](docs/art/clawdapus.png)
 
-
 **Infrastructure-layer governance for AI agent containers.**
 
 [Documentation](https://clawdapus.dev/) | [Quickstart](https://clawdapus.dev/guide/quickstart) | [Manifesto](https://clawdapus.dev/manifesto)
