@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,16 +33,20 @@ import (
 	_ "github.com/mostlydev/clawdapus/internal/driver/nullclaw"
 	_ "github.com/mostlydev/clawdapus/internal/driver/openclaw"
 	_ "github.com/mostlydev/clawdapus/internal/driver/picoclaw"
+	schedulepkg "github.com/mostlydev/clawdapus/internal/schedule"
 )
 
 type apiHandler struct {
-	manifest      *manifestpkg.PodManifest
-	store         *clawapi.Store
-	docker        *client.Client
-	auditLog      *json.Encoder
-	auditErr      io.Writer
-	thresholds    clawapi.Thresholds
-	governanceDir string
+	manifest         *manifestpkg.PodManifest
+	scheduleManifest *schedulepkg.Manifest
+	scheduleState    *scheduleStateStore
+	scheduler        *scheduler
+	store            *clawapi.Store
+	docker           *client.Client
+	auditLog         *json.Encoder
+	auditErr         io.Writer
+	thresholds       clawapi.Thresholds
+	governanceDir    string
 }
 
 type serviceStatus struct {
@@ -61,18 +67,36 @@ type alert struct {
 	Summary  string `json:"summary"`
 }
 
-func newHandler(manifest *manifestpkg.PodManifest, store *clawapi.Store, docker *client.Client, auditWriter io.Writer, thresholds clawapi.Thresholds, governanceDir string) http.Handler {
+type scheduleInvocationView struct {
+	schedulepkg.ManifestInvocation
+	State schedulepkg.InvocationState `json:"state"`
+}
+
+type schedulePauseRequest struct {
+	Until  string `json:"until,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type scheduleFireRequest struct {
+	BypassWhen  bool `json:"bypass_when,omitempty"`
+	BypassPause bool `json:"bypass_pause,omitempty"`
+}
+
+func newHandler(manifest *manifestpkg.PodManifest, scheduleManifest *schedulepkg.Manifest, scheduleState *scheduleStateStore, scheduler *scheduler, store *clawapi.Store, docker *client.Client, auditWriter io.Writer, thresholds clawapi.Thresholds, governanceDir string) http.Handler {
 	if auditWriter == nil {
 		auditWriter = io.Discard
 	}
 	return &apiHandler{
-		manifest:      manifest,
-		store:         store,
-		docker:        docker,
-		auditLog:      json.NewEncoder(auditWriter),
-		auditErr:      os.Stderr,
-		thresholds:    thresholds,
-		governanceDir: governanceDir,
+		manifest:         manifest,
+		scheduleManifest: scheduleManifest,
+		scheduleState:    scheduleState,
+		scheduler:        scheduler,
+		store:            store,
+		docker:           docker,
+		auditLog:         json.NewEncoder(auditWriter),
+		auditErr:         os.Stderr,
+		thresholds:       thresholds,
+		governanceDir:    governanceDir,
 	}
 }
 
@@ -92,6 +116,15 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodGet && r.URL.Path == "/fleet/alerts":
 		h.handleAlerts(w, r)
+		return
+	case r.Method == http.MethodGet && r.URL.Path == "/schedule":
+		h.handleScheduleList(w, r)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/schedule/"):
+		h.handleScheduleGet(w, r)
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/schedule/"):
+		h.handleScheduleControl(w, r)
 		return
 	case r.Method == http.MethodPost && r.URL.Path == "/fleet/restart":
 		h.handleRestart(w, r)
@@ -195,6 +228,233 @@ func (h *apiHandler) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *apiHandler) handleScheduleList(w http.ResponseWriter, r *http.Request) {
+	principal, ok := h.authorize(w, r, clawapi.VerbScheduleRead, "")
+	if !ok {
+		return
+	}
+	invocations := h.collectScheduleViews(principal)
+	writeJSON(w, http.StatusOK, map[string]any{"invocations": invocations})
+}
+
+func (h *apiHandler) handleScheduleGet(w http.ResponseWriter, r *http.Request) {
+	id, action, ok := parseSchedulePath(r.URL.Path)
+	if !ok || action != "" {
+		http.NotFound(w, r)
+		return
+	}
+	view, ok := h.resolveScopedScheduleView(w, r, id, clawapi.VerbScheduleRead)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"invocation": view})
+}
+
+func (h *apiHandler) handleScheduleControl(w http.ResponseWriter, r *http.Request) {
+	id, action, ok := parseSchedulePath(r.URL.Path)
+	if !ok || action == "" {
+		http.NotFound(w, r)
+		return
+	}
+	view, ok := h.resolveScopedScheduleView(w, r, id, clawapi.VerbScheduleControl)
+	if !ok {
+		return
+	}
+	switch action {
+	case "pause":
+		h.handleSchedulePause(w, r, view)
+	case "resume":
+		h.handleScheduleResume(w, r, view)
+	case "skip-next":
+		h.handleScheduleSkipNext(w, r, view)
+	case "fire":
+		h.handleScheduleFire(w, r, view)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func parseSchedulePath(path string) (id, action string, ok bool) {
+	if !strings.HasPrefix(path, "/schedule/") {
+		return "", "", false
+	}
+	trimmed := strings.TrimSpace(strings.TrimPrefix(path, "/schedule/"))
+	if trimmed == "" {
+		return "", "", false
+	}
+	parts := strings.Split(trimmed, "/")
+	switch len(parts) {
+	case 1:
+		if parts[0] == "" {
+			return "", "", false
+		}
+		return parts[0], "", true
+	case 2:
+		if parts[0] == "" || parts[1] == "" {
+			return "", "", false
+		}
+		return parts[0], parts[1], true
+	default:
+		return "", "", false
+	}
+}
+
+func (h *apiHandler) resolveScopedScheduleView(w http.ResponseWriter, r *http.Request, id, verb string) (scheduleInvocationView, bool) {
+	principal, err := h.store.ResolveBearer(r.Header.Get("Authorization"))
+	if err != nil {
+		h.logDecision("", verb, id, false, err.Error())
+		writeJSONError(w, http.StatusUnauthorized, "invalid bearer token")
+		return scheduleInvocationView{}, false
+	}
+	if !principal.AllowsVerb(verb) {
+		h.logDecision(principal.Name, verb, id, false, "verb denied")
+		writeJSONError(w, http.StatusForbidden, "principal is not allowed to perform this action")
+		return scheduleInvocationView{}, false
+	}
+	view, ok := h.lookupScheduleView(id)
+	if !ok || !principal.AllowsService(h.manifest.PodName, view.Service) {
+		h.logDecision(principal.Name, verb, id, false, "not found or out of scope")
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("schedule %q not found", id))
+		return scheduleInvocationView{}, false
+	}
+	h.logDecision(principal.Name, verb, view.Service, true, "")
+	return view, true
+}
+
+func (h *apiHandler) handleSchedulePause(w http.ResponseWriter, r *http.Request, view scheduleInvocationView) {
+	if h.scheduleState == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "schedule state unavailable")
+		return
+	}
+	var req schedulePauseRequest
+	if err := decodeOptionalJSONBody(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	var until *time.Time
+	if raw := strings.TrimSpace(req.Until); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "until must be RFC3339")
+			return
+		}
+		parsed = parsed.UTC()
+		if !parsed.After(time.Now().UTC()) {
+			writeJSONError(w, http.StatusBadRequest, "until must be in the future")
+			return
+		}
+		until = &parsed
+	}
+	if _, err := h.scheduleState.UpdateInvocation(view.ID, func(state *schedulepkg.InvocationState) error {
+		state.Paused = true
+		state.PausedUntil = until
+		state.PauseReason = reason
+		return nil
+	}); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeScheduleInvocation(w, view.ID)
+}
+
+func (h *apiHandler) handleScheduleResume(w http.ResponseWriter, r *http.Request, view scheduleInvocationView) {
+	if h.scheduleState == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "schedule state unavailable")
+		return
+	}
+	if err := requireEmptyOrJSONBody(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := h.scheduleState.UpdateInvocation(view.ID, func(state *schedulepkg.InvocationState) error {
+		state.Paused = false
+		state.PausedUntil = nil
+		state.PauseReason = ""
+		return nil
+	}); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeScheduleInvocation(w, view.ID)
+}
+
+func (h *apiHandler) handleScheduleSkipNext(w http.ResponseWriter, r *http.Request, view scheduleInvocationView) {
+	if h.scheduleState == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "schedule state unavailable")
+		return
+	}
+	if err := requireEmptyOrJSONBody(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := h.scheduleState.UpdateInvocation(view.ID, func(state *schedulepkg.InvocationState) error {
+		state.SkipNext = true
+		return nil
+	}); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeScheduleInvocation(w, view.ID)
+}
+
+func (h *apiHandler) handleScheduleFire(w http.ResponseWriter, r *http.Request, view scheduleInvocationView) {
+	if h.scheduler == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "scheduler unavailable")
+		return
+	}
+	var req scheduleFireRequest
+	if err := decodeOptionalJSONBody(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := h.scheduler.FireNow(r.Context(), view.ID, req.BypassWhen, req.BypassPause); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeJSONError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeScheduleInvocation(w, view.ID)
+}
+
+func (h *apiHandler) writeScheduleInvocation(w http.ResponseWriter, id string) {
+	view, ok := h.lookupScheduleView(id)
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("schedule %q not found", id))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"invocation": view})
+}
+
+func decodeOptionalJSONBody(r *http.Request, dst any) error {
+	if r == nil || r.Body == nil {
+		return nil
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return fmt.Errorf("invalid request body")
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return fmt.Errorf("invalid request body")
+	}
+	return fmt.Errorf("invalid request body")
+}
+
+func requireEmptyOrJSONBody(r *http.Request) error {
+	var body map[string]any
+	return decodeOptionalJSONBody(r, &body)
+}
+
 func (h *apiHandler) authorize(w http.ResponseWriter, r *http.Request, verb, target string) (*clawapi.Principal, bool) {
 	principal, err := h.store.ResolveBearer(r.Header.Get("Authorization"))
 	if err != nil {
@@ -212,6 +472,20 @@ func (h *apiHandler) authorize(w http.ResponseWriter, r *http.Request, verb, tar
 		if !principal.AllowsPod(h.manifest.PodName) && len(principal.Services) == 0 && len(principal.ClawIDs) == 0 {
 			h.logDecision(principal.Name, verb, target, false, "scope denied")
 			writeJSONError(w, http.StatusForbidden, "principal is out of scope")
+			return nil, false
+		}
+	case clawapi.VerbScheduleRead, clawapi.VerbScheduleControl:
+		if target == "" {
+			if !principal.AllowsPod(h.manifest.PodName) && len(principal.Services) == 0 {
+				h.logDecision(principal.Name, verb, target, false, "scope denied")
+				writeJSONError(w, http.StatusForbidden, "principal is out of scope")
+				return nil, false
+			}
+			break
+		}
+		if !principal.AllowsService(h.manifest.PodName, target) {
+			h.logDecision(principal.Name, verb, target, false, "service out of scope")
+			writeJSONError(w, http.StatusForbidden, "service is out of scope")
 			return nil, false
 		}
 	case clawapi.VerbFleetLogs:
@@ -241,6 +515,56 @@ func (h *apiHandler) authorize(w http.ResponseWriter, r *http.Request, verb, tar
 	}
 	h.logDecision(principal.Name, verb, target, true, "")
 	return principal, true
+}
+
+func (h *apiHandler) collectScheduleViews(principal *clawapi.Principal) []scheduleInvocationView {
+	if h == nil || h.scheduleManifest == nil {
+		return nil
+	}
+	state := schedulepkg.StateFile{Version: 1}
+	if h.scheduleState != nil {
+		state = h.scheduleState.Snapshot()
+	}
+	out := make([]scheduleInvocationView, 0, len(h.scheduleManifest.Invocations))
+	for _, inv := range h.scheduleManifest.Invocations {
+		if principal != nil && !principal.AllowsService(h.manifest.PodName, inv.Service) {
+			continue
+		}
+		out = append(out, scheduleInvocationView{
+			ManifestInvocation: inv,
+			State:              state.Invocations[inv.ID].Clone(),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Service != out[j].Service {
+			return out[i].Service < out[j].Service
+		}
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+func (h *apiHandler) lookupScheduleView(id string) (scheduleInvocationView, bool) {
+	if h == nil || h.scheduleManifest == nil {
+		return scheduleInvocationView{}, false
+	}
+	state := schedulepkg.StateFile{Version: 1}
+	if h.scheduleState != nil {
+		state = h.scheduleState.Snapshot()
+	}
+	for _, inv := range h.scheduleManifest.Invocations {
+		if inv.ID != id {
+			continue
+		}
+		return scheduleInvocationView{
+			ManifestInvocation: inv,
+			State:              state.Invocations[inv.ID].Clone(),
+		}, true
+	}
+	return scheduleInvocationView{}, false
 }
 
 func (h *apiHandler) collectStatus(ctx context.Context, principal *clawapi.Principal, useDriverProbe bool) ([]serviceStatus, error) {

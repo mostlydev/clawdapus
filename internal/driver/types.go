@@ -1,5 +1,13 @@
 package driver
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+
+	"github.com/mostlydev/clawdapus/internal/schedule"
+)
+
 // Driver translates Clawfile intent into runner-specific enforcement.
 // Fail-closed: Validate runs before compose up, PostApply runs after.
 type Driver interface {
@@ -17,10 +25,30 @@ type BaseImageProvider interface {
 
 // Invocation is a scheduled agent task resolved from image labels or pod x-claw.invoke.
 type Invocation struct {
-	Schedule string // 5-field cron expression (e.g., "15 8 * * 1-5")
-	Message  string // agent task payload (agentTurn message)
-	To       string // platform delivery target (channel/chat ID; empty = driver default behavior)
-	Name     string // human-readable job name (optional, derived from message if empty)
+	ID       string           `json:"id,omitempty"`
+	Schedule string           // 5-field cron expression (e.g., "15 8 * * 1-5")
+	Message  string           // agent task payload (agentTurn message)
+	To       string           // platform delivery target (channel/chat ID; empty = driver default behavior)
+	Name     string           // human-readable job name (optional, derived from message if empty)
+	Origin   InvocationOrigin `json:"origin,omitempty"`
+	When     *schedule.When   `json:"when,omitempty"`
+}
+
+type InvocationOrigin string
+
+const (
+	OriginImage InvocationOrigin = "image"
+	OriginPod   InvocationOrigin = "pod"
+)
+
+func DeterministicInvocationID(serviceName string, origin InvocationOrigin, scheduleExpr, message string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		strings.TrimSpace(serviceName),
+		string(origin),
+		strings.TrimSpace(scheduleExpr),
+		strings.TrimSpace(message),
+	}, "|")))
+	return hex.EncodeToString(sum[:6])
 }
 
 // ResolvedClaw combines image-level claw labels with pod-level x-claw overrides.

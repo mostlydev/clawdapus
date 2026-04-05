@@ -230,6 +230,19 @@ func TestGenerateCronJobsJSONRejectsInvalidSchedule(t *testing.T) {
 	}
 }
 
+func TestNativeCronInvocationsSkipsPodOrigin(t *testing.T) {
+	invocations := nativeCronInvocations([]driver.Invocation{
+		{Schedule: "*/5 * * * *", Message: "image", Origin: driver.OriginImage},
+		{Schedule: "*/15 * * * *", Message: "pod", Origin: driver.OriginPod},
+	})
+	if len(invocations) != 1 {
+		t.Fatalf("expected one native invocation, got %d", len(invocations))
+	}
+	if invocations[0].Message != "image" {
+		t.Fatalf("unexpected invocation kept: %+v", invocations[0])
+	}
+}
+
 func TestParseProbeResponse(t *testing.T) {
 	status, detail, err := parseProbeResponse(`{"status":"ok","detail":"service ready"}`)
 	if err != nil {

@@ -177,3 +177,22 @@ func TestBuildMasterPrincipalHasAllVerbs(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildSchedulerPrincipalIsScheduleScoped(t *testing.T) {
+	p, err := BuildSchedulerPrincipal("trading-desk")
+	if err != nil {
+		t.Fatalf("BuildSchedulerPrincipal: %v", err)
+	}
+	if p.Name != "claw-scheduler" {
+		t.Fatalf("unexpected name: %q", p.Name)
+	}
+	if !p.AllowsVerb(VerbScheduleRead) || !p.AllowsVerb(VerbScheduleControl) {
+		t.Fatalf("expected schedule verbs, got %v", p.Verbs)
+	}
+	if p.AllowsVerb(VerbFleetStatus) {
+		t.Fatalf("did not expect fleet.status in scheduler principal: %v", p.Verbs)
+	}
+	if !p.AllowsPod("trading-desk") {
+		t.Fatalf("expected pod scope, got %+v", p)
+	}
+}
