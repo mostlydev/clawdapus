@@ -93,6 +93,15 @@ func TestAPICmdRegistered(t *testing.T) {
 	t.Fatal("expected 'api' command to be registered on rootCmd")
 }
 
+func TestAPIScheduleClearSkipNextCmdRegistered(t *testing.T) {
+	for _, cmd := range apiScheduleCmd.Commands() {
+		if cmd.Name() == "clear-skip-next" {
+			return
+		}
+	}
+	t.Fatal("expected 'clear-skip-next' command under 'claw api schedule'")
+}
+
 func writeComposeFixture(t *testing.T, raw string) string {
 	t.Helper()
 	dir := t.TempDir()

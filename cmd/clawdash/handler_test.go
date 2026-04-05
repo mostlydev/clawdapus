@@ -41,6 +41,18 @@ func (f *fakeScheduleSource) List(_ context.Context) ([]scheduleInvocationView, 
 	return f.invocations, nil
 }
 
+func (f *fakeScheduleSource) Get(_ context.Context, id string) (scheduleInvocationView, error) {
+	if f.err != nil {
+		return scheduleInvocationView{}, f.err
+	}
+	for _, inv := range f.invocations {
+		if inv.ID == id {
+			return inv, nil
+		}
+	}
+	return scheduleInvocationView{}, fmt.Errorf("schedule %q not found", id)
+}
+
 func (f *fakeScheduleSource) Pause(_ context.Context, id, until, reason string) error {
 	f.actions = append(f.actions, fmt.Sprintf("pause:%s:%s:%s", id, until, reason))
 	return f.err
@@ -53,6 +65,11 @@ func (f *fakeScheduleSource) Resume(_ context.Context, id string) error {
 
 func (f *fakeScheduleSource) SkipNext(_ context.Context, id string) error {
 	f.actions = append(f.actions, "skip-next:"+id)
+	return f.err
+}
+
+func (f *fakeScheduleSource) ClearSkipNext(_ context.Context, id string) error {
+	f.actions = append(f.actions, "clear-skip-next:"+id)
 	return f.err
 }
 
@@ -120,8 +137,14 @@ func testStatuses() map[string]serviceStatus {
 }
 
 func testScheduleViews() []scheduleInvocationView {
-	nextFire := time.Date(2026, 4, 6, 9, 30, 0, 0, time.UTC)
-	lastFire := nextFire.Add(-24 * time.Hour)
+	openingBell := time.Date(2026, 4, 6, 13, 30, 0, 0, time.UTC)
+	openingLast := openingBell.Add(-24 * time.Hour)
+	skipSlot := time.Date(2026, 4, 5, 15, 0, 0, 0, time.UTC)
+	skipLast := skipSlot.Add(-2 * time.Hour)
+	pausedSlot := time.Date(2026, 4, 5, 16, 0, 0, 0, time.UTC)
+	pausedUntil := time.Date(2026, 4, 5, 15, 20, 0, 0, time.UTC)
+	degradedSlot := time.Date(2026, 4, 5, 17, 30, 0, 0, time.UTC)
+	degradedLast := degradedSlot.Add(-30 * time.Minute)
 	return []scheduleInvocationView{
 		{
 			ManifestInvocation: schedulepkg.ManifestInvocation{
@@ -143,9 +166,84 @@ func testScheduleViews() []scheduleInvocationView {
 				},
 			},
 			State: schedulepkg.InvocationState{
-				NextFireAt:  &nextFire,
-				LastFiredAt: &lastFire,
+				NextFireAt:  &openingBell,
+				LastFiredAt: &openingLast,
 				LastStatus:  "fired",
+			},
+		},
+		{
+			ManifestInvocation: schedulepkg.ManifestInvocation{
+				ID:       "research-pulse",
+				Service:  "bot",
+				AgentID:  "bot",
+				Schedule: "0 11 * * 1-5",
+				Timezone: "America/New_York",
+				Message:  "Post a research pulse.",
+				Name:     "Research Pulse",
+				Wake: schedulepkg.Wake{
+					Adapter: "openclaw-exec",
+					Target:  "bot",
+					Command: []string{"openclaw", "cron", "run", "research-pulse"},
+				},
+			},
+			State: schedulepkg.InvocationState{
+				NextFireAt:    &skipSlot,
+				LastSkippedAt: &skipLast,
+				LastStatus:    "skipped",
+				LastDetail:    "skip-next",
+				SkipNext:      true,
+			},
+		},
+		{
+			ManifestInvocation: schedulepkg.ManifestInvocation{
+				ID:       "midday-review",
+				Service:  "bot",
+				AgentID:  "bot",
+				Schedule: "0 12 * * 1-5",
+				Timezone: "America/New_York",
+				Message:  "Review the mid-session state.",
+				Name:     "Midday Review",
+				Wake: schedulepkg.Wake{
+					Adapter: "openclaw-exec",
+					Target:  "bot",
+					Command: []string{"openclaw", "cron", "run", "midday-review"},
+				},
+			},
+			State: schedulepkg.InvocationState{
+				NextFireAt:      &pausedSlot,
+				LastStatus:      "scheduled",
+				Paused:          true,
+				PausedUntil:     &pausedUntil,
+				PauseReason:     "operator hold",
+				LastEvaluatedAt: &skipLast,
+			},
+		},
+		{
+			ManifestInvocation: schedulepkg.ManifestInvocation{
+				ID:       "close-watch",
+				Service:  "bot",
+				AgentID:  "bot",
+				Schedule: "30 13 * * 1-5",
+				Timezone: "America/New_York",
+				Message:  "Watch the close setup.",
+				Name:     "Close Watch",
+				When: &schedulepkg.When{
+					Calendar: "us-equities",
+					Session:  schedulepkg.SessionRegular,
+				},
+				Wake: schedulepkg.Wake{
+					Adapter: "openclaw-exec",
+					Target:  "bot",
+					Command: []string{"openclaw", "cron", "run", "close-watch"},
+				},
+			},
+			State: schedulepkg.InvocationState{
+				NextFireAt:          &degradedSlot,
+				LastAttemptedAt:     &degradedLast,
+				LastStatus:          "wake-error",
+				LastDetail:          "docker exec timeout",
+				Degraded:            true,
+				ConsecutiveFailures: 3,
 			},
 		},
 	}
@@ -270,13 +368,20 @@ func TestDetailMissingServiceNotFound(t *testing.T) {
 }
 
 func TestSchedulePageRenders(t *testing.T) {
-	h := newHandler(
+	raw := newHandler(
 		testManifest(),
 		fakeStatusSource{statuses: testStatuses()},
 		&fakeScheduleSource{invocations: testScheduleViews()},
 		"http://localhost:8181",
 		false,
 	)
+	h, ok := raw.(*handler)
+	if !ok {
+		t.Fatal("expected *handler")
+	}
+	h.now = func() time.Time {
+		return time.Date(2026, 4, 5, 14, 0, 0, 0, time.UTC)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/schedule", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -291,8 +396,14 @@ func TestSchedulePageRenders(t *testing.T) {
 	if !strings.Contains(body, "Opening Bell") {
 		t.Fatalf("expected invocation name in body")
 	}
-	if !strings.Contains(body, "Fire now") || !strings.Contains(body, "Force fire") {
-		t.Fatalf("expected schedule action buttons in body")
+	if !strings.Contains(body, "Next slot") || !strings.Contains(body, "skip-next armed") {
+		t.Fatalf("expected slot-centric card copy in body:\n%s", body)
+	}
+	if !strings.Contains(body, "Midday Review") || !strings.Contains(body, "Resume") {
+		t.Fatalf("expected paused card controls in body:\n%s", body)
+	}
+	if !strings.Contains(body, "Clear skip-next") || !strings.Contains(body, "Force fire") {
+		t.Fatalf("expected overflow actions in body:\n%s", body)
 	}
 }
 
@@ -317,6 +428,74 @@ func TestScheduleActionPostsAndRedirects(t *testing.T) {
 	}
 	if len(scheduleSource.actions) != 1 || scheduleSource.actions[0] != "skip-next:opening-bell" {
 		t.Fatalf("expected skip-next action, got %v", scheduleSource.actions)
+	}
+}
+
+func TestScheduleActionClearSkipNextPostsAndRedirects(t *testing.T) {
+	scheduleSource := &fakeScheduleSource{invocations: testScheduleViews()}
+	h := newHandler(
+		testManifest(),
+		fakeStatusSource{statuses: testStatuses()},
+		scheduleSource,
+		"http://localhost:8181",
+		false,
+	)
+	req := httptest.NewRequest(http.MethodPost, "/schedule/research-pulse/clear-skip-next", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d", w.Code)
+	}
+	if len(scheduleSource.actions) != 1 || scheduleSource.actions[0] != "clear-skip-next:research-pulse" {
+		t.Fatalf("expected clear-skip-next action, got %v", scheduleSource.actions)
+	}
+}
+
+func TestSchedulePauseConvertsDatetimeLocalToUTC(t *testing.T) {
+	scheduleSource := &fakeScheduleSource{invocations: testScheduleViews()}
+	h := newHandler(
+		testManifest(),
+		fakeStatusSource{statuses: testStatuses()},
+		scheduleSource,
+		"http://localhost:8181",
+		false,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/schedule/opening-bell/pause",
+		strings.NewReader("until_local=2026-04-05T10%3A30&reason=market+holiday"),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d", w.Code)
+	}
+	if len(scheduleSource.actions) != 1 {
+		t.Fatalf("expected one action, got %v", scheduleSource.actions)
+	}
+	if got, want := scheduleSource.actions[0], "pause:opening-bell:2026-04-05T14:30:00Z:market holiday"; got != want {
+		t.Fatalf("unexpected pause action:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestBuildSchedulePageDataPinsPausedAndDegraded(t *testing.T) {
+	now := time.Date(2026, 4, 5, 14, 0, 0, 0, time.UTC)
+	data := buildSchedulePageData("fleet", testScheduleViews(), "", "", now)
+	if len(data.Cards) < 4 {
+		t.Fatalf("expected cards, got %d", len(data.Cards))
+	}
+	if got := data.Cards[0].Name; got != "Midday Review" {
+		t.Fatalf("expected paused card pinned first, got %q", got)
+	}
+	if got := data.Cards[1].Name; got != "Close Watch" {
+		t.Fatalf("expected degraded card pinned next, got %q", got)
+	}
+	if data.Summary[3].Label != "Next slot" {
+		t.Fatalf("expected next-slot summary label, got %+v", data.Summary[3])
 	}
 }
 

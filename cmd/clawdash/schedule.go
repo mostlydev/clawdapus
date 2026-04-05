@@ -16,9 +16,11 @@ import (
 
 type scheduleControlSource interface {
 	List(ctx context.Context) ([]scheduleInvocationView, error)
+	Get(ctx context.Context, id string) (scheduleInvocationView, error)
 	Pause(ctx context.Context, id, until, reason string) error
 	Resume(ctx context.Context, id string) error
 	SkipNext(ctx context.Context, id string) error
+	ClearSkipNext(ctx context.Context, id string) error
 	Fire(ctx context.Context, id string, bypassWhen, bypassPause bool) error
 }
 
@@ -70,6 +72,16 @@ func (c *scheduleHTTPClient) List(ctx context.Context) ([]scheduleInvocationView
 	return payload.Invocations, nil
 }
 
+func (c *scheduleHTTPClient) Get(ctx context.Context, id string) (scheduleInvocationView, error) {
+	var payload struct {
+		Invocation scheduleInvocationView `json:"invocation"`
+	}
+	if err := c.do(ctx, http.MethodGet, scheduleInvocationPath(id, ""), nil, &payload); err != nil {
+		return scheduleInvocationView{}, err
+	}
+	return payload.Invocation, nil
+}
+
 func (c *scheduleHTTPClient) Pause(ctx context.Context, id, until, reason string) error {
 	return c.do(ctx, http.MethodPost, scheduleInvocationPath(id, "pause"), schedulePauseRequest{
 		Until:  strings.TrimSpace(until),
@@ -83,6 +95,10 @@ func (c *scheduleHTTPClient) Resume(ctx context.Context, id string) error {
 
 func (c *scheduleHTTPClient) SkipNext(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodPost, scheduleInvocationPath(id, "skip-next"), nil, nil)
+}
+
+func (c *scheduleHTTPClient) ClearSkipNext(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodPost, scheduleInvocationPath(id, "clear-skip-next"), nil, nil)
 }
 
 func (c *scheduleHTTPClient) Fire(ctx context.Context, id string, bypassWhen, bypassPause bool) error {

@@ -497,6 +497,55 @@ func TestHandlerScheduleSkipNextSetsFlag(t *testing.T) {
 	}
 }
 
+func TestHandlerScheduleClearSkipNextClearsFlagIdempotently(t *testing.T) {
+	manifest := sampleScheduleManifest()
+	state := newTestScheduleStateStore(t, manifest)
+	if _, err := state.UpdateInvocation("westin-open", func(state *schedulepkg.InvocationState) error {
+		state.SkipNext = true
+		return nil
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	h := newScheduleTestHandler(t, manifest, state, nil, clawapi.Principal{
+		Name:     "westin-ops",
+		Token:    "capi_westin_ops",
+		Verbs:    []string{clawapi.VerbScheduleControl},
+		Services: []string{"westin"},
+	})
+
+	first := postJSON(t, h, "/schedule/westin-open/clear-skip-next", map[string]any{}, "capi_westin_ops")
+	if first.Code != http.StatusOK {
+		t.Fatalf("expected 200 on first clear, got %d body=%s", first.Code, first.Body.String())
+	}
+	if inv := decodeScheduleInvocationResponse(t, first); inv.State.SkipNext {
+		t.Fatalf("expected skip_next cleared on first call, got %+v", inv.State)
+	}
+
+	second := postJSON(t, h, "/schedule/westin-open/clear-skip-next", map[string]any{}, "capi_westin_ops")
+	if second.Code != http.StatusOK {
+		t.Fatalf("expected 200 on second clear, got %d body=%s", second.Code, second.Body.String())
+	}
+	if inv := decodeScheduleInvocationResponse(t, second); inv.State.SkipNext {
+		t.Fatalf("expected skip_next to remain cleared, got %+v", inv.State)
+	}
+}
+
+func TestHandlerScheduleClearSkipNextHonorsScope(t *testing.T) {
+	manifest := sampleScheduleManifest()
+	state := newTestScheduleStateStore(t, manifest)
+	h := newScheduleTestHandler(t, manifest, state, nil, clawapi.Principal{
+		Name:     "analyst-ops",
+		Token:    "capi_analyst_ops",
+		Verbs:    []string{clawapi.VerbScheduleControl},
+		Services: []string{"analyst"},
+	})
+
+	w := postJSON(t, h, "/schedule/westin-open/clear-skip-next", map[string]any{}, "capi_analyst_ops")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for out-of-scope clear, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandlerScheduleFireRespectsPauseWithoutBypass(t *testing.T) {
 	manifest := sampleScheduleManifest()
 	state := newTestScheduleStateStore(t, manifest)

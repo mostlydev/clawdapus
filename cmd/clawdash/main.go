@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 )
 
 func main() {

@@ -38,7 +38,8 @@ claw audit [--since <dur>] [--claw <id>] [--type <type>] [--json]
                                     # types: request, response, error, intervention,
                                     #        feed_fetch, provider_pool, tool_call
 claw api schedule <subcommand>      # inspect/control scheduled invocations via claw-api
-    # list | get <id> | pause <id> | resume <id> | skip-next <id> | fire <id>
+    # list | get <id> | pause <id> | resume <id> | skip-next <id> |
+    # clear-skip-next <id> | fire <id>
 
 # Session history & memory
 claw history export <agent-id>      # export session history as NDJSON

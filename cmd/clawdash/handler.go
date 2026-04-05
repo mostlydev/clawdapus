@@ -42,6 +42,7 @@ type handler struct {
 	cllamaCostsURL  string
 	costLogFallback bool
 	httpClient      *http.Client
+	now             func() time.Time
 	tpl             *template.Template
 	static          http.Handler
 }
@@ -70,6 +71,7 @@ func newHandler(manifest *manifestpkg.PodManifest, source statusSource, schedule
 		httpClient: &http.Client{
 			Timeout: 2 * time.Second,
 		},
+		now:    time.Now,
 		tpl:    tpl,
 		static: http.StripPrefix("/static/", http.FileServerFS(staticFS)),
 	}

@@ -267,6 +267,8 @@ func (h *apiHandler) handleScheduleControl(w http.ResponseWriter, r *http.Reques
 		h.handleScheduleResume(w, r, view)
 	case "skip-next":
 		h.handleScheduleSkipNext(w, r, view)
+	case "clear-skip-next":
+		h.handleScheduleClearSkipNext(w, r, view)
 	case "fire":
 		h.handleScheduleFire(w, r, view)
 	default:
@@ -390,6 +392,25 @@ func (h *apiHandler) handleScheduleSkipNext(w http.ResponseWriter, r *http.Reque
 	}
 	if _, err := h.scheduleState.UpdateInvocation(view.ID, func(state *schedulepkg.InvocationState) error {
 		state.SkipNext = true
+		return nil
+	}); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeScheduleInvocation(w, view.ID)
+}
+
+func (h *apiHandler) handleScheduleClearSkipNext(w http.ResponseWriter, r *http.Request, view scheduleInvocationView) {
+	if h.scheduleState == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "schedule state unavailable")
+		return
+	}
+	if err := requireEmptyOrJSONBody(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := h.scheduleState.UpdateInvocation(view.ID, func(state *schedulepkg.InvocationState) error {
+		state.SkipNext = false
 		return nil
 	}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())

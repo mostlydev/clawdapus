@@ -100,6 +100,15 @@ var apiScheduleSkipNextCmd = &cobra.Command{
 	},
 }
 
+var apiScheduleClearSkipNextCmd = &cobra.Command{
+	Use:   "clear-skip-next <id>",
+	Short: "Clear a pending skip-next flag for one invocation",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runScheduleRequest(cmd.OutOrStdout(), httpMethodPost, "/schedule/"+strings.TrimSpace(args[0])+"/clear-skip-next", nil)
+	},
+}
+
 var apiScheduleFireCmd = &cobra.Command{
 	Use:   "fire <id>",
 	Short: "Trigger an immediate fire for one invocation",
@@ -216,6 +225,7 @@ func init() {
 		apiSchedulePauseCmd,
 		apiScheduleResumeCmd,
 		apiScheduleSkipNextCmd,
+		apiScheduleClearSkipNextCmd,
 		apiScheduleFireCmd,
 	)
 	apiCmd.AddCommand(apiScheduleCmd)
