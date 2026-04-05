@@ -18,3 +18,17 @@ func TestNextSchedulerDelayReturnsMinuteAtBoundary(t *testing.T) {
 		t.Fatalf("expected 1m delay at boundary, got %v", got)
 	}
 }
+
+func TestShouldAttemptDegradedThrottlesToRoughlyTenPercent(t *testing.T) {
+	base := time.Date(2026, time.April, 6, 9, 0, 0, 0, time.UTC)
+	allowed := 0
+	total := 1000
+	for i := 0; i < total; i++ {
+		if shouldAttemptDegraded("westin-open", base.Add(time.Duration(i)*time.Minute)) {
+			allowed++
+		}
+	}
+	if allowed < 70 || allowed > 130 {
+		t.Fatalf("expected roughly 10%% allowed, got %d/%d", allowed, total)
+	}
+}

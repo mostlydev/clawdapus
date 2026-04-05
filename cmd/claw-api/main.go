@@ -62,6 +62,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	var scheduleState *scheduleStateStore
+	if scheduleManifest != nil {
+		scheduleState, err = newScheduleStateStore(cfg.GovernanceDir, scheduleManifest)
+		if err != nil {
+			return err
+		}
+	}
 	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return fmt.Errorf("docker client: %w", err)
@@ -71,7 +78,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	runtimeCtx, stopRuntime := context.WithCancel(context.Background())
 	defer stopRuntime()
 
-	scheduler, err := newScheduler(scheduleManifest, docker, stderr)
+	scheduler, err := newScheduler(scheduleManifest, docker, scheduleState, stderr)
 	if err != nil {
 		return err
 	}
@@ -79,7 +86,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		go scheduler.Run(runtimeCtx)
 	}
 
-	handler := newHandler(manifest, store, docker, stdout, clawapi.ThresholdsFromEnv(), cfg.GovernanceDir)
+	handler := newHandler(manifest, scheduleManifest, scheduleState, store, docker, stdout, clawapi.ThresholdsFromEnv(), cfg.GovernanceDir)
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           handler,
