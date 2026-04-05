@@ -3353,7 +3353,7 @@ func buildServiceSurfaceInfo(descriptor *describe.ServiceDescriptor) *driver.Ser
 func builtinClawAPIDescriptor() *describe.ServiceDescriptor {
 	return &describe.ServiceDescriptor{
 		Version:     1,
-		Description: "Read-only governance API for fleet telemetry, health, logs, metrics, alerts, and schedule state.",
+		Description: "Governance API for fleet telemetry, health, logs, metrics, alerts, and schedule state/control.",
 		Feeds: []describe.FeedDescriptor{{
 			Name: "fleet-alerts",
 			// Keep the pushed anomaly feed on a shorter horizon so agents do not
@@ -3369,6 +3369,10 @@ func builtinClawAPIDescriptor() *describe.ServiceDescriptor {
 			{Method: "GET", Path: "/fleet/alerts", Description: "Threshold-based anomaly summaries across the fleet."},
 			{Method: "GET", Path: "/schedule", Description: "Current scheduled invocation state for in-scope services."},
 			{Method: "GET", Path: "/schedule/:id", Description: "Detail for one scheduled invocation."},
+			{Method: "POST", Path: "/schedule/:id/pause", Description: "Pause one scheduled invocation, optionally until a timestamp."},
+			{Method: "POST", Path: "/schedule/:id/resume", Description: "Clear pause state for one scheduled invocation."},
+			{Method: "POST", Path: "/schedule/:id/skip-next", Description: "Skip the next scheduled fire for one invocation."},
+			{Method: "POST", Path: "/schedule/:id/fire", Description: "Trigger an immediate fire for one scheduled invocation."},
 		},
 		Auth: &describe.AuthDescriptor{
 			Type: "bearer",

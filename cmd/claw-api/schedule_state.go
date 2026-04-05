@@ -77,6 +77,33 @@ func (s *scheduleStateStore) Update(mutator func(*schedulepkg.StateFile)) error 
 	return s.persistLocked()
 }
 
+func (s *scheduleStateStore) UpdateInvocation(id string, mutator func(*schedulepkg.InvocationState) error) (schedulepkg.InvocationState, error) {
+	if s == nil {
+		return schedulepkg.InvocationState{}, fmt.Errorf("schedule state unavailable")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalizeScheduleState(&s.state)
+	state, ok := s.state.Invocations[id]
+	if !ok {
+		return schedulepkg.InvocationState{}, fmt.Errorf("schedule %q not found", id)
+	}
+	if mutator != nil {
+		if err := mutator(&state); err != nil {
+			return schedulepkg.InvocationState{}, err
+		}
+	}
+	now := time.Now().UTC()
+	s.state.Version = scheduleStateVersion
+	s.state.UpdatedAt = &now
+	s.state.Invocations[id] = state
+	if err := s.persistLocked(); err != nil {
+		return schedulepkg.InvocationState{}, err
+	}
+	return state.Clone(), nil
+}
+
 func (s *scheduleStateStore) syncManifest(manifest *schedulepkg.Manifest) error {
 	return s.Update(func(state *schedulepkg.StateFile) {
 		if manifest == nil {
