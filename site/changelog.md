@@ -27,7 +27,21 @@ outline: deep
 | Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012-015) |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
 
-## v0.5.2 <Badge type="tip" text="Latest" /> {#v0-5-2}
+## Unreleased
+
+<!-- Nothing yet -->
+
+## v0.6.0 <Badge type="tip" text="Latest" /> {#v0-6-0}
+
+*2026-04-05*
+
+- **Conditional invoke scheduling control plane** ([#107](https://github.com/mostlydev/clawdapus/issues/107)) — pod-origin `x-claw.invoke` entries compile to an external schedule manifest with calendar-aware `when:` gates (e.g. `when: { calendar: us-equities, session: regular }`). A scheduler loop inside `claw-api` evaluates gates before wake and persists state under `.claw-governance/`. Wake adapters cover the full runner set; Clawfile/image-origin `INVOKE` continues to use runner-native cron unchanged.
+- **`claw api schedule` operator CLI** — new subcommands (`list`, `show`, `pause`, `resume`, `skip-next`, `fire`) to inspect and control scheduled pod-origin invocations at runtime. Tunneled through `docker compose exec` so `claw-api` remains internal-only with no published host port. Operators can pause, resume, skip, or manually fire scheduled invocations without rebuilding images.
+- **Clawdash Schedule page** — new card-based UI organized around operator mental model: health at a glance, next fire time, last event, and a context-sensitive primary action. Gate/Timing/Wake columns consolidated into a single schedule block; `docker exec` wake commands hidden behind disclosure; always-visible action buttons collapsed into primary + overflow.
+- **Capability wave documentation** — new guides for Managed Tools (`site/guide/tools.md`) and Memory Plane; manifesto updated with compiled tool mediation section; ADRs 020 and 021 marked Implemented.
+- **Site branding refresh** — new hero lockup (octopus glyph + wordmark) on the landing page.
+
+## v0.5.2 {#v0-5-2}
 
 *2026-04-05*
 
