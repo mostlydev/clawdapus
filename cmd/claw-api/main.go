@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/docker/docker/client"
 
@@ -31,8 +32,15 @@ type config struct {
 	GovernanceDir  string
 }
 
+type quietExitError struct{}
+
+func (quietExitError) Error() string { return "" }
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+		if _, ok := err.(quietExitError); ok {
+			os.Exit(1)
+		}
 		log.Fatalf("claw-api: %v", err)
 	}
 }
@@ -41,6 +49,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("claw-api", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	healthcheck := fs.Bool("healthcheck", false, "check HTTP server health and exit")
+	requestMethod := fs.String("request-method", "", "issue a local authenticated request instead of serving HTTP")
+	requestPath := fs.String("request-path", "", "path to request in local client mode")
+	requestBody := fs.String("request-body", "", "raw JSON request body for local client mode")
+	requestPrincipal := fs.String("request-principal", "claw-scheduler", "principal name to use for local client mode")
+	requestTimeout := fs.Duration("request-timeout", 10*time.Second, "timeout for local client mode requests")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -48,6 +61,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 	cfg := configFromEnv()
 	if *healthcheck {
 		return runHealthcheck(cfg.Addr)
+	}
+	if strings.TrimSpace(*requestMethod) != "" || strings.TrimSpace(*requestPath) != "" || strings.TrimSpace(*requestBody) != "" {
+		if strings.TrimSpace(*requestMethod) == "" || strings.TrimSpace(*requestPath) == "" {
+			return fmt.Errorf("request-method and request-path are both required for local client mode")
+		}
+		return runLocalRequest(cfg, stdout, *requestMethod, *requestPath, *requestBody, *requestPrincipal, *requestTimeout)
 	}
 
 	manifest, err := loadManifest(cfg.ManifestPath)

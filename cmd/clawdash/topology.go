@@ -13,6 +13,7 @@ import (
 type topologyPageData struct {
 	PodName         string
 	ActiveTab       string
+	HasSchedule     bool
 	Summary         []dashStat
 	Lanes           []topologyLane
 	CanvasWidth     int

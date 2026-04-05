@@ -490,6 +490,12 @@ Other Slice 4 work:
 - `/schedule/:id/{pause,resume,skip-next,fire}` endpoints.
 - Principal scopes: `schedule.read`, `schedule.control`.
 - `claw api schedule {list,get,pause,resume,fire}` CLI subcommands.
+  Transport choice: the CLI tunnels through the existing compose/runtime path
+  with `docker compose exec -T claw-api /claw-api -request-*`; no host port is
+  published for claw-api in v1.
+  Trust boundary: this is operator/admin transport. Docker access implies pod
+  admin, so `--principal` is a selector for an in-container principal, not a
+  security boundary.
 - Clawdash schedule page + SSE stream.
 
 ### Slice 6 — Migration + docs

@@ -38,14 +38,16 @@ type statusSource interface {
 type handler struct {
 	manifest        *manifestpkg.PodManifest
 	statusSource    statusSource
+	scheduleSource  scheduleControlSource
 	cllamaCostsURL  string
 	costLogFallback bool
 	httpClient      *http.Client
+	now             func() time.Time
 	tpl             *template.Template
 	static          http.Handler
 }
 
-func newHandler(manifest *manifestpkg.PodManifest, source statusSource, cllamaCostsURL string, costLogFallback bool) http.Handler {
+func newHandler(manifest *manifestpkg.PodManifest, source statusSource, scheduleSource scheduleControlSource, cllamaCostsURL string, costLogFallback bool) http.Handler {
 	funcs := template.FuncMap{
 		"statusClass":   statusClass,
 		"pathEscape":    url.PathEscape,
@@ -63,11 +65,13 @@ func newHandler(manifest *manifestpkg.PodManifest, source statusSource, cllamaCo
 	return &handler{
 		manifest:        manifest,
 		statusSource:    source,
+		scheduleSource:  scheduleSource,
 		cllamaCostsURL:  strings.TrimSpace(cllamaCostsURL),
 		costLogFallback: costLogFallback,
 		httpClient: &http.Client{
 			Timeout: 2 * time.Second,
 		},
+		now:    time.Now,
 		tpl:    tpl,
 		static: http.StripPrefix("/static/", http.FileServerFS(staticFS)),
 	}
@@ -83,6 +87,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodGet && r.URL.Path == "/topology":
 		h.renderTopology(w, r)
+		return
+	case r.Method == http.MethodGet && r.URL.Path == "/schedule":
+		h.renderSchedule(w, r)
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/schedule/"):
+		h.handleScheduleAction(w, r)
 		return
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/detail/"):
 		h.renderDetail(w, r)
@@ -103,6 +113,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type fleetPageData struct {
 	PodName         string
 	ActiveTab       string
+	HasSchedule     bool
 	Summary         []dashStat
 	Attention       []dashAlert
 	HasAttention    bool
@@ -248,6 +259,7 @@ func (h *handler) buildFleetPageData(ctx context.Context, statuses map[string]se
 	return fleetPageData{
 		PodName:         h.manifest.PodName,
 		ActiveTab:       "fleet",
+		HasSchedule:     h.hasSchedule(),
 		Summary:         summary,
 		Attention:       attention,
 		HasAttention:    len(attention) > 0,
@@ -268,6 +280,7 @@ func (h *handler) buildFleetPageData(ctx context.Context, statuses map[string]se
 type detailPageData struct {
 	PodName         string
 	ActiveTab       string
+	HasSchedule     bool
 	ServiceName     string
 	RoleBadge       string
 	RoleClass       string
@@ -415,6 +428,7 @@ func (h *handler) buildDetailPageData(name string, statuses map[string]serviceSt
 	return detailPageData{
 		PodName:         h.manifest.PodName,
 		ActiveTab:       "detail",
+		HasSchedule:     h.hasSchedule(),
 		ServiceName:     name,
 		RoleBadge:       roleBadge,
 		RoleClass:       roleClass,
@@ -442,8 +456,13 @@ func (h *handler) buildDetailPageData(name string, statuses map[string]serviceSt
 func (h *handler) renderTopology(w http.ResponseWriter, r *http.Request) {
 	statuses, statusErr := h.snapshot(r.Context())
 	data := buildTopologyPageData(h.manifest, statuses, statusErr)
+	data.HasSchedule = h.hasSchedule()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = h.tpl.ExecuteTemplate(w, "topology.html", data)
+}
+
+func (h *handler) hasSchedule() bool {
+	return h != nil && h.scheduleSource != nil
 }
 
 type apiStatusResponse struct {

@@ -267,6 +267,8 @@ func (h *apiHandler) handleScheduleControl(w http.ResponseWriter, r *http.Reques
 		h.handleScheduleResume(w, r, view)
 	case "skip-next":
 		h.handleScheduleSkipNext(w, r, view)
+	case "clear-skip-next":
+		h.handleScheduleClearSkipNext(w, r, view)
 	case "fire":
 		h.handleScheduleFire(w, r, view)
 	default:
@@ -398,6 +400,25 @@ func (h *apiHandler) handleScheduleSkipNext(w http.ResponseWriter, r *http.Reque
 	h.writeScheduleInvocation(w, view.ID)
 }
 
+func (h *apiHandler) handleScheduleClearSkipNext(w http.ResponseWriter, r *http.Request, view scheduleInvocationView) {
+	if h.scheduleState == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "schedule state unavailable")
+		return
+	}
+	if err := requireEmptyOrJSONBody(r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := h.scheduleState.UpdateInvocation(view.ID, func(state *schedulepkg.InvocationState) error {
+		state.SkipNext = false
+		return nil
+	}); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeScheduleInvocation(w, view.ID)
+}
+
 func (h *apiHandler) handleScheduleFire(w http.ResponseWriter, r *http.Request, view scheduleInvocationView) {
 	if h.scheduler == nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "scheduler unavailable")
@@ -441,6 +462,8 @@ func decodeOptionalJSONBody(r *http.Request, dst any) error {
 		return fmt.Errorf("invalid request body")
 	}
 	var extra any
+	// A second successful decode means the stream contained multiple JSON
+	// documents (for example "{}{}"), which we reject as an invalid body.
 	if err := dec.Decode(&extra); err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil

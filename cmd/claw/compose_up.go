@@ -657,6 +657,16 @@ func runComposeUp(podFile string) error {
 		CllamaCostsURL:     firstIf(cllamaEnabled, fmt.Sprintf("http://localhost:%s", cllamaDashboardPort)),
 		PodName:            p.Name,
 	}
+	if p.ClawAPI != nil && hasPodInvokeEntries(p) {
+		schedulerToken, err := lookupClawAPIPrincipalToken(p.ClawAPI.PrincipalsHostPath, "claw-scheduler")
+		if err != nil {
+			return err
+		}
+		p.Clawdash.Environment = map[string]string{
+			"CLAW_API_URL":   fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr)),
+			"CLAW_API_TOKEN": schedulerToken,
+		}
+	}
 
 	// Pass 2: materialize after cllama tokens/context are resolved.
 	for _, name := range sortedResolvedClawNames(resolvedClaws) {
@@ -1626,7 +1636,9 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 			return nil, err
 		}
 		auto = append(auto, masterPrincipal)
-	} else if hasPodInvokeEntries(p) {
+	}
+
+	if hasPodInvokeEntries(p) {
 		schedulerPrincipal, err := clawapi.BuildSchedulerPrincipal(p.Name)
 		if err != nil {
 			return nil, err
@@ -1763,6 +1775,22 @@ func writeClawAPIPrincipalStore(runtimeDir, hostPath string, store clawapi.Store
 		return err
 	}
 	return nil
+}
+
+func lookupClawAPIPrincipalToken(storePath, principalName string) (string, error) {
+	store, err := clawapi.LoadStore(storePath)
+	if err != nil {
+		return "", err
+	}
+	for _, principal := range store.Principals {
+		if strings.TrimSpace(principal.Name) == strings.TrimSpace(principalName) {
+			if strings.TrimSpace(principal.Token) == "" {
+				return "", fmt.Errorf("principal %q has empty token", principalName)
+			}
+			return principal.Token, nil
+		}
+	}
+	return "", fmt.Errorf("principal %q not found in %s", principalName, storePath)
 }
 
 func prepareHistoryReplayRuntime(p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw, resolvedMemory map[string]*resolvedMemorySubscription) (map[string]cllama.ServiceAuthEntry, error) {
@@ -3187,15 +3215,6 @@ func inspectServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 		}
 	}
 
-	// Build-only services without an explicit image tag: fall back to the
-	// default image name that docker compose would assign, so we can still
-	// inspect the locally built image for `claw.describe` metadata.
-	if imageRef == "" && svc.Compose["build"] != nil {
-		if derived := defaultComposeImageName(podDir, serviceName); derived != "" && imageExistsLocally(derived) {
-			imageRef = derived
-		}
-	}
-
 	var info *inspect.ClawInfo
 	if imageRef != "" && imageExistsLocally(imageRef) {
 		var err error
@@ -3214,33 +3233,6 @@ func inspectServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 	imageRefs[serviceName] = imageRef
 	infos[serviceName] = info
 	return imageRef, info, nil
-}
-
-// defaultComposeImageName mirrors docker compose's default image naming for
-// build-only services: `<project>-<service>`, where `<project>` is the
-// normalized basename of the pod directory. Returns an empty string if the
-// project name normalizes to nothing.
-func defaultComposeImageName(podDir, serviceName string) string {
-	project := normalizeComposeProjectName(filepath.Base(podDir))
-	if project == "" {
-		return ""
-	}
-	return project + "-" + strings.ToLower(serviceName)
-}
-
-// normalizeComposeProjectName replicates docker compose's project-name
-// normalization: lowercase, strip any characters outside [a-z0-9_-], and trim
-// leading non-alphanumeric characters.
-func normalizeComposeProjectName(name string) string {
-	lower := strings.ToLower(name)
-	var b strings.Builder
-	b.Grow(len(lower))
-	for _, r := range lower {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-			b.WriteRune(r)
-		}
-	}
-	return strings.TrimLeft(b.String(), "_-")
 }
 
 func inspectBuildMetadata(podDir string, buildRaw interface{}) (*inspect.ClawInfo, error) {

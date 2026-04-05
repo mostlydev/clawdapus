@@ -21,6 +21,7 @@
       <nav class="dash-nav" aria-label="Primary">
         <a href="/" class="dash-nav-link">Fleet</a>
         <a href="/topology" class="dash-nav-link dash-nav-link-active">Topology</a>
+        {{if .HasSchedule}}<a href="/schedule" class="dash-nav-link">Schedule</a>{{end}}
       </nav>
 
       <div class="dash-title">{{.PodName}}</div>

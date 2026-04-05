@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>clawdapus dash - schedule</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/schedule.css" />
+  <script defer src="/static/alpine.js"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <div class="dash-shell">
+    <header class="dash-topbar">
+      <a href="/" class="dash-brand">
+        <div class="dash-brand-wordmark"><span>clawdash</span> fleet</div>
+      </a>
+
+      <nav class="dash-nav" aria-label="Primary">
+        <a href="/" class="dash-nav-link">Fleet</a>
+        <a href="/topology" class="dash-nav-link">Topology</a>
+        <a href="/schedule" class="dash-nav-link dash-nav-link-active">Schedule</a>
+      </nav>
+
+      <div class="dash-title">{{.PodName}}</div>
+    </header>
+
+    <section class="dash-page-head">
+      <div class="dash-page-kicker">{{.PodName}}</div>
+      <h1 class="dash-page-title">Schedule Control</h1>
+      <p class="dash-page-copy">Current scheduler state, next-slot timing, and operator controls for pod-origin invokes.</p>
+    </section>
+
+    {{if .HasNotice}}
+      <div class="dash-banner dash-banner-good">{{.Notice}}</div>
+    {{end}}
+    {{if .HasError}}
+      <div class="dash-banner">{{.Error}}</div>
+    {{end}}
+
+    <section class="dash-strip" aria-label="Schedule summary">
+      <div class="dash-strip-grid">
+        {{range .Summary}}
+          <article class="dash-metric {{if .Tone}}{{printf "tone-%s" .Tone}}{{end}}">
+            <div class="dash-metric-label">{{.Label}}</div>
+            <div class="dash-metric-value">{{.Value}}</div>
+            <div class="dash-metric-hint">{{.Hint}}</div>
+          </article>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="dash-panel">
+      <div class="dash-section-head">
+        <div>
+          <div class="dash-brand-kicker">Scheduler</div>
+          <h2 class="dash-section-title">Invocation registry</h2>
+        </div>
+        <span class="dash-chip">{{len .Cards}} visible</span>
+      </div>
+
+      {{if .HasCards}}
+        <div class="dash-card-list">
+          {{range .Cards}}
+            <article class="dash-schedule-card {{.StateAccent}}" x-data="{ menuOpen: false, pauseOpen: false, confirmBypass: false }">
+              <div class="dash-schedule-card-head">
+                <div class="dash-stack-tight">
+                  <div class="dash-service-name">{{.Name}}</div>
+                  <div class="dash-service-meta">{{.ServiceAgent}}</div>
+                </div>
+                <div class="dash-schedule-pill-row">
+                  <span class="dash-pill {{.LifecyclePill.Tone}}">{{.LifecyclePill.Label}}</span>
+                  {{if .HealthPill}}
+                    <span class="dash-pill {{.HealthPill.Tone}}">{{.HealthPill.Label}}</span>
+                  {{end}}
+                  {{if .SkipNextChip}}
+                    <span class="dash-pill {{.SkipNextChip.Tone}} dash-pill-outlined">{{.SkipNextChip.Label}}</span>
+                  {{end}}
+                </div>
+              </div>
+
+              <div class="dash-schedule-grid">
+                <section class="dash-schedule-block">
+                  <div class="dash-schedule-label">{{.NextSlot.HeroLabel}}</div>
+                  <div class="dash-schedule-hero {{if .NextSlot.Dimmed}}dash-schedule-hero-dimmed{{end}}">
+                    <span>{{.NextSlot.SlotRelative}}</span>
+                    {{if .NextSlot.Modifier}}<span class="dash-schedule-modifier">{{.NextSlot.Modifier}}</span>{{end}}
+                  </div>
+                  <div class="dash-schedule-meta-line">{{.NextSlot.SlotAbsolute}}</div>
+                  <div class="dash-schedule-meta-line">{{.NextSlot.CronExpr}} · {{.NextSlot.GateSubtitle}}</div>
+                  {{if .NextSlot.FollowupLabel}}
+                    <div class="dash-schedule-followup">{{.NextSlot.FollowupLabel}} · {{.NextSlot.FollowupValue}}</div>
+                  {{end}}
+                  {{range .NextSlot.Notes}}
+                    <div class="dash-schedule-note">{{.}}</div>
+                  {{end}}
+                </section>
+
+                <section class="dash-schedule-block">
+                  <div class="dash-schedule-label">Last event</div>
+                  <div class="dash-schedule-event" {{if .LastEvent.Tooltip}}title="{{.LastEvent.Tooltip}}"{{end}}>
+                    <span class="dash-pill {{.LastEvent.StatusTone}}">{{.LastEvent.StatusLabel}}</span>
+                    <span class="dash-schedule-event-copy">{{.LastEvent.Relative}}</span>
+                  </div>
+                  {{if .LastEvent.HasTimestamp}}
+                    <div class="dash-schedule-meta-line">{{.LastEvent.Absolute}}</div>
+                  {{end}}
+
+                  <details class="dash-schedule-details">
+                    <summary>Details</summary>
+                    <div class="dash-schedule-detail-grid">
+                      <div class="dash-detail-stat">
+                        <div class="dash-grid-label">Invocation ID</div>
+                        <div class="dash-detail-value">{{.Details.ID}}</div>
+                      </div>
+                      <div class="dash-detail-stat">
+                        <div class="dash-grid-label">Service</div>
+                        <div class="dash-detail-value">{{.Details.Service}}</div>
+                      </div>
+                      <div class="dash-detail-stat">
+                        <div class="dash-grid-label">Agent</div>
+                        <div class="dash-detail-value">{{.Details.AgentID}}</div>
+                      </div>
+                      <div class="dash-detail-stat">
+                        <div class="dash-grid-label">Target</div>
+                        <div class="dash-detail-value">{{.Details.Target}}</div>
+                      </div>
+                      <div class="dash-detail-stat">
+                        <div class="dash-grid-label">Wake adapter</div>
+                        <div class="dash-detail-value">{{.Details.WakeAdapter}}</div>
+                      </div>
+                      <div class="dash-detail-stat">
+                        <div class="dash-grid-label">Wake target</div>
+                        <div class="dash-detail-value">{{.Details.WakeTarget}}</div>
+                      </div>
+                      <div class="dash-detail-stat dash-schedule-detail-wide">
+                        <div class="dash-grid-label">Message</div>
+                        <div class="dash-detail-value">{{.Details.Message}}</div>
+                      </div>
+                      <div class="dash-detail-stat dash-schedule-detail-wide">
+                        <div class="dash-grid-label">Wake command</div>
+                        <div class="dash-detail-value dash-code">{{.Details.WakeCommand}}</div>
+                      </div>
+                    </div>
+                  </details>
+                </section>
+              </div>
+
+              <div class="dash-schedule-actions">
+                {{if .Primary.TogglesPauseForm}}
+                  <button type="button" class="{{.Primary.ButtonClass}}" @click="pauseOpen = !pauseOpen; menuOpen = false">
+                    {{.Primary.Label}}
+                  </button>
+                {{else}}
+                  <form method="post" action="{{.Primary.ActionPath}}" class="dash-inline-form">
+                    <button type="submit" class="{{.Primary.ButtonClass}}">{{.Primary.Label}}</button>
+                  </form>
+                {{end}}
+
+                <div class="dash-overflow-wrap" @click.outside="menuOpen = false">
+                  <button type="button" class="dash-button dash-button-subtle" @click="menuOpen = !menuOpen; pauseOpen = false">
+                    ⋯
+                  </button>
+                  <div class="dash-overflow-menu" x-show="menuOpen" x-cloak>
+                    {{range .Overflow}}
+                      <form method="post" action="{{.ActionPath}}">
+                        {{range .Fields}}
+                          <input type="hidden" name="{{.Name}}" value="{{.Value}}" />
+                        {{end}}
+                        <button type="submit" class="{{.ButtonClass}}">{{.Label}}</button>
+                      </form>
+                    {{end}}
+                    <button type="button" class="dash-menu-item dash-menu-item-danger" @click="menuOpen = false; confirmBypass = true">Force fire</button>
+                  </div>
+                </div>
+              </div>
+
+              {{if .Primary.TogglesPauseForm}}
+                <div class="dash-pause-form-shell" x-show="pauseOpen" x-cloak>
+                  <form method="post" action="{{.PauseForm.ActionPath}}" class="dash-pause-form">
+                    <label class="dash-form-field">
+                      <span class="dash-form-label">Pause until</span>
+                      <input type="datetime-local" class="dash-input" name="until_local" value="{{.PauseForm.UntilLocal}}" />
+                    </label>
+                    <label class="dash-form-field dash-form-field-wide">
+                      <span class="dash-form-label">Reason</span>
+                      <input type="text" class="dash-input" name="reason" value="{{.PauseForm.Reason}}" placeholder="Optional operator reason" />
+                    </label>
+                    <div class="dash-pause-form-actions">
+                      <button type="submit" class="dash-button">Pause</button>
+                      <button type="button" class="dash-button dash-button-subtle" @click="pauseOpen = false">Cancel</button>
+                    </div>
+                  </form>
+                  <div class="dash-schedule-note">`datetime-local` is interpreted in {{.PauseForm.Timezone}} and forwarded to claw-api as RFC3339 UTC.</div>
+                </div>
+              {{end}}
+
+              <div class="dash-confirm-modal" x-show="confirmBypass" x-cloak>
+                <div class="dash-confirm-backdrop" @click="confirmBypass = false"></div>
+                <div class="dash-confirm-dialog">
+                  <div class="dash-brand-kicker">Bypass fire</div>
+                  <h3 class="dash-confirm-title">Fire {{.Name}} now?</h3>
+                  <p class="dash-confirm-copy">This bypasses the calendar gate and pause state for a one-off wake.</p>
+                  <div class="dash-confirm-actions">
+                    <button type="button" class="dash-button dash-button-subtle" @click="confirmBypass = false">Cancel</button>
+                    <form method="post" action="{{.BypassFire.ActionPath}}" class="dash-inline-form">
+                      {{range .BypassFire.Fields}}
+                        <input type="hidden" name="{{.Name}}" value="{{.Value}}" />
+                      {{end}}
+                      <button type="submit" class="{{.BypassFire.ButtonClass}}">{{.BypassFire.Label}}</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </article>
+          {{end}}
+        </div>
+      {{else}}
+        <div class="dash-empty">This scope has no pod-origin invocations. Pod-level `x-claw.invoke` entries appear here once `claw up` wires them.</div>
+      {{end}}
+    </section>
+  </div>
+</body>
+</html>

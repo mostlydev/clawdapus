@@ -37,6 +37,9 @@ claw audit [--since <dur>] [--claw <id>] [--type <type>] [--json]
                                     # summarize cllama telemetry from container logs
                                     # types: request, response, error, intervention,
                                     #        feed_fetch, provider_pool, tool_call
+claw api schedule <subcommand>      # inspect/control scheduled invocations via claw-api
+    # list | get <id> | pause <id> | resume <id> | skip-next <id> |
+    # clear-skip-next <id> | fire <id>
 
 # Session history & memory
 claw history export <agent-id>      # export session history as NDJSON
@@ -53,6 +56,14 @@ claw update                         # re-run install.sh to update binary
 Lifecycle commands block if `claw-pod.yml` is newer than `compose.generated.yml` — run `claw up` to regenerate. `claw down` is exempt.
 
 `-f` locates `compose.generated.yml` next to the pod file. Without `-f`, `claw up` uses `./claw-pod.yml`; other lifecycle commands look for `compose.generated.yml` in the current directory.
+
+`claw api schedule ...` does not require a host-published claw-api port. It
+tunnels through `docker compose exec -T claw-api /claw-api -request-*`, so the
+pod must already be up and include an injected `claw-api` service.
+
+Trust boundary: if you can run `docker compose exec` against the pod, you can
+select any principal present in claw-api's `principals.json`. The `--principal`
+flag is a selector, not a security boundary.
 
 ## Clawfile Reference
 
