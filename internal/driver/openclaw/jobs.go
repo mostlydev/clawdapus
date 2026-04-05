@@ -62,11 +62,15 @@ func GenerateJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 		if name == "" {
 			name = truncate(inv.Message, 60)
 		}
+		id := strings.TrimSpace(inv.ID)
+		if id == "" {
+			id = deterministicJobID(rc.ServiceName, inv.Schedule, inv.Message)
+		}
 		j := job{
-			ID:            deterministicJobID(rc.ServiceName, inv.Schedule, inv.Message),
+			ID:            id,
 			AgentID:       "main",
 			Name:          name,
-			Enabled:       true,
+			Enabled:       inv.Origin != driver.OriginPod,
 			CreatedAtMs:   now,
 			UpdatedAtMs:   now,
 			Schedule:      jobSchedule{Expr: inv.Schedule, TZ: "UTC", Kind: "cron"},

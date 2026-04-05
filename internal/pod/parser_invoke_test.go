@@ -29,6 +29,9 @@ services:
           message: "Pre-market synthesis. Write report and post to #trading-floor."
           name: "Pre-market synthesis"
           to: trading-floor
+          when:
+            calendar: us-equities
+            session: regular
         - schedule: "*/30 * * * *"
           message: "Post a brief status update."
 `
@@ -70,6 +73,23 @@ services:
         - schedule: "15 8 * * 1-5"
 `
 
+const podWithInvokeInvalidWhen = `
+x-claw:
+  pod: test-pod
+
+services:
+  bot:
+    image: openclaw:latest
+    x-claw:
+      agent: ./AGENTS.md
+      invoke:
+        - schedule: "15 8 * * 1-5"
+          message: "Bad when"
+          when:
+            calendar: crypto-24-7
+            session: pre-market
+`
+
 func TestParsePodInvoke(t *testing.T) {
 	p, err := Parse(strings.NewReader(podWithInvoke))
 	if err != nil {
@@ -96,6 +116,15 @@ func TestParsePodInvoke(t *testing.T) {
 	if entry0.To != "trading-floor" {
 		t.Errorf("expected entry[0].to=%q, got %q", "trading-floor", entry0.To)
 	}
+	if entry0.When == nil {
+		t.Fatal("expected entry[0].when to be parsed")
+	}
+	if entry0.When.Calendar != "us-equities" {
+		t.Errorf("expected entry[0].when.calendar=%q, got %q", "us-equities", entry0.When.Calendar)
+	}
+	if string(entry0.When.Session) != "regular" {
+		t.Errorf("expected entry[0].when.session=%q, got %q", "regular", entry0.When.Session)
+	}
 
 	entry1 := svc.Claw.Invoke[1]
 	if entry1.Schedule != "*/30 * * * *" {
@@ -103,6 +132,9 @@ func TestParsePodInvoke(t *testing.T) {
 	}
 	if entry1.To != "" {
 		t.Errorf("expected entry[1].to to be empty, got %q", entry1.To)
+	}
+	if entry1.When != nil {
+		t.Errorf("expected entry[1].when to be nil, got %+v", entry1.When)
 	}
 }
 
@@ -132,5 +164,12 @@ func TestParsePodInvokeMissingMessageErrors(t *testing.T) {
 	_, err := Parse(strings.NewReader(podWithInvokeMissingMessage))
 	if err == nil {
 		t.Fatal("expected error for invoke entry missing message")
+	}
+}
+
+func TestParsePodInvokeInvalidWhenErrors(t *testing.T) {
+	_, err := Parse(strings.NewReader(podWithInvokeInvalidWhen))
+	if err == nil {
+		t.Fatal("expected error for invalid invoke.when")
 	}
 }

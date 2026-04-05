@@ -119,7 +119,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		if err := os.MkdirAll(filepath.Dir(cronPath), 0o777); err != nil {
 			return nil, fmt.Errorf("nanobot driver: create cron dir: %w", err)
 		}
-		cronJSON, err := generateCronJobsJSON(rc.Invocations)
+		cronJSON, err := generateCronJobsJSON(rc)
 		if err != nil {
 			return nil, fmt.Errorf("nanobot driver: generate cron jobs: %w", err)
 		}
@@ -236,6 +236,7 @@ type nanobotCronStore struct {
 }
 
 type nanobotCronJob struct {
+	ID       string               `json:"id"`
 	Name     string               `json:"name"`
 	Schedule nanobotCronSchedule  `json:"schedule"`
 	Payload  nanobotCronPayload   `json:"payload"`
@@ -258,13 +259,13 @@ type nanobotCronJobStatus struct {
 	Enabled bool `json:"enabled"`
 }
 
-func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
+func generateCronJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 	store := nanobotCronStore{
 		Version: 1,
-		Jobs:    make([]nanobotCronJob, 0, len(invocations)),
+		Jobs:    make([]nanobotCronJob, 0, len(rc.Invocations)),
 	}
 
-	for i, inv := range invocations {
+	for i, inv := range rc.Invocations {
 		expr := strings.TrimSpace(inv.Schedule)
 		if !shared.IsFiveFieldCron(expr) {
 			return nil, fmt.Errorf("invocation %d has invalid cron expression %q (expected 5 fields)", i+1, inv.Schedule)
@@ -281,7 +282,12 @@ func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
 		}
 
 		to := strings.TrimSpace(inv.To)
+		id := strings.TrimSpace(inv.ID)
+		if id == "" {
+			id = driver.DeterministicInvocationID(rc.ServiceName, inv.Origin, expr, message)
+		}
 		store.Jobs = append(store.Jobs, nanobotCronJob{
+			ID:   id,
 			Name: name,
 			Schedule: nanobotCronSchedule{
 				Kind:       "cron",
@@ -293,7 +299,7 @@ func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
 				Deliver: to != "",
 				To:      to,
 			},
-			State: nanobotCronJobStatus{Enabled: true},
+			State: nanobotCronJobStatus{Enabled: inv.Origin != driver.OriginPod},
 		})
 	}
 

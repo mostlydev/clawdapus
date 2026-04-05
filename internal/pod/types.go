@@ -1,6 +1,9 @@
 package pod
 
-import "github.com/mostlydev/clawdapus/internal/driver"
+import (
+	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/schedule"
+)
 
 // Pod represents a parsed claw-pod.yml.
 type Pod struct {
@@ -32,6 +35,7 @@ type InvokeEntry struct {
 	Message  string // agent task payload
 	Name     string // optional human-readable job name
 	To       string // delivery target (name or ID; optional platform prefix "platform:target")
+	When     *schedule.When
 }
 
 // ClawBlock represents the x-claw extension on a service.

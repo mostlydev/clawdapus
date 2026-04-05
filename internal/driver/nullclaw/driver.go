@@ -171,7 +171,14 @@ func (d *Driver) PostApply(rc *driver.ResolvedClaw, opts driver.PostApplyOpts) e
 		return fmt.Errorf("nullclaw driver: post-apply check failed: container is not running (status: %s)", status)
 	}
 
-	if len(rc.Invocations) == 0 {
+	nativeInvocations := make([]driver.Invocation, 0, len(rc.Invocations))
+	for _, inv := range rc.Invocations {
+		if inv.Origin == driver.OriginPod {
+			continue
+		}
+		nativeInvocations = append(nativeInvocations, inv)
+	}
+	if len(nativeInvocations) == 0 {
 		return nil
 	}
 
@@ -180,7 +187,7 @@ func (d *Driver) PostApply(rc *driver.ResolvedClaw, opts driver.PostApplyOpts) e
 		return fmt.Errorf("nullclaw driver: post-apply failed to list cron jobs: %w", err)
 	}
 
-	for _, inv := range rc.Invocations {
+	for _, inv := range nativeInvocations {
 		if strings.TrimSpace(inv.Name) != "" {
 			fmt.Printf("[claw] warning: nullclaw driver: INVOKE name %q is not supported by nullclaw cron CLI; ignoring\n", inv.Name)
 		}
