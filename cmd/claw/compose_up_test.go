@@ -1762,6 +1762,94 @@ func TestResolveServiceMetadataIgnoresMissingImplicitImageDescriptor(t *testing.
 	}
 }
 
+func TestResolveServiceMetadataFallsBackToDefaultComposeImageForBuildOnlyService(t *testing.T) {
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
+	prevLoadBuildCtx := loadDescriptorFromBuildCtx
+	defer func() {
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
+		loadDescriptorFromBuildCtx = prevLoadBuildCtx
+	}()
+
+	podDir := filepath.Join(t.TempDir(), "tiverton-house")
+	if err := os.MkdirAll(podDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const expectedImage = "tiverton-house-trading-api"
+	imageExistsLocally = func(ref string) bool { return ref == expectedImage }
+	inspectClawImage = func(ref string) (*inspect.ClawInfo, error) {
+		if ref != expectedImage {
+			t.Fatalf("unexpected image ref for inspect: %q", ref)
+		}
+		return &inspect.ClawInfo{DescribePath: "/rails/.claw-describe.json"}, nil
+	}
+	loadDescriptorFromImage = func(ref, descriptorPath string) (*describe.ServiceDescriptor, error) {
+		if ref != expectedImage {
+			t.Fatalf("unexpected image ref for descriptor load: %q", ref)
+		}
+		if descriptorPath != "/rails/.claw-describe.json" {
+			t.Fatalf("expected descriptor path from image label, got %q", descriptorPath)
+		}
+		return &describe.ServiceDescriptor{
+			Version: 2,
+			Feeds: []describe.FeedDescriptor{
+				{Name: "market-context", Path: "/feeds/market-context", TTL: 30},
+			},
+		}, nil
+	}
+	loadDescriptorFromBuildCtx = func(string, interface{}, string) (*describe.ServiceDescriptor, string, error) {
+		t.Fatal("should not fall through to build-context descriptor loader when local image carries the descriptor")
+		return nil, "", nil
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"trading-api": {
+				Compose: map[string]interface{}{
+					"build": map[string]interface{}{
+						"context":    "./services/trading-api",
+						"dockerfile": "Dockerfile",
+					},
+				},
+			},
+		},
+	}
+
+	imageRef, _, descriptor, err := resolveServiceMetadata(podDir, p, "trading-api", p.Services["trading-api"], map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if imageRef != expectedImage {
+		t.Fatalf("expected derived image ref %q, got %q", expectedImage, imageRef)
+	}
+	if descriptor == nil || len(descriptor.Feeds) == 0 || descriptor.Feeds[0].Name != "market-context" {
+		t.Fatalf("expected descriptor with market-context feed, got %+v", descriptor)
+	}
+}
+
+func TestNormalizeComposeProjectName(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"rollcall", "rollcall"},
+		{"tiverton-house", "tiverton-house"},
+		{"Tiverton House", "tivertonhouse"},
+		{"My.Project!", "myproject"},
+		{"__leading", "leading"},
+		{"---", ""},
+	}
+	for _, tc := range cases {
+		if got := normalizeComposeProjectName(tc.in); got != tc.want {
+			t.Errorf("normalizeComposeProjectName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func testInvokeHandles() map[string]*driver.HandleInfo {
 	return map[string]*driver.HandleInfo{
 		"discord": {
