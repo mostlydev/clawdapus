@@ -27,7 +27,21 @@ outline: deep
 | Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012-015) |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
 
-## v0.4.0 <Badge type="tip" text="Latest" /> {#v0-4-0}
+## v0.5.2 <Badge type="tip" text="Latest" /> {#v0-5-2}
+
+*2026-04-05*
+
+- **Fix: `claw.describe` discovery for build-only services** ([#112](https://github.com/mostlydev/clawdapus/issues/112)) — `claw up` now inspects locally built images for their `claw.describe` label even when the compose service uses `build:` without an explicit `image:`. Previously the in-image descriptor path was resolved against the host build context and quietly missed, which broke feed/tool subscriptions from sibling services.
+- **Scheduler groundwork (internal)** — `claw-api` gains an externalized invoke scheduler and schedule state/control endpoints. These are wiring for upcoming v0.6.0 work; no new CLI or UI surfaces ship with this release.
+
+## v0.5.1 {#v0-5-1}
+
+*2026-04-03*
+
+- **`body_key` in tool descriptors** — `claw.describe` v2 tool HTTP specs now support a `body_key` field that wraps tool arguments under a named JSON key in the request body (e.g. `"body_key": "trade"` sends `{"trade": {...args}}`). Validated at parse time for POST/PUT/PATCH only, propagated through the manifest, and executed by cllama proxy v0.3.0.
+- **`claw skill install`** — new command installs the clawdapus-cli skill to `~/.claude/skills/` and `~/.agents/skills/`, giving Claude Code, Codex, Gemini, and OpenCode full operational knowledge of the claw CLI. Auto-updates on every `claw` invocation when a newer binary is installed.
+
+## v0.5.0 {#v0-5-0}
 
 *2026-04-03*
 
@@ -39,6 +53,47 @@ outline: deep
 - **`claw memory forget`** — dispatches the service's `forget` endpoint and writes infra-owned tombstones under `.claw-memory-tombstones/`. Later backfill runs honor tombstones and skip re-retain.
 - **`claw audit` tool events** — session-history `tool_call` events are merged with proxy log events so managed tool activity and failures are visible without manual ledger inspection.
 - **Reference memory adapter** — `examples/reference-memory/` ships a file-backed reference implementation: idempotent retain by `entry.id`, tombstone-aware forget, recent/token-matching recall. Used by rollcall and capability-wave spike.
+- **Site branding refresh** — new octopus glyph mark with regenerated favicons across all sizes.
+
+## v0.4.3 {#v0-4-3}
+
+*2026-03-28*
+
+- **cllama model policy enforcement** — `claw up` compiles per-service model policies from pod YAML; cllama enforces allowed models, providers, and xAI seed support at the proxy layer.
+- **`claw update` subcommand** — self-update via the install script with hourly check during active development.
+- **`REPO_ROOT` surface placeholders** — volume surface paths now support `REPO_ROOT` substitution.
+- Cross-runner memory portability formalized in docs.
+
+## v0.4.2 {#v0-4-2}
+
+*2026-03-27*
+
+- **Session history** — `claw up` creates a persistent `.claw-session-history/` directory bind-mounted into cllama; proxy writes per-agent `history.jsonl` with `reported_cost_usd` on every 2xx completion. Survives container restarts and driver migrations.
+- **Descriptor discovery from Dockerfile labels** — `claw inspect` reads `.claw-describe.json` from image labels, not just the filesystem.
+- **Portable history importer** for trading-desk example feeds.
+- Fixes: OpenClaw mention regex and workspace permissions, claw-api alert window, claw-wall quiet-turn context.
+- ADR-018: session history and memory retention — two surfaces, two owners.
+
+## v0.4.1 {#v0-4-1}
+
+*2026-03-26*
+
+- **Communication tools contract** — all 7 runtimes now enforce private thinking + explicit `send_message` delivery. Agent reasoning never reaches Discord automatically.
+  - Hermes: `HERMES_TOOL_ONLY_MODE` injected by driver; runtime patches suppress text auto-routing
+  - OpenClaw: already enforced natively
+  - NullClaw, MicroClaw, NanoClaw, NanoBot, PicoClaw: `discord-responder.sh` passes a `send_message` tool to the LLM
+- **Spike test hardened** — `TestSpikeRollCall` always rebuilds stub base images; 7/7 runtimes pass end-to-end.
+
+## v0.4.0 {#v0-4-0}
+
+*2026-03-26*
+
+- **Hermes tool-only mode** — Hermes agents communicate exclusively via `send_message` tool calls when Discord handles are configured.
+- **`hermes-base` image** — real runtime build replaces rollcall stub. `patch-hermes-runtime.py` applies compatibility fixes at build time: disabled intents, non-blocking slash-command sync, reply-mention suppression, `tool_choice=required` on first turn.
+- **`claw up` auto-builds `hermes:latest`** via `ensureInfraImages`.
+- **cllama v0.2.3** — unpriced request tracking, reported cost passthrough, timezone context injection.
+- **clawdash** — surfaces `unpriced_requests` with amber warning in fleet page.
+- **CLAWDAPUS.md** — adds `## Communication Tools` section with private-thinking policy when handles are configured.
 
 ## v0.3.6 {#v0-3-6}
 

@@ -25,23 +25,25 @@ type CllamaProxyConfig struct {
 }
 
 type ClawdashConfig struct {
-	Image              string // e.g. ghcr.io/mostlydev/clawdash:latest
-	Addr               string // e.g. :8082
-	ManifestHostPath   string // host path to pod-manifest.json
-	DockerSockHostPath string // host path to docker socket
-	CllamaCostsURL     string // external costs URL for operator browser
+	Image              string            // e.g. ghcr.io/mostlydev/clawdash:latest
+	Addr               string            // e.g. :8082
+	ManifestHostPath   string            // host path to pod-manifest.json
+	DockerSockHostPath string            // host path to docker socket
+	CllamaCostsURL     string            // external costs URL for operator browser
+	Environment        map[string]string // extra env vars (e.g. schedule client auth)
 	PodName            string
 }
 
 type ClawAPIConfig struct {
-	Image               string            // e.g. ghcr.io/mostlydev/claw-api:latest
-	Addr                string            // e.g. :8080
-	ManifestHostPath    string            // host path to pod-manifest.json
-	PrincipalsHostPath  string            // host path to principals.json
-	DockerSockHostPath  string            // host path to docker socket
-	GovernanceHostPath  string            // host path to .claw-governance/ dir (write plane override files)
-	PodName             string
-	Environment         map[string]string // extra env vars (e.g. CLAW_ALERT_* thresholds)
+	Image              string // e.g. ghcr.io/mostlydev/claw-api:latest
+	Addr               string // e.g. :8080
+	ManifestHostPath   string // host path to pod-manifest.json
+	ScheduleHostPath   string // host path to schedule.json
+	PrincipalsHostPath string // host path to principals.json
+	DockerSockHostPath string // host path to docker socket
+	GovernanceHostPath string // host path to .claw-governance/ dir (write plane override files)
+	PodName            string
+	Environment        map[string]string // extra env vars (e.g. CLAW_ALERT_* thresholds)
 }
 
 // EmitCompose generates a compose.generated.yml string from pod definition and
@@ -317,9 +319,9 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		}
 
 		rootServices[serviceName] = map[string]interface{}{
-			"image":   proxy.Image,
-			"ports":   []string{fmt.Sprintf("%s:8081", dashboardPort)}, // operator dashboard
-			"volumes": volumes,
+			"image":       proxy.Image,
+			"ports":       []string{fmt.Sprintf("%s:8081", dashboardPort)}, // operator dashboard
+			"volumes":     volumes,
 			"environment": env,
 			"restart":     "on-failure",
 			"healthcheck": map[string]interface{}{
@@ -365,6 +367,9 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 			fmt.Sprintf("%s:/claw/principals.json:ro", p.ClawAPI.PrincipalsHostPath),
 			fmt.Sprintf("%s:/var/run/docker.sock:ro", socketPath),
 		}
+		if strings.TrimSpace(p.ClawAPI.ScheduleHostPath) != "" {
+			clawAPIVolumes = append(clawAPIVolumes, fmt.Sprintf("%s:/claw/schedule.json:ro", p.ClawAPI.ScheduleHostPath))
+		}
 		if p.ClawAPI.GovernanceHostPath != "" {
 			clawAPIVolumes = append(clawAPIVolumes, fmt.Sprintf("%s:/claw-governance:rw", p.ClawAPI.GovernanceHostPath))
 		}
@@ -375,7 +380,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 			"expose":      []string{port},
 			"volumes":     clawAPIVolumes,
 			"environment": clawAPIEnvironment(p.ClawAPI, addr),
-			"restart": "on-failure",
+			"restart":     "on-failure",
 			"healthcheck": map[string]interface{}{
 				"test":     []string{"CMD", "/claw-api", "-healthcheck"},
 				"interval": "15s",
@@ -416,6 +421,9 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		}
 		if strings.TrimSpace(p.Clawdash.CllamaCostsURL) != "" {
 			env["CLAWDASH_CLLAMA_COSTS_URL"] = p.Clawdash.CllamaCostsURL
+		}
+		for key, value := range p.Clawdash.Environment {
+			env[key] = value
 		}
 
 		rootServices["clawdash"] = map[string]interface{}{
@@ -600,11 +608,14 @@ func hostPortOrDefault(port, fallback string) string {
 
 func clawAPIEnvironment(cfg *ClawAPIConfig, addr string) map[string]string {
 	env := map[string]string{
-		"CLAW_API_ADDR":        addr,
-		"CLAW_API_MANIFEST":    "/claw/pod-manifest.json",
-		"CLAW_API_PRINCIPALS":  "/claw/principals.json",
-		"CLAW_GOVERNANCE_DIR":  "/claw-governance",
-		"CLAW_POD":             cfg.PodName,
+		"CLAW_API_ADDR":       addr,
+		"CLAW_API_MANIFEST":   "/claw/pod-manifest.json",
+		"CLAW_API_PRINCIPALS": "/claw/principals.json",
+		"CLAW_GOVERNANCE_DIR": "/claw-governance",
+		"CLAW_POD":            cfg.PodName,
+	}
+	if strings.TrimSpace(cfg.ScheduleHostPath) != "" {
+		env["CLAW_API_SCHEDULE_MANIFEST"] = "/claw/schedule.json"
 	}
 	for k, v := range cfg.Environment {
 		env[k] = v

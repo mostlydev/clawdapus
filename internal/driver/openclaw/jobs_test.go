@@ -142,3 +142,32 @@ func TestGenerateJobsJSONEmptyInvocations(t *testing.T) {
 		t.Errorf("expected empty array, got %d jobs", len(jobs))
 	}
 }
+
+func TestGenerateJobsJSONDisablesPodOriginJobs(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "tiverton",
+		Invocations: []driver.Invocation{
+			{
+				ID:       "podjob01",
+				Schedule: "15 8 * * 1-5",
+				Message:  "Pre-market synthesis",
+				Origin:   driver.OriginPod,
+			},
+		},
+	}
+	data, err := GenerateJobsJSON(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var jobs []map[string]interface{}
+	if err := json.Unmarshal(data, &jobs); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if jobs[0]["enabled"] != false {
+		t.Fatalf("expected pod-origin job to be disabled, got %v", jobs[0]["enabled"])
+	}
+	if jobs[0]["id"] != "podjob01" {
+		t.Fatalf("expected explicit invocation id to be preserved, got %v", jobs[0]["id"])
+	}
+}

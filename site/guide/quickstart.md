@@ -112,26 +112,29 @@ claw agent add researcher
 Give your coding agent full operational knowledge of Clawdapus -- the `claw` CLI, Clawfile syntax, claw-pod.yml structure, cllama proxy wiring, driver semantics, and troubleshooting patterns.
 
 ```bash
+# Recommended: installs to ~/.claude/skills/ and ~/.agents/skills/
+# Auto-updates whenever you update the claw binary.
+claw skill install
+```
+
+Or install manually:
+
+```bash
 SKILL_URL="https://raw.githubusercontent.com/mostlydev/clawdapus/master/skills/clawdapus/SKILL.md"
 
-# Claude Code
-mkdir -p ~/.claude/skills/clawdapus
-curl -sSL "$SKILL_URL" -o ~/.claude/skills/clawdapus/SKILL.md
+# Claude Code / OpenCode
+mkdir -p ~/.claude/skills/clawdapus-cli
+curl -sSL "$SKILL_URL" -o ~/.claude/skills/clawdapus-cli/SKILL.md
 
-# Codex CLI
-curl -sSL "$SKILL_URL" >> ~/.codex/AGENTS.md
-
-# Gemini CLI
-curl -sSL "$SKILL_URL" >> ~/.gemini/GEMINI.md
-
-# OpenCode
-curl -sSL "$SKILL_URL" >> AGENTS.md
+# Codex CLI / Gemini CLI / OpenCode (shared .agents/skills/ convention)
+mkdir -p .agents/skills/clawdapus-cli
+curl -sSL "$SKILL_URL" -o .agents/skills/clawdapus-cli/SKILL.md
 
 # Cursor / Windsurf / other .cursorrules-based agents
 curl -sSL "$SKILL_URL" >> .cursorrules
 ```
 
-This installs the Clawdapus skill into your coding agent's context, so it can help you write Clawfiles, debug pod configurations, and work with the full `claw` CLI surface.
+This gives your coding agent full context on Clawfiles, pod configurations, and the full `claw` CLI surface. When installed via `claw skill install`, the skill auto-updates on every `claw` invocation.
 
 ## Next Steps
 

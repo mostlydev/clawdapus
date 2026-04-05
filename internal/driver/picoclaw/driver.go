@@ -122,12 +122,12 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		return nil, fmt.Errorf("picoclaw driver: write seeded AGENTS.md: %w", err)
 	}
 
-	if len(rc.Invocations) > 0 {
+	if nativeInvocations := nativeCronInvocations(rc.Invocations); len(nativeInvocations) > 0 {
 		cronPath := filepath.Join(workspaceDir, "cron", "jobs.json")
 		if err := os.MkdirAll(filepath.Dir(cronPath), 0o777); err != nil {
 			return nil, fmt.Errorf("picoclaw driver: create cron dir: %w", err)
 		}
-		cronJSON, err := generateCronJobsJSON(rc.Invocations)
+		cronJSON, err := generateCronJobsJSON(nativeInvocations)
 		if err != nil {
 			return nil, fmt.Errorf("picoclaw driver: generate cron jobs: %w", err)
 		}
@@ -397,4 +397,15 @@ func generateCronJobsJSON(invocations []driver.Invocation) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(store, "", "  ")
+}
+
+func nativeCronInvocations(invocations []driver.Invocation) []driver.Invocation {
+	out := make([]driver.Invocation, 0, len(invocations))
+	for _, inv := range invocations {
+		if inv.Origin == driver.OriginPod {
+			continue
+		}
+		out = append(out, inv)
+	}
+	return out
 }

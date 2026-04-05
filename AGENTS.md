@@ -20,6 +20,21 @@ Core docs:
   - move an issue to `In review` when implementation, docs, and verification are complete
   - move an issue to `Done` only after review/acceptance, not immediately after coding
 
+## Issue-First Workflow
+
+All planned work is tracked as GitHub issues and prioritized on the [project board](https://github.com/users/mostlydev/projects/2). This applies to agents and human collaborators alike.
+
+**Before starting any non-trivial task:**
+1. Find the relevant issue on the project board. If none exists, **create one first** — do not start work without an issue.
+2. The issue must contain enough context for any model (or human) to resume cold: motivation, constraints, key design decisions, and open questions. A future collaborator with no prior context should be able to pick it up from the issue alone.
+3. Move the issue to **In Progress** before beginning.
+4. Do the work on a branch or worktree tied to that issue.
+5. Move the issue to **Done** (or close it) when the work lands on master.
+
+**Planning goes into issues.** Design notes, constraints, open questions, and sub-tasks belong in the issue body or comments — not in local plan files, unless the plan is large enough to warrant a `docs/plans/` document (linked from the issue).
+
+**The project board is the single source of truth for priorities.** Column order within a status column reflects relative priority. Work the top item unless there is a blocking reason not to.
+
 ## Compilation Principles
 
 `claw up` is a compiler. These principles govern the pipeline and must not be violated by new features:
@@ -57,6 +72,7 @@ Current top-level commands are:
 - `claw inspect`
 - `claw doctor`
 - `claw init`
+- `claw api` (`schedule` subcommands)
 - `claw agent add`
 - `claw compose` (use this liberally instead of invoking docker directly)
 
@@ -183,6 +199,8 @@ The spike tests are the heavy end-to-end path. They build images, run Docker, an
 - User-defined `healthcheck:` in `claw-pod.yml` takes precedence over driver defaults. The override happens in `compose_emit.go` — check `serviceOut["healthcheck"]` before applying `result.Healthcheck`.
 - `Service.Compose` in the pod parser preserves all non-`x-claw` compose keys as a deep-copied `map[string]interface{}`. This is how user healthchecks, depends_on, command, etc. flow through.
 - Releases: use `gh release create` with semver tags. cllama has its own tag namespace (e.g. `v0.1.0`) published from the submodule repo. ghcr.io packages default to private; must be set public via GitHub UI after first push. Pre-built `claw` binaries are published via `goreleaser` (`.goreleaser.yml` is in-tree) — do not suggest adding goreleaser, it already exists. `install.sh` downloads the latest release with checksum verification; `claw update` re-runs it.
+- Before release work: `git fetch --tags`. Local tag list can lag GitHub releases significantly (e.g. v0.5.0 lived on GitHub while local tags stopped at v0.2.5).
+- `cmd/claw/skill_data/SKILL.md` is a tracked mirror of `skills/clawdapus/SKILL.md` for `go:embed` in CI. Keep in sync via `go generate ./cmd/claw/...` (also runs in the goreleaser before hook). Do not add it back to `.gitignore` — `go vet`/CI builds need it present at checkout time.
 - `claw-api` image is not published to ghcr.io. The `ensureImage` fallback tries a git URL build which fails because the Docker builder cannot access the private cllama submodule. Build it locally from the repo root: `docker build -t ghcr.io/mostlydev/claw-api:latest -f dockerfiles/claw-api/Dockerfile .`
 - `claw-wall` image is built from `dockerfiles/claw-wall/Dockerfile` with `.` context and published to `ghcr.io/mostlydev/claw-wall:latest`. The `ensureInfraImages` fallback applies: local image → `docker pull` → local Dockerfile build. Multi-arch build: `docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/mostlydev/claw-wall:latest --push -f dockerfiles/claw-wall/Dockerfile .`
 - `hermes-base` image is built from `dockerfiles/hermes-base/` and published to `ghcr.io/mostlydev/hermes-base:<tag>` (e.g. `v2026.3.17`). It installs `hermes-agent[messaging,cron]` from the pinned upstream tag, then runs `patch-hermes-runtime.py` to apply compatibility fixes. The patch disables the `members` and `voice_states` Discord intents, makes slash-command sync non-blocking (best-effort with timeout), and — critically — sets `allowed_mentions=discord.AllowedMentions(replied_user=False)` on all `channel.send()` calls that carry a reply reference. Without this last fix, Hermes's reply feature auto-pings the original author, which in multi-agent pods creates mention loops even when `DISCORD_REQUIRE_MENTION=true`. Build: `docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/mostlydev/hermes-base:v2026.3.17 --push dockerfiles/hermes-base/`.

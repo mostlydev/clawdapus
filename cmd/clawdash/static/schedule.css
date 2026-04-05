@@ -1,0 +1,385 @@
+[x-cloak] {
+  display: none !important;
+}
+
+.tone-critical {
+  border-color: rgba(239, 68, 68, 0.25);
+  background-color: rgba(239, 68, 68, 0.08);
+  color: rgb(239 68 68 / 1);
+}
+
+.dash-banner-good {
+  border-color: rgba(52, 211, 153, 0.25);
+  background-color: rgba(52, 211, 153, 0.08);
+  color: rgb(52 211 153 / 1);
+}
+
+.dash-stack-tight {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dash-code {
+  font-family: Geist Mono, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgb(94 112 133 / 1);
+  word-break: break-word;
+}
+
+.dash-card-list {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.dash-schedule-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgb(31 45 61 / 1);
+  border-radius: 0.55rem;
+  background:
+    radial-gradient(circle at top right, rgba(34, 211, 238, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(15, 22, 32, 0.94), rgba(12, 16, 23, 0.96));
+  padding: 1.2rem 1.25rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.dash-schedule-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: rgba(34, 211, 238, 0.14);
+}
+
+.dash-schedule-card-warning::before {
+  background: rgba(240, 165, 0, 0.55);
+}
+
+.dash-schedule-card-critical::before {
+  background: rgba(239, 68, 68, 0.72);
+}
+
+.dash-schedule-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.dash-schedule-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.dash-pill-outlined {
+  background-color: transparent;
+}
+
+.dash-schedule-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+@media (min-width: 860px) {
+  .dash-schedule-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.dash-schedule-block {
+  border: 1px solid rgba(31, 45, 61, 0.92);
+  border-radius: 0.5rem;
+  background: rgba(12, 16, 23, 0.78);
+  padding: 0.95rem 1rem;
+}
+
+.dash-schedule-label,
+.dash-form-label {
+  font-family: Geist Mono, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(94 112 133 / 1);
+}
+
+.dash-schedule-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+  font-family: Geist Mono, monospace;
+  font-size: 1.4rem;
+  font-weight: 600;
+  line-height: 1.15;
+  color: rgb(237 242 247 / 1);
+}
+
+.dash-schedule-hero-dimmed {
+  color: rgb(140 154 173 / 1);
+}
+
+.dash-schedule-modifier {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: rgb(94 112 133 / 1);
+}
+
+.dash-schedule-meta-line,
+.dash-schedule-note {
+  margin-top: 0.35rem;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgb(94 112 133 / 1);
+}
+
+.dash-schedule-followup {
+  margin-top: 0.6rem;
+  font-family: Geist Mono, monospace;
+  font-size: 11px;
+  color: rgb(34 211 238 / 1);
+}
+
+.dash-schedule-note {
+  border-top: 1px dashed rgba(31, 45, 61, 0.9);
+  padding-top: 0.45rem;
+}
+
+.dash-schedule-event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.dash-schedule-event-copy {
+  font-size: 13px;
+  color: rgb(212 220 232 / 1);
+}
+
+.dash-schedule-details {
+  margin-top: 0.85rem;
+}
+
+.dash-schedule-details summary {
+  cursor: pointer;
+  font-family: Geist Mono, monospace;
+  font-size: 11px;
+  color: rgb(34 211 238 / 1);
+}
+
+.dash-schedule-detail-grid {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+@media (min-width: 720px) {
+  .dash-schedule-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.dash-schedule-detail-wide {
+  grid-column: 1 / -1;
+}
+
+.dash-schedule-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.dash-inline-form {
+  display: inline-flex;
+}
+
+.dash-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  background-color: rgba(34, 211, 238, 0.08);
+  padding: 0.48rem 0.82rem;
+  font-family: Geist Mono, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(34 211 238 / 1);
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.dash-button:hover {
+  border-color: rgba(34, 211, 238, 0.4);
+  background-color: rgba(34, 211, 238, 0.14);
+  color: rgb(237 242 247 / 1);
+}
+
+.dash-button-subtle {
+  border-color: rgb(31 45 61 / 1);
+  background-color: rgb(12 16 23 / 1);
+  color: rgb(94 112 133 / 1);
+}
+
+.dash-button-subtle:hover {
+  border-color: rgba(34, 211, 238, 0.25);
+  background-color: rgba(34, 211, 238, 0.06);
+  color: rgb(212 220 232 / 1);
+}
+
+.dash-button-danger {
+  border-color: rgba(239, 68, 68, 0.28);
+  background-color: rgba(239, 68, 68, 0.08);
+  color: rgb(248 113 113 / 1);
+}
+
+.dash-button-danger:hover {
+  border-color: rgba(239, 68, 68, 0.45);
+  background-color: rgba(239, 68, 68, 0.14);
+  color: rgb(254 202 202 / 1);
+}
+
+.dash-overflow-wrap {
+  position: relative;
+}
+
+.dash-overflow-menu {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 0.25rem;
+  min-width: 180px;
+  border: 1px solid rgb(31 45 61 / 1);
+  border-radius: 0.45rem;
+  background: rgb(12 16 23 / 0.98);
+  padding: 0.35rem;
+  box-shadow: 0 18px 30px rgba(0, 0, 0, 0.32);
+}
+
+.dash-menu-item {
+  width: 100%;
+  border: 0;
+  border-radius: 0.35rem;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  font-family: Geist Mono, monospace;
+  font-size: 11px;
+  color: rgb(212 220 232 / 1);
+}
+
+.dash-menu-item:hover {
+  background: rgba(34, 211, 238, 0.08);
+}
+
+.dash-menu-item-danger {
+  color: rgb(248 113 113 / 1);
+}
+
+.dash-menu-item-danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.dash-pause-form-shell {
+  margin-top: 1rem;
+  border-top: 1px solid rgba(31, 45, 61, 0.92);
+  padding-top: 0.95rem;
+}
+
+.dash-pause-form {
+  display: grid;
+  gap: 0.8rem;
+}
+
+@media (min-width: 820px) {
+  .dash-pause-form {
+    grid-template-columns: minmax(0, 220px) minmax(0, 1fr) auto;
+    align-items: end;
+  }
+}
+
+.dash-form-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dash-form-field-wide {
+  min-width: 0;
+}
+
+.dash-pause-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dash-confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.dash-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 8, 13, 0.72);
+  backdrop-filter: blur(2px);
+}
+
+.dash-confirm-dialog {
+  position: relative;
+  width: min(420px, calc(100vw - 2rem));
+  border: 1px solid rgb(31 45 61 / 1);
+  border-radius: 0.6rem;
+  background: linear-gradient(180deg, rgba(19, 26, 36, 0.98), rgba(12, 16, 23, 0.98));
+  padding: 1.2rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.36);
+}
+
+.dash-confirm-title {
+  margin-top: 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: rgb(237 242 247 / 1);
+}
+
+.dash-confirm-copy {
+  margin-top: 0.5rem;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgb(94 112 133 / 1);
+}
+
+.dash-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 700px) {
+  .dash-schedule-card-head,
+  .dash-schedule-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dash-schedule-pill-row {
+    justify-content: flex-start;
+  }
+}

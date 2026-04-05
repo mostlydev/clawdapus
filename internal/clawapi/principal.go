@@ -16,14 +16,16 @@ const (
 	VerbFleetLogs          = "fleet.logs"
 	VerbFleetQueryMetrics  = "fleet.query_metrics"
 	VerbFleetAlerts        = "fleet.alerts"
+	VerbScheduleRead       = "schedule.read"
 	VerbFleetRestart       = "fleet.restart"
 	VerbFleetQuarantine    = "fleet.quarantine"
 	VerbFleetBudgetSet     = "fleet.budget.set"
 	VerbFleetModelRestrict = "fleet.model.restrict"
+	VerbScheduleControl    = "schedule.control"
 )
 
-var AllReadVerbs = []string{VerbFleetStatus, VerbFleetLogs, VerbFleetQueryMetrics, VerbFleetAlerts}
-var AllWriteVerbs = []string{VerbFleetRestart, VerbFleetQuarantine, VerbFleetBudgetSet, VerbFleetModelRestrict}
+var AllReadVerbs = []string{VerbFleetStatus, VerbFleetLogs, VerbFleetQueryMetrics, VerbFleetAlerts, VerbScheduleRead}
+var AllWriteVerbs = []string{VerbFleetRestart, VerbFleetQuarantine, VerbFleetBudgetSet, VerbFleetModelRestrict, VerbScheduleControl}
 var AllVerbs = append(append([]string{}, AllReadVerbs...), AllWriteVerbs...)
 
 type Store struct {
@@ -149,6 +151,19 @@ func BuildSelfPrincipal(podName, serviceName string) (Principal, error) {
 		Token:    token,
 		Verbs:    verbs,
 		Services: []string{serviceName},
+	}, nil
+}
+
+func BuildSchedulerPrincipal(podName string) (Principal, error) {
+	token, err := GenerateToken()
+	if err != nil {
+		return Principal{}, err
+	}
+	return Principal{
+		Name:  "claw-scheduler",
+		Token: token,
+		Verbs: []string{VerbScheduleRead, VerbScheduleControl},
+		Pods:  []string{podName},
 	}, nil
 }
 

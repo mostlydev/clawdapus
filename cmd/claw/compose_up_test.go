@@ -719,6 +719,92 @@ func TestPrepareClawAPIRuntimeUsesPostMergeMasterToken(t *testing.T) {
 	}
 }
 
+func TestPrepareClawAPIRuntimeWithoutMasterWritesSchedulerPrincipal(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name: "ops",
+		Services: map[string]*pod.Service{
+			"westin": {
+				Claw: &pod.ClawBlock{
+					Invoke: []pod.InvokeEntry{{
+						Schedule: "0 9 * * 1-5",
+						Message:  "Open the market.",
+					}},
+				},
+			},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	auth, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"westin": {Count: 1},
+	})
+	if err != nil {
+		t.Fatalf("prepareClawAPIRuntime: %v", err)
+	}
+	if auth != nil {
+		t.Fatalf("expected no cllama auth without master, got %+v", auth)
+	}
+	if env := p.Services["westin"].Environment; len(env) != 0 {
+		t.Fatalf("did not expect token injection without master, got %v", env)
+	}
+	raw, err := os.ReadFile(p.ClawAPI.PrincipalsHostPath)
+	if err != nil {
+		t.Fatalf("read principals: %v", err)
+	}
+	if !strings.Contains(string(raw), "claw-scheduler") {
+		t.Fatalf("expected scheduler principal in principals.json, got %s", string(raw))
+	}
+	if !strings.Contains(string(raw), clawapi.VerbScheduleRead) || !strings.Contains(string(raw), clawapi.VerbScheduleControl) {
+		t.Fatalf("expected schedule verbs in principals.json, got %s", string(raw))
+	}
+}
+
+func TestPrepareClawAPIRuntimeWithMasterAndInvokeAlsoWritesSchedulerPrincipal(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name:   "ops",
+		Master: "octopus",
+		Services: map[string]*pod.Service{
+			"octopus": {
+				Environment: map[string]string{},
+				Claw:        &pod.ClawBlock{},
+			},
+			"westin": {
+				Claw: &pod.ClawBlock{
+					Invoke: []pod.InvokeEntry{{
+						Schedule: "0 9 * * 1-5",
+						Message:  "Open the market.",
+					}},
+				},
+			},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	_, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"octopus": {Count: 1},
+		"westin":  {Count: 1},
+	})
+	if err != nil {
+		t.Fatalf("prepareClawAPIRuntime: %v", err)
+	}
+
+	raw, err := os.ReadFile(p.ClawAPI.PrincipalsHostPath)
+	if err != nil {
+		t.Fatalf("read principals: %v", err)
+	}
+	if !strings.Contains(string(raw), "claw-scheduler") {
+		t.Fatalf("expected scheduler principal in principals.json, got %s", string(raw))
+	}
+}
+
 func TestPrepareClawAPIRuntimeRejectsInjectIntoReservedMasterService(t *testing.T) {
 	runtimeDir := t.TempDir()
 	p := &pod.Pod{
@@ -2554,13 +2640,15 @@ func TestBuildToolManifestEntriesNamescopesAndProjectsAuth(t *testing.T) {
 		},
 		"analyst",
 		[]describe.ToolSpec{{
-			Name:        "get_market_context",
+			Name:        "propose_trade",
 			Service:     "trading-api",
-			Description: "Retrieve market context",
+			Description: "Submit trade proposal",
 			InputSchema: map[string]interface{}{"type": "object"},
 			HTTP: &describe.ToolHTTP{
-				Method: "GET",
-				Path:   "/api/v1/market_context/{claw_id}",
+				Method:  "POST",
+				Path:    "/api/v1/trades",
+				Body:    "json",
+				BodyKey: "trade",
 			},
 		}},
 		nil,
@@ -2571,7 +2659,7 @@ func TestBuildToolManifestEntriesNamescopesAndProjectsAuth(t *testing.T) {
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool entry, got %+v", tools)
 	}
-	if tools[0].Name != "trading-api.get_market_context" {
+	if tools[0].Name != "trading-api.propose_trade" {
 		t.Fatalf("expected namespaced tool name, got %+v", tools[0])
 	}
 	if tools[0].Execution.BaseURL != "http://trading-api:4000" {
@@ -2579,6 +2667,9 @@ func TestBuildToolManifestEntriesNamescopesAndProjectsAuth(t *testing.T) {
 	}
 	if tools[0].Execution.Auth == nil || tools[0].Execution.Auth.Token != "real-token" {
 		t.Fatalf("expected projected auth token, got %+v", tools[0].Execution.Auth)
+	}
+	if tools[0].Execution.BodyKey != "trade" {
+		t.Fatalf("expected propagated body key, got %+v", tools[0].Execution)
 	}
 }
 

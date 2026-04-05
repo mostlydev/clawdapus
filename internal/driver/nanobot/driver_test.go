@@ -196,11 +196,36 @@ func TestMaterializeWritesCronJobs(t *testing.T) {
 }
 
 func TestGenerateCronJobsJSONRejectsInvalidSchedule(t *testing.T) {
-	_, err := generateCronJobsJSON([]driver.Invocation{
-		{Schedule: "@hourly", Message: "hi"},
-	})
+	rc, _ := newTestRC(t)
+	rc.Invocations = []driver.Invocation{{Schedule: "@hourly", Message: "hi"}}
+	_, err := generateCronJobsJSON(rc)
 	if err == nil {
 		t.Fatal("expected cron schedule validation error")
+	}
+}
+
+func TestGenerateCronJobsJSONAddsIDAndDisablesPodOrigin(t *testing.T) {
+	rc, _ := newTestRC(t)
+	rc.Invocations = []driver.Invocation{
+		{ID: "podjob01", Schedule: "*/5 * * * *", Message: "hi", Origin: driver.OriginPod},
+	}
+	data, err := generateCronJobsJSON(rc)
+	if err != nil {
+		t.Fatalf("generateCronJobsJSON failed: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("parse cron json: %v", err)
+	}
+	jobs := payload["jobs"].([]any)
+	job := jobs[0].(map[string]any)
+	if got := job["id"]; got != "podjob01" {
+		t.Fatalf("expected explicit id, got %#v", got)
+	}
+	state := job["state"].(map[string]any)
+	if got := state["enabled"]; got != false {
+		t.Fatalf("expected pod-origin job disabled, got %#v", got)
 	}
 }
 

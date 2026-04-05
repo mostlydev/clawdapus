@@ -1,0 +1,9 @@
+{
+  "name": "crypto-24-7",
+  "timezone": "UTC",
+  "weekdays": [0, 1, 2, 3, 4, 5, 6],
+  "sessions": {
+    "regular": {"start": "00:00", "end": "24:00"}
+  },
+  "holidays": []
+}

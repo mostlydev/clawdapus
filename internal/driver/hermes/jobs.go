@@ -80,17 +80,21 @@ func GenerateJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 		if name == "" {
 			name = fmt.Sprintf("invoke-%02d", i+1)
 		}
+		id := strings.TrimSpace(inv.ID)
+		if id == "" {
+			id = deterministicJobID(rc.ServiceName, expr, message, deliverTarget(rc.Handles, strings.TrimSpace(inv.To)))
+		}
 
 		deliver := deliverTarget(rc.Handles, strings.TrimSpace(inv.To))
 		file.Jobs = append(file.Jobs, job{
-			ID:              deterministicJobID(rc.ServiceName, expr, message, deliver),
+			ID:              id,
 			Name:            name,
 			Prompt:          message,
 			Skills:          []string{},
 			Schedule:        schedule{Kind: "cron", Expr: expr, Display: expr},
 			ScheduleDisplay: expr,
 			Repeat:          repeatState{Times: nil, Completed: 0},
-			Enabled:         true,
+			Enabled:         inv.Origin != driver.OriginPod,
 			State:           "scheduled",
 			CreatedAt:       now.Format(time.RFC3339),
 			NextRunAt:       nextRunAt,

@@ -83,3 +83,33 @@ func TestGenerateJobsJSONRejectsInvalidSchedule(t *testing.T) {
 		t.Fatal("expected GenerateJobsJSON to reject invalid cron")
 	}
 }
+
+func TestGenerateJobsJSONDisablesPodOriginJobs(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "hermes",
+		Invocations: []driver.Invocation{
+			{ID: "podjob01", Schedule: "*/5 * * * *", Message: "Check status", Origin: driver.OriginPod},
+		},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {},
+		},
+	}
+
+	data, err := GenerateJobsJSON(rc)
+	if err != nil {
+		t.Fatalf("GenerateJobsJSON returned error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("parse jobs json: %v", err)
+	}
+	jobs := payload["jobs"].([]any)
+	job := jobs[0].(map[string]any)
+	if got := job["enabled"]; got != false {
+		t.Fatalf("expected disabled pod-origin job, got %#v", got)
+	}
+	if got := job["id"]; got != "podjob01" {
+		t.Fatalf("expected explicit id, got %#v", got)
+	}
+}

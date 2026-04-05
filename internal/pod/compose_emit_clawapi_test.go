@@ -88,3 +88,46 @@ func TestEmitComposeInjectsClawAPI(t *testing.T) {
 		t.Fatalf("expected claw-api on claw-internal network, got %v", clawAPISvc.Networks)
 	}
 }
+
+func TestEmitComposeInjectsClawAPIScheduleManifestWhenConfigured(t *testing.T) {
+	p := &Pod{
+		Name: "ops-pod",
+		Services: map[string]*Service{
+			"octopus": {Image: "ghcr.io/example/octopus:latest", Claw: &ClawBlock{}},
+		},
+		ClawAPI: &ClawAPIConfig{
+			Image:              "ghcr.io/mostlydev/claw-api:latest",
+			Addr:               ":8080",
+			ManifestHostPath:   "/tmp/.claw-runtime/pod-manifest.json",
+			ScheduleHostPath:   "/tmp/.claw-runtime/schedule.json",
+			PrincipalsHostPath: "/tmp/.claw-runtime/claw-api/principals.json",
+			DockerSockHostPath: "/var/run/docker.sock",
+			PodName:            "ops-pod",
+		},
+	}
+
+	out, err := EmitCompose(p, map[string]*driver.MaterializeResult{
+		"octopus": {ReadOnly: true, Restart: "on-failure"},
+	})
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	var cf struct {
+		Services map[string]struct {
+			Volumes     []string          `yaml:"volumes"`
+			Environment map[string]string `yaml:"environment"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
+		t.Fatalf("parse compose yaml: %v", err)
+	}
+
+	clawAPISvc := cf.Services["claw-api"]
+	if !strings.Contains(strings.Join(clawAPISvc.Volumes, ","), "/claw/schedule.json:ro") {
+		t.Fatalf("expected schedule manifest mount, got %v", clawAPISvc.Volumes)
+	}
+	if clawAPISvc.Environment["CLAW_API_SCHEDULE_MANIFEST"] != "/claw/schedule.json" {
+		t.Fatalf("expected schedule manifest env, got %v", clawAPISvc.Environment["CLAW_API_SCHEDULE_MANIFEST"])
+	}
+}

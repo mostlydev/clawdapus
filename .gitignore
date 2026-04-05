@@ -46,6 +46,7 @@ cmd/clawdash/node_modules/
 testdata/*
 !testdata/openclaw-stub/
 !testdata/microclaw-stub/
+!testdata/tool-stub/
 *-notes.md
 .claude/settings.local.json
 .worktrees/

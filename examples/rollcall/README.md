@@ -65,6 +65,12 @@ Or from this directory:
 go test -tags spike -v -run TestSpikeRollCall ../../cmd/claw/...
 ```
 
+For the integrated capability-wave path on `oc-roll` only:
+
+```bash
+go test -tags spike -v -run TestSpikeCapabilityWaveLive ./cmd/claw/...
+```
+
 ## Expected Result
 
 The test should:
@@ -83,6 +89,13 @@ The test should:
    - `picoclaw`
    - `hermes`
 7. Confirm `claw audit` telemetry appears for each runtime's cllama-backed turn.
+
+The dedicated capability-wave spike additionally confirms that `oc-roll` can:
+
+1. receive a real Discord trigger
+2. execute a managed service tool through cllama mediation
+3. record `tool_trace` in session history
+4. emit `memory_op` recall and retain telemetry in the same turn
 
 ## Notes
 
