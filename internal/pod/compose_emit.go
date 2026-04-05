@@ -25,11 +25,12 @@ type CllamaProxyConfig struct {
 }
 
 type ClawdashConfig struct {
-	Image              string // e.g. ghcr.io/mostlydev/clawdash:latest
-	Addr               string // e.g. :8082
-	ManifestHostPath   string // host path to pod-manifest.json
-	DockerSockHostPath string // host path to docker socket
-	CllamaCostsURL     string // external costs URL for operator browser
+	Image              string            // e.g. ghcr.io/mostlydev/clawdash:latest
+	Addr               string            // e.g. :8082
+	ManifestHostPath   string            // host path to pod-manifest.json
+	DockerSockHostPath string            // host path to docker socket
+	CllamaCostsURL     string            // external costs URL for operator browser
+	Environment        map[string]string // extra env vars (e.g. schedule client auth)
 	PodName            string
 }
 
@@ -420,6 +421,9 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		}
 		if strings.TrimSpace(p.Clawdash.CllamaCostsURL) != "" {
 			env["CLAWDASH_CLLAMA_COSTS_URL"] = p.Clawdash.CllamaCostsURL
+		}
+		for key, value := range p.Clawdash.Environment {
+			env[key] = value
 		}
 
 		rootServices["clawdash"] = map[string]interface{}{

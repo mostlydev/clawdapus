@@ -13,6 +13,7 @@ import (
 
 	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
 	"github.com/mostlydev/clawdapus/internal/driver"
+	schedulepkg "github.com/mostlydev/clawdapus/internal/schedule"
 )
 
 type fakeStatusSource struct {
@@ -25,6 +26,39 @@ func (f fakeStatusSource) Snapshot(_ context.Context, _ []string) (map[string]se
 		return nil, f.err
 	}
 	return f.statuses, nil
+}
+
+type fakeScheduleSource struct {
+	invocations []scheduleInvocationView
+	err         error
+	actions     []string
+}
+
+func (f *fakeScheduleSource) List(_ context.Context) ([]scheduleInvocationView, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.invocations, nil
+}
+
+func (f *fakeScheduleSource) Pause(_ context.Context, id, until, reason string) error {
+	f.actions = append(f.actions, fmt.Sprintf("pause:%s:%s:%s", id, until, reason))
+	return f.err
+}
+
+func (f *fakeScheduleSource) Resume(_ context.Context, id string) error {
+	f.actions = append(f.actions, "resume:"+id)
+	return f.err
+}
+
+func (f *fakeScheduleSource) SkipNext(_ context.Context, id string) error {
+	f.actions = append(f.actions, "skip-next:"+id)
+	return f.err
+}
+
+func (f *fakeScheduleSource) Fire(_ context.Context, id string, bypassWhen, bypassPause bool) error {
+	f.actions = append(f.actions, fmt.Sprintf("fire:%s:%t:%t", id, bypassWhen, bypassPause))
+	return f.err
 }
 
 func testManifest() *manifestpkg.PodManifest {
@@ -85,8 +119,40 @@ func testStatuses() map[string]serviceStatus {
 	}
 }
 
+func testScheduleViews() []scheduleInvocationView {
+	nextFire := time.Date(2026, 4, 6, 9, 30, 0, 0, time.UTC)
+	lastFire := nextFire.Add(-24 * time.Hour)
+	return []scheduleInvocationView{
+		{
+			ManifestInvocation: schedulepkg.ManifestInvocation{
+				ID:       "opening-bell",
+				Service:  "bot",
+				AgentID:  "bot",
+				Schedule: "30 9 * * 1-5",
+				Timezone: "America/New_York",
+				Message:  "Open the market.",
+				Name:     "Opening Bell",
+				When: &schedulepkg.When{
+					Calendar: "us-equities",
+					Session:  schedulepkg.SessionRegular,
+				},
+				Wake: schedulepkg.Wake{
+					Adapter: "openclaw-exec",
+					Target:  "bot",
+					Command: []string{"openclaw", "cron", "run", "opening-bell"},
+				},
+			},
+			State: schedulepkg.InvocationState{
+				NextFireAt:  &nextFire,
+				LastFiredAt: &lastFire,
+				LastStatus:  "fired",
+			},
+		},
+	}
+}
+
 func TestFleetPageRenders(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181", false)
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, nil, "http://localhost:8181", false)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -116,7 +182,7 @@ func TestFleetPageRenders(t *testing.T) {
 }
 
 func TestFleetPageShowsCostLinkWhenCostAPIAvailable(t *testing.T) {
-	raw := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181", false)
+	raw := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, nil, "http://localhost:8181", false)
 	h, ok := raw.(*handler)
 	if !ok {
 		t.Fatal("expected *handler")
@@ -155,7 +221,7 @@ func TestFleetPageShowsCostLinkWhenCostAPIAvailable(t *testing.T) {
 }
 
 func TestTopologyPageRenders(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181", false)
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, nil, "http://localhost:8181", false)
 	req := httptest.NewRequest(http.MethodGet, "/topology", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -173,7 +239,7 @@ func TestTopologyPageRenders(t *testing.T) {
 }
 
 func TestAPIStatusJSON(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181", false)
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, nil, "http://localhost:8181", false)
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -193,13 +259,64 @@ func TestAPIStatusJSON(t *testing.T) {
 }
 
 func TestDetailMissingServiceNotFound(t *testing.T) {
-	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, "http://localhost:8181", false)
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, nil, "http://localhost:8181", false)
 	req := httptest.NewRequest(http.MethodGet, "/detail/missing", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestSchedulePageRenders(t *testing.T) {
+	h := newHandler(
+		testManifest(),
+		fakeStatusSource{statuses: testStatuses()},
+		&fakeScheduleSource{invocations: testScheduleViews()},
+		"http://localhost:8181",
+		false,
+	)
+	req := httptest.NewRequest(http.MethodGet, "/schedule", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Schedule Control") {
+		t.Fatalf("expected schedule heading in body")
+	}
+	if !strings.Contains(body, "Opening Bell") {
+		t.Fatalf("expected invocation name in body")
+	}
+	if !strings.Contains(body, "Fire now") || !strings.Contains(body, "Force fire") {
+		t.Fatalf("expected schedule action buttons in body")
+	}
+}
+
+func TestScheduleActionPostsAndRedirects(t *testing.T) {
+	scheduleSource := &fakeScheduleSource{invocations: testScheduleViews()}
+	h := newHandler(
+		testManifest(),
+		fakeStatusSource{statuses: testStatuses()},
+		scheduleSource,
+		"http://localhost:8181",
+		false,
+	)
+	req := httptest.NewRequest(http.MethodPost, "/schedule/opening-bell/skip-next", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d", w.Code)
+	}
+	if got := w.Header().Get("Location"); !strings.Contains(got, "/schedule?notice=") {
+		t.Fatalf("expected redirect back to /schedule with notice, got %q", got)
+	}
+	if len(scheduleSource.actions) != 1 || scheduleSource.actions[0] != "skip-next:opening-bell" {
+		t.Fatalf("expected skip-next action, got %v", scheduleSource.actions)
 	}
 }
 

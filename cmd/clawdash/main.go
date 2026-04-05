@@ -34,6 +34,8 @@ type config struct {
 	ManifestPath    string
 	CllamaCostsURL  string
 	CostLogFallback bool
+	ClawAPIURL      string
+	ClawAPIToken    string
 }
 
 func loadConfig() config {
@@ -44,6 +46,8 @@ func loadConfig() config {
 		CostLogFallback: envBool(
 			"CLAWDASH_COST_LOG_FALLBACK",
 		),
+		ClawAPIURL:   strings.TrimSpace(os.Getenv("CLAW_API_URL")),
+		ClawAPIToken: strings.TrimSpace(os.Getenv("CLAW_API_TOKEN")),
 	}
 }
 
@@ -59,7 +63,8 @@ func run(cfg config) error {
 	}
 	defer source.Close()
 
-	h := newHandler(manifest, source, cfg.CllamaCostsURL, cfg.CostLogFallback)
+	scheduleSource := newScheduleHTTPClient(cfg.ClawAPIURL, cfg.ClawAPIToken)
+	h := newHandler(manifest, source, scheduleSource, cfg.CllamaCostsURL, cfg.CostLogFallback)
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           h,

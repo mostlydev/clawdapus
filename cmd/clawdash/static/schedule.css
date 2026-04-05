@@ -1,0 +1,88 @@
+.tone-critical {
+  border-color: rgba(239, 68, 68, 0.25);
+  background-color: rgba(239, 68, 68, 0.08);
+  color: rgb(239 68 68 / 1);
+}
+
+.dash-banner-good {
+  border-color: rgba(52, 211, 153, 0.25);
+  background-color: rgba(52, 211, 153, 0.08);
+  color: rgb(52 211 153 / 1);
+}
+
+.dash-stack-tight {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dash-code {
+  font-family: Geist Mono, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgb(94 112 133 / 1);
+  word-break: break-word;
+}
+
+.dash-schedule-table td {
+  vertical-align: top;
+}
+
+.dash-action-stack {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.dash-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dash-inline-form {
+  display: inline-flex;
+}
+
+.dash-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  background-color: rgba(34, 211, 238, 0.08);
+  padding: 0.45rem 0.75rem;
+  font-family: Geist Mono, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(34 211 238 / 1);
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.dash-button:hover {
+  border-color: rgba(34, 211, 238, 0.4);
+  background-color: rgba(34, 211, 238, 0.14);
+  color: rgb(237 242 247 / 1);
+}
+
+.dash-button-subtle {
+  border-color: rgb(31 45 61 / 1);
+  background-color: rgb(12 16 23 / 1);
+  color: rgb(94 112 133 / 1);
+}
+
+.dash-button-subtle:hover {
+  border-color: rgba(34, 211, 238, 0.25);
+  background-color: rgba(34, 211, 238, 0.06);
+  color: rgb(212 220 232 / 1);
+}
+
+.dash-button-danger {
+  border-color: rgba(239, 68, 68, 0.28);
+  background-color: rgba(239, 68, 68, 0.08);
+  color: rgb(248 113 113 / 1);
+}
+
+.dash-button-danger:hover {
+  border-color: rgba(239, 68, 68, 0.45);
+  background-color: rgba(239, 68, 68, 0.14);
+  color: rgb(254 202 202 / 1);
+}

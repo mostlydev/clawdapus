@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>clawdapus dash - schedule</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/schedule.css" />
+  <script defer src="/static/alpine.js"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <div class="dash-shell">
+    <header class="dash-topbar">
+      <a href="/" class="dash-brand">
+        <div class="dash-brand-wordmark"><span>clawdash</span> fleet</div>
+      </a>
+
+      <nav class="dash-nav" aria-label="Primary">
+        <a href="/" class="dash-nav-link">Fleet</a>
+        <a href="/topology" class="dash-nav-link">Topology</a>
+        <a href="/schedule" class="dash-nav-link dash-nav-link-active">Schedule</a>
+      </nav>
+
+      <div class="dash-title">{{.PodName}}</div>
+    </header>
+
+    <section class="dash-page-head">
+      <div class="dash-page-kicker">{{.PodName}}</div>
+      <h1 class="dash-page-title">Schedule Control</h1>
+      <p class="dash-page-copy">Current scheduler state, wake paths, and operator controls for pod-origin invokes.</p>
+    </section>
+
+    {{if .HasNotice}}
+      <div class="dash-banner dash-banner-good">{{.Notice}}</div>
+    {{end}}
+    {{if .HasError}}
+      <div class="dash-banner">{{.Error}}</div>
+    {{end}}
+
+    <section class="dash-strip" aria-label="Schedule summary">
+      <div class="dash-strip-grid">
+        {{range .Summary}}
+          <article class="dash-metric {{if .Tone}}{{printf "tone-%s" .Tone}}{{end}}">
+            <div class="dash-metric-label">{{.Label}}</div>
+            <div class="dash-metric-value">{{.Value}}</div>
+            <div class="dash-metric-hint">{{.Hint}}</div>
+          </article>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="dash-panel">
+      <div class="dash-section-head">
+        <div>
+          <div class="dash-brand-kicker">Scheduler</div>
+          <h2 class="dash-section-title">Invocation registry</h2>
+        </div>
+        <span class="dash-chip">{{len .Rows}} visible</span>
+      </div>
+
+      {{if .HasRows}}
+        <div class="overflow-x-auto p-5 pt-4">
+          <table class="dash-table dash-schedule-table min-w-full">
+            <thead>
+              <tr>
+                <th>Invocation</th>
+                <th>Gate</th>
+                <th>Timing</th>
+                <th>Wake</th>
+                <th>State</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Rows}}
+                <tr>
+                  <td>
+                    <div class="dash-stack-tight">
+                      <div class="dash-service-name">{{.Name}}</div>
+                      <div class="dash-service-meta">{{.Service}} → {{.AgentID}}</div>
+                      <div class="dash-service-meta">{{truncate .Message 120}}</div>
+                      {{if .Target}}<div class="dash-service-meta">to {{.Target}}</div>{{end}}
+                      <div class="dash-code">{{.ID}}</div>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="dash-stack-tight">
+                      <div>{{.Gate}}</div>
+                      <div class="dash-service-meta">{{.Timezone}}</div>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="dash-stack-tight">
+                      <div>{{.Schedule}}</div>
+                      <div class="dash-service-meta">next {{.NextFire}}</div>
+                      <div class="dash-service-meta">last {{.LastEvent}}</div>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="dash-stack-tight">
+                      <div>{{.WakeAdapter}}</div>
+                      <div class="dash-service-meta">{{.WakeTarget}}</div>
+                      <div class="dash-code">{{truncate .WakeCommand 96}}</div>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="dash-stack-tight">
+                      <span class="dash-pill {{.LastStatusTone}}">{{.LastStatus}}</span>
+                      {{range .Badges}}
+                        <span class="dash-pill {{.Tone}}">{{.Label}}</span>
+                      {{end}}
+                      {{if .PauseSummary}}<div class="dash-service-meta">{{.PauseSummary}}</div>{{end}}
+                      {{if .LastDetail}}<div class="dash-service-meta">{{truncate .LastDetail 120}}</div>{{end}}
+                    </div>
+                  </td>
+                  <td>
+                    <div class="dash-action-stack">
+                      <div class="dash-action-row">
+                        <form method="post" action="/schedule/{{pathEscape .ID}}/pause" class="dash-inline-form">
+                          <button type="submit" class="dash-button dash-button-subtle">Pause</button>
+                        </form>
+                        <form method="post" action="/schedule/{{pathEscape .ID}}/resume" class="dash-inline-form">
+                          <button type="submit" class="dash-button dash-button-subtle">Resume</button>
+                        </form>
+                        <form method="post" action="/schedule/{{pathEscape .ID}}/skip-next" class="dash-inline-form">
+                          <button type="submit" class="dash-button dash-button-subtle">Skip next</button>
+                        </form>
+                      </div>
+                      <div class="dash-action-row">
+                        <form method="post" action="/schedule/{{pathEscape .ID}}/fire" class="dash-inline-form">
+                          <button type="submit" class="dash-button">Fire now</button>
+                        </form>
+                        <form method="post" action="/schedule/{{pathEscape .ID}}/fire" class="dash-inline-form">
+                          <input type="hidden" name="bypass_when" value="true" />
+                          <input type="hidden" name="bypass_pause" value="true" />
+                          <button type="submit" class="dash-button dash-button-danger">{{.BypassFireLabel}}</button>
+                        </form>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      {{else}}
+        <div class="dash-empty">No scheduler-owned invocations are available in the current scope.</div>
+      {{end}}
+    </section>
+  </div>
+</body>
+</html>

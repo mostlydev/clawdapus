@@ -763,6 +763,48 @@ func TestPrepareClawAPIRuntimeWithoutMasterWritesSchedulerPrincipal(t *testing.T
 	}
 }
 
+func TestPrepareClawAPIRuntimeWithMasterAndInvokeAlsoWritesSchedulerPrincipal(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name:   "ops",
+		Master: "octopus",
+		Services: map[string]*pod.Service{
+			"octopus": {
+				Environment: map[string]string{},
+				Claw:        &pod.ClawBlock{},
+			},
+			"westin": {
+				Claw: &pod.ClawBlock{
+					Invoke: []pod.InvokeEntry{{
+						Schedule: "0 9 * * 1-5",
+						Message:  "Open the market.",
+					}},
+				},
+			},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	_, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"octopus": {Count: 1},
+		"westin":  {Count: 1},
+	})
+	if err != nil {
+		t.Fatalf("prepareClawAPIRuntime: %v", err)
+	}
+
+	raw, err := os.ReadFile(p.ClawAPI.PrincipalsHostPath)
+	if err != nil {
+		t.Fatalf("read principals: %v", err)
+	}
+	if !strings.Contains(string(raw), "claw-scheduler") {
+		t.Fatalf("expected scheduler principal in principals.json, got %s", string(raw))
+	}
+}
+
 func TestPrepareClawAPIRuntimeRejectsInjectIntoReservedMasterService(t *testing.T) {
 	runtimeDir := t.TempDir()
 	p := &pod.Pod{

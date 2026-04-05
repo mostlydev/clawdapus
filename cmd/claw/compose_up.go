@@ -657,6 +657,16 @@ func runComposeUp(podFile string) error {
 		CllamaCostsURL:     firstIf(cllamaEnabled, fmt.Sprintf("http://localhost:%s", cllamaDashboardPort)),
 		PodName:            p.Name,
 	}
+	if p.ClawAPI != nil && hasPodInvokeEntries(p) {
+		schedulerToken, err := lookupClawAPIPrincipalToken(p.ClawAPI.PrincipalsHostPath, "claw-scheduler")
+		if err != nil {
+			return err
+		}
+		p.Clawdash.Environment = map[string]string{
+			"CLAW_API_URL":   fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr)),
+			"CLAW_API_TOKEN": schedulerToken,
+		}
+	}
 
 	// Pass 2: materialize after cllama tokens/context are resolved.
 	for _, name := range sortedResolvedClawNames(resolvedClaws) {
@@ -1626,7 +1636,9 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 			return nil, err
 		}
 		auto = append(auto, masterPrincipal)
-	} else if hasPodInvokeEntries(p) {
+	}
+
+	if hasPodInvokeEntries(p) {
 		schedulerPrincipal, err := clawapi.BuildSchedulerPrincipal(p.Name)
 		if err != nil {
 			return nil, err
@@ -1763,6 +1775,22 @@ func writeClawAPIPrincipalStore(runtimeDir, hostPath string, store clawapi.Store
 		return err
 	}
 	return nil
+}
+
+func lookupClawAPIPrincipalToken(storePath, principalName string) (string, error) {
+	store, err := clawapi.LoadStore(storePath)
+	if err != nil {
+		return "", err
+	}
+	for _, principal := range store.Principals {
+		if strings.TrimSpace(principal.Name) == strings.TrimSpace(principalName) {
+			if strings.TrimSpace(principal.Token) == "" {
+				return "", fmt.Errorf("principal %q has empty token", principalName)
+			}
+			return principal.Token, nil
+		}
+	}
+	return "", fmt.Errorf("principal %q not found in %s", principalName, storePath)
 }
 
 func prepareHistoryReplayRuntime(p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw, resolvedMemory map[string]*resolvedMemorySubscription) (map[string]cllama.ServiceAuthEntry, error) {

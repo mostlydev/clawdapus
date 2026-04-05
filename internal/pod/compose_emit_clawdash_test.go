@@ -23,7 +23,11 @@ func TestEmitComposeInjectsClawdashDashboard(t *testing.T) {
 			ManifestHostPath:   "/tmp/.claw-runtime/pod-manifest.json",
 			DockerSockHostPath: "/var/run/docker.sock",
 			CllamaCostsURL:     "http://localhost:8181",
-			PodName:            "ops-pod",
+			Environment: map[string]string{
+				"CLAW_API_URL":   "http://claw-api:8080",
+				"CLAW_API_TOKEN": "capi_sched",
+			},
+			PodName: "ops-pod",
 		},
 	}
 	results := map[string]*driver.MaterializeResult{
@@ -80,6 +84,12 @@ func TestEmitComposeInjectsClawdashDashboard(t *testing.T) {
 	}
 	if clawdashSvc.Environment["CLAWDASH_CLLAMA_COSTS_URL"] != "http://localhost:8181" {
 		t.Fatalf("expected CLAWDASH_CLLAMA_COSTS_URL env, got %v", clawdashSvc.Environment["CLAWDASH_CLLAMA_COSTS_URL"])
+	}
+	if clawdashSvc.Environment["CLAW_API_URL"] != "http://claw-api:8080" {
+		t.Fatalf("expected CLAW_API_URL passthrough env, got %v", clawdashSvc.Environment["CLAW_API_URL"])
+	}
+	if clawdashSvc.Environment["CLAW_API_TOKEN"] != "capi_sched" {
+		t.Fatalf("expected CLAW_API_TOKEN passthrough env, got %v", clawdashSvc.Environment["CLAW_API_TOKEN"])
 	}
 	if clawdashSvc.Labels["claw.role"] != "dashboard" {
 		t.Fatalf("expected claw.role=dashboard, got %q", clawdashSvc.Labels["claw.role"])
