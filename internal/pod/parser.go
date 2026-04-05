@@ -12,6 +12,7 @@ import (
 
 	"github.com/mostlydev/clawdapus/internal/clawapi"
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/schedule"
 )
 
 // rawPod is the YAML deserialization target.
@@ -49,10 +50,11 @@ type rawService struct {
 }
 
 type rawInvokeEntry struct {
-	Schedule string `yaml:"schedule"`
-	Message  string `yaml:"message"`
-	Name     string `yaml:"name"`
-	To       string `yaml:"to"`
+	Schedule string                 `yaml:"schedule"`
+	Message  string                 `yaml:"message"`
+	Name     string                 `yaml:"name"`
+	To       string                 `yaml:"to"`
+	When     map[string]interface{} `yaml:"when"`
 }
 
 type rawClawBlock struct {
@@ -236,11 +238,16 @@ func Parse(r io.Reader) (*Pod, error) {
 				if rawInv.Schedule == "" || rawInv.Message == "" {
 					return nil, fmt.Errorf("service %q: invoke entry missing required field (schedule or message)", name)
 				}
+				when, err := parseInvokeWhen(rawInv.When)
+				if err != nil {
+					return nil, fmt.Errorf("service %q: invoke when: %w", name, err)
+				}
 				invoke = append(invoke, InvokeEntry{
 					Schedule: rawInv.Schedule,
 					Message:  rawInv.Message,
 					Name:     rawInv.Name,
 					To:       rawInv.To,
+					When:     when,
 				})
 			}
 			clawAPIMode, err := parseClawAPIMode(svc.XClaw.ClawAPI)
@@ -304,6 +311,44 @@ func Parse(r io.Reader) (*Pod, error) {
 	}
 
 	return pod, nil
+}
+
+func parseInvokeWhen(raw map[string]interface{}) (*schedule.When, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+
+	when := &schedule.When{}
+	for key, value := range raw {
+		switch strings.TrimSpace(key) {
+		case "calendar":
+			text, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("calendar must be a string")
+			}
+			when.Calendar = strings.TrimSpace(text)
+		case "session":
+			text, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("session must be a string")
+			}
+			sessionValue, err := schedule.ParseSession(text)
+			if err != nil {
+				return nil, err
+			}
+			when.Session = sessionValue
+		default:
+			return nil, fmt.Errorf("unknown field %q", key)
+		}
+	}
+
+	if strings.TrimSpace(when.Calendar) == "" {
+		return nil, fmt.Errorf("missing calendar discriminator")
+	}
+	if err := when.Validate(); err != nil {
+		return nil, err
+	}
+	return when, nil
 }
 
 func validateHandleIdentityUniqueness(p *Pod) error {
