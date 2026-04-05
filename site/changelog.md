@@ -30,7 +30,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.5.1 <Badge type="tip" text="Latest" /> {#v0-5-1}
+## v0.5.2 <Badge type="tip" text="Latest" /> {#v0-5-2}
+
+*2026-04-05*
+
+- **Fix: `claw.describe` discovery for build-only services** ([#112](https://github.com/mostlydev/clawdapus/issues/112)) — `claw up` now inspects locally built images for their `claw.describe` label even when the compose service uses `build:` without an explicit `image:`. Previously the in-image descriptor path was resolved against the host build context and quietly missed, which broke feed/tool subscriptions from sibling services.
+- **Scheduler groundwork (internal)** — `claw-api` gains an externalized invoke scheduler and schedule state/control endpoints. These are wiring for upcoming v0.6.0 work; no new CLI or UI surfaces ship with this release.
+
+## v0.5.1 {#v0-5-1}
 
 *2026-04-03*
 
