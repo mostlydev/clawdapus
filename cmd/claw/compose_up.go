@@ -1603,27 +1603,36 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 	if p == nil || p.ClawAPI == nil {
 		return nil, nil
 	}
-	if strings.TrimSpace(p.Master) == "" {
-		return nil, writeClawAPIPrincipalStore(runtimeDir, p.ClawAPI.PrincipalsHostPath, clawapi.Store{})
-	}
-
-	rc := resolvedClaws[p.Master]
-	if rc == nil {
-		return nil, fmt.Errorf("master service %q did not resolve to a claw", p.Master)
-	}
-	masterSvc := p.Services[p.Master]
-	if masterSvc == nil {
-		return nil, fmt.Errorf("master service %q not found in pod services", p.Master)
-	}
-
 	clawAPIURL := fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr))
 
-	// 1. Build master principal (full access, pod-wide).
-	masterPrincipal, err := clawapi.BuildMasterPrincipal(p.Name, p.Master)
-	if err != nil {
-		return nil, err
+	auto := make([]clawapi.Principal, 0)
+	var (
+		masterSvc *pod.Service
+		masterRC  *driver.ResolvedClaw
+	)
+
+	if strings.TrimSpace(p.Master) != "" {
+		masterRC = resolvedClaws[p.Master]
+		if masterRC == nil {
+			return nil, fmt.Errorf("master service %q did not resolve to a claw", p.Master)
+		}
+		masterSvc = p.Services[p.Master]
+		if masterSvc == nil {
+			return nil, fmt.Errorf("master service %q not found in pod services", p.Master)
+		}
+
+		masterPrincipal, err := clawapi.BuildMasterPrincipal(p.Name, p.Master)
+		if err != nil {
+			return nil, err
+		}
+		auto = append(auto, masterPrincipal)
+	} else if hasPodInvokeEntries(p) {
+		schedulerPrincipal, err := clawapi.BuildSchedulerPrincipal(p.Name)
+		if err != nil {
+			return nil, err
+		}
+		auto = append(auto, schedulerPrincipal)
 	}
-	auto := []clawapi.Principal{masterPrincipal}
 
 	// 2. Build self principals for services declaring claw-api: self.
 	for name, svc := range p.Services {
@@ -1647,19 +1656,24 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 	// An explicit principal may have overridden the auto-generated master by name;
 	// use the merged token, not the pre-merge one.
 	effectiveMasterToken := ""
-	for _, m := range merged {
-		if m.Principal.Name == p.Master {
-			effectiveMasterToken = m.Principal.Token
-			break
+	if p.Master != "" {
+		for _, m := range merged {
+			if m.Principal.Name == p.Master {
+				effectiveMasterToken = m.Principal.Token
+				break
+			}
 		}
-	}
-	if effectiveMasterToken == "" {
-		return nil, fmt.Errorf("master principal %q not found in merged result", p.Master)
+		if effectiveMasterToken == "" {
+			return nil, fmt.Errorf("master principal %q not found in merged result", p.Master)
+		}
 	}
 
 	// 3b. Reject explicit inject-into claims that target master or claw-api: self services.
 	// Those injection points are reserved for their auto-generated principals.
-	reservedInjectTargets := map[string]string{p.Master: "master claw"}
+	reservedInjectTargets := map[string]string{}
+	if p.Master != "" {
+		reservedInjectTargets[p.Master] = "master claw"
+	}
 	for name, svc := range p.Services {
 		if svc.Claw != nil && svc.Claw.ClawAPIMode == "self" {
 			reservedInjectTargets[name] = "claw-api: self service"
@@ -1693,7 +1707,9 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 	}
 
 	// Master always gets its (effective, post-merge) token.
-	injectClawAPIEnv(masterSvc, effectiveMasterToken)
+	if p.Master != "" {
+		injectClawAPIEnv(masterSvc, effectiveMasterToken)
+	}
 
 	// Self principals and explicit inject-into targets.
 	for _, m := range merged {
@@ -1712,6 +1728,10 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		}
 	}
 
+	if p.Master == "" {
+		return nil, nil
+	}
+
 	// 6. Build cllama service auth entries for the master (feed fetching).
 	authEntry := cllama.ServiceAuthEntry{
 		Service:   "claw-api",
@@ -1721,8 +1741,8 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 	}
 	serviceAuth := make(map[string]cllama.ServiceAuthEntry)
 	count := 1
-	if rc.Count > 0 {
-		count = rc.Count
+	if masterRC.Count > 0 {
+		count = masterRC.Count
 	}
 	for _, agentID := range expandedServiceNames(p.Master, count) {
 		serviceAuth[agentID] = authEntry
@@ -3333,7 +3353,7 @@ func buildServiceSurfaceInfo(descriptor *describe.ServiceDescriptor) *driver.Ser
 func builtinClawAPIDescriptor() *describe.ServiceDescriptor {
 	return &describe.ServiceDescriptor{
 		Version:     1,
-		Description: "Read-only governance API for fleet telemetry, health, logs, metrics, and alerts.",
+		Description: "Read-only governance API for fleet telemetry, health, logs, metrics, alerts, and schedule state.",
 		Feeds: []describe.FeedDescriptor{{
 			Name: "fleet-alerts",
 			// Keep the pushed anomaly feed on a shorter horizon so agents do not
@@ -3347,6 +3367,8 @@ func builtinClawAPIDescriptor() *describe.ServiceDescriptor {
 			{Method: "GET", Path: "/fleet/logs", Description: "Recent logs for one in-scope service."},
 			{Method: "GET", Path: "/fleet/metrics", Description: "Normalized telemetry for one claw."},
 			{Method: "GET", Path: "/fleet/alerts", Description: "Threshold-based anomaly summaries across the fleet."},
+			{Method: "GET", Path: "/schedule", Description: "Current scheduled invocation state for in-scope services."},
+			{Method: "GET", Path: "/schedule/:id", Description: "Detail for one scheduled invocation."},
 		},
 		Auth: &describe.AuthDescriptor{
 			Type: "bearer",

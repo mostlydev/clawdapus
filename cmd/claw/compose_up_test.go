@@ -719,6 +719,50 @@ func TestPrepareClawAPIRuntimeUsesPostMergeMasterToken(t *testing.T) {
 	}
 }
 
+func TestPrepareClawAPIRuntimeWithoutMasterWritesSchedulerPrincipal(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name: "ops",
+		Services: map[string]*pod.Service{
+			"westin": {
+				Claw: &pod.ClawBlock{
+					Invoke: []pod.InvokeEntry{{
+						Schedule: "0 9 * * 1-5",
+						Message:  "Open the market.",
+					}},
+				},
+			},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	auth, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+		"westin": {Count: 1},
+	})
+	if err != nil {
+		t.Fatalf("prepareClawAPIRuntime: %v", err)
+	}
+	if auth != nil {
+		t.Fatalf("expected no cllama auth without master, got %+v", auth)
+	}
+	if env := p.Services["westin"].Environment; len(env) != 0 {
+		t.Fatalf("did not expect token injection without master, got %v", env)
+	}
+	raw, err := os.ReadFile(p.ClawAPI.PrincipalsHostPath)
+	if err != nil {
+		t.Fatalf("read principals: %v", err)
+	}
+	if !strings.Contains(string(raw), "claw-scheduler") {
+		t.Fatalf("expected scheduler principal in principals.json, got %s", string(raw))
+	}
+	if !strings.Contains(string(raw), clawapi.VerbScheduleRead) || !strings.Contains(string(raw), clawapi.VerbScheduleControl) {
+		t.Fatalf("expected schedule verbs in principals.json, got %s", string(raw))
+	}
+}
+
 func TestPrepareClawAPIRuntimeRejectsInjectIntoReservedMasterService(t *testing.T) {
 	runtimeDir := t.TempDir()
 	p := &pod.Pod{

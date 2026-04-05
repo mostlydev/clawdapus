@@ -10,12 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
 	"github.com/mostlydev/clawdapus/internal/clawapi"
+	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
+	schedulepkg "github.com/mostlydev/clawdapus/internal/schedule"
 )
 
 func TestHandlerHealthEndpoint(t *testing.T) {
-	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, &clawapi.Store{}, nil, nil, clawapi.DefaultThresholds(), t.TempDir())
+	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, nil, nil, &clawapi.Store{}, nil, nil, clawapi.DefaultThresholds(), t.TempDir())
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 
@@ -30,7 +31,7 @@ func TestHandlerHealthEndpoint(t *testing.T) {
 }
 
 func TestHandlerStatusRejectsMissingBearer(t *testing.T) {
-	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, &clawapi.Store{}, nil, nil, clawapi.DefaultThresholds(), t.TempDir())
+	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, nil, nil, &clawapi.Store{}, nil, nil, clawapi.DefaultThresholds(), t.TempDir())
 	req := httptest.NewRequest(http.MethodGet, "/fleet/status", nil)
 	w := httptest.NewRecorder()
 
@@ -44,6 +45,8 @@ func TestHandlerStatusRejectsMissingBearer(t *testing.T) {
 func TestHandlerLogsRejectsInvalidLinesValue(t *testing.T) {
 	h := newHandler(
 		&manifestpkg.PodManifest{PodName: "ops"},
+		nil,
+		nil,
 		&clawapi.Store{Principals: []clawapi.Principal{{
 			Name:  "octopus",
 			Token: "capi_deadbeef",
@@ -84,6 +87,8 @@ func newWriteHandler(t *testing.T, govDir string, principals ...clawapi.Principa
 	t.Helper()
 	h := newHandler(
 		&manifestpkg.PodManifest{PodName: "ops"},
+		nil,
+		nil,
 		&clawapi.Store{Principals: principals},
 		nil,
 		nil,
@@ -91,6 +96,15 @@ func newWriteHandler(t *testing.T, govDir string, principals ...clawapi.Principa
 		govDir,
 	)
 	return h
+}
+
+func newTestScheduleStateStore(t *testing.T, manifest *schedulepkg.Manifest) *scheduleStateStore {
+	t.Helper()
+	store, err := newScheduleStateStore(t.TempDir(), manifest)
+	if err != nil {
+		t.Fatalf("newScheduleStateStore: %v", err)
+	}
+	return store
 }
 
 func postJSON(t *testing.T, h http.Handler, path string, body any, token string) *httptest.ResponseRecorder {
@@ -144,6 +158,215 @@ func TestHandlerRestartRequiresAuth(t *testing.T) {
 	w := postJSON(t, h, "/fleet/restart", map[string]string{"service": "trader-0"}, "")
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandlerScheduleRejectsMissingBearer(t *testing.T) {
+	scheduleManifest := &schedulepkg.Manifest{
+		Version: 1,
+		Pod:     "ops",
+		Invocations: []schedulepkg.ManifestInvocation{{
+			ID:       "westin-open",
+			Service:  "westin",
+			AgentID:  "westin",
+			Schedule: "0 9 * * 1-5",
+			Timezone: "America/New_York",
+			Wake:     schedulepkg.Wake{Adapter: "openclaw-exec", Target: "westin", Command: []string{"openclaw", "cron", "run", "westin-open"}},
+		}},
+	}
+	h := newHandler(
+		&manifestpkg.PodManifest{PodName: "ops"},
+		scheduleManifest,
+		newTestScheduleStateStore(t, scheduleManifest),
+		&clawapi.Store{},
+		nil,
+		nil,
+		clawapi.DefaultThresholds(),
+		t.TempDir(),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/schedule", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandlerScheduleListFiltersByServiceScope(t *testing.T) {
+	scheduleManifest := &schedulepkg.Manifest{
+		Version: 1,
+		Pod:     "ops",
+		Invocations: []schedulepkg.ManifestInvocation{
+			{
+				ID:       "westin-open",
+				Service:  "westin",
+				AgentID:  "westin",
+				Schedule: "0 9 * * 1-5",
+				Timezone: "America/New_York",
+				Name:     "Market Open",
+				Wake:     schedulepkg.Wake{Adapter: "openclaw-exec", Target: "westin", Command: []string{"openclaw", "cron", "run", "westin-open"}},
+			},
+			{
+				ID:       "analyst-open",
+				Service:  "analyst",
+				AgentID:  "analyst",
+				Schedule: "0 10 * * 1-5",
+				Timezone: "America/New_York",
+				Name:     "Research Open",
+				Wake:     schedulepkg.Wake{Adapter: "hermes-exec", Target: "analyst", Command: []string{"hermes", "cron", "run", "analyst-open"}},
+			},
+		},
+	}
+	state := newTestScheduleStateStore(t, scheduleManifest)
+	if err := state.Update(func(file *schedulepkg.StateFile) {
+		inv := file.Invocations["westin-open"]
+		inv.LastStatus = "fired"
+		inv.LastDetail = "ok"
+		file.Invocations["westin-open"] = inv
+	}); err != nil {
+		t.Fatalf("state update: %v", err)
+	}
+	h := newHandler(
+		&manifestpkg.PodManifest{PodName: "ops"},
+		scheduleManifest,
+		state,
+		&clawapi.Store{Principals: []clawapi.Principal{{
+			Name:     "westin-self",
+			Token:    "capi_westin",
+			Verbs:    []string{clawapi.VerbScheduleRead},
+			Services: []string{"westin"},
+		}}},
+		nil,
+		nil,
+		clawapi.DefaultThresholds(),
+		t.TempDir(),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/schedule", nil)
+	req.Header.Set("Authorization", "Bearer capi_westin")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Invocations []scheduleInvocationView `json:"invocations"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Invocations) != 1 {
+		t.Fatalf("expected 1 invocation, got %d", len(resp.Invocations))
+	}
+	if resp.Invocations[0].ID != "westin-open" {
+		t.Fatalf("expected westin-open, got %+v", resp.Invocations[0])
+	}
+	if resp.Invocations[0].State.LastStatus != "fired" {
+		t.Fatalf("expected persisted last_status, got %+v", resp.Invocations[0].State)
+	}
+}
+
+func TestHandlerScheduleGetReturnsInvocationDetail(t *testing.T) {
+	scheduleManifest := &schedulepkg.Manifest{
+		Version: 1,
+		Pod:     "ops",
+		Invocations: []schedulepkg.ManifestInvocation{{
+			ID:       "westin-open",
+			Service:  "westin",
+			AgentID:  "westin",
+			Schedule: "0 9 * * 1-5",
+			Timezone: "America/New_York",
+			Name:     "Market Open",
+			Wake:     schedulepkg.Wake{Adapter: "openclaw-exec", Target: "westin", Command: []string{"openclaw", "cron", "run", "westin-open"}},
+		}},
+	}
+	state := newTestScheduleStateStore(t, scheduleManifest)
+	if err := state.Update(func(file *schedulepkg.StateFile) {
+		inv := file.Invocations["westin-open"]
+		inv.LastStatus = "scheduled"
+		inv.LastDetail = "ready"
+		file.Invocations["westin-open"] = inv
+	}); err != nil {
+		t.Fatalf("state update: %v", err)
+	}
+	h := newHandler(
+		&manifestpkg.PodManifest{PodName: "ops"},
+		scheduleManifest,
+		state,
+		&clawapi.Store{Principals: []clawapi.Principal{{
+			Name:  "master",
+			Token: "capi_master",
+			Verbs: []string{clawapi.VerbScheduleRead},
+			Pods:  []string{"ops"},
+		}}},
+		nil,
+		nil,
+		clawapi.DefaultThresholds(),
+		t.TempDir(),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/schedule/westin-open", nil)
+	req.Header.Set("Authorization", "Bearer capi_master")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Invocation scheduleInvocationView `json:"invocation"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Invocation.ID != "westin-open" {
+		t.Fatalf("expected westin-open, got %+v", resp.Invocation)
+	}
+	if resp.Invocation.State.LastDetail != "ready" {
+		t.Fatalf("expected state detail=ready, got %+v", resp.Invocation.State)
+	}
+}
+
+func TestHandlerScheduleGetReturnsNotFoundWhenOutOfScope(t *testing.T) {
+	scheduleManifest := &schedulepkg.Manifest{
+		Version: 1,
+		Pod:     "ops",
+		Invocations: []schedulepkg.ManifestInvocation{{
+			ID:       "westin-open",
+			Service:  "westin",
+			AgentID:  "westin",
+			Schedule: "0 9 * * 1-5",
+			Timezone: "America/New_York",
+			Name:     "Market Open",
+			Wake:     schedulepkg.Wake{Adapter: "openclaw-exec", Target: "westin", Command: []string{"openclaw", "cron", "run", "westin-open"}},
+		}},
+	}
+	h := newHandler(
+		&manifestpkg.PodManifest{PodName: "ops"},
+		scheduleManifest,
+		newTestScheduleStateStore(t, scheduleManifest),
+		&clawapi.Store{Principals: []clawapi.Principal{{
+			Name:     "analyst-self",
+			Token:    "capi_analyst",
+			Verbs:    []string{clawapi.VerbScheduleRead},
+			Services: []string{"analyst"},
+		}}},
+		nil,
+		nil,
+		clawapi.DefaultThresholds(),
+		t.TempDir(),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/schedule/westin-open", nil)
+	req.Header.Set("Authorization", "Bearer capi_analyst")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 

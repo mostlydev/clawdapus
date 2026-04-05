@@ -77,6 +77,10 @@ claw-api is auto-injected when `x-claw.master` is set **or** any service has
 pod-level `x-claw.invoke` entries. Pods that use `invoke:` without a master
 will gain a claw-api service after migration. The injected claw-api in this
 mode runs with a scheduler-only principal scope if no master is configured.
+For v1, that scheduler principal is **host/operator-facing** (written to
+`principals.json`) rather than auto-injected into arbitrary services. Pod-
+internal token projection can be added later alongside explicit schedule CLI
+or self-surface work.
 
 ## Origin Split
 
@@ -218,7 +222,8 @@ schedule manifest** at `.claw-runtime/schedule.json`:
 **State persistence location.** The manifest itself (`schedule.json`) lives
 under `.claw-runtime/` because it is a compile artifact and is regenerated on
 every `claw up`. **All mutable scheduler state** — pause flags, skip-next
-queue, degraded state, fire history — lives under `.claw-governance/`, which
+queue, degraded state, and scheduler-owned invocation state — lives under
+`.claw-governance/`, which
 `claw up` explicitly preserves across resets
 (`cmd/claw/compose_up.go:118`). Putting state under `.claw-runtime/` would
 wipe it on every recompile (`resetRuntimeDir` at
@@ -236,28 +241,29 @@ goroutine:
 2. **At fire time**, evaluate `when:`:
    - Load the calendar (already in memory).
    - Compute session state at the fire instant.
-   - If the session condition fails → record a **skip event** (reason:
-     `calendar-closed`, `calendar-holiday`, `calendar-early-close`) and do
-     not wake.
-   - If the invocation is **paused** (see below) → record a skip event (reason:
-     `paused-by-operator`) and do not wake.
-3. **Otherwise**, call the wake adapter. Record a **fire event** with the
-   adapter's response (`wake-ok`, `wake-failed`, or `wake-timeout`).
+   - If the session condition fails → update the invocation state with the
+     last outcome (`calendar-closed`, `calendar-holiday`, `calendar-early-close`)
+     and do not wake.
+   - If the invocation is **paused** (see below) → update the invocation state
+     with the last outcome (`paused-by-operator`) and do not wake.
+3. **Otherwise**, call the wake adapter. Update the invocation state with the
+   adapter's result (`wake-ok`, `wake-failed`, or `wake-timeout`).
 4. **Backoff on repeated wake failures**: if 3 consecutive fires fail, the
    invocation enters `degraded` state and fires at 10% rate until recovery.
-   Recorded in the audit trail; surfaced in clawdash.
+   Surfaced in current state and clawdash.
 
-**State is persisted** to `.claw-governance/schedule-state.db` (sqlite): pause
-state, fire history (bounded ring buffer, 1000 entries per invocation), degraded
-flags, last-fire-at. Survives claw-api restarts.
+**State is persisted** to `.claw-governance/schedule-state.json`: a
+machine-owned JSON document keyed by invocation ID. v1 stores current
+config/state only: pause state, skip-next, degraded flags, consecutive
+failures, last evaluation timestamps, last wake outcome, and next-fire
+metadata. Writes are atomic temp-file + rename. No SQL schema, migrations,
+or long-tail event history are required for v1. State survives claw-api
+restarts.
 
-**Cllama session-history integration**: linking a scheduler fire to the
-resulting agent turn / cllama session-history entry is non-trivial under
-Pattern B, because the payload is pre-registered and there is no obvious
-place to inject per-fire metadata. See Slice 2.5 for the audit-correlation
-design task. v1 likely ships with best-effort correlation (timestamp +
-agent matching) unless a cleaner option surfaces during the Slice 2.5
-design spike.
+**No session-history correlation in v1.** The scheduler's JSON state is
+authoritative for current scheduling state only. Precise linkage from a
+fire to cllama session-history is deferred until there is a real need for
+retained audit history.
 
 ### Wake adapters
 
@@ -271,7 +277,6 @@ type WakeAdapter interface {
 type WakePayload struct {
     Message        string
     To             string
-    CorrelationID  string
     InvocationName string
 }
 ```
@@ -321,7 +326,7 @@ preserved).
 
 All endpoints require a principal with the `schedule.*` verbs. New verbs:
 
-- `schedule.read` — list, get, history
+- `schedule.read` — list, get
 - `schedule.control` — pause, resume, skip-next, fire-now
 
 Endpoints:
@@ -329,7 +334,6 @@ Endpoints:
 ```
 GET    /schedule                       → list all invocations + state
 GET    /schedule/:id                   → single invocation detail
-GET    /schedule/:id/history           → fire + skip events
 POST   /schedule/:id/pause             → body: {until?: RFC3339, reason?: str}
 POST   /schedule/:id/resume            → clear pause
 POST   /schedule/:id/skip-next         → skip the next scheduled fire
@@ -342,22 +346,23 @@ Pause semantics:
 - `skip-next` queues one skip and clears itself after the next fire-or-skip.
 
 `fire` endpoint flags:
-- `bypass_when: true` — fire even if the calendar gate is closed. Audited as
-  `manual-fire-bypass`.
-- `bypass_pause: true` — fire even if paused. Audited as `manual-fire-paused`.
+- `bypass_when: true` — fire even if the calendar gate is closed. Reflected in
+  the invocation's last-status metadata as `manual-fire-bypass`.
+- `bypass_pause: true` — fire even if paused. Reflected in the invocation's
+  last-status metadata as `manual-fire-paused`.
 
 ### clawdash schedule page
 
 New page at `/schedule` in clawdash:
 
-- Table: service, name, next fire, last fire, last status, paused?, skip
-  count (7d).
-- Row detail drawer: full schedule, `when:` gate, fire history timeline, link
-  to cllama session-history for completed fires.
+- Table: service, name, next fire, last fire, last status, last detail,
+  paused?, degraded?.
+- Row detail drawer: full schedule, `when:` gate, current pause/degraded state,
+  and last wake outcome.
 - Row actions: pause, resume, skip-next, fire-now.
-- Top-of-page summary: total scheduled, N paused, M degraded, K skipped today.
+- Top-of-page summary: total scheduled, N paused, M degraded.
 
-SSE stream from `/schedule/events` for live updates.
+SSE stream from `/schedule/events` for live state updates.
 
 ## Implementation Slices
 
@@ -421,37 +426,27 @@ during Slice 2 implementation):
   behavior and emit a warning when `when:` is declared ("calendar gating
   not supported for driver X; invocation ignored").
 
-### Slice 2.5 — Audit correlation design
+### Slice 2.5 — JSON state store shape
 
-Pattern B's wake path is `cron run <id>` — the job payload was
-pre-registered at compile time, so there is no obvious place to attach a
-**per-fire correlation ID** that links a scheduler fire event to the
-resulting agent turn / cllama session-history entry. Pattern A doesn't
-have this problem (the scheduler synthesizes each message) but still
-needs a consistent correlation model.
+Before Slice 3 lands, freeze the file format for
+`.claw-governance/schedule-state.json`:
 
-Before Slice 3 starts, decide the correlation model:
+- Top-level `version` plus an `invocations` map keyed by invocation ID.
+- Per invocation: pause state (`paused`, `paused_until`, `pause_reason`),
+  `skip_next`, `degraded`, `consecutive_failures`, `last_evaluated_at`,
+  `last_attempted_at`, `last_fired_at`, `last_skipped_at`, `last_status`,
+  `last_detail`.
+- Optional top-level pod metadata if useful for debugging (`pod`, `updated_at`).
+- Atomic write strategy (`.tmp` + rename) and bounded in-memory mutation path.
 
-- **Option A — Out-of-band correlation store**: scheduler writes a
-  `(container, native_job_id, fire_id, fired_at)` row to a short-lived
-  table; a downstream joiner matches against cllama session-history by
-  `(agent, approximate_time)`. Works but is fuzzy.
-- **Option B — Runner-supported override channel**: if any Pattern B
-  runner supports "run this job with an override message suffix / header"
-  (needs per-runner investigation), inject the correlation ID there.
-  Cleanest but per-driver.
-- **Option C — Scheduler-written env var via `docker exec --env`**: pass
-  `CLAW_FIRE_ID=<uuid>` as an env on the exec call. If cllama reads this
-  env when processing that turn, it becomes a session-history field. This
-  requires a cllama-side change.
-- **Option D — Accept approximate correlation for v1**: scheduler's own
-  audit is authoritative; cross-reference to session-history is
-  best-effort via timestamp + agent. Ship this, defer precise linkage.
+Explicit non-goals for v1:
 
-Output: a short decision note picking one option, with a brief prototype
-showing the linkage works end-to-end for OpenClaw (the Tiverton case).
-Expected outcome: Option A or D for v1, Option C as a follow-on if
-session-history precision becomes a real user need.
+- No SQLite.
+- No append-only event log.
+- No per-fire/session-history correlation.
+
+Output: a short state-shape note or tests that lock the JSON structure so
+Slice 3 can implement against it without inventing schema mid-stream.
 
 ### Slice 3 — Scheduler goroutine in claw-api
 
@@ -459,8 +454,8 @@ session-history precision becomes a real user need.
 - Per-minute tick, cron evaluation via `robfig/cron`.
 - Calendar gate evaluation.
 - Fire adapter dispatch (stub adapters initially).
-- State persistence to sqlite (`.claw-governance/schedule-state.db`).
-- Fire/skip event recording with correlation IDs per Slice 2.5 decision.
+- State persistence to JSON (`.claw-governance/schedule-state.json`).
+- Current-state updates for last outcome / pause / degraded / skip-next.
 - Expose `/schedule` read endpoints.
 
 ### Slice 4 — Wake adapters
@@ -494,14 +489,14 @@ Other Slice 4 work:
 
 - `/schedule/:id/{pause,resume,skip-next,fire}` endpoints.
 - Principal scopes: `schedule.read`, `schedule.control`.
-- `claw api schedule {list,get,pause,resume,fire,history}` CLI subcommands.
+- `claw api schedule {list,get,pause,resume,fire}` CLI subcommands.
 - Clawdash schedule page + SSE stream.
 
 ### Slice 6 — Migration + docs
 
 - Migration note: existing pods get automatic manifest emission on next
-  `claw up`; runner-native jobs.json is no longer written for supported
-  drivers; state is fresh (fire history starts empty).
+  `claw up`; supported drivers flip to the Pattern A / Pattern B emission
+  model; state is fresh (`schedule-state.json` starts empty).
 - `claw inspect` surfaces scheduled invocations from the manifest.
 - CLAWDAPUS.md reference update.
 - ADR-022 drafted and merged alongside Slice 3.
@@ -521,7 +516,7 @@ entries today without `when:`. On first `claw up` after this lands:
 3. **Pattern A drivers** (PicoClaw, NullClaw): native cron registration is
    skipped for pod-origin invocations. The scheduler calls `agent -m`
    directly.
-4. Fire history starts empty in claw-api.
+4. Scheduler state starts empty in claw-api (`schedule-state.json`).
 5. Operator can add `when:` fields incrementally.
 
 **Risk**: at the moment the migration flips on, scheduled jobs migrate from
@@ -539,16 +534,16 @@ aggressive.
 **Title**: Scheduler Authority and Runtime Control
 
 **Decision**: Clawdapus owns the scheduler. Runners are woken through driver
-adapters. Runner-native cron stores are no longer written for supported
-drivers.
+adapters. Pod-origin scheduling state is infrastructure-owned, while
+runner-native job stores remain as disabled registries for Pattern B drivers.
 
 **Rationale**:
 - Scheduling is governance policy. Per ADR-019, runners are untrusted for
   governance decisions.
 - Uniform control surface (pause/resume/fire) is impossible across 7 runner
   formats; trivially expressible with one scheduler.
-- Fleet-level audit ("what was scheduled, what fired, what was skipped and
-  why") wants a single source of truth.
+- Fleet-level scheduling state ("what is scheduled, what is paused, what last
+  happened") wants a single source of truth.
 
 **Supersedes**: ADR-006. ADR-006's pragmatic argument (no extra runtime
 processes) no longer applies — Clawdapus pods already include claw-api,

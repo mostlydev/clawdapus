@@ -1021,10 +1021,12 @@ var knownVerbs = map[string]bool{
 	clawapi.VerbFleetLogs:         true,
 	clawapi.VerbFleetQueryMetrics: true,
 	clawapi.VerbFleetAlerts:       true,
+	clawapi.VerbScheduleRead:      true,
 	"fleet.restart":               true,
 	"fleet.quarantine":            true,
 	"fleet.budget.set":            true,
 	"fleet.model.restrict":        true,
+	clawapi.VerbScheduleControl:   true,
 }
 
 func parsePrincipals(raw []rawPrincipalEntry, services map[string]*Service) ([]PodPrincipal, error) {
