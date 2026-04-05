@@ -147,17 +147,23 @@ Current state (verified against `cmd/claw/compose_up.go:3970-4002` and `AGENTS.m
 |---|---|---|---|
 | `cllama` | `ghcr.io/mostlydev/cllama:latest`, multi-arch, published from submodule repo | pinned tag from cllama's own version namespace (e.g. `:v0.2.2`) | none — tag namespace already exists |
 | `hermes-base` | `ghcr.io/mostlydev/hermes-base:v2026.3.17` (dated), multi-arch | pinned dated tag (already satisfies contract) | none |
-| `claw-api` | **not published to ghcr.io**; built locally from repo root | `ghcr.io/mostlydev/claw-api:<tag>` published per `claw` release | publication workflow must be added |
+| `claw-api` | publication workflow added (`.github/workflows/claw-api-image.yml`), multi-arch, published on master + tags | pinned tag per `claw` release | none — workflow in place, awaiting first tag cut |
 | `clawdash` | `ghcr.io/mostlydev/clawdash:latest` | pinned tag per `claw` release | needs versioned-tag publication |
 | `claw-wall` | `ghcr.io/mostlydev/claw-wall:latest`, multi-arch | pinned tag per `claw` release | needs versioned-tag publication |
 
 Migration steps:
 
-1. Add `claw-api` publication to the release workflow (blocker for the full model).
-2. Add versioned-tag publication for `clawdash` and `claw-wall` alongside existing `:latest` (keep `:latest` during transition for existing operators).
+1. ~~Add `claw-api` publication to the release workflow~~ **Done** — `.github/workflows/claw-api-image.yml` publishes multi-arch images on master pushes and version tags.
+2. Add versioned-tag publication for `claw-wall` alongside existing `:latest` (keep `:latest` during transition for existing operators). `clawdash` already emits `type=ref,event=tag` and `type=sha` alongside `:latest`.
 3. Introduce the compiled-in infra manifest in the `claw` binary, initially shadowing the `:latest` fallback.
 4. Flip `ensureInfraImages` to consult the manifest. Hard-fail only after operators have had a full release cycle to update.
-5. Drop `:latest` references from operator documentation, CLAUDE.md gotchas, examples, and tests.
+5. Drop `:latest` references and raw `docker build`/`docker pull`/`docker buildx` incantations from operator-facing documentation. The sweep must cover at minimum:
+   - **Top-level entry points:** `README.md` quickstart, `site/index.md` hero/CTA flow, `site/guide/quickstart.md`, `site/guide/cli.md` (command surface), `site/guide/what-is-clawdapus.md`.
+   - **Adjacent guide pages** that currently lean on raw docker: `site/guide/cllama.md`, `site/guide/clawfile.md`, `site/manifesto.md` (if it cites any), `site/changelog.md` entry for this change.
+   - **Example READMEs** that narrate an operator flow: `examples/quickstart/README.md`, `examples/trading-desk/README.md`, `examples/master-claw/README.md`, and any `examples/*/README.md` that walks through pulls/builds.
+   - **Agent/contributor context:** `AGENTS.md` (and its `CLAUDE.md` symlink) — remove the `docker pull ghcr.io/mostlydev/cllama:latest` and `docker buildx build ... --push` gotchas, replacing them with the four-verb flow. Mirror into `skills/clawdapus/SKILL.md` and the embedded `cmd/claw/skill_data/SKILL.md` (regenerate via `go generate ./cmd/claw/...`).
+   - **Tests that assert on doc content:** `cmd/claw/docs_quickstart_spike_test.go` extracts shell blocks from `README.md` and runs them in a fresh container — the updated quickstart must keep that test green (or the test's extraction targets must move with it).
+6. Update the `TESTING.md` operator flow if it cites raw docker commands, and audit `docs/plans/` entries that are still live references (historical plan docs can stay as written).
 
 Until step 4 lands, `:latest` remains the effective default. This ADR describes the target state.
 
