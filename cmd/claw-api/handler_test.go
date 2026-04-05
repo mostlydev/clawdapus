@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mostlydev/clawdapus/internal/clawapi"
 	manifestpkg "github.com/mostlydev/clawdapus/internal/clawdash"
@@ -16,7 +18,7 @@ import (
 )
 
 func TestHandlerHealthEndpoint(t *testing.T) {
-	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, nil, nil, &clawapi.Store{}, nil, nil, clawapi.DefaultThresholds(), t.TempDir())
+	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, nil, nil, nil, &clawapi.Store{}, nil, nil, clawapi.DefaultThresholds(), t.TempDir())
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 
@@ -31,7 +33,7 @@ func TestHandlerHealthEndpoint(t *testing.T) {
 }
 
 func TestHandlerStatusRejectsMissingBearer(t *testing.T) {
-	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, nil, nil, &clawapi.Store{}, nil, nil, clawapi.DefaultThresholds(), t.TempDir())
+	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, nil, nil, nil, &clawapi.Store{}, nil, nil, clawapi.DefaultThresholds(), t.TempDir())
 	req := httptest.NewRequest(http.MethodGet, "/fleet/status", nil)
 	w := httptest.NewRecorder()
 
@@ -45,6 +47,7 @@ func TestHandlerStatusRejectsMissingBearer(t *testing.T) {
 func TestHandlerLogsRejectsInvalidLinesValue(t *testing.T) {
 	h := newHandler(
 		&manifestpkg.PodManifest{PodName: "ops"},
+		nil,
 		nil,
 		nil,
 		&clawapi.Store{Principals: []clawapi.Principal{{
@@ -89,6 +92,7 @@ func newWriteHandler(t *testing.T, govDir string, principals ...clawapi.Principa
 		&manifestpkg.PodManifest{PodName: "ops"},
 		nil,
 		nil,
+		nil,
 		&clawapi.Store{Principals: principals},
 		nil,
 		nil,
@@ -105,6 +109,50 @@ func newTestScheduleStateStore(t *testing.T, manifest *schedulepkg.Manifest) *sc
 		t.Fatalf("newScheduleStateStore: %v", err)
 	}
 	return store
+}
+
+func newScheduleTestHandler(t *testing.T, manifest *schedulepkg.Manifest, state *scheduleStateStore, scheduler *scheduler, principals ...clawapi.Principal) http.Handler {
+	t.Helper()
+	return newHandler(
+		&manifestpkg.PodManifest{PodName: "ops"},
+		manifest,
+		state,
+		scheduler,
+		&clawapi.Store{Principals: principals},
+		nil,
+		nil,
+		clawapi.DefaultThresholds(),
+		t.TempDir(),
+	)
+}
+
+func decodeScheduleInvocationResponse(t *testing.T, w *httptest.ResponseRecorder) scheduleInvocationView {
+	t.Helper()
+	var resp struct {
+		Invocation scheduleInvocationView `json:"invocation"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v body=%s", err, w.Body.String())
+	}
+	return resp.Invocation
+}
+
+func sampleScheduleManifest() *schedulepkg.Manifest {
+	return &schedulepkg.Manifest{
+		Version: 1,
+		Pod:     "ops",
+		Invocations: []schedulepkg.ManifestInvocation{{
+			ID:       "westin-open",
+			Service:  "westin",
+			AgentID:  "westin",
+			Schedule: "0 9 * * 1-5",
+			Timezone: "America/New_York",
+			Name:     "Market Open",
+			Message:  "Post status.",
+			When:     &schedulepkg.When{Calendar: "crypto-24-7", Session: schedulepkg.SessionRegular},
+			Wake:     schedulepkg.Wake{Adapter: "openclaw-exec", Target: "westin", Command: []string{"openclaw", "cron", "run", "westin-open"}},
+		}},
+	}
 }
 
 func postJSON(t *testing.T, h http.Handler, path string, body any, token string) *httptest.ResponseRecorder {
@@ -178,6 +226,7 @@ func TestHandlerScheduleRejectsMissingBearer(t *testing.T) {
 		&manifestpkg.PodManifest{PodName: "ops"},
 		scheduleManifest,
 		newTestScheduleStateStore(t, scheduleManifest),
+		nil,
 		&clawapi.Store{},
 		nil,
 		nil,
@@ -232,6 +281,7 @@ func TestHandlerScheduleListFiltersByServiceScope(t *testing.T) {
 		&manifestpkg.PodManifest{PodName: "ops"},
 		scheduleManifest,
 		state,
+		nil,
 		&clawapi.Store{Principals: []clawapi.Principal{{
 			Name:     "westin-self",
 			Token:    "capi_westin",
@@ -296,6 +346,7 @@ func TestHandlerScheduleGetReturnsInvocationDetail(t *testing.T) {
 		&manifestpkg.PodManifest{PodName: "ops"},
 		scheduleManifest,
 		state,
+		nil,
 		&clawapi.Store{Principals: []clawapi.Principal{{
 			Name:  "master",
 			Token: "capi_master",
@@ -348,6 +399,7 @@ func TestHandlerScheduleGetReturnsNotFoundWhenOutOfScope(t *testing.T) {
 		&manifestpkg.PodManifest{PodName: "ops"},
 		scheduleManifest,
 		newTestScheduleStateStore(t, scheduleManifest),
+		nil,
 		&clawapi.Store{Principals: []clawapi.Principal{{
 			Name:     "analyst-self",
 			Token:    "capi_analyst",
@@ -367,6 +419,194 @@ func TestHandlerScheduleGetReturnsNotFoundWhenOutOfScope(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandlerSchedulePauseUpdatesState(t *testing.T) {
+	manifest := sampleScheduleManifest()
+	state := newTestScheduleStateStore(t, manifest)
+	h := newScheduleTestHandler(t, manifest, state, nil, clawapi.Principal{
+		Name:     "westin-ops",
+		Token:    "capi_westin_ops",
+		Verbs:    []string{clawapi.VerbScheduleControl},
+		Services: []string{"westin"},
+	})
+
+	w := postJSON(t, h, "/schedule/westin-open/pause", map[string]any{"reason": "incident"}, "capi_westin_ops")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	inv := decodeScheduleInvocationResponse(t, w)
+	if !inv.State.Paused {
+		t.Fatalf("expected paused state, got %+v", inv.State)
+	}
+	if inv.State.PauseReason != "incident" {
+		t.Fatalf("expected pause reason incident, got %+v", inv.State)
+	}
+}
+
+func TestHandlerScheduleResumeClearsPause(t *testing.T) {
+	manifest := sampleScheduleManifest()
+	state := newTestScheduleStateStore(t, manifest)
+	until := time.Now().UTC().Add(time.Hour)
+	if _, err := state.UpdateInvocation("westin-open", func(state *schedulepkg.InvocationState) error {
+		state.Paused = true
+		state.PausedUntil = &until
+		state.PauseReason = "incident"
+		return nil
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	h := newScheduleTestHandler(t, manifest, state, nil, clawapi.Principal{
+		Name:     "westin-ops",
+		Token:    "capi_westin_ops",
+		Verbs:    []string{clawapi.VerbScheduleControl},
+		Services: []string{"westin"},
+	})
+
+	w := postJSON(t, h, "/schedule/westin-open/resume", map[string]any{}, "capi_westin_ops")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	inv := decodeScheduleInvocationResponse(t, w)
+	if inv.State.Paused || inv.State.PausedUntil != nil || inv.State.PauseReason != "" {
+		t.Fatalf("expected cleared pause state, got %+v", inv.State)
+	}
+}
+
+func TestHandlerScheduleSkipNextSetsFlag(t *testing.T) {
+	manifest := sampleScheduleManifest()
+	state := newTestScheduleStateStore(t, manifest)
+	h := newScheduleTestHandler(t, manifest, state, nil, clawapi.Principal{
+		Name:     "westin-ops",
+		Token:    "capi_westin_ops",
+		Verbs:    []string{clawapi.VerbScheduleControl},
+		Services: []string{"westin"},
+	})
+
+	w := postJSON(t, h, "/schedule/westin-open/skip-next", map[string]any{}, "capi_westin_ops")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	inv := decodeScheduleInvocationResponse(t, w)
+	if !inv.State.SkipNext {
+		t.Fatalf("expected skip_next=true, got %+v", inv.State)
+	}
+}
+
+func TestHandlerScheduleFireRespectsPauseWithoutBypass(t *testing.T) {
+	manifest := sampleScheduleManifest()
+	state := newTestScheduleStateStore(t, manifest)
+	if _, err := state.UpdateInvocation("westin-open", func(state *schedulepkg.InvocationState) error {
+		state.Paused = true
+		state.PauseReason = "incident"
+		return nil
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	scheduler, err := newScheduler(manifest, nil, state, io.Discard)
+	if err != nil {
+		t.Fatalf("newScheduler: %v", err)
+	}
+	h := newScheduleTestHandler(t, manifest, state, scheduler, clawapi.Principal{
+		Name:     "westin-ops",
+		Token:    "capi_westin_ops",
+		Verbs:    []string{clawapi.VerbScheduleControl},
+		Services: []string{"westin"},
+	})
+
+	w := postJSON(t, h, "/schedule/westin-open/fire", map[string]any{}, "capi_westin_ops")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	inv := decodeScheduleInvocationResponse(t, w)
+	if inv.State.LastStatus != "skipped" || inv.State.LastDetail != "paused-by-operator" {
+		t.Fatalf("expected paused skip outcome, got %+v", inv.State)
+	}
+	if !inv.State.Paused {
+		t.Fatalf("expected pause to remain set, got %+v", inv.State)
+	}
+}
+
+func TestHandlerScheduleFireBypassesPauseWhenRequested(t *testing.T) {
+	manifest := sampleScheduleManifest()
+	state := newTestScheduleStateStore(t, manifest)
+	if _, err := state.UpdateInvocation("westin-open", func(state *schedulepkg.InvocationState) error {
+		state.Paused = true
+		state.PauseReason = "incident"
+		return nil
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	scheduler, err := newScheduler(manifest, nil, state, io.Discard)
+	if err != nil {
+		t.Fatalf("newScheduler: %v", err)
+	}
+	h := newScheduleTestHandler(t, manifest, state, scheduler, clawapi.Principal{
+		Name:     "westin-ops",
+		Token:    "capi_westin_ops",
+		Verbs:    []string{clawapi.VerbScheduleControl},
+		Services: []string{"westin"},
+	})
+
+	w := postJSON(t, h, "/schedule/westin-open/fire", map[string]any{"bypass_pause": true}, "capi_westin_ops")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	inv := decodeScheduleInvocationResponse(t, w)
+	if inv.State.LastStatus != "wake-target-error" {
+		t.Fatalf("expected wake-target-error after bypassed pause, got %+v", inv.State)
+	}
+	if !strings.Contains(inv.State.LastDetail, "docker client unavailable") {
+		t.Fatalf("expected docker client error detail, got %+v", inv.State)
+	}
+	if !inv.State.Paused {
+		t.Fatalf("expected pause to remain set, got %+v", inv.State)
+	}
+}
+
+func TestHandlerScheduleFireBypassesCalendarWhenRequested(t *testing.T) {
+	manifest := sampleScheduleManifest()
+	manifest.Invocations[0].When = &schedulepkg.When{Calendar: "us-equities", Session: schedulepkg.SessionRegular}
+	state := newTestScheduleStateStore(t, manifest)
+	scheduler, err := newScheduler(manifest, nil, state, io.Discard)
+	if err != nil {
+		t.Fatalf("newScheduler: %v", err)
+	}
+	scheduler.now = func() time.Time {
+		return time.Date(2026, time.July, 3, 15, 0, 0, 0, time.UTC)
+	}
+	h := newScheduleTestHandler(t, manifest, state, scheduler, clawapi.Principal{
+		Name:     "westin-ops",
+		Token:    "capi_westin_ops",
+		Verbs:    []string{clawapi.VerbScheduleControl},
+		Services: []string{"westin"},
+	})
+
+	skipped := postJSON(t, h, "/schedule/westin-open/fire", map[string]any{}, "capi_westin_ops")
+	if skipped.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", skipped.Code, skipped.Body.String())
+	}
+	skippedInv := decodeScheduleInvocationResponse(t, skipped)
+	if skippedInv.State.LastStatus != "skipped" || skippedInv.State.LastDetail != "holiday" {
+		t.Fatalf("expected holiday skip, got %+v", skippedInv.State)
+	}
+
+	bypassed := postJSON(t, h, "/schedule/westin-open/fire", map[string]any{"bypass_when": true}, "capi_westin_ops")
+	if bypassed.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", bypassed.Code, bypassed.Body.String())
+	}
+	bypassedInv := decodeScheduleInvocationResponse(t, bypassed)
+	if bypassedInv.State.LastStatus != "wake-target-error" {
+		t.Fatalf("expected wake-target-error after bypassed calendar, got %+v", bypassedInv.State)
+	}
+	if !strings.Contains(bypassedInv.State.LastDetail, "docker client unavailable") {
+		t.Fatalf("expected docker client error detail, got %+v", bypassedInv.State)
 	}
 }
 

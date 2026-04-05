@@ -86,7 +86,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		go scheduler.Run(runtimeCtx)
 	}
 
-	handler := newHandler(manifest, scheduleManifest, scheduleState, store, docker, stdout, clawapi.ThresholdsFromEnv(), cfg.GovernanceDir)
+	handler := newHandler(manifest, scheduleManifest, scheduleState, scheduler, store, docker, stdout, clawapi.ThresholdsFromEnv(), cfg.GovernanceDir)
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           handler,

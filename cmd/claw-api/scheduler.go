@@ -23,6 +23,7 @@ type scheduler struct {
 	docker   *client.Client
 	log      io.Writer
 	state    *scheduleStateStore
+	now      func() time.Time
 
 	mu      sync.RWMutex
 	entries []*scheduledInvocation
@@ -47,6 +48,14 @@ type dispatchResult struct {
 	failure       bool
 	clearPause    bool
 	clearSkipNext bool
+}
+
+type dispatchOptions struct {
+	manual         bool
+	bypassPause    bool
+	bypassWhen     bool
+	ignoreSkipNext bool
+	ignoreDegraded bool
 }
 
 func newScheduler(manifest *schedulepkg.Manifest, docker *client.Client, state *scheduleStateStore, log io.Writer) (*scheduler, error) {
@@ -82,7 +91,10 @@ func newScheduler(manifest *schedulepkg.Manifest, docker *client.Client, state *
 		docker:   docker,
 		log:      log,
 		state:    state,
-		entries:  entries,
+		now: func() time.Time {
+			return time.Now().UTC()
+		},
+		entries: entries,
 	}
 	if err := s.syncInitialState(); err != nil {
 		return nil, err
@@ -136,14 +148,25 @@ func (s *scheduler) tick(ctx context.Context, now time.Time) {
 }
 
 func (s *scheduler) dispatch(ctx context.Context, entry *scheduledInvocation, fireAt time.Time) dispatchResult {
+	return s.dispatchWithOptions(ctx, entry, fireAt, dispatchOptions{})
+}
+
+func (s *scheduler) dispatchWithOptions(ctx context.Context, entry *scheduledInvocation, fireAt time.Time, opts dispatchOptions) dispatchResult {
 	var state schedulepkg.InvocationState
 	if s.state != nil {
 		state, _ = s.state.Invocation(entry.manifest.ID)
 	}
 	result := dispatchResult{}
+	bypassedPause := false
+	bypassedWhen := false
 	if state.Paused {
 		if state.PausedUntil != nil && !fireAt.Before(state.PausedUntil.UTC()) {
 			result.clearPause = true
+			state.Paused = false
+			state.PausedUntil = nil
+			state.PauseReason = ""
+		} else if opts.bypassPause {
+			bypassedPause = true
 		} else {
 			result.status = "skipped"
 			result.detail = "paused-by-operator"
@@ -152,7 +175,7 @@ func (s *scheduler) dispatch(ctx context.Context, entry *scheduledInvocation, fi
 			return result
 		}
 	}
-	if state.SkipNext {
+	if state.SkipNext && !opts.ignoreSkipNext {
 		result.status = "skipped"
 		result.detail = "skip-next"
 		result.skipped = true
@@ -173,18 +196,22 @@ func (s *scheduler) dispatch(ctx context.Context, entry *scheduledInvocation, fi
 		}
 		state := cal.SessionAt(fireAt)
 		if !state.Matches(when.SessionOrDefault()) {
-			detail := state.Reason
-			if detail == "" {
-				detail = "calendar-closed"
+			if opts.bypassWhen {
+				bypassedWhen = true
+			} else {
+				detail := state.Reason
+				if detail == "" {
+					detail = "calendar-closed"
+				}
+				s.logf("schedule %s: skipped (%s)", entry.manifest.ID, detail)
+				result.status = "skipped"
+				result.detail = detail
+				result.skipped = true
+				return result
 			}
-			s.logf("schedule %s: skipped (%s)", entry.manifest.ID, detail)
-			result.status = "skipped"
-			result.detail = detail
-			result.skipped = true
-			return result
 		}
 	}
-	if state.Degraded && !shouldAttemptDegraded(entry.manifest.ID, fireAt) {
+	if state.Degraded && !opts.ignoreDegraded && !shouldAttemptDegraded(entry.manifest.ID, fireAt) {
 		result.status = "skipped"
 		result.detail = "degraded-throttled"
 		result.skipped = true
@@ -232,6 +259,16 @@ func (s *scheduler) dispatch(ctx context.Context, entry *scheduledInvocation, fi
 
 	s.logf("schedule %s: fired via %s -> %s", entry.manifest.ID, entry.manifest.Wake.Adapter, composeServiceName(target))
 	result.status = "fired"
+	if opts.manual {
+		switch {
+		case bypassedWhen:
+			result.status = "manual-fire-bypass"
+		case bypassedPause:
+			result.status = "manual-fire-paused"
+		default:
+			result.status = "manual-fire"
+		}
+	}
 	result.detail = strings.TrimSpace(stdout)
 	result.attempted = true
 	result.fired = true
@@ -239,6 +276,9 @@ func (s *scheduler) dispatch(ctx context.Context, entry *scheduledInvocation, fi
 }
 
 func (s *scheduler) lookupTargetContainer(ctx context.Context, target string) (types.Container, error) {
+	if s == nil || s.docker == nil {
+		return types.Container{}, fmt.Errorf("docker client unavailable")
+	}
 	args := filters.NewArgs(filters.Arg("label", "claw.pod="+s.manifest.Pod))
 	containers, err := s.docker.ContainerList(ctx, containerapi.ListOptions{All: true, Filters: args})
 	if err != nil {
@@ -254,6 +294,51 @@ func (s *scheduler) lookupTargetContainer(ctx context.Context, target string) (t
 		}
 	}
 	return matches[0], nil
+}
+
+func (s *scheduler) FireNow(ctx context.Context, id string, bypassWhen, bypassPause bool) (dispatchResult, error) {
+	if s == nil {
+		return dispatchResult{}, fmt.Errorf("scheduler unavailable")
+	}
+	entry := s.lookupEntry(id)
+	if entry == nil {
+		return dispatchResult{}, fmt.Errorf("schedule %q not found", id)
+	}
+	fireAt := s.now()
+	result := s.dispatchWithOptions(ctx, entry, fireAt, dispatchOptions{
+		manual:         true,
+		bypassPause:    bypassPause,
+		bypassWhen:     bypassWhen,
+		ignoreSkipNext: true,
+		ignoreDegraded: true,
+	})
+
+	s.mu.Lock()
+	entry.lastFireUTC = fireAt
+	entry.lastStatus = result.status
+	entry.lastDetail = result.detail
+	nextFire := entry.nextFireUTC
+	s.mu.Unlock()
+
+	if nextFire.IsZero() {
+		nextFire = fireAt
+	}
+	s.persistDispatchResult(entry, fireAt, nextFire, result)
+	return result, nil
+}
+
+func (s *scheduler) lookupEntry(id string) *scheduledInvocation {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, entry := range s.entries {
+		if entry != nil && entry.manifest.ID == id {
+			return entry
+		}
+	}
+	return nil
 }
 
 func (s *scheduler) logf(format string, args ...any) {
