@@ -441,6 +441,8 @@ func decodeOptionalJSONBody(r *http.Request, dst any) error {
 		return fmt.Errorf("invalid request body")
 	}
 	var extra any
+	// A second successful decode means the stream contained multiple JSON
+	// documents (for example "{}{}"), which we reject as an invalid body.
 	if err := dec.Decode(&extra); err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil

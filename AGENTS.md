@@ -57,6 +57,7 @@ Current top-level commands are:
 - `claw inspect`
 - `claw doctor`
 - `claw init`
+- `claw api` (`schedule` subcommands)
 - `claw agent add`
 - `claw compose` (use this liberally instead of invoking docker directly)
 
