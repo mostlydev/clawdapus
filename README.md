@@ -352,12 +352,80 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Identity resolution:** Single proxy serves an entire pod. Bearer tokens resolve which agent is calling.
 - **Cost accounting:** Extracts token usage from every response, multiplies by pricing table, tracks per agent/provider/model.
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
-- **Planned ambient memory:** The architecture is moving toward querying pluggable memory services before each inference turn, injecting relevant derived context — facts, commitments, summaries — into the prompt automatically. Memory intelligence will live in swappable services, not in the proxy.
+- **Managed tool mediation:** Services declare callable tools via `claw.describe` (MCP-shaped schemas). `claw up` compiles per-agent `tools.json`. cllama injects tools into LLM requests, intercepts `tool_call` responses, executes them against the service, and loops until terminal text — transparent to the runner. Both OpenAI-compatible and Anthropic formats are supported.
+- **Ambient memory plane:** Services declare `recall`, `retain`, and `forget` endpoints via `claw.describe`. `claw up` compiles per-agent `memory.json`. cllama calls `/recall` before each inference turn and `/retain` after each successful response (async, non-blocking). Memory intelligence stays in swappable external services — the proxy owns orchestration only.
 - **Operator dashboard:** Real-time web UI at host port 8181 by default (container `:8081`) — agent activity, provider status, cost breakdown.
 
 The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
 
 See the [cllama specification](./docs/CLLAMA_SPEC.md) for the full standard.
+
+---
+
+## Managed Tools (ADR-020)
+
+Services declare callable tools in their `claw.describe` descriptor. `claw up` compiles per-agent `tools.json` from the declared and policy-filtered tool catalog.
+
+```yaml
+services:
+  analyst:
+    x-claw:
+      cllama: passthrough
+      surfaces:
+        - service://trading-api
+      tools:
+        - service: trading-api
+          allow:
+            - get_market_context   # read-only
+            - execute_trade        # side-effecting
+
+  trading-api:
+    image: trading-api:latest
+    # declares tools[] in claw.describe label
+```
+
+`tools:` follows the same pod-defaults model as `feeds:` and `surfaces:`. No tools are injected unless explicitly declared — deny by default.
+
+cllama injects the compiled tool schemas into each upstream LLM request, intercepts `tool_call` responses, executes them against the service, and loops until the LLM returns terminal text. The runner receives only the final text — managed tool rounds are transparent.
+
+Non-cllama services that declare `x-claw.tools` or `x-claw.memory` are a hard error at `claw up` time.
+
+---
+
+## Memory Plane (ADR-021)
+
+Services declare memory endpoints in their `claw.describe` descriptor. `claw up` compiles per-agent `memory.json`.
+
+```yaml
+services:
+  analyst:
+    x-claw:
+      cllama: passthrough
+      memory:
+        service: mem-svc
+        timeout-ms: 300
+
+  mem-svc:
+    image: reference-memory:latest
+    # declares memory.recall/retain/forget in claw.describe
+```
+
+cllama calls `/recall` before each upstream inference request and `/retain` asynchronously after each successful response. Retain failures never fail the user-visible response.
+
+Operator commands:
+
+```bash
+# Replay the durable session ledger into a memory service
+claw memory backfill mem-svc
+
+# Replay only entries after a given time
+claw memory backfill mem-svc --after 2026-03-01T00:00:00Z
+
+# Tombstone a retained entry (does not mutate session history)
+claw memory forget mem-svc --entry-id hist1_abc123 --reason "operator request"
+```
+
+A runnable reference adapter lives at [`examples/reference-memory/`](./examples/reference-memory/) — file-backed, idempotent on `entry.id`, tombstone-aware.
 
 ---
 
@@ -422,6 +490,7 @@ $ claw skillmap crypto-crusher-0
 | [`examples/multi-claw/`](./examples/multi-claw/) | Two agents sharing a volume surface with different access modes |
 | [`examples/trading-desk/`](./examples/trading-desk/) | Three agents coordinating via Discord with a mock trading API, scheduled invocations, desk-wide risk feeds, and cllama governance proxy |
 | [`examples/rollcall/`](./examples/rollcall/) | All 7 drivers sharing one Discord identity — driver parity fixture and end-to-end cllama validation |
+| [`examples/reference-memory/`](./examples/reference-memory/) | Runnable reference memory adapter — file-backed, idempotent retain, tombstone-aware forget, used by rollcall and capability-wave spike |
 
 ---
 
@@ -485,7 +554,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 6. **Claws are users** — standard credentials; the proxy governs intent, the service's own auth governs execution
 7. **Compute is a privilege** — operator assigns models and schedules; proxy enforces budgets and rate limits; bot doesn't choose
 8. **Think twice, act once** — a reasoning model cannot be its own judge
-9. **Memory survives the container (and the runner)** — session history is captured at the proxy boundary and persisted outside the runtime directory. Bots don't start amnesia-fresh after every restart. Infrastructure owns the record; the runner owns the scratch space. Two surfaces, two owners, never merged. Because the architecture is the agent, you can swap the runtime (`CLAW_TYPE`) without losing the mind; knowledge seamlessly crosses driver boundaries. Retention is only half of memory. The architecture is moving toward an **ambient memory plane**: pluggable memory services deriving durable state from the retained record, and the proxy recalling relevant context into future inference turns automatically. The agent would not manage its own long-term memory — infrastructure would.
+9. **Memory survives the container (and the runner)** — session history is captured at the proxy boundary and persisted outside the runtime directory. Bots don't start amnesia-fresh after every restart. Infrastructure owns the record; the runner owns the scratch space. Two surfaces, two owners, never merged. Because the architecture is the agent, you can swap the runtime (`CLAW_TYPE`) without losing the mind; knowledge seamlessly crosses driver boundaries. Retention is only half of memory. The **ambient memory plane** is live: pluggable memory services declared via `claw.describe`, compiled by `claw up`, and orchestrated by cllama — recalling derived context before each inference turn and retaining after each response. The agent does not manage its own long-term memory. Infrastructure does.
 
 ---
 
@@ -507,6 +576,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 4.7 — Nanobot + PicoClaw + NullClaw + MicroClaw drivers | Done |
 | Phase 4.8 — Hermes driver + shared helper extraction | Done |
 | Phase 4.9 — Peer handles, mention safety, healthcheck passthrough | Done |
+| Phase 4.10 — Capability evolution wave: compiled tools + memory plane | Done (ADRs 020–021) |
 | Phase 4.6 — Unified worker architecture (config, provision, diagnostic) | Design |
 | Phase 5 — Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012–015) |
 | Phase 6 — Recipe promotion + worker mode | Planned |
@@ -535,6 +605,8 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 - [`docs/decisions/016-canonical-social-identity-and-conformance-spikes.md`](./docs/decisions/016-canonical-social-identity-and-conformance-spikes.md) — ADR: Canonical Social Identity and Conformance Spikes
 - [`docs/decisions/017-pod-defaults-and-service-self-description.md`](./docs/decisions/017-pod-defaults-and-service-self-description.md) — ADR: Pod-Level Defaults and Service Self-Description (`claw.describe`, provider-owned feeds)
 - [`docs/decisions/018-session-history-and-memory-retention.md`](./docs/decisions/018-session-history-and-memory-retention.md) — ADR: Session History and Persistent Memory Surfaces (two surfaces, two owners, phase model)
+- [`docs/decisions/020-cllama-compiled-tool-mediation.md`](./docs/decisions/020-cllama-compiled-tool-mediation.md) — ADR: Compiled Tool Plane with Native and Mediated Execution Modes
+- [`docs/decisions/021-memory-plane-and-pluggable-recall.md`](./docs/decisions/021-memory-plane-and-pluggable-recall.md) — ADR: Memory Plane as a Compiled Capability
 - [`docs/UPDATING.md`](./docs/UPDATING.md) — checklist of everything to update when implementation changes
 - [`TESTING.md`](./TESTING.md) — unit, E2E, and spike test runbook
 

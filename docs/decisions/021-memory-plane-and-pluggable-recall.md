@@ -1,7 +1,7 @@
 # ADR-021: Memory Plane as a Compiled Capability
 
 **Date:** 2026-03-30
-**Status:** Draft
+**Status:** Implemented (first hardening wave complete; see implementation status below)
 **Depends on:** ADR-017 (Pod Defaults and Service Self-Description), ADR-018 (Session History and Persistent Memory Surfaces), ADR-020 (Compiled Tool Plane with Native and Mediated Execution Modes)
 **Amends:** ADR-018 (defines the derived retrieval plane), ADR-020 (extends the canonical capability IR)
 **Implementation:** Plan: docs/plans/2026-03-30-memory-plane-and-pluggable-recall.md
@@ -525,3 +525,31 @@ The first supported end-to-end checkpoint is after steps 4 and 5:
 - replay/backfill is supported through the scoped history surface
 
 Without that checkpoint, the system may be an interesting prototype, but it is not yet the supported memory plane defined by this ADR.
+
+## Implementation Status (2026-04-03)
+
+The capability-evolution wave (this ADR + ADR-020) landed together. The first hardening wave is complete:
+
+**Shipped:**
+- `claw.describe` version 2 `memory` block parsing (recall, retain, forget endpoints)
+- `x-claw.memory` / `memory-defaults:` pod grammar
+- `memory.json` compiled per subscribing agent into the cllama context directory
+- Hard error at `claw up` time when non-cllama services declare `x-claw.memory`
+- Pre-turn recall hook in cllama (synchronous, hot-path; skips gracefully on failure)
+- Post-turn retain hook in cllama (asynchronous, best-effort, non-blocking)
+- Provider-format-aware memory injection for OpenAI-style and Anthropic-style requests
+- Structured `memory_op` telemetry: outcome, latency, block count, injected bytes, policy-removal counts
+- Retain-side secret scrubbing (redacts `sk-...` and `Bearer ...` patterns before the backend receives them)
+- Recall-side policy filtering: drops blocked sources/kinds, enforces block-count and byte budgets, redacts secret-shaped values
+- Stable session-history `entry.id` values propagated through live retain, backfill, history export, and `GET /history/{agentID}`
+- `claw memory backfill` with `--after` (indexed), `--limit`, `--agent`, `--url`, `--auth-token`; tombstone-aware
+- `claw memory forget` with service `forget` endpoint dispatch and local tombstone writes under `.claw-memory-tombstones/`
+- `history.index.json` per-agent checkpoint sidecar for indexed `--after` seeks
+- Reference memory adapter at `examples/reference-memory/` (idempotent retain, tombstone-aware forget, recent/token-matching recall)
+- `claw audit` surfaces normalized `memory_op` events
+
+**Intentional drift from first sketch:**
+- Recall sends the full inbound `messages` payload (plus Anthropic `system`) rather than a pre-shaped smaller window. This is an implementation-shape choice that preserves the core contract.
+- `claw memory backfill` replays through the memory service's declared `retain` endpoint rather than a backend-native replay control plane.
+
+See `docs/plans/2026-03-30-memory-plane-and-pluggable-recall.md` for the companion implementation-status document.

@@ -433,6 +433,64 @@ $ claw audit crypto-crusher-2 --last 24h
 
 ---
 
+## claw memory
+
+Operator commands for the memory plane.
+
+### claw memory backfill
+
+Replay the durable session ledger into a memory service's `retain` endpoint.
+
+```bash
+claw memory backfill <service>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--after <RFC3339>` | Replay only entries after this timestamp |
+| `--limit <n>` | Maximum entries to replay per agent (0 means all) |
+| `--agent <id>` | Restrict replay to one or more agent IDs |
+| `--url <url>` | Override the retain endpoint URL |
+| `--auth-token <token>` | Override the bearer token for retain requests |
+
+Backfill uses the same stable session-history `entry.id` values as live retain, honors local forget tombstones, and uses an indexed `history.index.json` sidecar for `--after` seeks — no full ledger rescan.
+
+**Examples:**
+
+```bash
+# Replay entire ledger for all subscribed agents
+claw memory backfill mem-svc
+
+# Replay only entries after a given timestamp
+claw memory backfill mem-svc --after 2026-03-01T00:00:00Z
+
+# Replay for a single agent using an explicit retain URL
+claw memory backfill mem-svc --agent analyst-0 --url http://localhost:9090/retain
+```
+
+### claw memory forget
+
+Tombstone a retained memory entry. Dispatches the service's `forget` endpoint (when declared) and writes infra-owned tombstones locally under `.claw-memory-tombstones/`. Later backfill runs honor tombstones and skip re-retain for forgotten entry IDs.
+
+```bash
+claw memory forget <service> --entry-id <id>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--entry-id <id>` | Stable session-history entry ID to tombstone (required) |
+| `--reason <text>` | Human-readable reason for audit records |
+
+Forget does not mutate the immutable `history.jsonl` ledger.
+
+**Example:**
+
+```bash
+claw memory forget mem-svc --entry-id hist1_abc123 --reason "operator request"
+```
+
+---
+
 ## claw skillmap (Planned)
 
 Display the compiled skill map for a specific agent -- showing which surfaces provide which capabilities, how they were discovered, and where the generated skill files live.
@@ -531,3 +589,5 @@ Error: claw-pod.yml is newer than compose.generated.yml — run 'claw up' to reg
 | `claw doctor` | -- | No | System prerequisite check |
 | `claw init` | -- | No | Project scaffolding |
 | `claw agent add` | -- | No | Modifies project files |
+| `claw memory backfill` | -- | Yes | Replays session ledger into memory service |
+| `claw memory forget` | -- | Yes | Tombstones a retained entry |
