@@ -42,6 +42,12 @@ func NormalizeLine(line []byte) (*Event, error) {
 	} else if value, ok := nullableStringField(raw, "intervention"); ok {
 		event.InterventionReason = strings.TrimSpace(value)
 	}
+	if value, ok := boolField(raw, "manifest_present"); ok {
+		event.ManifestPresent = &value
+	}
+	if value, ok := intField(raw, "tools_count"); ok {
+		event.ToolsCount = &value
+	}
 	if value, ok := int64Field(raw, "latency_ms"); ok {
 		event.LatencyMS = &value
 	}
@@ -233,6 +239,15 @@ func nullableStringField(raw map[string]any, key string) (string, bool) {
 	}
 	s, ok := value.(string)
 	return s, ok
+}
+
+func boolField(raw map[string]any, key string) (bool, bool) {
+	value, ok := raw[key]
+	if !ok || value == nil {
+		return false, false
+	}
+	v, ok := value.(bool)
+	return v, ok
 }
 
 func intField(raw map[string]any, key string) (int, bool) {

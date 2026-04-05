@@ -80,6 +80,23 @@ func TestNormalizeLineParseFeedFetchEvent(t *testing.T) {
 	}
 }
 
+func TestNormalizeLineParseToolManifestEvent(t *testing.T) {
+	line := `{"ts":"2026-04-05T19:00:00Z","claw_id":"weston","type":"tool_manifest_loaded","model":"openai/gpt-4o","manifest_present":true,"tools_count":2}`
+	event, err := NormalizeLine([]byte(line))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if event.Type != "tool_manifest_loaded" {
+		t.Fatalf("expected type tool_manifest_loaded, got %q", event.Type)
+	}
+	if event.ManifestPresent == nil || !*event.ManifestPresent {
+		t.Fatalf("expected manifest_present=true, got %+v", event)
+	}
+	if event.ToolsCount == nil || *event.ToolsCount != 2 {
+		t.Fatalf("expected tools_count=2, got %+v", event)
+	}
+}
+
 func TestSummarizeCountsFeedFetches(t *testing.T) {
 	events := []Event{
 		{ClawID: "weston", Type: "request"},

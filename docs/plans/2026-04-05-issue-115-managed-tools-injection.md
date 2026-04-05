@@ -1,6 +1,6 @@
 # Investigation: managed tools compiled but not injected at runtime (#115)
 
-**Status:** Investigation
+**Status:** Confirmed in source tree; observability fix landed
 **Issue:** [#115](https://github.com/mostlydev/clawdapus/issues/115)
 **Reporter environment:** Tiverton House pod, `claw` v0.5.1, `ghcr.io/mostlydev/cllama:latest`, OpenClaw `2026.3.24`
 
@@ -86,20 +86,39 @@ though cllama did its job. Verification: tail the cllama structured log and
 confirm `tool_call` / `tool_trace` events appear (or don't) for Weston during a
 live turn.
 
-## Next steps
+## Conclusion
+
+The current `master` tree already contains the managed tool mediation path. In
+particular:
+
+- `tools.json` is compiled into `.claw-runtime/context/<agent-id>/`
+- cllama loads that manifest from `/claw/context/<agent-id>/tools.json`
+- both OpenAI and Anthropic request paths inject provider-native tool schemas
+  and route into the mediation loop when managed tools are present
+
+The main repo-local gap behind the Tiverton report was **observability**: the
+structured logs emitted `feed_fetch`, `request`, and `response`, but nothing
+that told an operator whether cllama had actually loaded a tool manifest for a
+given turn. This branch closes that gap with a `tool_manifest_loaded` event
+containing `manifest_present` and `tools_count`.
+
+## Remaining live checks
 
 1. Run H1 + H2 verifications on `tiverton` — these are fastest to rule out.
 2. If H1 confirms stale image, pin the tag (ADR-022, #116) and republish
    `cllama:latest` from current `master`; no code change needed in clawdapus.
 3. If H2/H3 confirms a path/id mismatch, fix in clawdapus context materializer.
-4. If all the above are clean, instrument cllama to log a structured
-   `tool_manifest_loaded` event on every request so future occurrences are
-   visible in operator logs. This closes the observability gap the reporter hit
-   ("no evidence of tool loading/injection for Weston").
+4. Use the new `tool_manifest_loaded` event to confirm what the live pod sees on
+   each request before assuming a compile-time or runtime wiring bug.
 
-## Fix target
+## Fix landed here
 
-Whichever hypothesis confirms. Most likely outcome is **H1 + observability
-follow-up**: publish fresh `cllama` image, add a request-scope log line that
-reports `tools_count` so operators can tell at a glance whether mediation is
-active for a given agent.
+- `cllama` now logs `tool_manifest_loaded` on every chat request with:
+  - `manifest_present`
+  - `tools_count`
+- parent-repo audit normalization now preserves those fields so the event
+  remains visible in operator tooling
+
+This does not rule out **H1** in Tiverton specifically; a stale published image
+is still plausible. It does rule out the simpler theory that the current source
+tree is missing managed tool mediation entirely.

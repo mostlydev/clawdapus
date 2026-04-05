@@ -7,6 +7,8 @@ type Event struct {
 	ClawID             string    `json:"claw_id,omitempty"`
 	Type               string    `json:"type"`
 	Model              string    `json:"model,omitempty"`
+	ManifestPresent    *bool     `json:"manifest_present,omitempty"`
+	ToolsCount         *int      `json:"tools_count,omitempty"`
 	LatencyMS          *int64    `json:"latency_ms,omitempty"`
 	StatusCode         *int      `json:"status_code,omitempty"`
 	TokensIn           *int      `json:"tokens_in,omitempty"`
