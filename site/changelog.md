@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.6.0 <Badge type="tip" text="Latest" /> {#v0-6-0}
+## v0.6.1 <Badge type="tip" text="Latest" /> {#v0-6-1}
+
+*2026-04-05*
+
+- **Managed tool manifest state in `claw audit`** ([#115](https://github.com/mostlydev/clawdapus/issues/115)) — proxy telemetry now emits `manifest_present` (bool) and `tools_count` (int) on every mediated request, and `claw audit` surfaces them in its JSON output. Operators can verify at runtime whether a compiled `tools.json` actually reached cllama for a given agent — closing an observability gap that made it hard to diagnose cases where tools were compiled on disk but not being injected into upstream LLM requests. Requires cllama v0.3.1 or newer.
+
+## v0.6.0 {#v0-6-0}
 
 *2026-04-05*
 

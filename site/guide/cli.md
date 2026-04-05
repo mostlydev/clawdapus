@@ -422,6 +422,8 @@ $ claw audit --since 1h --json | jq '.summary.cost_usd'
 
 The JSON output includes the pod name, skipped malformed lines count, per-agent summary, and the full list of matched events.
 
+Each event in the JSON output carries `manifest_present` (bool) and `tools_count` (int) fields when the upstream request was mediated by a compiled managed-tool manifest. These fields let operators verify at runtime whether `tools.json` was actually loaded by cllama for a given agent — distinct from checking whether the file exists on disk. Events without managed tools omit both fields.
+
 **Future (Design -- Phase 5):** `claw audit` will include intervention detail with policy attribution:
 
 ```

@@ -227,7 +227,7 @@ Mediated requests write a `tool_trace` to session history:
 }
 ```
 
-`claw audit` merges session-history `tool_call` events with proxy log events, so managed tool activity and failures are visible without manual ledger inspection.
+`claw audit` merges session-history `tool_call` events with proxy log events, so managed tool activity and failures are visible without manual ledger inspection. Every proxied request also carries `manifest_present` and `tools_count` fields in the JSON output — use them to confirm at runtime that a compiled tool manifest actually reached cllama for a given agent.
 
 ## Skills and Tools: Complementary
 
