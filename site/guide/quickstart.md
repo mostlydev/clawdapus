@@ -57,15 +57,29 @@ Edit `.env` and set:
 - `DISCORD_BOT_ID` -- your Discord bot's application ID
 - `DISCORD_GUILD_ID` -- the Discord server (guild) ID
 
-## Build and Launch
+## Run the Four Verbs
 
 ```bash
 source .env
-claw build -t quickstart-assistant:latest ./agents/assistant
+
+# 1. Pull pinned runtime infra + any registry-backed pod services
+claw pull -f claw-pod.yml
+
+# 2. Build this pod's local build: services
+claw build -f claw-pod.yml
+
+# 3. Compile the pod and launch it
 claw up -f claw-pod.yml -d
 ```
 
-On the first run, `claw build` auto-builds the local `openclaw:latest` base image if it is missing.
+Clawdapus keeps the operator loop explicit:
+
+- `claw pull` fetches pinned runtime infra and registry-backed pod services
+- `claw build` builds pod services that declare `build:`
+- `claw up` compiles the pod and launches it
+- `claw down` tears the pod back down
+
+`claw up` stays strict by default and tells you which command to run when something is missing. For onboarding, `claw up --fix -f claw-pod.yml -d` will do the remediation steps automatically.
 
 `claw up` resolves `${...}` placeholders inside `x-claw` metadata from your shell environment and the pod-local `.env` file, so you do not need to duplicate handle IDs or guild IDs into service `environment:` blocks.
 
@@ -79,6 +93,12 @@ claw health -f claw-pod.yml    # both healthy
 ```
 
 Message `@quickstart-bot` in your Discord server. The bot responds through the governance proxy -- it has no direct API access. The dashboards update live.
+
+When you're done:
+
+```bash
+claw down -f claw-pod.yml
+```
 
 ## Dashboards
 
@@ -95,9 +115,12 @@ cd my-pod
 cp .env.example .env
 # Edit .env with your credentials
 source .env
-claw build -t my-pod-assistant:latest ./agents/assistant
+claw pull
+claw build
 claw up -d
 ```
+
+That scaffolded project follows the same four verbs: `claw pull`, `claw build`, `claw up`, and `claw down`.
 
 Add more agents later:
 

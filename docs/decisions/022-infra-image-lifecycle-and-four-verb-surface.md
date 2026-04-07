@@ -72,7 +72,9 @@ No new top-level verbs are introduced. No `claw infra status` / `claw infra sync
 
 ### 3. `claw pull` is the sole infra freshness verb
 
-`claw pull` fetches every pinned first-party infra image the binary expects, plus registry image refs for pod services that do not carry a local source. It is pod-aware when a `claw-pod.yml` is present in the cwd, and still useful without one (it can pull the binary's infra manifest on a fresh machine).
+`claw pull` fetches pinned runtime infra images plus registry image refs for pod services that do not carry a local source. Without a pod file, it can still pull the binary's default runtime infra manifest on a fresh machine. With a pod file, it narrows to the runtime infra that pod can actually consume (`cllama`, `cllama-policy`, `claw-api`, `clawdash`, `claw-wall`) instead of failing on unrelated components.
+
+**Build-time base images stay with `claw build`.** `hermes-base` is pinned for build resolution, but it is not part of the runtime pull surface. If a pod needs a Hermes-derived service image, `claw build` owns that source compilation path and resolves its base image there.
 
 **Services with `build:` blocks are skipped by `claw pull`**, without exception. This is critical: today's pod parser (`cmd/claw/compose_up.go:3650`) allows a service to carry both `build:` and `image:` simultaneously, where the `image:` value is the local build target (either user-declared or auto-generated via `managedServiceImageRef()` as `claw-local/<pod>-<svc>:latest`). Pulling those refs would either fail against the registry or — worse — silently overwrite a just-built local image with something from a registry that happens to share the tag. `claw pull` therefore treats the presence of `build:` as an unambiguous signal that the image is owned by `claw build`, and leaves it alone.
 
@@ -141,22 +143,22 @@ Infra image correctness is `claw up`'s responsibility. Pod coherence is `claw up
 
 ## Migration
 
-Current state (verified against `cmd/claw/compose_up.go:3970-4002` and `AGENTS.md:183-189`) uses `:latest` for every managed infra image, and `claw-api` has no registry presence. Transitioning to pinned tags requires:
+Current state: the four-verb lifecycle and compiled manifest are live. Remaining release cleanup is about making sure every repo-local runtime infra image has the versioned tags the binary now expects, because source checkouts and release builds both fail closed on unpublished refs.
 
 | Image | Current state | Target state | Blocker |
 |---|---|---|---|
 | `cllama` | `ghcr.io/mostlydev/cllama:latest`, multi-arch, published from submodule repo | pinned tag from cllama's own version namespace (e.g. `:v0.2.2`) | none — tag namespace already exists |
-| `hermes-base` | `ghcr.io/mostlydev/hermes-base:v2026.3.17` (dated), multi-arch | pinned dated tag (already satisfies contract) | none |
-| `claw-api` | publication workflow added (`.github/workflows/claw-api-image.yml`), multi-arch, published on master + tags | pinned tag per `claw` release | none — workflow in place, awaiting first tag cut |
-| `clawdash` | `ghcr.io/mostlydev/clawdash:latest` | pinned tag per `claw` release | needs versioned-tag publication |
-| `claw-wall` | `ghcr.io/mostlydev/claw-wall:latest`, multi-arch | pinned tag per `claw` release | needs versioned-tag publication |
+| `hermes-base` | `ghcr.io/mostlydev/hermes-base:v2026.3.17` (dated), multi-arch | pinned build-time base image resolved by `claw build` | none |
+| `claw-api` | publication workflow added (`.github/workflows/claw-api-image.yml`), multi-arch, published on master + tags | pinned tag per `claw` release | first versioned tag must exist before that binary is used |
+| `clawdash` | versioned tags already published (`type=ref,event=tag`) | pinned tag per `claw` release | none |
+| `claw-wall` | publication workflow added (`.github/workflows/claw-wall-image.yml`), multi-arch, published on master + tags | pinned tag per `claw` release | first versioned tag must exist before that binary is used |
 
 Migration steps:
 
 1. ~~Add `claw-api` publication to the release workflow~~ **Done** — `.github/workflows/claw-api-image.yml` publishes multi-arch images on master pushes and version tags.
-2. Add versioned-tag publication for `claw-wall` alongside existing `:latest` (keep `:latest` during transition for existing operators). `clawdash` already emits `type=ref,event=tag` and `type=sha` alongside `:latest`.
-3. Introduce the compiled-in infra manifest in the `claw` binary, initially shadowing the `:latest` fallback.
-4. Flip `ensureInfraImages` to consult the manifest. Hard-fail only after operators have had a full release cycle to update.
+2. ~~Add versioned-tag publication for `claw-wall` alongside existing `:latest`~~ **Done** — `.github/workflows/claw-wall-image.yml` now emits tag refs alongside `:latest`. `clawdash` already emitted tag refs.
+3. ~~Introduce the compiled-in infra manifest in the `claw` binary~~ **Done** — release builds stamp pinned refs into the binary, and source checkouts carry explicit default pinned refs.
+4. ~~Flip `ensureInfraImages` to consult the manifest~~ **Done** — runtime no longer carries a transition fallback. Missing or unpublished pinned refs fail closed and point operators at `claw pull`.
 5. Drop `:latest` references and raw `docker build`/`docker pull`/`docker buildx` incantations from operator-facing documentation. The sweep must cover at minimum:
    - **Top-level entry points:** `README.md` quickstart, `site/index.md` hero/CTA flow, `site/guide/quickstart.md`, `site/guide/cli.md` (command surface), `site/guide/what-is-clawdapus.md`.
    - **Adjacent guide pages** that currently lean on raw docker: `site/guide/cllama.md`, `site/guide/clawfile.md`, `site/manifesto.md` (if it cites any), `site/changelog.md` entry for this change.
@@ -165,7 +167,7 @@ Migration steps:
    - **Tests that assert on doc content:** `cmd/claw/docs_quickstart_spike_test.go` extracts shell blocks from `README.md` and runs them in a fresh container — the updated quickstart must keep that test green (or the test's extraction targets must move with it).
 6. Update the `TESTING.md` operator flow if it cites raw docker commands, and audit `docs/plans/` entries that are still live references (historical plan docs can stay as written).
 
-Until step 4 lands, `:latest` remains the effective default. This ADR describes the target state.
+Source checkouts now use the same pinned-ref policy as release builds. If a pinned ref has not been published yet, contributors must tag a local build explicitly or cut the missing infra image before using that binary.
 
 ## Consequences
 
@@ -192,7 +194,7 @@ Until step 4 lands, `:latest` remains the effective default. This ADR describes 
 **Risks:**
 
 - If the infra manifest references tags that haven't been published, `claw pull` will hard-fail for every operator on that binary. Mitigation: CI must verify all manifest tags exist in the registry before publishing a `claw` release.
-- `claw-api` publication is a prerequisite for the full model — without it, the migration cannot complete. Step 1 of the migration plan is a hard blocker.
+- `claw-api` and `claw-wall` publication workflows are wired, but the corresponding versioned tags must actually exist before the matching binary is used. The release verifier protects tagged releases; source checkouts fail closed on missing refs too.
 - Operators with air-gapped or restricted registry access may need to mirror the full pinned tag set rather than `:latest`. Acceptable tradeoff.
 
 ## Alternatives Considered

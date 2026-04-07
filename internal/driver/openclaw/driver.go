@@ -160,6 +160,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		// container home dir and every exec tool call fails with ENOENT. Remove once the
 		// upstream issue is resolved and we've bumped past the fixed release.
 		"OPENCLAW_HOME": "/app/state",
+		// Some openclaw runtime paths still resolve through HOME rather than OPENCLAW_HOME.
+		// Keep HOME aligned with the writable state tmpfs so live Discord runtimes do not
+		// fall back to /root/.openclaw and fail closed on read-only filesystem state.
+		"HOME": "/app/state",
 	}
 	if rc.PersonaHostPath != "" {
 		env["CLAW_PERSONA_DIR"] = "/claw/persona"

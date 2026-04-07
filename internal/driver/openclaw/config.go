@@ -131,7 +131,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 						channels := make(map[string]interface{})
 						for _, ch := range g.Channels {
 							channels[ch.ID] = map[string]interface{}{
-								"allow":          true,
+								"enabled":        true,
 								"requireMention": true,
 							}
 						}

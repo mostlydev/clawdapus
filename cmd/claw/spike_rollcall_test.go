@@ -118,6 +118,7 @@ func TestSpikeRollCall(t *testing.T) {
 			spikeBuildImage(t, ctxDir, b.tag, b.dockerfile)
 		}
 	}
+	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawdash, infraComponentClawWall)
 	spikeEnsureCllamaPassthroughImage(t, repoRoot)
 
 	// Build agent images (Clawfile on top of base)
@@ -225,6 +226,7 @@ func TestSpikeRollCall(t *testing.T) {
 
 			spikeWaitHealthy(t, agentContainerID, 120*time.Second)
 
+			auditWindowStart := time.Now()
 			triggerMsg := fmt.Sprintf("<@%s> Runtime check: introduce yourself and state what runtime you are running on.", botID)
 			triggerMsgID := rollcallSendWebhookMessage(t, webhookURL, triggerMsg)
 			t.Logf("sent runtime check for %s to channel %s via webhook (message ID: %s)", agent.runtime, channelID, triggerMsgID)
@@ -239,7 +241,7 @@ func TestSpikeRollCall(t *testing.T) {
 			)
 			t.Logf("found %s response: %q", agent.runtime, rollcallTruncate(response, 120))
 
-			rollcallAssertAuditTelemetry(t, podPath, agent.name, agent.runtime)
+			rollcallAssertAuditTelemetry(t, podPath, agent.name, agent.runtime, auditWindowStart)
 			rollcallAssertSessionHistory(t, sessionHistoryDir, agent.name)
 
 			// oc-roll has memory configured — confirm memory_op telemetry fired.
@@ -461,13 +463,18 @@ func rollcallWaitForRuntimeResponse(t *testing.T, token, channelID, afterMessage
 	return ""
 }
 
-func rollcallAssertAuditTelemetry(t *testing.T, spikePodPath, clawID, runtime string) {
+func rollcallAssertAuditTelemetry(t *testing.T, spikePodPath, clawID, runtime string, windowStart time.Time) {
 	t.Helper()
+	since := time.Since(windowStart) + 10*time.Second
+	if since < 30*time.Second {
+		since = 30 * time.Second
+	}
+	since = since.Round(time.Second)
 
 	auditOut, auditErr := exec.Command(
 		"go", "run", "../../cmd/claw/", "audit",
 		"-f", spikePodPath,
-		"--json", "--since", "10m",
+		"--json", "--since", since.String(),
 	).CombinedOutput()
 	if auditErr != nil {
 		t.Logf("warning: claw audit failed for %s (%s): %v\n%s", clawID, runtime, auditErr, string(auditOut))

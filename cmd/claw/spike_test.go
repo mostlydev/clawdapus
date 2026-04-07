@@ -62,26 +62,29 @@ func TestSpikeComposeUp(t *testing.T) {
 	if env["ANTHROPIC_API_KEY"] == "" {
 		env["ANTHROPIC_API_KEY"] = "sk-spike-anthropic"
 	}
-	if env["ALLEN_BOT_TOKEN"] == "" {
-		env["ALLEN_BOT_TOKEN"] = env["TIVERTON_BOT_TOKEN"]
+	for _, key := range []string{
+		"WESTIN_BOT_TOKEN",
+		"ALLEN_BOT_TOKEN",
+		"LOGAN_BOT_TOKEN",
+		"MICRO_BOT_TOKEN",
+		"HERMES_BOT_TOKEN",
+	} {
+		if env[key] == "" {
+			env[key] = env["TIVERTON_BOT_TOKEN"]
+		}
 	}
-	if env["LOGAN_BOT_TOKEN"] == "" {
-		env["LOGAN_BOT_TOKEN"] = env["TIVERTON_BOT_TOKEN"]
+	requiredIDs := []string{
+		"TIVERTON_DISCORD_ID",
+		"WESTIN_DISCORD_ID",
+		"ALLEN_DISCORD_ID",
+		"LOGAN_DISCORD_ID",
+		"MICRO_DISCORD_ID",
+		"HERMES_DISCORD_ID",
+		"DISCORD_GUILD_ID",
+		"DISCORD_TRADING_FLOOR_CHANNEL",
 	}
-	if env["LOGAN_DISCORD_ID"] == "" {
-		env["LOGAN_DISCORD_ID"] = env["TIVERTON_DISCORD_ID"]
-	}
-	if env["MICRO_BOT_TOKEN"] == "" {
-		env["MICRO_BOT_TOKEN"] = env["TIVERTON_BOT_TOKEN"]
-	}
-	if env["MICRO_DISCORD_ID"] == "" {
-		env["MICRO_DISCORD_ID"] = env["TIVERTON_DISCORD_ID"]
-	}
-	if env["HERMES_BOT_TOKEN"] == "" {
-		env["HERMES_BOT_TOKEN"] = env["TIVERTON_BOT_TOKEN"]
-	}
-	if env["HERMES_DISCORD_ID"] == "" {
-		env["HERMES_DISCORD_ID"] = env["TIVERTON_DISCORD_ID"]
+	if missing := missingEnvKeys(env, requiredIDs); len(missing) > 0 {
+		t.Skipf("trading-desk spike requires env-owned Discord identity/topology (%s)", strings.Join(missing, ", "))
 	}
 	if env["CLLAMA_UI_PORT"] == "" {
 		env["CLLAMA_UI_PORT"] = spikeFreePort(t)
@@ -107,6 +110,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	spikeBuildImage(t, dir, "trading-desk-microclaw:latest", "Clawfile.microclaw")
 	spikeBuildImage(t, dir, "trading-desk-hermes:latest", "Clawfile.hermes")
 	spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
+	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawAPI, infraComponentClawdash, infraComponentClawWall)
 	spikeEnsureCllamaPassthroughImage(t, repoRoot)
 
 	// Write a pre-expanded spike pod YAML so Go YAML parser sees real IDs.
@@ -832,20 +836,57 @@ func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 	}
 }
 
+func spikeEnsureRepoInfraImages(t *testing.T, repoRoot string, components ...string) {
+	t.Helper()
+	for _, component := range components {
+		spec := infraImageSpecFor(component)
+		ref := strings.TrimSpace(spec.ExpectedRef)
+		if spec.Component == "" {
+			t.Fatalf("unknown infra component %q", component)
+		}
+		if ref == "" {
+			t.Fatalf("infra component %q has no pinned ref configured", component)
+		}
+		if spikeImageExists(ref) {
+			continue
+		}
+
+		contextDir := repoRoot
+		dockerfile := spec.DockerfilePath
+		if strings.TrimSpace(spec.ContextDir) != "" && spec.ContextDir != "." {
+			contextDir = filepath.Join(repoRoot, spec.ContextDir)
+			if rel, err := filepath.Rel(contextDir, filepath.Join(repoRoot, spec.DockerfilePath)); err == nil {
+				dockerfile = rel
+			}
+		}
+
+		t.Logf("building local %s image as %s", component, ref)
+		spikeBuildImage(t, contextDir, ref, dockerfile)
+	}
+}
+
 // spikeEnsureCllamaPassthroughImage guarantees a local image exists for
 // ghcr.io/mostlydev/cllama:latest. For spike coverage we prefer the local
 // submodule under test over any cached image, then fall back to GitHub, then
 // finally to a stub image if no real build is possible.
 func spikeEnsureCllamaPassthroughImage(t *testing.T, repoRoot string) {
 	t.Helper()
-	const tag = "ghcr.io/mostlydev/cllama:latest"
+	tags := []string{"ghcr.io/mostlydev/cllama:latest"}
+	if preferred := preferredInfraImageRef(infraComponentCllama); preferred != "" && preferred != tags[0] {
+		tags = append(tags, preferred)
+	}
 
 	localContext := filepath.Join(repoRoot, "cllama")
 	localDockerfile := filepath.Join(localContext, "Dockerfile")
 	if repoRoot != "" {
 		if _, err := os.Stat(localDockerfile); err == nil {
-			t.Logf("building local cllama image from %s", localContext)
-			cmd := exec.Command("docker", "build", "-t", tag, localContext)
+			t.Logf("building local cllama image from %s as %s", localContext, strings.Join(tags, ", "))
+			args := []string{"build"}
+			for _, tag := range tags {
+				args = append(args, "-t", tag)
+			}
+			args = append(args, localContext)
+			cmd := exec.Command("docker", args...)
 			out, err := cmd.CombinedOutput()
 			if err == nil {
 				t.Logf("built local cllama image from working tree")
@@ -858,7 +899,12 @@ func spikeEnsureCllamaPassthroughImage(t *testing.T, repoRoot string) {
 	// Try building from the GitHub repo.
 	const repo = "https://github.com/mostlydev/cllama.git"
 	t.Logf("building real cllama from %s", repo)
-	cmd := exec.Command("docker", "build", "-t", tag, repo)
+	args := []string{"build"}
+	for _, tag := range tags {
+		args = append(args, "-t", tag)
+	}
+	args = append(args, repo)
+	cmd := exec.Command("docker", args...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Logf("built real cllama image from GitHub")
@@ -881,13 +927,18 @@ RUN chmod +x /cllama
 ENTRYPOINT ["/cllama"]
 `)
 
-	stubCmd := exec.Command("docker", "build", "-t", tag, "-")
+	stubArgs := []string{"build"}
+	for _, tag := range tags {
+		stubArgs = append(stubArgs, "-t", tag)
+	}
+	stubArgs = append(stubArgs, "-")
+	stubCmd := exec.Command("docker", stubArgs...)
 	stubCmd.Stdin = dockerfile
 	stubOut, stubErr := stubCmd.CombinedOutput()
 	if stubErr != nil {
 		t.Fatalf("build cllama stub image: %v\n%s", stubErr, stubOut)
 	}
-	t.Logf("built cllama stub image (no real proxy)")
+	t.Logf("built cllama stub image (no real proxy) as %s", strings.Join(tags, ", "))
 }
 
 // spikeWaitHealthy waits until the Docker healthcheck reports "healthy".

@@ -613,8 +613,10 @@ func TestE2EPhase3MultiClawContextAndHooks(t *testing.T) {
 			t.Fatalf("expected %s on claw-internal network, got %v", name, service.Networks)
 		}
 	}
-	if net, ok := cf.Networks["claw-internal"]; !ok || !net.Internal {
-		t.Fatal("expected claw-internal network internal=true")
+	if net, ok := cf.Networks["claw-internal"]; !ok {
+		t.Fatal("expected claw-internal network in compose output")
+	} else if net.Internal {
+		t.Fatal("claw-internal must not set internal=true; agents need egress for LLM and platform APIs")
 	}
 
 	if _, ok := results["researcher"]; !ok {

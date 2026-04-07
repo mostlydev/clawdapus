@@ -849,8 +849,11 @@ func mergeHandleDefaults(defaults, service map[string]interface{}) map[string]in
 	if len(defaults) == 0 {
 		return service
 	}
-	if len(service) == 0 {
+	if service == nil {
 		return deepCopyMap(defaults)
+	}
+	if len(service) == 0 {
+		return map[string]interface{}{}
 	}
 
 	merged := deepCopyMap(defaults)

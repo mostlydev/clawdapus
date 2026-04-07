@@ -33,12 +33,12 @@ import (
 )
 
 var composeUpDetach bool
+var composeUpFix bool
 
 var runtimePlaceholderPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 const (
 	conversationWallServiceName  = "claw-wall"
-	conversationWallImageRef     = "ghcr.io/mostlydev/claw-wall:latest"
 	conversationWallFeedName     = "channel-context"
 	conversationWallFeedTTL      = 30
 	conversationWallFeedLimit    = 20
@@ -87,20 +87,33 @@ var composeUpCmd = &cobra.Command{
 }
 
 func runComposeUp(podFile string) error {
-	f, err := os.Open(podFile)
-	if err != nil {
-		return fmt.Errorf("open pod file: %w", err)
-	}
-	defer f.Close()
-
-	p, err := pod.Parse(f)
+	p, podDir, err := loadPodDefinition(podFile)
 	if err != nil {
 		return err
 	}
 
-	podDir, err := filepath.Abs(filepath.Dir(podFile))
+	servicePlans, err := planPodServiceImages(p)
 	if err != nil {
-		return fmt.Errorf("resolve pod directory: %w", err)
+		return err
+	}
+	if !composeUpFix {
+		if plan := firstMissingPullPlan(servicePlans); plan != nil {
+			return remediationErrorf("claw pull", "service %q image %q missing locally", plan.ServiceName, plan.ImageRef)
+		}
+		if plan := firstMissingBuildPlan(servicePlans); plan != nil {
+			return remediationErrorf("claw build", "service %q image not built", plan.ServiceName)
+		}
+	} else {
+		if firstMissingPullPlan(servicePlans) != nil {
+			if err := pullRegistryServiceImages(servicePlans, true); err != nil {
+				return err
+			}
+		}
+		if firstMissingBuildPlan(servicePlans) != nil {
+			if err := buildPlannedServiceImages(podDir, servicePlans, true); err != nil {
+				return err
+			}
+		}
 	}
 	if err := resolveRuntimePlaceholders(podDir, p); err != nil {
 		return fmt.Errorf("resolve x-claw runtime placeholders: %w", err)
@@ -132,7 +145,7 @@ func runComposeUp(podFile string) error {
 			return fmt.Errorf("service name %q is reserved when claw-api auto-injection is active", "claw-api")
 		}
 		p.ClawAPI = &pod.ClawAPIConfig{
-			Image:              "ghcr.io/mostlydev/claw-api:latest",
+			Image:              preferredInfraImageRef(infraComponentClawAPI),
 			Addr:               envOrDefault("CLAW_API_ADDR", ":8080"),
 			ManifestHostPath:   filepath.Join(runtimeDir, "pod-manifest.json"),
 			ScheduleHostPath:   firstIf(needsScheduleAPI, filepath.Join(runtimeDir, "schedule.json")),
@@ -621,7 +634,7 @@ func runComposeUp(podFile string) error {
 		for _, proxyType := range proxyTypes {
 			proxies = append(proxies, pod.CllamaProxyConfig{
 				ProxyType:             proxyType,
-				Image:                 cllama.ProxyImageRef(proxyType),
+				Image:                 resolveProxyImageRef(proxyType),
 				ContextHostDir:        filepath.Join(runtimeDir, "context"),
 				AuthHostDir:           authDir,
 				SessionHistoryHostDir: sessionHistoryDir,
@@ -650,7 +663,7 @@ func runComposeUp(podFile string) error {
 	fmt.Printf("[claw] wrote %s\n", manifestPath)
 
 	p.Clawdash = &pod.ClawdashConfig{
-		Image:              "ghcr.io/mostlydev/clawdash:latest",
+		Image:              preferredInfraImageRef(infraComponentClawdash),
 		Addr:               envOrDefault("CLAWDASH_ADDR", ":8082"),
 		ManifestHostPath:   manifestPath,
 		DockerSockHostPath: "/var/run/docker.sock",
@@ -714,9 +727,15 @@ func runComposeUp(podFile string) error {
 	}
 	fmt.Printf("[claw] wrote %s\n", generatedPath)
 
-	hermesEnabled := detectHermes(resolvedClaws)
-	if err := ensureInfraImages(p, cllamaEnabled, hermesEnabled, proxies, p.ClawAPI, p.Clawdash); err != nil {
-		return err
+	requiredInfra := requiredInfraImageSpecs(p, cllamaEnabled, proxies, p.ClawAPI, p.Clawdash)
+	if !composeUpFix {
+		if err := ensureRequiredInfraImagesAvailable(requiredInfra); err != nil {
+			return err
+		}
+	} else {
+		if err := ensureInfraImages(p, cllamaEnabled, proxies, p.ClawAPI, p.Clawdash); err != nil {
+			return err
+		}
 	}
 
 	if len(drivers) == 0 {
@@ -1493,7 +1512,7 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 	}
 
 	p.Services[conversationWallServiceName] = &pod.Service{
-		Image:       conversationWallImageRef,
+		Image:       resolveConversationWallImageRef(),
 		Environment: map[string]string{"CLAW_WALL_TOKENS": formatConversationWallTokenPairs(tokenPairs)},
 		Expose:      []string{conversationWallInternalPort},
 		Compose: map[string]interface{}{
@@ -3655,7 +3674,7 @@ type buildArgValue struct {
 	Passthrough bool
 }
 
-func resolveManagedServiceImage(podDir string, p *pod.Pod, serviceName string, svc *pod.Service) (string, error) {
+func resolveManagedServiceImage(_ string, p *pod.Pod, serviceName string, svc *pod.Service) (string, error) {
 	imageRef := strings.TrimSpace(svc.Image)
 	cfg, err := parseServiceBuildConfig(svc.Compose["build"])
 	if err != nil {
@@ -3669,28 +3688,17 @@ func resolveManagedServiceImage(podDir string, p *pod.Pod, serviceName string, s
 		if imageExistsLocally(imageRef) {
 			return imageRef, nil
 		}
-		return "", fmt.Errorf("service %q: image %q not found locally and no build config declared", serviceName, imageRef)
+		return "", remediationErrorf("claw pull", "service %q image %q missing locally", serviceName, imageRef)
 	}
 
 	if imageRef == "" {
 		imageRef = managedServiceImageRef(p.Name, serviceName)
-		svc.Image = imageRef
-		if svc.Compose == nil {
-			svc.Compose = make(map[string]interface{})
-		}
-		svc.Compose["image"] = imageRef
 	}
+	assignServiceImageRef(svc, imageRef)
 
-	fmt.Printf("[claw] %s: building image %s for inspection\n", serviceName, imageRef)
-	if err := buildManagedServiceImage(podDir, imageRef, cfg); err != nil {
-		return "", fmt.Errorf("service %q: %w", serviceName, err)
+	if !imageExistsLocally(imageRef) {
+		return "", remediationErrorf("claw build", "service %q image not built", serviceName)
 	}
-
-	svc.Image = imageRef
-	if svc.Compose == nil {
-		svc.Compose = make(map[string]interface{})
-	}
-	svc.Compose["image"] = imageRef
 	return imageRef, nil
 }
 
@@ -3975,36 +3983,10 @@ func ensurePersistentCllamaDir(podDir, name string) (string, error) {
 	return dir, nil
 }
 
-// ensureInfraImages checks that hermes-base, cllama proxy, claw-api, clawdash, and claw-wall images exist locally,
-// building them from source when missing.
-func ensureInfraImages(p *pod.Pod, cllamaEnabled, hermesEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
-	if hermesEnabled {
-		if err := ensureImage("hermes:latest", "hermes-base", "dockerfiles/hermes-base/Dockerfile", "dockerfiles/hermes-base"); err != nil {
+func ensureInfraImages(p *pod.Pod, cllamaEnabled bool, proxies []pod.CllamaProxyConfig, api *pod.ClawAPIConfig, dash *pod.ClawdashConfig) error {
+	for _, spec := range requiredInfraImageSpecs(p, cllamaEnabled, proxies, api, dash) {
+		if err := pullInfraImageFromRegistry(spec); err != nil {
 			return err
-		}
-	}
-	if cllamaEnabled {
-		for _, proxy := range proxies {
-			if err := ensureImage(proxy.Image, "cllama", "cllama/Dockerfile", "cllama"); err != nil {
-				return err
-			}
-		}
-	}
-	if api != nil {
-		if err := ensureImage(api.Image, "claw-api", "dockerfiles/claw-api/Dockerfile", "."); err != nil {
-			return err
-		}
-	}
-	if dash != nil {
-		if err := ensureImage(dash.Image, "clawdash", "dockerfiles/clawdash/Dockerfile", "."); err != nil {
-			return err
-		}
-	}
-	if p != nil {
-		if wall := p.Services[conversationWallServiceName]; wall != nil && strings.TrimSpace(wall.Image) != "" {
-			if err := ensureImage(wall.Image, conversationWallServiceName, conversationWallDockerfile, "."); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -4081,5 +4063,6 @@ func findRepoRoot() (string, bool) {
 
 func init() {
 	composeUpCmd.Flags().BoolVarP(&composeUpDetach, "detach", "d", false, "Run in background")
+	composeUpCmd.Flags().BoolVar(&composeUpFix, "fix", false, "Pull/build missing images before starting the pod")
 	rootCmd.AddCommand(composeUpCmd)
 }

@@ -245,15 +245,18 @@ PRIVILEGE read-only-fs
 ## Building
 
 ```bash
-# Build from a Clawfile
+# Build a single Clawfile
 claw build -t my-agent:latest ./agents/my-agent
 
 # Separate build context
 claw build -t my-agent:latest --context ./build-context ./agents/my-agent
+
+# Build every build-owned service in the current pod
+claw build -f claw-pod.yml
 ```
 
 ::: tip Auto-Built Base Images
-On the first run, `claw build` auto-builds the local `openclaw:latest` base image if it is missing. You do not need to pull or build base images manually -- the CLI handles it.
+When a Clawfile references a driver base image that is missing locally, `claw build` resolves it automatically. For pod work, the intended operator loop is `claw pull` then `claw build` then `claw up`.
 :::
 
 The generated `Dockerfile.generated` is a standard Dockerfile. Inspect it to see exactly what `claw build` produced -- but do not hand-edit it, as it is regenerated on every build.

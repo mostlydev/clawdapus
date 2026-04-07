@@ -59,17 +59,16 @@ ANTHROPIC_API_KEY=...
 ## Running
 
 ```bash
-# Build base image once (skip if openclaw:latest exists)
-docker build -t openclaw:latest -f Dockerfile.openclaw-base .
-
-# Deploy the full fleet
-claw up claw-pod.yml
+# Pull pinned infra, then build the pod's local services
+claw pull -f claw-pod.yml
+claw build -f claw-pod.yml
+claw up -f claw-pod.yml -d
 
 # Check health
-docker exec trading-desk-tiverton-1 openclaw health --json
+claw health -f claw-pod.yml
 
 # Tail logs
-docker compose -f compose.generated.yml logs -f tiverton
+claw logs -f claw-pod.yml tiverton
 ```
 
 ## Spike integration test
@@ -85,6 +84,7 @@ docker compose -f compose.generated.yml logs -f tiverton
 
 **Requirements:**
 - Docker running
+- Env-owned Discord IDs for tiverton, westin, allen, logan, micro, and hermes, plus shared guild/channel IDs
 - Real bot tokens in `examples/trading-desk/.env` (`TIVERTON_BOT_TOKEN` at minimum; others can reuse it for local spike runs)
 - Provider key for proxy env (`OPENROUTER_API_KEY`; `ANTHROPIC_API_KEY` optional fallback)
 - Internet access from Docker containers (no internal-only Docker Desktop network mode)
@@ -95,7 +95,8 @@ docker compose -f compose.generated.yml logs -f tiverton
 go test -tags spike -v -run TestSpikeComposeUp -timeout 300s ./cmd/claw/
 ```
 
-The test skips automatically if `TIVERTON_BOT_TOKEN` is not set in `.env`.
+The test skips automatically if `TIVERTON_BOT_TOKEN` is not set in `.env`, or if
+the required per-service Discord IDs/topology are missing.
 
 **What it verifies:**
 

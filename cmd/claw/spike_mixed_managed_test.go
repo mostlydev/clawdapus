@@ -38,6 +38,8 @@ func TestSpikeMixedManagedTypesCoexist(t *testing.T) {
 		_, _ = exec.Command("docker", "image", "rm", "-f", openTag, microTag).CombinedOutput()
 	})
 
+	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawdash)
+
 	workDir := t.TempDir()
 	agentsDir := filepath.Join(workDir, "agents")
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
@@ -74,6 +76,7 @@ services:
 	prevDetach := composeUpDetach
 	composeUpDetach = true
 	defer func() { composeUpDetach = prevDetach }()
+	t.Setenv("CLAWDASH_ADDR", ":"+spikeFreePort(t))
 
 	if err := runComposeUp(podPath); err != nil {
 		t.Fatalf("runComposeUp failed: %v", err)

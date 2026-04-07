@@ -30,9 +30,16 @@ cd clawdapus/examples/quickstart
 cp .env.example .env
 # Edit .env — add OPENROUTER_API_KEY, DISCORD_BOT_TOKEN, DISCORD_BOT_ID, DISCORD_GUILD_ID
 
-# Build and launch
+# Run the four-verb operator loop
 source .env
-claw build -t quickstart-assistant:latest ./agents/assistant
+
+# 1. pull pinned runtime infra + any registry-backed pod services
+claw pull -f claw-pod.yml
+
+# 2. build this pod's local build: services
+claw build -f claw-pod.yml
+
+# 3. compile the pod and launch it
 claw up -f claw-pod.yml -d
 
 # Verify
@@ -41,15 +48,24 @@ claw health -f claw-pod.yml    # both healthy
 
 # Run any docker compose command against the pod
 claw compose exec assistant bash
-claw compose restart cllama-passthrough
+claw compose restart cllama
 claw compose top
+
+# 4. tear the pod down when you're done
+claw down -f claw-pod.yml
 ```
 
 The cllama governance proxy dashboard runs on port **8181** — every LLM call in real time: which agent, which model, token counts, cost.
 
 The Clawdapus Dash fleet dashboard runs on port **8082** — live service health, topology wiring, and per-service drill-down.
 
-On the first run, `claw build` auto-builds the local `openclaw:latest` base image if it is missing.
+The operator surface is four verbs:
+- `claw pull` fetches pinned runtime infra and registry-backed pod services
+- `claw build` builds pod services that declare `build:`
+- `claw up` compiles the pod and launches it, staying strict by default
+- `claw down` tears the pod back down
+
+If `claw up` finds something missing, it tells you exactly which command to run next. For a first-run shortcut, use `claw up --fix -f claw-pod.yml -d`.
 
 Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
 
@@ -80,12 +96,15 @@ claw init my-pod
 cd my-pod
 cp .env.example .env
 source .env
-claw build -t my-pod-assistant:latest ./agents/assistant
+claw pull
+claw build
 claw up -d
 
 # add another agent later
 claw agent add researcher
 ```
+
+Generated projects use the same four-verb loop: `claw pull`, `claw build`, `claw up`, then `claw down` when you're finished.
 
 `claw agent add` preserves the project's existing layout by default:
 - Canonical project: adds `agents/<name>/Clawfile` + `agents/<name>/AGENTS.md`
@@ -229,8 +248,9 @@ Clawdapus extends two formats you already know:
 | `claw agent add` | _(none)_ | Add agents while preserving existing layout (`--layout auto|canonical|flat`) |
 | `Clawfile` | `Dockerfile` | Build an immutable agent image |
 | `claw-pod.yml` | `docker-compose.yml` | Run a governed agent fleet |
-| `claw build` | `docker build` | Transpile + build OCI image (`--context` for separate build context) |
-| `claw up` | `docker compose up` | Enforce + deploy |
+| `claw pull` | `docker compose pull` | Fetch pinned infra images and pod registry images |
+| `claw build` | `docker build` | Transpile + build OCI image, or build every `build:` service in the pod |
+| `claw up` | `docker compose up` | Enforce + deploy; authoritative on what is stale |
 
 Any valid Dockerfile is a valid Clawfile. Any valid `docker-compose.yml` is a valid `claw-pod.yml`. Extended directives live in namespaces Docker already ignores. Eject from Clawdapus anytime — you still have a working OCI image and a working compose file.
 

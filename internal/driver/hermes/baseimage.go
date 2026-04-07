@@ -1,6 +1,6 @@
 package hermes
 
-const baseImageTag = "hermes:latest"
+var BaseImageTag = "ghcr.io/mostlydev/hermes-base:v2026.3.17"
 
 const baseImageDockerfile = `FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
@@ -23,5 +23,5 @@ CMD ["gateway", "start"]
 `
 
 func (d *Driver) BaseImage() (string, string) {
-	return baseImageTag, baseImageDockerfile
+	return BaseImageTag, baseImageDockerfile
 }

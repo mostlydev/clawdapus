@@ -105,6 +105,9 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	if result.Environment["OPENCLAW_HOME"] != "/app/state" {
 		t.Errorf("expected OPENCLAW_HOME=/app/state (shim for openclaw#29736), got %q", result.Environment["OPENCLAW_HOME"])
 	}
+	if result.Environment["HOME"] != "/app/state" {
+		t.Errorf("expected HOME=/app/state so ~/.openclaw resolves onto writable state, got %q", result.Environment["HOME"])
+	}
 	if result.Environment[shared.PortableMemoryEnv] != shared.PortableMemoryDir {
 		t.Errorf("expected %s=%s, got %q", shared.PortableMemoryEnv, shared.PortableMemoryDir, result.Environment[shared.PortableMemoryEnv])
 	}

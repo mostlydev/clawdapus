@@ -20,8 +20,9 @@ The `claw` CLI maps directly to what you already know:
 | `claw agent add` | _(none)_ | Add agents while preserving existing layout |
 | `Clawfile` | `Dockerfile` | Build an immutable agent image |
 | `claw-pod.yml` | `docker-compose.yml` | Run a governed agent fleet |
-| `claw build` | `docker build` | Transpile + build OCI image |
-| `claw up` | `docker compose up` | Enforce + deploy |
+| `claw pull` | `docker compose pull` | Fetch pinned infra images and pod registry images |
+| `claw build` | `docker build` | Transpile + build OCI image, or build all pod `build:` services |
+| `claw up` | `docker compose up` | Enforce + deploy; authoritative on missing images |
 
 Any valid Dockerfile is a valid Clawfile. Any valid `docker-compose.yml` is a valid `claw-pod.yml`. You are always one `docker compose` command away from running your stack without Clawdapus.
 

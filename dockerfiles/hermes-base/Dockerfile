@@ -1,5 +1,14 @@
 FROM python:3.11-slim
 
+ARG GIT_REVISION=unknown
+ARG CLAW_SOURCE=local-checkout
+ARG CLAW_DIRTY=true
+
+LABEL claw.component="hermes-base" \
+      org.opencontainers.image.revision="${GIT_REVISION}" \
+      claw.source="${CLAW_SOURCE}" \
+      claw.dirty="${CLAW_DIRTY}"
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \

@@ -25,9 +25,8 @@ type quickstartDocCase struct {
 
 func TestQuickstartDocsRunInFreshDockerContainer(t *testing.T) {
 	requireDockerForQuickstartDocs(t)
-	removeInfraImages(t)
-
 	repoRoot := quickstartRepoRoot(t)
+	removeInfraImages(t)
 	env := loadQuickstartDocEnv(t, repoRoot)
 	if env["CLLAMA_UI_PORT"] == "" {
 		env["CLLAMA_UI_PORT"] = spikeFreePort(t)
@@ -329,10 +328,21 @@ func runQuickstartDocCommandsInContainer(t *testing.T, repoRoot, linuxClaw strin
 }
 
 // removeInfraImages removes cllama and clawdash images so the test exercises
-// the ensureImage pull path that real quickstart users hit.
+// the explicit pinned-image pull path that real quickstart users hit.
 func removeInfraImages(t *testing.T) {
 	t.Helper()
-	for _, img := range []string{"ghcr.io/mostlydev/cllama:latest", "ghcr.io/mostlydev/clawdash:latest"} {
+	toRemove := make(map[string]struct{})
+	for _, component := range []string{infraComponentCllama, infraComponentClawdash} {
+		spec := infraImageSpecFor(component)
+		for _, ref := range []string{spec.ExpectedRef} {
+			ref = strings.TrimSpace(ref)
+			if ref == "" {
+				continue
+			}
+			toRemove[ref] = struct{}{}
+		}
+	}
+	for img := range toRemove {
 		cmd := exec.Command("docker", "rmi", img)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Logf("removing %s (may not exist): %s", img, strings.TrimSpace(string(out)))

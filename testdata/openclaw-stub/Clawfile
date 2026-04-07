@@ -10,6 +10,6 @@ CONFIGURE openclaw config set agents.defaults.heartbeat.every 30m
 RUN apk add --no-cache bash jq tini
 COPY openclaw /usr/local/bin/openclaw
 RUN chmod +x /usr/local/bin/openclaw
-COPY entrypoint.sh /claw/entrypoint.sh
-RUN chmod +x /claw/entrypoint.sh
-ENTRYPOINT ["/sbin/tini", "--", "/claw/entrypoint.sh"]
+COPY entrypoint.sh /usr/local/bin/openclaw-entrypoint.sh
+RUN chmod +x /usr/local/bin/openclaw-entrypoint.sh
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/openclaw-entrypoint.sh"]

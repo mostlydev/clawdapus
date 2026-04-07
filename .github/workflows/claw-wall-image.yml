@@ -1,4 +1,4 @@
-name: claw-api Image
+name: claw-wall Image
 
 on:
   push:
@@ -8,11 +8,11 @@ on:
       - "v*"
   pull_request:
     paths:
-      - "cmd/claw-api/**"
-      - "dockerfiles/claw-api/**"
+      - "cmd/claw-wall/**"
+      - "dockerfiles/claw-wall/**"
       - "go.mod"
       - "go.sum"
-      - ".github/workflows/claw-api-image.yml"
+      - ".github/workflows/claw-wall-image.yml"
   workflow_dispatch:
 
 permissions:
@@ -39,20 +39,20 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/claw-api
+          images: ghcr.io/${{ github.repository_owner }}/claw-wall
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
             type=sha,format=short
           labels: |
-            claw.component=claw-api
+            claw.component=claw-wall
             claw.source=registry
             claw.dirty=false
 
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: dockerfiles/claw-api/Dockerfile
+          file: dockerfiles/claw-wall/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

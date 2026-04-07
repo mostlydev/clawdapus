@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
 
 func TestInitScaffoldCreatesFiles(t *testing.T) {
@@ -126,7 +128,7 @@ func TestInitScaffoldTypeDefaults(t *testing.T) {
 		baseImage string
 	}{
 		{name: "generic", clawType: "generic", baseImage: "alpine:3.20"},
-		{name: "hermes", clawType: "hermes", baseImage: "hermes:latest"},
+		{name: "hermes", clawType: "hermes", baseImage: hermes.BaseImageTag},
 		{name: "nanoclaw", clawType: "nanoclaw", baseImage: "nanoclaw-orchestrator:latest"},
 		{name: "microclaw", clawType: "microclaw", baseImage: "microclaw:latest"},
 		{name: "nullclaw", clawType: "nullclaw", baseImage: "nullclaw:latest"},

@@ -125,6 +125,7 @@ services:
     x-claw:
       <<: *cllama_agent
       agent: ./agents/OCTOPUS.md
+      handles: {}
       feeds:
         - source: claw-api
           path: /fleet/alerts

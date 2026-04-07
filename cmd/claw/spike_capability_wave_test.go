@@ -49,6 +49,7 @@ func TestSpikeCapabilityWaveArtifacts(t *testing.T) {
 		exec.Command("docker", "image", "rm", "-f", agentTag, memTag).CombinedOutput()
 	})
 
+	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawdash)
 	// Ensure the cllama passthrough image is available (agent uses cllama: passthrough).
 	spikeEnsureCllamaPassthroughImage(t, repoRoot)
 
@@ -87,6 +88,8 @@ services:
 	prevDetach := composeUpDetach
 	composeUpDetach = true
 	defer func() { composeUpDetach = prevDetach }()
+	t.Setenv("CLLAMA_UI_PORT", spikeFreePort(t))
+	t.Setenv("CLAWDASH_ADDR", ":"+spikeFreePort(t))
 
 	if err := runComposeUp(podPath); err != nil {
 		t.Fatalf("runComposeUp: %v", err)

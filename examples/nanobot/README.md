@@ -8,6 +8,7 @@ Minimal Clawdapus project using `CLAW_TYPE nanobot`.
 cp .env.example .env
 # edit .env
 
-claw build -t nanobot-example:latest .
+claw pull -f claw-pod.yml
+claw build -f claw-pod.yml
 claw up -f claw-pod.yml -d
 ```

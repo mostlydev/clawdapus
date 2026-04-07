@@ -17,13 +17,13 @@ All packages are covered. These must pass before any commit.
 
 ---
 
-## E2E Tests (Docker required)
+## Integration Tests (Docker required)
 
-Build-tagged `e2e`. Require Docker running locally. No real credentials needed —
+Build-tagged `integration`. Require Docker running locally. No real credentials needed —
 tests use locally-built fixture images.
 
 ```bash
-go test -tags e2e -v ./...
+go test -tags integration -v ./...
 ```
 
 ---
@@ -155,7 +155,8 @@ workflow validation instrument for the richer `examples/trading-desk/` example.
 - Docker running
 - Go toolchain
 - A Discord server with:
-  - Two bot applications (tiverton, westin), each with a bot token
+  - Distinct Discord application/user IDs for tiverton, westin, allen, logan, micro, and hermes
+  - At least one bot token with permission to read and post in the target channel
   - A text channel the bots can read and post to
   - An incoming webhook URL for the `trading-api` startup announcement (optional —
     if absent, webhook posting is skipped and logged)
@@ -174,12 +175,18 @@ cp .env.example .env
 | `TIVERTON_DISCORD_ID` | Application/user ID for tiverton bot |
 | `WESTIN_BOT_TOKEN` | Bot token for the westin Discord application |
 | `WESTIN_DISCORD_ID` | Application/user ID for westin bot |
+| `ALLEN_DISCORD_ID` | Application/user ID declared for allen |
+| `LOGAN_DISCORD_ID` | Application/user ID declared for logan |
+| `MICRO_DISCORD_ID` | Application/user ID declared for micro |
+| `HERMES_DISCORD_ID` | Application/user ID declared for hermes |
 | `DISCORD_GUILD_ID` | Discord server (guild) ID |
 | `DISCORD_TRADING_FLOOR_CHANNEL` | Channel ID the bots post to |
 | `DISCORD_TRADING_API_WEBHOOK` | Incoming webhook URL (optional) |
 
-Both bot tokens need **Read Messages** and **Send Messages** permissions in the target
-channel. The test reads message history via the Discord REST API using these tokens.
+Only `TIVERTON_BOT_TOKEN` is strictly required for the local spike harness; the
+other bot token env vars can reuse it if you just want one real Discord bot for
+the run. The Discord IDs are env-owned pod metadata and still need to be present
+for every managed service because the parser enforces unique concurrent handles.
 
 ### Running
 

@@ -1,6 +1,6 @@
 # CLI Commands
 
-The `claw` CLI is the single entry point for building, deploying, and managing governed agent pods.
+The `claw` CLI is the single entry point for building, deploying, and managing governed agent pods. The everyday operator loop is `claw pull`, `claw build`, `claw up`, `claw down`: pull pinned/runtime images, build local services, compile and launch, then tear the pod back down.
 
 ## Global Flags
 
@@ -9,34 +9,55 @@ The `claw` CLI is the single entry point for building, deploying, and managing g
 | `--file <path>` | `-f` | Path to `claw-pod.yml`. Locates `compose.generated.yml` next to it. |
 | `--version` | | Print the CLI version and exit. |
 
-The `-f` flag is a persistent flag on the root command, so all lifecycle commands (`ps`, `logs`, `health`, `down`, `audit`, `compose`) inherit it. When omitted, commands look for `compose.generated.yml` in the current directory.
+The `-f` flag is a persistent flag on the root command, so lifecycle commands inherit it. When omitted, commands look for `compose.generated.yml` in the current directory.
+
+---
+
+## claw pull
+
+Fetch pinned infra images and pod registry images.
+
+```bash
+claw pull [pod-file]
+```
+
+Without a pod file, `claw pull` fetches the binary's pinned runtime infra images. With a pod file, it narrows to the runtime infra that pod actually needs and also pulls every service image that does **not** declare `build:`.
+
+**What it does:**
+
+1. Checks the binary's pinned infra image refs.
+2. Pulls missing infra images.
+3. If a pod is present, pulls registry-backed service images.
+4. Skips any service with `build:` because those belong to `claw build`.
+
+**Examples:**
+
+```bash
+# Pull just the pinned infra images
+claw pull
+
+# Pull infra plus this pod's registry services
+claw pull -f claw-pod.yml
+```
 
 ---
 
 ## claw build
 
-Transpile a Clawfile into a standard Dockerfile and build the OCI image.
+Build local sources.
 
 ```bash
 claw build [path-or-clawfile]
 ```
 
-If `path-or-clawfile` is a directory, `claw build` looks for a `Clawfile` inside it. If omitted, the current directory is used.
+With a positional argument, `claw build` keeps the single-image form: transpile one Clawfile, write `Dockerfile.generated`, and run `docker build`. With no positional argument and a `claw-pod.yml` in scope, it becomes pod-aware and builds every service that declares `build:`.
 
 | Flag | Description |
 |------|-------------|
-| `-t, --tag <name>` | Tag for the built image (e.g. `my-agent:latest`). |
-| `--context <dir>` | Docker build context directory. Defaults to the Clawfile's parent directory. |
+| `-t, --tag <name>` | Tag for the built image in single-image mode. |
+| `--context <dir>` | Docker build context directory in single-image mode. Defaults to the Clawfile's parent directory. |
 
-On the first run, if the driver's base image (e.g. `openclaw:latest`) is missing locally, `claw build` auto-builds it.
-
-**What it does:**
-
-1. Reads the Clawfile and translates extended directives (`CLAW_TYPE`, `MODEL`, `CLLAMA`, etc.) into standard Dockerfile primitives (`LABEL`, `ENV`, `RUN`).
-2. Writes `Dockerfile.generated` next to the Clawfile.
-3. Calls `docker build` on the generated Dockerfile.
-
-The output is a standard OCI image. You can `docker run` it directly, or use it in a `claw-pod.yml`.
+When a driver's base image is missing locally, `claw build` resolves it automatically.
 
 **Examples:**
 
@@ -44,11 +65,8 @@ The output is a standard OCI image. You can `docker run` it directly, or use it 
 # Build from an agent directory
 claw build -t trading-desk-analyst:latest ./agents/analyst
 
-# Build from the current directory
-claw build -t my-bot:latest .
-
-# Separate build context from Clawfile location
-claw build --context ./project ./agents/bot/Clawfile
+# Build every build-owned service in the current pod
+claw build -f claw-pod.yml
 ```
 
 ---
@@ -66,6 +84,7 @@ The pod file can be specified as a positional argument or via `-f`. Defaults to 
 | Flag | Description |
 |------|-------------|
 | `-d` | Detached mode. Required when the pod contains managed `x-claw` services. |
+| `--fix` | Pull and build missing images before starting. |
 | `-f, --file <path>` | Path to `claw-pod.yml`. |
 
 **What it does:**
@@ -82,13 +101,16 @@ The pod file can be specified as a positional argument or via `-f`. Defaults to 
 
 **Generated artifacts** are written to `.claw-runtime/` next to the pod file. Per-agent context lives at `.claw-runtime/context/<agent-id>/`. These are generated outputs — inspect them for debugging, but do not hand-edit them.
 
-**Image resolution** follows a 3-step fallback: check local images, then `docker pull`, then build from local Dockerfile or git URL.
+`claw up` is strict by default. If an infra image is missing, it tells you to run `claw pull`. If a pod service image is not built, it tells you to run `claw build`. `claw up --fix` performs those remediation steps automatically.
 
 **Examples:**
 
 ```bash
 # Launch the pod in detached mode (required for managed services)
 claw up -d
+
+# First-run shortcut
+claw up --fix -d
 
 # Explicit pod file
 claw up -f claw-pod.yml -d
@@ -138,9 +160,9 @@ Wraps `docker compose ps` against `compose.generated.yml`. Subject to the [stale
 **Example output:**
 
 ```
-NAME                    IMAGE                           COMMAND   SERVICE               CREATED        STATUS
-trading-desk-analyst-1  trading-desk-analyst:latest      ...      analyst               2 hours ago    Up 2 hours (healthy)
-trading-desk-cllama-1   ghcr.io/mostlydev/cllama:latest  ...      cllama-passthrough    2 hours ago    Up 2 hours (healthy)
+NAME                    IMAGE                           COMMAND   SERVICE     CREATED        STATUS
+trading-desk-analyst-1  trading-desk-analyst:latest      ...      analyst     2 hours ago    Up 2 hours (healthy)
+trading-desk-cllama-1   ghcr.io/mostlydev/cllama:v0.2.2  ...      cllama      2 hours ago    Up 2 hours (healthy)
 ```
 
 **Future (Design -- Phase 5):** `claw ps` will include drift scoring from the governance proxy:
@@ -178,7 +200,7 @@ claw logs
 claw logs analyst
 
 # Follow cllama proxy logs in real time (useful for watching LLM traffic)
-claw logs --follow cllama-passthrough
+claw logs --follow cllama
 ```
 
 ---
@@ -202,7 +224,7 @@ User-defined `healthcheck:` blocks in `claw-pod.yml` take precedence over driver
 ```
 SERVICE              STATUS     DETAIL
 analyst              healthy    openclaw health --json: ok
-cllama-passthrough   healthy    native docker healthcheck
+cllama               healthy    native docker healthcheck
 trading-api          running    native (no claw driver)
 ```
 
@@ -358,7 +380,7 @@ Flag parsing is disabled for this command -- everything after `compose` is forwa
 claw compose exec analyst bash
 
 # Restart the cllama proxy without tearing down the whole pod
-claw compose restart cllama-passthrough
+claw compose restart cllama
 
 # View resource usage across the pod
 claw compose top
@@ -519,8 +541,9 @@ Error: claw-pod.yml is newer than compose.generated.yml — run 'claw up' to reg
 
 | Command | Staleness guard | Requires `claw up` first | Notes |
 |---------|:-:|:-:|-------|
-| `claw build` | -- | No | Standalone image build |
-| `claw up` | -- | No | Generates `compose.generated.yml` |
+| `claw pull` | -- | No | Pinned infra + pod registry images |
+| `claw build` | -- | No | Single-image or pod-aware build |
+| `claw up` | -- | No | Generates `compose.generated.yml`; strict by default |
 | `claw down` | Exempt | Yes | Always allowed |
 | `claw ps` | Yes | Yes | |
 | `claw logs` | Yes | Yes | |

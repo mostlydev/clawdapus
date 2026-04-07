@@ -45,6 +45,10 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
             type=sha,format=short
+          labels: |
+            claw.component=clawdash
+            claw.source=registry
+            claw.dirty=false
 
       - uses: docker/build-push-action@v6
         with:

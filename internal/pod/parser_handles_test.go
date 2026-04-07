@@ -122,6 +122,23 @@ services:
         discord: "123456789"
 `
 
+const podWithHandleDefaultsSuppressed = `
+x-claw:
+  pod: test-pod
+  handles-defaults:
+    discord:
+      guilds:
+        - id: "111222333"
+          name: "Trading Floor"
+
+services:
+  bot:
+    image: openclaw:latest
+    x-claw:
+      agent: ./AGENTS.md
+      handles: {}
+`
+
 const podWithDuplicateHandleIDs = `
 x-claw:
   pod: test-pod
@@ -349,6 +366,17 @@ func TestParseHandlesDefaultsMergeStringHandleIntoMap(t *testing.T) {
 	}
 	if len(info.Guilds) != 1 || info.Guilds[0].Name != "Trading Floor" {
 		t.Fatalf("expected inherited default guilds, got %+v", info.Guilds)
+	}
+}
+
+func TestParseHandlesDefaultsExplicitEmptyMapSuppressesInheritance(t *testing.T) {
+	p, err := Parse(strings.NewReader(podWithHandleDefaultsSuppressed))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if p.Services["bot"].Claw.Handles != nil {
+		t.Fatalf("expected explicit empty handles map to suppress defaults, got %+v", p.Services["bot"].Claw.Handles)
 	}
 }
 

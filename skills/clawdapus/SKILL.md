@@ -16,12 +16,15 @@ Infrastructure-layer governance for AI agent containers. `claw` treats agents as
 go build -o bin/claw ./cmd/claw    # build from source
 claw doctor                         # verify Docker, buildx, compose
 
-# Build
-claw build -t <image> <path>        # Clawfile -> Dockerfile.generated -> docker build
+# Image lifecycle
+claw pull [-f <pod>.yml]            # pinned infra + pod registry images
+claw build -t <image> <path>        # single Clawfile -> Dockerfile.generated -> docker build
+claw build [-f <pod>.yml]           # with no path: build every pod service that has build:
 claw inspect <image>                 # show claw.* labels from built image
 
 # Pod lifecycle (mirrors docker compose UX)
-claw up [-f <pod>.yml] [-d]         # parse pod, enforce drivers, emit compose.generated.yml, launch
+claw up [-f <pod>.yml] [-d]         # strict: tells you to run claw pull/build when images are missing
+claw up --fix [-f <pod>.yml] [-d]   # pull/build missing images, then launch
 claw down [-f <pod>.yml]            # tear down
 claw ps [-f <pod>.yml]              # container status
 claw logs [-f <pod>.yml] [svc]      # stream logs (--follow)
@@ -461,8 +464,9 @@ Clawdapus refuses to start containers when:
 
 ## Architecture Key Points
 
-- `claw build` transpiles Clawfile -> standard Dockerfile -> `docker build` -> OCI image
-- `claw up` parses pod YAML -> driver enforcement -> `compose.generated.yml` -> `docker compose`
+- `claw pull` owns pinned infra freshness and pod registry-image pulls
+- `claw build` transpiles Clawfile -> standard Dockerfile -> `docker build` -> OCI image, or builds every pod `build:` service when run without a path
+- `claw up` parses pod YAML -> driver enforcement -> `compose.generated.yml` -> `docker compose`, but stays strict about missing images unless `--fix` is set
 - **docker compose is the sole lifecycle authority**. Docker SDK is read-only.
 - Two-pass loop in compose_up: Pass 1 inspect+resolve all services + cllama wiring, Pass 2 materialize
 - After feed resolution: `resolveToolSubscriptions` and `resolveMemorySubscriptions` wire capability providers into the internal network and compile manifests into cllama context

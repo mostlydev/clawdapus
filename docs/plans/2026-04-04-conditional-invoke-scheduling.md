@@ -4,8 +4,8 @@ Tracking issue: mostlydev/clawdapus#107
 
 ## Status
 
-Proposed. Supersedes ADR-006 ("INVOKE Scheduling Mechanism") with a new ADR-022
-("Scheduler Authority and Runtime Control").
+Proposed. Supersedes ADR-006 ("INVOKE Scheduling Mechanism") with a new ADR
+("Scheduler Authority and Runtime Control"), number TBD.
 
 ## Goal
 
@@ -529,7 +529,7 @@ opt-out can be gated by a pod-level flag (`x-claw.scheduler: external` vs
 `runner`) to let operators opt in incrementally if the default flip is too
 aggressive.
 
-## ADR-022 Skeleton
+## ADR Skeleton
 
 **Title**: Scheduler Authority and Runtime Control
 
