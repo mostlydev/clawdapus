@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Fix: cllama prompt cache efficiency** ([#122](https://github.com/mostlydev/clawdapus/issues/122)) — feed and time context is now appended after the system prompt rather than prepended, enabling Anthropic prompt cache reuse across requests.
 
 ## v0.6.1 <Badge type="tip" text="Latest" /> {#v0-6-1}
 
