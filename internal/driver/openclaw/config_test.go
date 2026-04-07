@@ -778,8 +778,8 @@ func TestGenerateConfigDiscordGuildUsersAndChannels(t *testing.T) {
 	if !ok {
 		t.Fatal("expected channels.CHAN1 entry")
 	}
-	if ch["allow"] != true {
-		t.Error("expected channel.allow=true")
+	if ch["enabled"] != true {
+		t.Error("expected channel.enabled=true")
 	}
 	if ch["requireMention"] != true {
 		t.Error("expected channel.requireMention=true")

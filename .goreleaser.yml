@@ -19,7 +19,13 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
+      - >-
+        -s -w
+        -X main.version={{.Version}}
+        -X main.commit={{.Commit}}
+        -X main.infraClawAPITag={{.Version}}
+        -X main.infraClawdashTag={{.Version}}
+        -X main.infraClawWallTag={{.Version}}
 
 archives:
   - format: tar.gz

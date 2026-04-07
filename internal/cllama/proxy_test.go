@@ -1,6 +1,11 @@
 package cllama
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	"github.com/mostlydev/clawdapus/internal/infraimages"
+)
 
 func TestProxyServiceName(t *testing.T) {
 	tests := []struct {
@@ -20,10 +25,10 @@ func TestProxyServiceName(t *testing.T) {
 }
 
 func TestProxyImageRef(t *testing.T) {
-	if got := ProxyImageRef("passthrough"); got != "ghcr.io/mostlydev/cllama:latest" {
+	if got := ProxyImageRef("passthrough"); got != fmt.Sprintf("ghcr.io/mostlydev/cllama:%s", infraimages.DefaultCllamaTag) {
 		t.Fatalf("passthrough image = %q", got)
 	}
-	if got := ProxyImageRef("policy"); got != "ghcr.io/mostlydev/cllama-policy:latest" {
+	if got := ProxyImageRef("policy"); got != fmt.Sprintf("ghcr.io/mostlydev/cllama-policy:%s", infraimages.DefaultCllamaTag) {
 		t.Fatalf("policy image = %q", got)
 	}
 }

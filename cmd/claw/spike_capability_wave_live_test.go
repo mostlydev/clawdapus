@@ -84,6 +84,7 @@ func TestSpikeCapabilityWaveLive(t *testing.T) {
 	spikeBuildImage(t, dir, "rollcall-openclaw:latest", "agents/oc-roll/Clawfile")
 	spikeBuildImage(t, filepath.Join(repoRoot, "examples", "reference-memory"), "rollcall-reference-memory:latest", "Dockerfile")
 	spikeBuildImage(t, filepath.Join(repoRoot, "testdata", "tool-stub"), "rollcall-tool-stub:latest", "Dockerfile")
+	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawdash, infraComponentClawWall)
 	spikeEnsureCllamaPassthroughImage(t, repoRoot)
 
 	expandedPod := spikeExpandEnvVars(spikeReadFile(t, filepath.Join(dir, "claw-pod.yml")), env)
@@ -132,6 +133,7 @@ func TestSpikeCapabilityWaveLive(t *testing.T) {
 
 	spikeWaitHealthy(t, agentContainerID, 120*time.Second)
 
+	auditWindowStart := time.Now()
 	triggerMsg := fmt.Sprintf(
 		"<@%s> Call the managed tool tool-svc.get_runtime_context before replying. Then answer in one sentence with the runtime and the exact phrase capability wave online.",
 		env["DISCORD_BOT_ID"],
@@ -149,7 +151,7 @@ func TestSpikeCapabilityWaveLive(t *testing.T) {
 	)
 	t.Logf("found capability-wave response: %q", rollcallTruncate(response, 160))
 
-	rollcallAssertAuditTelemetry(t, podPath, "oc-roll", "openclaw")
+	rollcallAssertAuditTelemetry(t, podPath, "oc-roll", "openclaw", auditWindowStart)
 	rollcallAssertSessionHistory(t, sessionHistoryDir, "oc-roll")
 	rollcallAssertManagedToolTrace(t, sessionHistoryDir, "oc-roll", "tool-svc")
 	rollcallAssertMemoryTelemetry(t, cllamaContainerID, "oc-roll")

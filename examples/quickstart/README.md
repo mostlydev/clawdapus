@@ -36,15 +36,29 @@ cp .env.example .env
 # Edit .env — add your OPENROUTER_API_KEY, DISCORD_BOT_TOKEN, DISCORD_BOT_ID, DISCORD_GUILD_ID
 ```
 
-## 3. Build and launch
+## 3. Run the four verbs
 
 ```bash
 source .env
-claw build -t quickstart-assistant:latest ./agents/assistant
+
+# 1. Pull pinned runtime infra + any registry-backed pod services
+claw pull -f claw-pod.yml
+
+# 2. Build this pod's local build: services
+claw build -f claw-pod.yml
+
+# 3. Compile the pod and launch it
 claw up -f claw-pod.yml -d
 ```
 
-On the first run, `claw build` auto-builds the local `openclaw:latest` base image if it is missing.
+The quickstart follows the four-verb operator loop:
+
+- `claw pull` fetches pinned runtime infra and registry-backed pod services
+- `claw build` builds pod services that declare `build:`
+- `claw up` compiles the pod and launches it
+- `claw down` tears the pod back down in [step 6](#6-clean-up)
+
+`claw up` is strict by default. If something is missing, it prints the exact remediation command (`claw pull` or `claw build`). If you want a first-run shortcut, use `claw up --fix -f claw-pod.yml -d`.
 
 ## 4. Verify
 

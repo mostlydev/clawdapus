@@ -18,6 +18,17 @@ var buildCmd = &cobra.Command{
 	Short: "Compile a Clawfile to Dockerfile and build the image",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			if podFile, ok, err := resolveOptionalPodFile(composePodFile, nil); err != nil {
+				return err
+			} else if ok {
+				if buildTag != "" || strings.TrimSpace(buildContext) != "" {
+					return fmt.Errorf("pod-aware 'claw build' does not accept --tag or --context")
+				}
+				return runBuildPod(podFile)
+			}
+		}
+
 		input := "."
 		if len(args) == 1 {
 			input = args[0]
@@ -42,6 +53,36 @@ var buildCmd = &cobra.Command{
 		fmt.Println("Building image with docker")
 		return build.BuildFromGenerated(generatedPath, buildTag, contextDir)
 	},
+}
+
+func runBuildPod(podFile string) error {
+	p, podDir, err := loadPodDefinition(podFile)
+	if err != nil {
+		return err
+	}
+
+	plans, err := planPodServiceImages(p)
+	if err != nil {
+		return err
+	}
+
+	buildCount := 0
+	for _, plan := range plans {
+		if plan.BuildConfig != nil {
+			buildCount++
+		}
+	}
+	if buildCount == 0 {
+		fmt.Println("[claw] no pod services declare build:")
+		return nil
+	}
+
+	if err := buildPlannedServiceImages(podDir, plans, false); err != nil {
+		return err
+	}
+
+	fmt.Printf("[claw] built %d pod service image(s)\n", buildCount)
+	return nil
 }
 
 func resolveClawfilePath(input string) (string, error) {

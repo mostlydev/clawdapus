@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
 
 func TestGenerateWritesDockerfile(t *testing.T) {
@@ -188,7 +190,7 @@ func TestGenerateBuildsMatchingDriverBaseImageWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	clawfilePath := filepath.Join(dir, "Clawfile")
 
-	input := `FROM hermes:latest
+	input := `FROM ` + hermes.BaseImageTag + `
 
 CLAW_TYPE hermes
 AGENT AGENTS.md
@@ -205,7 +207,7 @@ AGENT AGENTS.md
 	if len(args) != 4 {
 		t.Fatalf("expected docker build invocation with 4 args, got %v", args)
 	}
-	if !reflect.DeepEqual(args[:3], []string{"build", "-t", "hermes:latest"}) {
+	if !reflect.DeepEqual(args[:3], []string{"build", "-t", hermes.BaseImageTag}) {
 		t.Fatalf("unexpected docker build args prefix: %v", args)
 	}
 	if baseDockerfile == "" {

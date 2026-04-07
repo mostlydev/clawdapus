@@ -29,7 +29,9 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Fix: cllama prompt cache efficiency** ([#122](https://github.com/mostlydev/clawdapus/issues/122)) — feed and time context is now appended after the system prompt rather than prepended, enabling Anthropic prompt cache reuse across requests.
+- **Four-verb image lifecycle** — `claw pull` is now the explicit infra freshness command, `claw build` is pod-aware with no path, and `claw up` is strict by default with `--fix` as the opt-in auto-remediation path.
+- **Pinned infra manifest plumbing** — release builds stamp first-party infra image tags into the `claw` binary, and source checkouts now use the same pinned refs with fail-closed behavior when a tag is unpublished.
 
 ## v0.6.2 <Badge type="tip" text="Latest" /> {#v0-6-2}
 

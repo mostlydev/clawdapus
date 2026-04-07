@@ -3,6 +3,8 @@ package cllama
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mostlydev/clawdapus/internal/infraimages"
 )
 
 const passthroughProxyType = "passthrough"
@@ -27,13 +29,12 @@ func ProxyServiceName(proxyType string) string {
 }
 
 // ProxyImageRef returns the default image reference for a proxy type.
-// Passthrough uses the consolidated "ghcr.io/mostlydev/cllama:latest" image.
 func ProxyImageRef(proxyType string) string {
 	pt := ProxyType(proxyType)
 	if pt == passthroughProxyType {
-		return "ghcr.io/mostlydev/cllama:latest"
+		return fmt.Sprintf("ghcr.io/mostlydev/cllama:%s", infraimages.DefaultCllamaTag)
 	}
-	return fmt.Sprintf("ghcr.io/mostlydev/cllama-%s:latest", pt)
+	return fmt.Sprintf("ghcr.io/mostlydev/cllama-%s:%s", pt, infraimages.DefaultCllamaTag)
 }
 
 // ProxyHealthcheckBinary returns the binary path used by compose healthchecks.

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
 
 func TestAgentAddCreatesFilesAndUpdatesPod(t *testing.T) {
@@ -170,7 +172,7 @@ func TestAgentAddTypeDefaults(t *testing.T) {
 		baseImage string
 	}{
 		{name: "generic", agentName: "genericone", clawType: "generic", baseImage: "alpine:3.20"},
-		{name: "hermes", agentName: "hermesone", clawType: "hermes", baseImage: "hermes:latest"},
+		{name: "hermes", agentName: "hermesone", clawType: "hermes", baseImage: hermes.BaseImageTag},
 		{name: "nanoclaw", agentName: "nanoclawone", clawType: "nanoclaw", baseImage: "nanoclaw-orchestrator:latest"},
 		{name: "microclaw", agentName: "microclawone", clawType: "microclaw", baseImage: "microclaw:latest"},
 		{name: "nullclaw", agentName: "nullclawone", clawType: "nullclaw", baseImage: "nullclaw:latest"},

@@ -20,6 +20,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Verify pinned infra tags exist in GHCR
+        run: go run ./scripts/check-release-infra-tags --release-tag "${{ github.ref_name }}"
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           args: release --clean

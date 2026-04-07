@@ -14,8 +14,8 @@ func TestBaseImageProvider(t *testing.T) {
 
 	tag, dockerfile := d.BaseImage()
 
-	if tag != "hermes:latest" {
-		t.Fatalf("expected tag hermes:latest, got %q", tag)
+	if tag != BaseImageTag {
+		t.Fatalf("expected tag %s, got %q", BaseImageTag, tag)
 	}
 	if !strings.HasPrefix(dockerfile, "FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim") {
 		t.Fatal("Dockerfile should start from the uv Python base image")

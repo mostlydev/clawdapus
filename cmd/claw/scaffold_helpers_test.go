@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
 
 func TestParseClawTypeAcceptsSupportedValues(t *testing.T) {
@@ -50,7 +52,7 @@ func TestDefaultBaseImageForClawType(t *testing.T) {
 		want     string
 	}{
 		{name: "openclaw", clawType: "openclaw", want: "openclaw:latest"},
-		{name: "hermes", clawType: "hermes", want: "hermes:latest"},
+		{name: "hermes", clawType: "hermes", want: hermes.BaseImageTag},
 		{name: "nanoclaw", clawType: "nanoclaw", want: "nanoclaw-orchestrator:latest"},
 		{name: "microclaw", clawType: "microclaw", want: "microclaw:latest"},
 		{name: "nullclaw", clawType: "nullclaw", want: "nullclaw:latest"},

@@ -384,23 +384,20 @@ The logger (`cllama/internal/logging/logger.go`) writes one JSON object per line
 
 ### Image Resolution
 
-When `claw up` encounters a cllama proxy declaration, it resolves the image through the standard `ensureImage()` fallback chain:
+Operator flow is explicit now:
 
-1. Check if the image exists locally.
-2. Attempt `docker pull` from the registry.
-3. Attempt a local Dockerfile build.
-4. Attempt a git URL build.
-
-For the public `ghcr.io/mostlydev/cllama` image, step 2 succeeds on most systems. The git URL fallback does not work for cllama because the Docker builder cannot access the private submodule repo.
+1. `claw pull` fetches the pinned cllama image the current `claw` binary expects.
+2. `claw up` stays strict and tells you to run `claw pull` when the proxy image is missing.
+3. `claw up --fix` performs that remediation automatically.
 
 ### Build and Publish
 
-The cllama image supports multi-architecture builds:
+For end users, prefer `claw pull`. The raw multi-arch build below is contributor-only release tooling:
 
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/mostlydev/cllama:latest \
+  -t ghcr.io/mostlydev/cllama:<tag> \
   --push cllama/
 ```
 

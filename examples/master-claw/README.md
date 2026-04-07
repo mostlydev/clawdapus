@@ -16,20 +16,13 @@ Demonstrates fleet governance using a Master Claw (ADR-012).
 3. `/fleet/alerts` feed is injected into governor's context on every LLM turn
 4. Governor has an INVOKE schedule that fires every 5 minutes for periodic review
 
-## Prerequisites
-
-The `claw-api` image must exist locally before first run. Build it from the repo root:
-
-```bash
-cd /path/to/clawdapus
-docker build -t ghcr.io/mostlydev/claw-api:latest -f dockerfiles/claw-api/Dockerfile .
-```
-
 ## Running
 
 ```bash
 cp .env.example .env
 # Fill in Discord bot tokens and OPENROUTER_API_KEY
+claw pull
+claw build
 claw up -d
 claw ps
 claw logs governor

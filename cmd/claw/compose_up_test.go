@@ -1036,7 +1036,7 @@ func TestMergedPortsPortsOnly(t *testing.T) {
 	}
 }
 
-func TestResolveManagedServiceImageBuildOnlyClawfile(t *testing.T) {
+func TestBuildPlannedServiceImagesBuildOnlyClawfile(t *testing.T) {
 	tmpDir := t.TempDir()
 	clawfilePath := filepath.Join(tmpDir, "agents", "shared", "OpenClawfile")
 	if err := os.MkdirAll(filepath.Dir(clawfilePath), 0o755); err != nil {
@@ -1054,8 +1054,6 @@ func TestResolveManagedServiceImageBuildOnlyClawfile(t *testing.T) {
 			},
 		},
 	}
-	p := &pod.Pod{Name: "Research Pod"}
-
 	prevExists := imageExistsLocally
 	prevGenerate := generateClawDockerfile
 	prevBuildGenerated := buildGeneratedImage
@@ -1090,9 +1088,21 @@ func TestResolveManagedServiceImageBuildOnlyClawfile(t *testing.T) {
 		return nil
 	}
 
-	imageRef, err := resolveManagedServiceImage(tmpDir, p, "bot", svc)
+	plans, err := planPodServiceImages(&pod.Pod{
+		Name: "Research Pod",
+		Services: map[string]*pod.Service{
+			"bot": svc,
+		},
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("planPodServiceImages: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected one planned image, got %d", len(plans))
+	}
+	imageRef := plans[0].ImageRef
+	if err := buildPlannedServiceImages(tmpDir, plans, false); err != nil {
+		t.Fatalf("buildPlannedServiceImages: %v", err)
 	}
 	if imageRef != "claw-local/research-pod-bot:latest" {
 		t.Fatalf("unexpected generated image ref: %q", imageRef)
@@ -1111,7 +1121,7 @@ func TestResolveManagedServiceImageBuildOnlyClawfile(t *testing.T) {
 	}
 }
 
-func TestResolveManagedServiceImageRebuildsClawfileBuildWhenTagExistsLocally(t *testing.T) {
+func TestBuildPlannedServiceImagesRebuildsClawfileBuildWhenTagExistsLocally(t *testing.T) {
 	tmpDir := t.TempDir()
 	clawfilePath := filepath.Join(tmpDir, "agents", "shared", "OpenClawfile")
 	if err := os.MkdirAll(filepath.Dir(clawfilePath), 0o755); err != nil {
@@ -1130,8 +1140,6 @@ func TestResolveManagedServiceImageRebuildsClawfileBuildWhenTagExistsLocally(t *
 			},
 		},
 	}
-	p := &pod.Pod{Name: "Research Pod"}
-
 	prevExists := imageExistsLocally
 	prevGenerate := generateClawDockerfile
 	prevBuildGenerated := buildGeneratedImage
@@ -1170,10 +1178,19 @@ func TestResolveManagedServiceImageRebuildsClawfileBuildWhenTagExistsLocally(t *
 		return nil
 	}
 
-	imageRef, err := resolveManagedServiceImage(tmpDir, p, "bot", svc)
+	plans, err := planPodServiceImages(&pod.Pod{
+		Name: "Research Pod",
+		Services: map[string]*pod.Service{
+			"bot": svc,
+		},
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("planPodServiceImages: %v", err)
 	}
+	if err := buildPlannedServiceImages(tmpDir, plans, false); err != nil {
+		t.Fatalf("buildPlannedServiceImages: %v", err)
+	}
+	imageRef := plans[0].ImageRef
 	if imageRef != svc.Image {
 		t.Fatalf("expected image ref %q, got %q", svc.Image, imageRef)
 	}
@@ -1182,7 +1199,7 @@ func TestResolveManagedServiceImageRebuildsClawfileBuildWhenTagExistsLocally(t *
 	}
 }
 
-func TestResolveManagedServiceImageBuildsPlainDockerfile(t *testing.T) {
+func TestBuildPlannedServiceImagesBuildsPlainDockerfile(t *testing.T) {
 	tmpDir := t.TempDir()
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	if err := os.WriteFile(dockerfilePath, []byte("FROM alpine\n"), 0o644); err != nil {
@@ -1202,8 +1219,6 @@ func TestResolveManagedServiceImageBuildsPlainDockerfile(t *testing.T) {
 			},
 		},
 	}
-	p := &pod.Pod{Name: "test-pod"}
-
 	prevExists := imageExistsLocally
 	prevGenerate := generateClawDockerfile
 	prevBuildGenerated := buildGeneratedImage
@@ -1236,10 +1251,19 @@ func TestResolveManagedServiceImageBuildsPlainDockerfile(t *testing.T) {
 		return nil
 	}
 
-	imageRef, err := resolveManagedServiceImage(tmpDir, p, "bot", svc)
+	plans, err := planPodServiceImages(&pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"bot": svc,
+		},
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("planPodServiceImages: %v", err)
 	}
+	if err := buildPlannedServiceImages(tmpDir, plans, false); err != nil {
+		t.Fatalf("buildPlannedServiceImages: %v", err)
+	}
+	imageRef := plans[0].ImageRef
 	if imageRef != "ghcr.io/example/bot:latest" {
 		t.Fatalf("expected image ref to remain unchanged, got %q", imageRef)
 	}
@@ -2448,7 +2472,7 @@ func TestBuildFeedManifestUsesOrdinalClawID(t *testing.T) {
 		Name: "test-pod",
 		Services: map[string]*pod.Service{
 			"claw-wall": {
-				Image:  conversationWallImageRef,
+				Image:  resolveConversationWallImageRef(),
 				Expose: []string{conversationWallInternalPort},
 			},
 			"trader": {
@@ -2903,8 +2927,8 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	if wall == nil {
 		t.Fatal("expected claw-wall service to be injected")
 	}
-	if wall.Image != conversationWallImageRef {
-		t.Fatalf("expected claw-wall image %q, got %q", conversationWallImageRef, wall.Image)
+	if wall.Image != resolveConversationWallImageRef() {
+		t.Fatalf("expected claw-wall image %q, got %q", resolveConversationWallImageRef(), wall.Image)
 	}
 	if !slices.Equal(wall.Expose, []string{conversationWallInternalPort}) {
 		t.Fatalf("expected claw-wall expose %v, got %v", []string{conversationWallInternalPort}, wall.Expose)

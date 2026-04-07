@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+
+	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
 
 const (
@@ -167,7 +169,7 @@ func defaultBaseImageForClawType(clawType string) string {
 	case "openclaw":
 		return "openclaw:latest"
 	case "hermes":
-		return "hermes:latest"
+		return hermes.BaseImageTag
 	case "nanoclaw":
 		return "nanoclaw-orchestrator:latest"
 	case "microclaw":
