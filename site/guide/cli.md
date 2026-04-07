@@ -36,8 +36,8 @@ Without a pod file, `claw pull` fetches the binary's pinned runtime infra images
 # Pull just the pinned infra images
 claw pull
 
-# Pull infra plus this pod's registry services
-claw pull -f claw-pod.yml
+# Pull infra plus another pod's registry services
+claw pull ./examples/quickstart/claw-pod.yml
 ```
 
 ---
@@ -66,7 +66,7 @@ When a driver's base image is missing locally, `claw build` resolves it automati
 claw build -t trading-desk-analyst:latest ./agents/analyst
 
 # Build every build-owned service in the current pod
-claw build -f claw-pod.yml
+claw build
 ```
 
 ---

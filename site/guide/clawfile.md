@@ -252,7 +252,7 @@ claw build -t my-agent:latest ./agents/my-agent
 claw build -t my-agent:latest --context ./build-context ./agents/my-agent
 
 # Build every build-owned service in the current pod
-claw build -f claw-pod.yml
+claw build
 ```
 
 ::: tip Auto-Built Base Images

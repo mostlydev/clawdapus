@@ -20,9 +20,9 @@ workflow is tag-driven: pushing a semver tag on master triggers
 GitHub release) and `.github/workflows/deploy-site.yml` deploys the updated
 site to clawdapus.dev.
 
-`cllama` and the infra Docker images (`cllama`, `claw-wall`, `claw-api`,
-`hermes-base`) are on separate release cycles with manual steps — this skill
-covers both sides.
+`cllama` and the infra Docker images (`cllama`, `clawdash`, `claw-wall`,
+`claw-api`, `hermes-base`) are on separate release cycles with manual steps —
+this skill covers both sides.
 
 Your job is to prepare everything locally, confirm with the user, then push.
 
@@ -316,10 +316,13 @@ git push origin master
 git push origin v0.X.Y --force
 ```
 
-## Step 9: Docker image rebuilds (post-release)
+## Step 9: Docker image rebuilds and registry verification
 
-Clawdapus ships several infra images that are NOT auto-built by CI. Rebuild
-any that were affected by the release.
+Clawdapus release binaries now hard-fail on missing pinned infra tags. Before
+you push the release tag, make sure every required image ref exists in ghcr.io.
+`claw-api`, `clawdash`, and `claw-wall` have CI workflows on `master`, but the
+release workflow verifies versioned refs (`v0.X.Y`), so you may still need to
+push those tags manually for the release you are cutting.
 
 Prerequisite: `docker buildx create --name multiarch-builder --use` (one-time
 setup). Authenticate to ghcr.io: `gh auth token | docker login ghcr.io -u
@@ -335,23 +338,37 @@ docker buildx build \
   --push cllama/
 ```
 
+### clawdash
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/mostlydev/clawdash:latest \
+  -t ghcr.io/mostlydev/clawdash:v0.X.Y \
+  --push \
+  -f dockerfiles/clawdash/Dockerfile .
+```
+
 ### claw-wall
 
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t ghcr.io/mostlydev/claw-wall:latest \
+  -t ghcr.io/mostlydev/claw-wall:v0.X.Y \
   --push \
   -f dockerfiles/claw-wall/Dockerfile .
 ```
 
 ### claw-api
 
-**Not published to ghcr.io.** Build locally from repo root if users will
-consume it:
-
 ```bash
-docker build -t ghcr.io/mostlydev/claw-api:latest -f dockerfiles/claw-api/Dockerfile .
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/mostlydev/claw-api:latest \
+  -t ghcr.io/mostlydev/claw-api:v0.X.Y \
+  --push \
+  -f dockerfiles/claw-api/Dockerfile .
 ```
 
 ### hermes-base
@@ -365,8 +382,16 @@ docker buildx build \
   --push dockerfiles/hermes-base/
 ```
 
-New ghcr.io packages default to private — after first push, visit the GitHub
-package settings UI and flip them to public.
+### Verify refs before tagging
+
+Run the release manifest verifier locally before `git tag`:
+
+```bash
+go run ./scripts/check-release-infra-tags --release-tag v0.X.Y
+```
+
+If a new ghcr.io package was just created, visit the GitHub package settings UI
+and flip it to public before shipping the release.
 
 ## Step 10: Verify
 

@@ -23,6 +23,9 @@ func TestBaseImageProvider(t *testing.T) {
 	if !strings.Contains(dockerfile, "https://github.com/NousResearch/hermes-agent.git") {
 		t.Fatal("Dockerfile should clone the correct Hermes upstream repository")
 	}
+	if !strings.Contains(dockerfile, `ARG HERMES_UPSTREAM_TAG=`+UpstreamTag) {
+		t.Fatal("Dockerfile should pin the Hermes upstream tag")
+	}
 	if !strings.Contains(dockerfile, `"/opt/hermes-agent[messaging,cron]"`) {
 		t.Fatal("Dockerfile should install Hermes with messaging and cron extras")
 	}

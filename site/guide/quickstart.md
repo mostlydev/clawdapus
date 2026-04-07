@@ -63,13 +63,13 @@ Edit `.env` and set:
 source .env
 
 # 1. Pull pinned runtime infra + any registry-backed pod services
-claw pull -f claw-pod.yml
+claw pull
 
 # 2. Build this pod's local build: services
-claw build -f claw-pod.yml
+claw build
 
 # 3. Compile the pod and launch it
-claw up -f claw-pod.yml -d
+claw up -d
 ```
 
 Clawdapus keeps the operator loop explicit:
@@ -79,7 +79,7 @@ Clawdapus keeps the operator loop explicit:
 - `claw up` compiles the pod and launches it
 - `claw down` tears the pod back down
 
-`claw up` stays strict by default and tells you which command to run when something is missing. For onboarding, `claw up --fix -f claw-pod.yml -d` will do the remediation steps automatically.
+`claw up` stays strict by default and tells you which command to run when something is missing. For onboarding, `claw up --fix -d` will do the remediation steps automatically.
 
 `claw up` resolves `${...}` placeholders inside `x-claw` metadata from your shell environment and the pod-local `.env` file, so you do not need to duplicate handle IDs or guild IDs into service `environment:` blocks.
 
@@ -88,8 +88,8 @@ Clawdapus keeps the operator loop explicit:
 Check that everything is running:
 
 ```bash
-claw ps -f claw-pod.yml        # assistant + cllama both running
-claw health -f claw-pod.yml    # both healthy
+claw ps        # assistant + cllama both running
+claw health    # both healthy
 ```
 
 Message `@quickstart-bot` in your Discord server. The bot responds through the governance proxy -- it has no direct API access. The dashboards update live.
@@ -97,7 +97,7 @@ Message `@quickstart-bot` in your Discord server. The bot responds through the g
 When you're done:
 
 ```bash
-claw down -f claw-pod.yml
+claw down
 ```
 
 ## Dashboards

@@ -42,13 +42,13 @@ cp .env.example .env
 source .env
 
 # 1. Pull pinned runtime infra + any registry-backed pod services
-claw pull -f claw-pod.yml
+claw pull
 
 # 2. Build this pod's local build: services
-claw build -f claw-pod.yml
+claw build
 
 # 3. Compile the pod and launch it
-claw up -f claw-pod.yml -d
+claw up -d
 ```
 
 The quickstart follows the four-verb operator loop:
@@ -58,13 +58,13 @@ The quickstart follows the four-verb operator loop:
 - `claw up` compiles the pod and launches it
 - `claw down` tears the pod back down in [step 6](#6-clean-up)
 
-`claw up` is strict by default. If something is missing, it prints the exact remediation command (`claw pull` or `claw build`). If you want a first-run shortcut, use `claw up --fix -f claw-pod.yml -d`.
+`claw up` is strict by default. If something is missing, it prints the exact remediation command (`claw pull` or `claw build`). If you want a first-run shortcut, use `claw up --fix -d`.
 
 ## 4. Verify
 
 ```bash
-claw ps -f claw-pod.yml       # assistant + cllama both running
-claw health -f claw-pod.yml   # both healthy
+claw ps       # assistant + cllama both running
+claw health   # both healthy
 ```
 
 Open **http://localhost:8181** — the cllama governance proxy dashboard. Every LLM call in real time: which agent, which model, token counts, cost.
@@ -78,7 +78,7 @@ Message `@quickstart-bot` in your Discord server. Every message routes through t
 Check the audit trail:
 
 ```bash
-claw logs -f claw-pod.yml cllama
+claw logs cllama
 ```
 
 Structured JSON for every request: agent, model, tokens, cost, latency.
@@ -121,5 +121,5 @@ claw init --from ~/path/to/openclaw/config
 ## Clean up
 
 ```bash
-claw down -f claw-pod.yml
+claw down
 ```

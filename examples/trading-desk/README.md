@@ -60,15 +60,15 @@ ANTHROPIC_API_KEY=...
 
 ```bash
 # Pull pinned infra, then build the pod's local services
-claw pull -f claw-pod.yml
-claw build -f claw-pod.yml
-claw up -f claw-pod.yml -d
+claw pull
+claw build
+claw up -d
 
 # Check health
-claw health -f claw-pod.yml
+claw health
 
 # Tail logs
-claw logs -f claw-pod.yml tiverton
+claw logs tiverton
 ```
 
 ## Spike integration test

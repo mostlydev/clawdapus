@@ -34,17 +34,17 @@ cp .env.example .env
 source .env
 
 # 1. pull pinned runtime infra + any registry-backed pod services
-claw pull -f claw-pod.yml
+claw pull
 
 # 2. build this pod's local build: services
-claw build -f claw-pod.yml
+claw build
 
 # 3. compile the pod and launch it
-claw up -f claw-pod.yml -d
+claw up -d
 
 # Verify
-claw ps -f claw-pod.yml        # assistant + cllama both running
-claw health -f claw-pod.yml    # both healthy
+claw ps        # assistant + cllama both running
+claw health    # both healthy
 
 # Run any docker compose command against the pod
 claw compose exec assistant bash
@@ -52,7 +52,7 @@ claw compose restart cllama
 claw compose top
 
 # 4. tear the pod down when you're done
-claw down -f claw-pod.yml
+claw down
 ```
 
 The cllama governance proxy dashboard runs on port **8181** — every LLM call in real time: which agent, which model, token counts, cost.
@@ -65,7 +65,7 @@ The operator surface is four verbs:
 - `claw up` compiles the pod and launches it, staying strict by default
 - `claw down` tears the pod back down
 
-If `claw up` finds something missing, it tells you exactly which command to run next. For a first-run shortcut, use `claw up --fix -f claw-pod.yml -d`.
+If `claw up` finds something missing, it tells you exactly which command to run next. For a first-run shortcut, use `claw up --fix -d`.
 
 Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
 

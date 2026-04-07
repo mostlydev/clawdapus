@@ -95,11 +95,11 @@ curl -sSL https://raw.githubusercontent.com/mostlydev/clawdapus/master/install.s
 git clone https://github.com/mostlydev/clawdapus.git
 cd clawdapus/examples/quickstart
 cp .env.example .env   # add your keys
-claw pull -f claw-pod.yml      # pinned runtime infra + registry services
-claw build -f claw-pod.yml     # local build: services
-claw up -f claw-pod.yml -d     # compile + launch
-claw health -f claw-pod.yml  # ✓ all healthy
-claw down -f claw-pod.yml      # tear down when you're done
+claw pull      # pinned runtime infra + registry services
+claw build     # local build: services
+claw up -d     # compile + launch
+claw health    # ✓ all healthy
+claw down      # tear down when you're done
 ```
 
 The everyday operator loop is `claw pull`, `claw build`, `claw up`, `claw down`.

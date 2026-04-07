@@ -240,12 +240,18 @@ func normalizeQuickstartBlockCommands(block string) []string {
 			continue
 		case strings.HasPrefix(trimmed, "claw logs -f "):
 			continue
+		case strings.HasPrefix(trimmed, "claw logs "):
+			continue
 		case strings.HasPrefix(trimmed, "claw down -f "):
+			continue
+		case strings.HasPrefix(trimmed, "claw down"):
 			continue
 		case strings.HasPrefix(trimmed, "cp .env.example .env"):
 			out = append(out, trimmed)
 			out = append(out, quickstartEnvRewriteSnippet())
 		case strings.HasPrefix(trimmed, "claw health -f claw-pod.yml"):
+			out = append(out, "wait_for_health")
+		case strings.HasPrefix(trimmed, "claw health"):
 			out = append(out, "wait_for_health")
 		case strings.HasPrefix(trimmed, "claw agent add "):
 			if strings.Contains(trimmed, "--yes") {
