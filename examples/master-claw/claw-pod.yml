@@ -5,6 +5,9 @@ x-claw:
     proxy: [passthrough]
     env:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+  models-defaults:
+    primary: openrouter/anthropic/claude-sonnet-4
+    fallback: anthropic/claude-haiku-4-5
 
 services:
   worker-a:
@@ -42,6 +45,8 @@ services:
       dockerfile: Clawfile
     x-claw:
       agent: ./agents/GOVERNOR.md
+      models:
+        primary: openrouter/anthropic/claude-opus-4-1
       feeds: [fleet-alerts]
       surfaces:
         - "service://claw-api"

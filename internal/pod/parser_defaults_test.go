@@ -305,6 +305,31 @@ func TestParseModelsDefaultsAdditiveNewSlot(t *testing.T) {
 	}
 }
 
+func TestParseModelsDefaultsRejectsNonMap(t *testing.T) {
+	const yaml = `
+x-claw:
+  pod: bad-model-defaults
+  models-defaults:
+    primary: openrouter/anthropic/claude-sonnet-4
+
+services:
+  worker:
+    image: worker:latest
+    x-claw:
+      agent: ./AGENTS.md
+      models:
+        - openrouter/google/gemini-2.5-flash
+`
+
+	_, err := Parse(strings.NewReader(yaml))
+	if err == nil {
+		t.Fatal("expected non-map models error")
+	}
+	if !strings.Contains(err.Error(), "models: expected map") {
+		t.Fatalf("expected wrapped models parse error, got %v", err)
+	}
+}
+
 func TestParseModelsNoDefaultsNoServiceModels(t *testing.T) {
 	const yaml = `
 x-claw:

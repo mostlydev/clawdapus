@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Pod-level model slots** ([#118](https://github.com/mostlydev/clawdapus/issues/118)) — `claw-pod.yml` now supports service-level `x-claw.models` and pod-level `x-claw.models-defaults`. `claw up` compiles the merged slot map into each service's runtime config so operators can retarget models per pod without rebuilding shared images.
 
 ## v0.7.0 <Badge type="tip" text="Latest" /> {#v0-7-0}
 
