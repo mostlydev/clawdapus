@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -51,6 +52,102 @@ func TestMergeResolvedSkills(t *testing.T) {
 	}
 	if merged[2].Name != "pod.md" {
 		t.Fatalf("expected pod-level-only skill to be appended, got %q", merged[2].Name)
+	}
+}
+
+func TestMergeModelSlots(t *testing.T) {
+	tests := []struct {
+		name  string
+		image map[string]string
+		pod   map[string]string
+		want  map[string]string
+	}{
+		{
+			name:  "pod overrides image per key",
+			image: map[string]string{"primary": "image-primary", "fallback": "image-fallback"},
+			pod:   map[string]string{"primary": "pod-primary"},
+			want:  map[string]string{"primary": "pod-primary", "fallback": "image-fallback"},
+		},
+		{
+			name:  "image only key preserved",
+			image: map[string]string{"fallback": "image-fallback"},
+			pod:   map[string]string{"primary": "pod-primary"},
+			want:  map[string]string{"primary": "pod-primary", "fallback": "image-fallback"},
+		},
+		{
+			name:  "nil pod returns cloned image",
+			image: map[string]string{"primary": "image-primary"},
+			pod:   nil,
+			want:  map[string]string{"primary": "image-primary"},
+		},
+		{
+			name:  "nil image non nil pod",
+			image: nil,
+			pod:   map[string]string{"primary": "pod-primary"},
+			want:  map[string]string{"primary": "pod-primary"},
+		},
+		{
+			name:  "both nil",
+			image: nil,
+			pod:   nil,
+			want:  nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeModelSlots(tt.image, tt.pod)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("mergeModelSlots(%v, %v) = %v, want %v", tt.image, tt.pod, got, tt.want)
+			}
+		})
+	}
+
+	image := map[string]string{"primary": "image-primary"}
+	merged := mergeModelSlots(image, map[string]string{"fallback": "pod-fallback"})
+	merged["primary"] = "mutated"
+	if got := image["primary"]; got != "image-primary" {
+		t.Fatalf("expected input image map to remain unchanged, got %q", got)
+	}
+
+	const yaml = `
+x-claw:
+  pod: merge-model-slots
+  models-defaults:
+    primary: pod-default-primary
+    fallback: pod-default-fallback
+
+services:
+  suppressor:
+    image: suppressor:latest
+    x-claw:
+      agent: ./AGENTS.md
+      models: {}
+  null_suppressor:
+    image: null-suppressor:latest
+    x-claw:
+      agent: ./AGENTS.md
+      models: null
+`
+
+	parsed, err := pod.Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	imageModels := map[string]string{
+		"primary":  "image-primary",
+		"fallback": "image-fallback",
+	}
+	for _, serviceName := range []string{"suppressor", "null_suppressor"} {
+		service := parsed.Services[serviceName]
+		if service == nil || service.Claw == nil {
+			t.Fatalf("expected parsed service %q", serviceName)
+		}
+		got := mergeModelSlots(imageModels, service.Claw.Models)
+		if !reflect.DeepEqual(got, imageModels) {
+			t.Fatalf("%s: expected image-declared slots to remain after pod-default suppression, got %v", serviceName, got)
+		}
 	}
 }
 

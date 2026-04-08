@@ -13,6 +13,9 @@ x-claw:
     env:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+  models-defaults:
+    primary: openrouter/anthropic/claude-sonnet-4
+    fallback: anthropic/claude-haiku-4-5
   surfaces-defaults:
     - "service://trading-api"
     - "volume://shared-research read-write"
@@ -35,7 +38,7 @@ services:
           to: trading-floor
 ```
 
-This declares a pod called `trading-desk` with a master claw, shared proxy config, shared surfaces, and a service that inherits all of it while adding its own Discord identity and scheduled invocations.
+This declares a pod called `trading-desk` with a master claw, shared proxy config, shared model slots, shared surfaces, and a service that inherits all of it while adding its own Discord identity and scheduled invocations.
 
 ## Pod-Level Configuration
 
@@ -46,6 +49,7 @@ The top-level `x-claw` block declares shared configuration that all services inh
 | `pod` | Names the pod (used in generated artifacts and container naming) |
 | `master` | Designates the Master Claw governor for fleet oversight |
 | `cllama-defaults` | Shared governance proxy configuration -- proxy types and provider API keys |
+| `models-defaults` | Shared compile-time model slots inherited by all claw-managed services |
 | `surfaces-defaults` | Surfaces available to all services (volumes, services, channels) |
 | `feeds-defaults` | Context feeds subscribed by all services |
 | `handles-defaults` | Shared chat topology (guild IDs, channel IDs) inherited by all services |
@@ -82,14 +86,14 @@ services:
           message: "Run morning market analysis."
 ```
 
-Service-level fields include `agent`, `persona`, `cllama`, `cllama-env`, `handles`, `surfaces`, `skills`, `invoke`, `include`, and `count`.
+Service-level fields include `agent`, `persona`, `cllama`, `cllama-env`, `models`, `handles`, `surfaces`, `skills`, `invoke`, `include`, and `count`.
 
 ## Defaults and Overrides
 
 The Clawfile bakes defaults into the image. The pod YAML overrides them per-deployment. This follows a consistent pattern:
 
-- **Inherit by default.** Services receive pod-level `cllama-defaults`, `surfaces-defaults`, `feeds-defaults`, and `handles-defaults` automatically.
-- **Override to replace.** Setting a field at the service level replaces the pod default entirely.
+- **Inherit by default.** Services receive pod-level `cllama-defaults`, `models-defaults`, `surfaces-defaults`, `feeds-defaults`, and `handles-defaults` automatically.
+- **Override to replace.** Setting a field at the service level replaces the pod default entirely, except `models`, which merges additively per slot.
 - **Spread to extend.** Use `...` to inherit the pod default and add to it:
 
 ```yaml
@@ -102,6 +106,33 @@ The Clawfile bakes defaults into the image. The pod YAML overrides them per-depl
 ::: tip The Spread Operator
 The `...` entry in a list means "include everything from the pod-level default here." This lets you extend shared config without duplicating it.
 :::
+
+## Model Slot Precedence
+
+Image `MODEL` labels still define the base slot map, but pod YAML can retarget slots at deploy time:
+
+```yaml
+x-claw:
+  models-defaults:
+    primary: openrouter/anthropic/claude-sonnet-4
+    fallback: anthropic/claude-haiku-4-5
+
+services:
+  analyst:
+    image: trading-desk-analyst:latest
+    x-claw:
+      agent: ./agents/analyst/AGENTS.md
+      models:
+        primary: openrouter/google/gemini-2.5-flash
+```
+
+Precedence is:
+
+- service `x-claw.models`
+- pod `x-claw.models-defaults`
+- image `MODEL` labels
+
+`x-claw.models` merges additively over `models-defaults`, so overriding `primary` still inherits `fallback` unless you explicitly suppress pod defaults. `models: {}` and `models: null` both suppress pod defaults only; image-declared slots still apply.
 
 ## Mixed Cognitive and Non-Cognitive Services
 

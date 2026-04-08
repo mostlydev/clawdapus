@@ -61,6 +61,7 @@ type rawClawBlock struct {
 	Agent     string                 `yaml:"agent"`
 	Persona   string                 `yaml:"persona"`
 	Cllama    interface{}            `yaml:"cllama"`
+	Models    map[string]string      `yaml:"models"`
 	CllamaEnv map[string]string      `yaml:"cllama-env"`
 	Count     int                    `yaml:"count"`
 	Handles   map[string]interface{} `yaml:"handles"`
@@ -258,6 +259,7 @@ func Parse(r io.Reader) (*Pod, error) {
 				Agent:       svc.XClaw.Agent,
 				Persona:     svc.XClaw.Persona,
 				Cllama:      cllama,
+				Models:      svc.XClaw.Models,
 				CllamaEnv:   svc.XClaw.CllamaEnv,
 				Count:       count,
 				Handles:     handles,
@@ -639,6 +641,7 @@ func expandPodDefaults(root map[string]interface{}) error {
 
 	defaults := podDefaults{
 		CllamaDefaults:   deepCopyMapOrNil(rawXClaw["cllama-defaults"]),
+		ModelsDefaults:   deepCopyMapOrNil(rawXClaw["models-defaults"]),
 		SurfacesDefaults: deepCopySliceOrNil(rawXClaw["surfaces-defaults"]),
 		FeedsDefaults:    deepCopySliceOrNil(rawXClaw["feeds-defaults"]),
 		ToolsDefaults:    deepCopySliceOrNil(rawXClaw["tools-defaults"]),
@@ -681,6 +684,7 @@ func expandPodDefaults(root map[string]interface{}) error {
 
 type podDefaults struct {
 	CllamaDefaults   map[string]interface{}
+	ModelsDefaults   map[string]interface{}
 	SurfacesDefaults []interface{}
 	FeedsDefaults    []interface{}
 	ToolsDefaults    []interface{}
@@ -690,6 +694,9 @@ type podDefaults struct {
 
 func applyRawPodDefaults(raw map[string]interface{}, defaults podDefaults) error {
 	if err := applyRawCllamaDefaults(raw, defaults.CllamaDefaults); err != nil {
+		return err
+	}
+	if err := applyRawModelsDefaults(raw, defaults.ModelsDefaults); err != nil {
 		return err
 	}
 	if err := applyRawListDefaults(raw, "surfaces", defaults.SurfacesDefaults); err != nil {
@@ -738,6 +745,33 @@ func applyRawCllamaDefaults(raw map[string]interface{}, defaults map[string]inte
 		return nil
 	}
 	raw["cllama-env"] = mergeStringMap(defaultEnv, serviceEnv)
+	return nil
+}
+
+func applyRawModelsDefaults(raw map[string]interface{}, defaults map[string]interface{}) error {
+	serviceVal, present := raw["models"]
+	if !present {
+		if len(defaults) > 0 {
+			raw["models"] = deepCopyMap(defaults)
+		}
+		return nil
+	}
+
+	serviceMap, err := mapStringAny(serviceVal)
+	if err != nil {
+		return fmt.Errorf("models: %w", err)
+	}
+	if serviceMap == nil {
+		return nil
+	}
+	if len(serviceMap) == 0 {
+		raw["models"] = map[string]interface{}{}
+		return nil
+	}
+	if len(defaults) == 0 {
+		return nil
+	}
+	raw["models"] = mergeStringMap(defaults, serviceMap)
 	return nil
 }
 

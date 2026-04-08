@@ -43,6 +43,24 @@ services:
         - ./skills/team-conventions.md
 `
 
+const testPodWithModelsYAML = `
+x-claw:
+  pod: model-pod
+
+services:
+  weston:
+    image: trader:latest
+    x-claw:
+      agent: ./AGENTS.md
+      models:
+        primary: openrouter/google/gemini-2.5-flash
+        fallback: anthropic/claude-haiku-4-5
+  sentinel:
+    image: sentinel:latest
+    x-claw:
+      agent: ./AGENTS.md
+`
+
 func TestParsePodExtractsSkills(t *testing.T) {
 	pod, err := Parse(strings.NewReader(testPodWithSkillsYAML))
 	if err != nil {
@@ -71,6 +89,39 @@ func TestParsePodDefaultsEmptySkills(t *testing.T) {
 	}
 	if len(coord.Claw.Skills) != 0 {
 		t.Errorf("expected 0 skills, got %d", len(coord.Claw.Skills))
+	}
+}
+
+func TestParsePodServiceLevelModels(t *testing.T) {
+	pod, err := Parse(strings.NewReader(testPodWithModelsYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	weston := pod.Services["weston"]
+	if weston == nil || weston.Claw == nil {
+		t.Fatal("expected weston claw service")
+	}
+	if got := weston.Claw.Models["primary"]; got != "openrouter/google/gemini-2.5-flash" {
+		t.Fatalf("expected primary model slot, got %q", got)
+	}
+	if got := weston.Claw.Models["fallback"]; got != "anthropic/claude-haiku-4-5" {
+		t.Fatalf("expected fallback model slot, got %q", got)
+	}
+}
+
+func TestParsePodNoModelsBlock(t *testing.T) {
+	pod, err := Parse(strings.NewReader(testPodWithModelsYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sentinel := pod.Services["sentinel"]
+	if sentinel == nil || sentinel.Claw == nil {
+		t.Fatal("expected sentinel claw service")
+	}
+	if len(sentinel.Claw.Models) != 0 {
+		t.Fatalf("expected no model slots, got %+v", sentinel.Claw.Models)
 	}
 }
 
