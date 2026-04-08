@@ -2705,6 +2705,9 @@ var seedKeyDefs = []seedKeyDef{
 	{"ANTHROPIC_API_KEY_1", "anthropic", "seed:ANTHROPIC_API_KEY_1", "backup-1"},
 	{"OPENROUTER_API_KEY", "openrouter", "seed:OPENROUTER_API_KEY", "primary"},
 	{"OPENROUTER_API_KEY_1", "openrouter", "seed:OPENROUTER_API_KEY_1", "backup-1"},
+	{"GEMINI_API_KEY", "google", "seed:GEMINI_API_KEY", "primary"},
+	{"GEMINI_API_KEY_1", "google", "seed:GEMINI_API_KEY_1", "backup-1"},
+	{"GOOGLE_API_KEY", "google", "seed:GOOGLE_API_KEY", "backup-2"},
 }
 
 // v2ProviderFile is the providers.json v2 on-disk shape (write path only).
@@ -2740,6 +2743,7 @@ var defaultBaseURLs = map[string]string{
 	"xai":        "https://api.x.ai/v1",
 	"anthropic":  "https://api.anthropic.com/v1",
 	"openrouter": "https://openrouter.ai/api/v1",
+	"google":     "https://generativelanguage.googleapis.com/v1beta/openai",
 }
 
 var defaultAuths = map[string]string{
@@ -2790,6 +2794,7 @@ func mergeProviderSeeds(authDir string, p *pod.Pod) error {
 		"XAI_BASE_URL":        "xai",
 		"ANTHROPIC_BASE_URL":  "anthropic",
 		"OPENROUTER_BASE_URL": "openrouter",
+		"GOOGLE_BASE_URL":     "google",
 	}
 	customBaseURLs := make(map[string]string)
 	for envKey, prov := range baseURLEnvMap {
@@ -3004,8 +3009,10 @@ func loadOrGenerateUIToken(authDir string) (string, error) {
 func isProviderKey(key string) bool {
 	switch key {
 	case "OPENAI_API_KEY", "OPENAI_API_KEY_1", "OPENAI_API_KEY_2",
+		"XAI_API_KEY", "XAI_API_KEY_1",
 		"ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY_1",
-		"OPENROUTER_API_KEY", "OPENROUTER_API_KEY_1":
+		"OPENROUTER_API_KEY", "OPENROUTER_API_KEY_1",
+		"GEMINI_API_KEY", "GEMINI_API_KEY_1", "GOOGLE_API_KEY":
 		return true
 	}
 	return strings.HasPrefix(key, "PROVIDER_API_KEY")

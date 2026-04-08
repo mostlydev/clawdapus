@@ -2143,7 +2143,10 @@ func TestCollectProxyTypes(t *testing.T) {
 func TestStripLLMKeys(t *testing.T) {
 	env := map[string]string{
 		"OPENAI_API_KEY":    "sk-real",
+		"XAI_API_KEY":       "sk-xai",
 		"ANTHROPIC_API_KEY": "sk-ant",
+		"GEMINI_API_KEY":    "sk-gemini",
+		"GOOGLE_API_KEY":    "sk-google",
 		"DISCORD_BOT_TOKEN": "keep",
 		"LOG_LEVEL":         "info",
 	}
@@ -2151,8 +2154,17 @@ func TestStripLLMKeys(t *testing.T) {
 	if _, ok := env["OPENAI_API_KEY"]; ok {
 		t.Error("should strip OPENAI_API_KEY")
 	}
+	if _, ok := env["XAI_API_KEY"]; ok {
+		t.Error("should strip XAI_API_KEY")
+	}
 	if _, ok := env["ANTHROPIC_API_KEY"]; ok {
 		t.Error("should strip ANTHROPIC_API_KEY")
+	}
+	if _, ok := env["GEMINI_API_KEY"]; ok {
+		t.Error("should strip GEMINI_API_KEY")
+	}
+	if _, ok := env["GOOGLE_API_KEY"]; ok {
+		t.Error("should strip GOOGLE_API_KEY")
 	}
 	if env["DISCORD_BOT_TOKEN"] != "keep" {
 		t.Error("should keep non-LLM keys")
@@ -2167,10 +2179,15 @@ func TestIsProviderKey(t *testing.T) {
 		{"OPENAI_API_KEY", true},
 		{"OPENAI_API_KEY_1", true},
 		{"OPENAI_API_KEY_2", true},
+		{"XAI_API_KEY", true},
+		{"XAI_API_KEY_1", true},
 		{"ANTHROPIC_API_KEY", true},
 		{"ANTHROPIC_API_KEY_1", true},
 		{"OPENROUTER_API_KEY", true},
 		{"OPENROUTER_API_KEY_1", true},
+		{"GEMINI_API_KEY", true},
+		{"GEMINI_API_KEY_1", true},
+		{"GOOGLE_API_KEY", true},
 		{"PROVIDER_API_KEY_CUSTOM", true},
 		{"DISCORD_BOT_TOKEN", false},
 		{"LOG_LEVEL", false},
@@ -2292,6 +2309,116 @@ func TestMergeProviderSeedsWritesXAIProvider(t *testing.T) {
 	}
 	if xai.Keys[0].Secret != "xai-primary" {
 		t.Fatalf("expected xai secret preserved, got %q", xai.Keys[0].Secret)
+	}
+}
+
+func TestMergeProviderSeedsWritesGoogleProvider(t *testing.T) {
+	dir := t.TempDir()
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"GEMINI_API_KEY":  "gemini-primary",
+						"GOOGLE_API_KEY":  "google-alias",
+						"GOOGLE_BASE_URL": "https://proxy.example.test/google",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+
+	var probe struct {
+		Providers map[string]struct {
+			BaseURL     string `json:"base_url"`
+			ActiveKeyID string `json:"active_key_id"`
+			Keys        []struct {
+				ID     string `json:"id"`
+				Secret string `json:"secret"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatalf("parse providers.json: %v", err)
+	}
+
+	google, ok := probe.Providers["google"]
+	if !ok {
+		t.Fatal("google missing from output")
+	}
+	if google.BaseURL != "https://proxy.example.test/google" {
+		t.Fatalf("expected google base URL override, got %q", google.BaseURL)
+	}
+	if google.ActiveKeyID != "seed:GEMINI_API_KEY" {
+		t.Fatalf("expected google active key to prefer GEMINI_API_KEY, got %q", google.ActiveKeyID)
+	}
+	if len(google.Keys) != 2 {
+		t.Fatalf("expected 2 google keys, got %d", len(google.Keys))
+	}
+	if google.Keys[0].ID != "seed:GEMINI_API_KEY" || google.Keys[0].Secret != "gemini-primary" {
+		t.Fatalf("unexpected primary google key: %+v", google.Keys[0])
+	}
+	if google.Keys[1].ID != "seed:GOOGLE_API_KEY" || google.Keys[1].Secret != "google-alias" {
+		t.Fatalf("unexpected alias google key: %+v", google.Keys[1])
+	}
+}
+
+func TestMergeProviderSeedsUsesGoogleAliasWhenGeminiMissing(t *testing.T) {
+	dir := t.TempDir()
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"GOOGLE_API_KEY": "google-alias",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+
+	var probe struct {
+		Providers map[string]struct {
+			BaseURL     string `json:"base_url"`
+			ActiveKeyID string `json:"active_key_id"`
+			Keys        []struct {
+				ID     string `json:"id"`
+				Secret string `json:"secret"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatalf("parse providers.json: %v", err)
+	}
+
+	google, ok := probe.Providers["google"]
+	if !ok {
+		t.Fatal("google missing from output")
+	}
+	if google.BaseURL != "https://generativelanguage.googleapis.com/v1beta/openai" {
+		t.Fatalf("expected default google base URL, got %q", google.BaseURL)
+	}
+	if google.ActiveKeyID != "seed:GOOGLE_API_KEY" {
+		t.Fatalf("expected GOOGLE_API_KEY alias to become active key, got %q", google.ActiveKeyID)
+	}
+	if len(google.Keys) != 1 || google.Keys[0].ID != "seed:GOOGLE_API_KEY" || google.Keys[0].Secret != "google-alias" {
+		t.Fatalf("unexpected google alias seed output: %+v", google.Keys)
 	}
 }
 
