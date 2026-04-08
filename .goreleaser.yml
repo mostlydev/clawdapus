@@ -19,13 +19,17 @@ builds:
       - amd64
       - arm64
     ldflags:
+      # IMPORTANT: infra tag ldflags must use {{.Tag}} (full git tag, e.g. v0.8.0),
+      # NOT {{.Version}} which strips the leading "v" and produces e.g. "0.8.0".
+      # The ghcr.io infra images are published with the "v" prefix, so stripping
+      # it leaves claw pull looking for a tag that does not exist.
       - >-
         -s -w
         -X main.version={{.Version}}
         -X main.commit={{.Commit}}
-        -X main.infraClawAPITag={{.Version}}
-        -X main.infraClawdashTag={{.Version}}
-        -X main.infraClawWallTag={{.Version}}
+        -X main.infraClawAPITag={{.Tag}}
+        -X main.infraClawdashTag={{.Tag}}
+        -X main.infraClawWallTag={{.Tag}}
 
 archives:
   - format: tar.gz
