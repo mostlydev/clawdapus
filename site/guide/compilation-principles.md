@@ -78,6 +78,9 @@ x-claw:
     proxy: [passthrough]
     env:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+  models-defaults:
+    primary: openrouter/anthropic/claude-sonnet-4
+    fallback: anthropic/claude-haiku-4-5
   surfaces-defaults:
     - "service://trading-api"
     - "volume://shared-research read-write"
@@ -97,7 +100,7 @@ x-claw:
 - No `...` in the list -- full replacement of defaults
 - `...` present -- defaults splice at that position
 - At most one `...` per list
-- Map fields (`cllama-defaults.env`) merge additively; service keys win on collision
+- Map fields (`cllama-defaults.env`, `models-defaults`) merge additively; service keys win on collision
 :::
 
 ### What it prevents
