@@ -5,11 +5,12 @@ description: >
   with cllama submodule releases if needed, determines the next semver version,
   backfills any missing changelog entries, sweeps docs (CLI reference, README,
   manifesto) for updates tied to the release, writes the new version entry in
-  the site changelog, updates the nav dropdown and Latest badge, commits, tags,
-  pushes (which triggers goreleaser + site deploy), and rebuilds any affected
-  Docker images. Use this skill whenever the user says "release", "cut a
-  release", "new version", "update the changelog and tag", "prepare a release",
-  or anything about shipping a new version of the claw CLI.
+  the site changelog, updates the nav dropdown and Latest badge, pushes the
+  release-prep commit to master, prepublishes the pinned infra image refs the
+  release workflow verifies, then tags and pushes the release. Use this skill
+  whenever the user says "release", "cut a release", "new version", "update
+  the changelog and tag", "prepare a release", or anything about shipping a
+  new version of the claw CLI.
 ---
 
 # Release
@@ -24,11 +25,13 @@ site to clawdapus.dev.
 `claw-api`, `hermes-base`) are on separate release cycles with manual steps —
 this skill covers both sides.
 
-Your job is to prepare everything locally, confirm with the user, then push.
+Your job is to prepare everything locally, push the release-prep commit to
+`master`, prepublish whatever pinned images the release verifier needs, then
+push the release tag.
 
 ## Step 1: Pre-release sanity checks
 
-Before touching anything, verify the working tree and the build:
+Before touching anything, verify the working tree, auth, and local build:
 
 ```bash
 # Clean working tree check
@@ -37,16 +40,27 @@ git status
 # Make sure local tags match GitHub — local tag list can lag badly
 git fetch --tags
 
-# Build sanity — catch compile errors before tagging
-go build ./...
+# Auth sanity — releases usually need both gh and docker/ghcr
+gh auth status -t
+
+# Build sanity — goreleaser runs vet + unit tests before publishing
 go vet ./...
+go test ./...
 ```
 
 If the working tree is dirty, decide with the user whether those changes are
 part of this release or should be stashed/committed separately. Don't mix
 unrelated changes into the release commit.
 
-If `go build` or `go vet` fails, stop and fix it — goreleaser will fail too.
+If `go vet` or `go test` fails, stop and fix it — goreleaser will fail too.
+
+If the release touched runtime docs or image lifecycle behavior, consider
+running the heavier repo checks as well:
+
+```bash
+go test -tags integration ./...
+go test -tags spike -run TestQuickstartDocsRunInFreshDockerContainer ./cmd/claw/...
+```
 
 ## Step 2: Determine cllama coordination
 
@@ -269,7 +283,7 @@ In `site/.vitepress/config.mts`, find the version string in the nav array:
 
 Replace it with the new version.
 
-## Step 8: Commit, tag, and push
+## Step 8: Commit and push master first
 
 Stage the changed files explicitly — don't use `git add -A`:
 
@@ -290,39 +304,52 @@ Backfill v0.A.B–v0.C.D changelog entries. Add v0.X.Y with [brief summary].
 Update nav dropdown and CLI reference."
 ```
 
-Tag:
+Push `master` before creating the release tag. The tag workflow's release job
+verifies pinned infra refs immediately, so you need the release-prep commit on
+the remote default branch before you start tagging.
 
 ```bash
-git tag v0.X.Y
+git push origin master
 ```
 
-Before pushing, confirm with the user: "Ready to push commit + tag. This will
-trigger goreleaser (binary release) and site deploy. Go?"
-
-Then push:
+If local SSH auth is flaky, switch git to GitHub credential helper and push via
+HTTPS instead:
 
 ```bash
-git push origin master --tags
+gh auth setup-git
+git push https://github.com/mostlydev/clawdapus.git master:master
 ```
 
-If the push is rejected because the remote is ahead, pull with rebase, re-tag
-(delete old local tag first), and push again:
+After the push, wait for the `master` workflows you just touched to settle:
+
+```bash
+gh run list --branch master --limit 5
+```
+
+If the push is rejected because the remote is ahead, pull with rebase and push
+`master` again before doing any tag work:
 
 ```bash
 git pull --rebase origin master
-git tag -d v0.X.Y
-git tag v0.X.Y
 git push origin master
-git push origin v0.X.Y --force
 ```
 
-## Step 9: Docker image rebuilds and registry verification
+## Step 9: Prepublish pinned image refs and verify registry visibility
 
 Clawdapus release binaries now hard-fail on missing pinned infra tags. Before
 you push the release tag, make sure every required image ref exists in ghcr.io.
-`claw-api`, `clawdash`, and `claw-wall` have CI workflows on `master`, but the
-release workflow verifies versioned refs (`v0.X.Y`), so you may still need to
-push those tags manually for the release you are cutting.
+The release workflow checks these refs before goreleaser runs:
+
+- `ghcr.io/mostlydev/claw-api:v0.X.Y`
+- `ghcr.io/mostlydev/clawdash:v0.X.Y`
+- `ghcr.io/mostlydev/claw-wall:v0.X.Y`
+- whatever fixed refs are currently pinned in
+  `internal/infraimages/release_manifest.go` (today: `cllama` and
+  `hermes-base`)
+
+The tag-triggered image workflows for `claw-api`, `clawdash`, and `claw-wall`
+run too late to satisfy that verifier. If the versioned refs do not already
+exist, publish them manually before creating the release tag.
 
 Prerequisite: `docker buildx create --name multiarch-builder --use` (one-time
 setup). Authenticate to ghcr.io: `gh auth token | docker login ghcr.io -u
@@ -390,10 +417,49 @@ Run the release manifest verifier locally before `git tag`:
 go run ./scripts/check-release-infra-tags --release-tag v0.X.Y
 ```
 
-If a new ghcr.io package was just created, visit the GitHub package settings UI
-and flip it to public before shipping the release.
+Do not stop at the local verifier. If your local Docker client is authenticated
+to ghcr.io, private packages can still appear healthy locally while the public
+release workflow or end users fail.
 
-## Step 10: Verify
+Check package visibility explicitly for anything newly pushed:
+
+```bash
+gh api /users/mostlydev/packages/container/claw-api
+gh api /users/mostlydev/packages/container/clawdash
+gh api /users/mostlydev/packages/container/claw-wall
+gh api /users/mostlydev/packages/container/hermes-base
+```
+
+For a public package, the JSON should show `"visibility":"public"`.
+
+For the package most likely to have just been created, also verify anonymous
+pull token issuance:
+
+```bash
+curl -fsS 'https://ghcr.io/token?service=ghcr.io&scope=repository:mostlydev/hermes-base:pull'
+```
+
+If GitHub created a new package as private, flip it to public in the GitHub UI
+before shipping the release.
+
+## Step 10: Tag and push the release
+
+Only after `master` is pushed and the pinned refs are public and verifiably
+present should you create the release tag:
+
+```bash
+git tag -a v0.X.Y -m "v0.X.Y"
+git push origin refs/tags/v0.X.Y
+```
+
+If local SSH auth is broken, use the same HTTPS fallback:
+
+```bash
+gh auth setup-git
+git push https://github.com/mostlydev/clawdapus.git refs/tags/v0.X.Y
+```
+
+## Step 11: Verify
 
 After pushing the clawdapus tag, confirm the workflows started:
 
@@ -401,11 +467,22 @@ After pushing the clawdapus tag, confirm the workflows started:
 gh run list --limit 5
 ```
 
-Check the GitHub release was created:
+Watch the `Release` workflow through completion:
+
+```bash
+gh run watch <release-run-id> --exit-status
+```
+
+Then check the GitHub release object and assets:
 
 ```bash
 gh release view v0.X.Y
 ```
+
+Also make sure the tag-triggered `claw-api Image`, `clawdash Image`, and
+`claw-wall Image` workflows finished green. They are confirmation that the CI
+publishing path still works, but they are not the thing the release job
+depended on.
 
 Report the status to the user with links:
 
@@ -426,8 +503,14 @@ Report the status to the user with links:
 - **Docker buildx builder missing**: `docker buildx create --name
   multiarch-builder --use` before push.
 - **ghcr.io package is private**: After first push of a new package, flip it
-  to public in the GitHub UI — the Docker image fallback in `claw up` will
-  fail otherwise.
+  to public in the GitHub UI. Local `docker manifest inspect` can succeed when
+  your machine is logged in, while the public release workflow or end users
+  still fail.
+- **Release verifier fails even though tag image workflows exist**: expected.
+  The release workflow runs before the tag-triggered image workflows finish.
+  Prepublish the versioned `claw-api`, `clawdash`, and `claw-wall` refs first.
+- **`git push origin master` fails on SSH auth**: run `gh auth setup-git` and
+  push via `https://github.com/mostlydev/clawdapus.git`.
 - **Rebase moved the tagged commit**: If you had to rebase after tagging, the
   tag points at the old (pre-rebase) commit. Delete the local tag, re-create
   it, and force-push just the tag. If goreleaser already created a partial
