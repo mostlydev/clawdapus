@@ -43,6 +43,7 @@ type ClawBlock struct {
 	Agent        string
 	Persona      string
 	Cllama       []string
+	Models       map[string]string
 	CllamaEnv    map[string]string
 	CllamaTokens map[string]string // runtime-only: expanded service name -> token
 	Count        int

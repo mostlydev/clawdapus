@@ -299,7 +299,7 @@ func runComposeUp(podFile string) error {
 			Agent:         agentFile,
 			AgentHostPath: agentHostPath,
 			Persona:       personaRef,
-			Models:        info.Models,
+			Models:        mergeModelSlots(info.Models, svc.Claw.Models),
 			Handles:       svc.Claw.Handles,
 			PeerHandles:   peerHandles,
 			Includes:      resolvedIncludes,
@@ -2451,6 +2451,23 @@ func mergeResolvedSkills(imageSkills, podSkills []driver.ResolvedSkill) []driver
 	}
 
 	return merged
+}
+
+// mergeModelSlots overlays pod-declared model slots onto image-declared slots.
+// Image-only slots are preserved; pod entries replace image entries by key.
+// Empty or nil pod maps suppress pod defaults only; image labels still apply.
+func mergeModelSlots(image, pod map[string]string) map[string]string {
+	out := cloneStringMap(image)
+	if len(pod) == 0 {
+		return out
+	}
+	if out == nil {
+		out = make(map[string]string, len(pod))
+	}
+	for key, value := range pod {
+		out[key] = value
+	}
+	return out
 }
 
 func materializeContractIncludes(baseDir, runtimeDir, agentHostPath string, includes []pod.IncludeEntry) ([]driver.ResolvedInclude, []driver.ResolvedSkill, error) {

@@ -58,6 +58,42 @@ services:
     image: claw-api:latest
 `
 
+const testPodWithModelDefaultsYAML = `
+x-claw:
+  pod: model-defaults-pod
+  models-defaults:
+    primary: openrouter/anthropic/claude-sonnet-4
+    fallback: anthropic/claude-haiku-4-5
+
+services:
+  inheritor:
+    image: inheritor:latest
+    x-claw:
+      agent: ./AGENTS.md
+  override:
+    image: override:latest
+    x-claw:
+      agent: ./AGENTS.md
+      models:
+        primary: openrouter/google/gemini-2.5-flash
+  suppressor:
+    image: suppressor:latest
+    x-claw:
+      agent: ./AGENTS.md
+      models: {}
+  null_suppressor:
+    image: null-suppressor:latest
+    x-claw:
+      agent: ./AGENTS.md
+      models: null
+  adder:
+    image: adder:latest
+    x-claw:
+      agent: ./AGENTS.md
+      models:
+        tertiary: openrouter/meta-llama/llama-4-scout
+`
+
 func TestParsePodDefaultsInheritWhenFieldOmitted(t *testing.T) {
 	p, err := Parse(strings.NewReader(testPodWithDefaultsYAML))
 	if err != nil {
@@ -179,5 +215,143 @@ services:
 	_, err := Parse(strings.NewReader(yaml))
 	if err == nil || !strings.Contains(err.Error(), `no pod-level skills-defaults declared`) {
 		t.Fatalf("expected spread-with-no-defaults error, got %v", err)
+	}
+}
+
+func TestParseModelsDefaultsInherited(t *testing.T) {
+	p, err := Parse(strings.NewReader(testPodWithModelDefaultsYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	inheritor := p.Services["inheritor"]
+	if inheritor == nil || inheritor.Claw == nil {
+		t.Fatal("expected inheritor claw service")
+	}
+	if got := inheritor.Claw.Models["primary"]; got != "openrouter/anthropic/claude-sonnet-4" {
+		t.Fatalf("expected inherited primary slot, got %q", got)
+	}
+	if got := inheritor.Claw.Models["fallback"]; got != "anthropic/claude-haiku-4-5" {
+		t.Fatalf("expected inherited fallback slot, got %q", got)
+	}
+}
+
+func TestParseModelsDefaultsOverrideMergeIsAdditive(t *testing.T) {
+	p, err := Parse(strings.NewReader(testPodWithModelDefaultsYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	override := p.Services["override"]
+	if override == nil || override.Claw == nil {
+		t.Fatal("expected override claw service")
+	}
+	if got := override.Claw.Models["primary"]; got != "openrouter/google/gemini-2.5-flash" {
+		t.Fatalf("expected overridden primary slot, got %q", got)
+	}
+	if got := override.Claw.Models["fallback"]; got != "anthropic/claude-haiku-4-5" {
+		t.Fatalf("expected inherited fallback slot, got %q", got)
+	}
+}
+
+func TestParseModelsDefaultsEmptyMapSuppresses(t *testing.T) {
+	p, err := Parse(strings.NewReader(testPodWithModelDefaultsYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	suppressor := p.Services["suppressor"]
+	if suppressor == nil || suppressor.Claw == nil {
+		t.Fatal("expected suppressor claw service")
+	}
+	if len(suppressor.Claw.Models) != 0 {
+		t.Fatalf("expected empty models to suppress defaults, got %+v", suppressor.Claw.Models)
+	}
+}
+
+func TestParseModelsDefaultsNullSuppresses(t *testing.T) {
+	p, err := Parse(strings.NewReader(testPodWithModelDefaultsYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	suppressor := p.Services["null_suppressor"]
+	if suppressor == nil || suppressor.Claw == nil {
+		t.Fatal("expected null_suppressor claw service")
+	}
+	if len(suppressor.Claw.Models) != 0 {
+		t.Fatalf("expected null models to suppress defaults, got %+v", suppressor.Claw.Models)
+	}
+}
+
+func TestParseModelsDefaultsAdditiveNewSlot(t *testing.T) {
+	p, err := Parse(strings.NewReader(testPodWithModelDefaultsYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	adder := p.Services["adder"]
+	if adder == nil || adder.Claw == nil {
+		t.Fatal("expected adder claw service")
+	}
+	if got := adder.Claw.Models["primary"]; got != "openrouter/anthropic/claude-sonnet-4" {
+		t.Fatalf("expected inherited primary slot, got %q", got)
+	}
+	if got := adder.Claw.Models["fallback"]; got != "anthropic/claude-haiku-4-5" {
+		t.Fatalf("expected inherited fallback slot, got %q", got)
+	}
+	if got := adder.Claw.Models["tertiary"]; got != "openrouter/meta-llama/llama-4-scout" {
+		t.Fatalf("expected additive tertiary slot, got %q", got)
+	}
+}
+
+func TestParseModelsDefaultsRejectsNonMap(t *testing.T) {
+	const yaml = `
+x-claw:
+  pod: bad-model-defaults
+  models-defaults:
+    primary: openrouter/anthropic/claude-sonnet-4
+
+services:
+  worker:
+    image: worker:latest
+    x-claw:
+      agent: ./AGENTS.md
+      models:
+        - openrouter/google/gemini-2.5-flash
+`
+
+	_, err := Parse(strings.NewReader(yaml))
+	if err == nil {
+		t.Fatal("expected non-map models error")
+	}
+	if !strings.Contains(err.Error(), "models: expected map") {
+		t.Fatalf("expected wrapped models parse error, got %v", err)
+	}
+}
+
+func TestParseModelsNoDefaultsNoServiceModels(t *testing.T) {
+	const yaml = `
+x-claw:
+  pod: no-model-defaults
+
+services:
+  worker:
+    image: worker:latest
+    x-claw:
+      agent: ./AGENTS.md
+`
+
+	p, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	worker := p.Services["worker"]
+	if worker == nil || worker.Claw == nil {
+		t.Fatal("expected worker claw service")
+	}
+	if len(worker.Claw.Models) != 0 {
+		t.Fatalf("expected nil/empty models with no defaults, got %+v", worker.Claw.Models)
 	}
 }
