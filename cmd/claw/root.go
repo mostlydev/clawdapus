@@ -17,7 +17,13 @@ var rootCmd = &cobra.Command{
 	SilenceUsage: true,
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		maybeSyncSkill()
-		maybeNotifyUpdate()
+		// Skip the "update available" notice for `claw update` itself —
+		// the running process is still the old binary, so the notice would
+		// fire immediately after a successful update and tell the user to
+		// run the command they just ran.
+		if cmd.Name() != "update" {
+			maybeNotifyUpdate()
+		}
 	},
 }
 
