@@ -162,7 +162,7 @@ Wraps `docker compose ps` against `compose.generated.yml`. Subject to the [stale
 ```
 NAME                    IMAGE                           COMMAND   SERVICE     CREATED        STATUS
 trading-desk-analyst-1  trading-desk-analyst:latest      ...      analyst     2 hours ago    Up 2 hours (healthy)
-trading-desk-cllama-1   ghcr.io/mostlydev/cllama:v0.2.2  ...      cllama      2 hours ago    Up 2 hours (healthy)
+trading-desk-cllama-1   ghcr.io/mostlydev/cllama:v0.3.2  ...      cllama      2 hours ago    Up 2 hours (healthy)
 ```
 
 **Future (Design -- Phase 5):** `claw ps` will include drift scoring from the governance proxy:

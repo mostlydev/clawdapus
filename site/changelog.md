@@ -29,9 +29,16 @@ outline: deep
 
 ## Unreleased
 
-- **Pod-level model slots** ([#118](https://github.com/mostlydev/clawdapus/issues/118)) — `claw-pod.yml` now supports service-level `x-claw.models` and pod-level `x-claw.models-defaults`. `claw up` compiles the merged slot map into each service's runtime config so operators can retarget models per pod without rebuilding shared images.
+<!-- Nothing yet -->
 
-## v0.7.0 <Badge type="tip" text="Latest" /> {#v0-7-0}
+## v0.8.0 <Badge type="tip" text="Latest" /> {#v0-8-0}
+
+*2026-04-08*
+
+- **Pod-level model slots** ([#118](https://github.com/mostlydev/clawdapus/issues/118)) — `claw-pod.yml` now supports service-level `x-claw.models` and pod-level `x-claw.models-defaults`. `claw up` compiles the merged slot map into each service's runtime config so operators can retarget models per pod without rebuilding shared images. Service-level overrides merge additively per slot over pod defaults, so you can replace `primary` without losing `fallback`. Pod slots still overlay image `MODEL` labels; `models: {}` and `models: null` suppress pod defaults only.
+- **Cllama image bump to v0.3.2** — `DefaultCllamaTag` now pins [cllama v0.3.2](https://github.com/mostlydev/cllama/releases/tag/v0.3.2), which carries the cache-friendly feed injection ordering fix. Operators running `claw pull` will now actually receive the Anthropic prompt cache fix tracked in [#122](https://github.com/mostlydev/clawdapus/issues/122).
+
+## v0.7.0 {#v0-7-0}
 
 *2026-04-07*
 
