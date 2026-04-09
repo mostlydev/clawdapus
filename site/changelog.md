@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.3 <Badge type="tip" text="Latest" /> {#v0-8-3}
+## v0.8.4 <Badge type="tip" text="Latest" /> {#v0-8-4}
+
+*2026-04-09*
+
+- **Fix: OpenClaw pod-origin cron schedules stop loading on openclaw ≥ 2026.3.24** ([#132](https://github.com/mostlydev/clawdapus/issues/132)) — OpenClaw `2026.3.24` changed its cron store contract: the jobs file is now resolved under `CONFIG_DIR/cron/jobs.json` using a versioned envelope (`{"version":1,"jobs":[...]}`), not the legacy bare array at `/app/state/cron/jobs.json`. Clawdapus was still emitting the old path and shape, so pod-origin schedules never loaded into OpenClaw's in-memory registry, `openclaw cron run <id>` returned `unknown cron job id`, and `claw-api` eventually marked affected schedules as degraded after repeated wake failures. The driver now writes `jobs.json` under the writable `/app/config/cron/` directory in the versioned envelope format, and the `examples/openclaw/` Clawfile is bumped to `openclaw@2026.4.9` so the example's `INVOKE` heartbeat actually loads.
+
+## v0.8.3 {#v0-8-3}
 
 *2026-04-09*
 
