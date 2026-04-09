@@ -9,7 +9,7 @@ The initial architecture plan stated that the `INVOKE` directive would be implem
 
 ## Decision
 
-We have updated the enforcement mechanism for the `INVOKE` directive. Instead of relying on system cron, the `INVOKE` directive bakes scheduled tasks into the OCI image as labels (`claw.invoke.N`). At runtime, the driver extracts these labels and translates them into a runner-native scheduling format. For example, the OpenClaw driver generates a `jobs.json` file and mounts it directly into OpenClaw's `/app/state/cron/` directory, allowing OpenClaw's internal scheduler to pick it up automatically.
+We have updated the enforcement mechanism for the `INVOKE` directive. Instead of relying on system cron, the `INVOKE` directive bakes scheduled tasks into the OCI image as labels (`claw.invoke.N`). At runtime, the driver extracts these labels and translates them into a runner-native scheduling format. For example, the OpenClaw driver generates a versioned `jobs.json` store under its writable config directory (`CONFIG_DIR/cron/jobs.json`; `/app/config/cron/jobs.json` in the current Clawdapus layout), allowing OpenClaw's internal scheduler to pick it up automatically.
 
 ## Rationale
 

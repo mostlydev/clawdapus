@@ -141,8 +141,8 @@ workflow validation instrument for the richer `examples/trading-desk/` example.
   guild ID, `groupPolicy`, `dmPolicy`, `allowBots`, `mentionPatterns`, peer `users[]`
 - `jobs.json` generated correctly: `agentTurn` payloads with `delivery.mode=announce`
   and `delivery.to` resolved to the real channel ID
-- `compose.generated.yml` contains correct bind mounts for `/app/config` and
-  `/app/state/cron`
+- `compose.generated.yml` contains the writable `/app/config` bind mount used for
+  both `openclaw.json` and `cron/jobs.json`
 - Both agent containers start and serve mounted files at the expected paths
 - `openclaw health --json` reports healthy inside the tiverton container
 - Both agents post startup greetings to Discord (`tiverton online.`, `westin online.`)

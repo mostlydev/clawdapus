@@ -7,6 +7,22 @@ import (
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
+func parseJobStore(t *testing.T, data []byte) []map[string]interface{} {
+	t.Helper()
+
+	var store struct {
+		Version int                      `json:"version"`
+		Jobs    []map[string]interface{} `json:"jobs"`
+	}
+	if err := json.Unmarshal(data, &store); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if store.Version != 1 {
+		t.Fatalf("expected version=1, got %d", store.Version)
+	}
+	return store.Jobs
+}
+
 func TestGenerateJobsJSONSingleInvocation(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		ServiceName: "tiverton",
@@ -24,10 +40,7 @@ func TestGenerateJobsJSONSingleInvocation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var jobs []map[string]interface{}
-	if err := json.Unmarshal(data, &jobs); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
+	jobs := parseJobStore(t, data)
 	if len(jobs) != 1 {
 		t.Fatalf("expected 1 job, got %d", len(jobs))
 	}
@@ -79,16 +92,22 @@ func TestGenerateJobsJSONNoTo(t *testing.T) {
 	}
 
 	// Use raw map to check key presence
-	var raw []map[string]json.RawMessage
+	var raw struct {
+		Version int                          `json:"version"`
+		Jobs    []map[string]json.RawMessage `json:"jobs"`
+	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if len(raw) != 1 {
-		t.Fatalf("expected 1 job, got %d", len(raw))
+	if raw.Version != 1 {
+		t.Fatalf("expected version=1, got %d", raw.Version)
+	}
+	if len(raw.Jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(raw.Jobs))
 	}
 
 	var delivery map[string]json.RawMessage
-	if err := json.Unmarshal(raw[0]["delivery"], &delivery); err != nil {
+	if err := json.Unmarshal(raw.Jobs[0]["delivery"], &delivery); err != nil {
 		t.Fatalf("invalid delivery JSON: %v", err)
 	}
 	if _, haTo := delivery["to"]; haTo {
@@ -113,9 +132,8 @@ func TestGenerateJobsJSONDeterministicIDs(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var firstJobs, secondJobs []map[string]interface{}
-	json.Unmarshal(first, &firstJobs)
-	json.Unmarshal(second, &secondJobs)
+	firstJobs := parseJobStore(t, first)
+	secondJobs := parseJobStore(t, second)
 
 	id1 := firstJobs[0]["id"]
 	id2 := secondJobs[0]["id"]
@@ -134,10 +152,7 @@ func TestGenerateJobsJSONEmptyInvocations(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var jobs []map[string]interface{}
-	if err := json.Unmarshal(data, &jobs); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
+	jobs := parseJobStore(t, data)
 	if len(jobs) != 0 {
 		t.Errorf("expected empty array, got %d jobs", len(jobs))
 	}
@@ -160,10 +175,7 @@ func TestGenerateJobsJSONDisablesPodOriginJobs(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var jobs []map[string]interface{}
-	if err := json.Unmarshal(data, &jobs); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
+	jobs := parseJobStore(t, data)
 	if jobs[0]["enabled"] != false {
 		t.Fatalf("expected pod-origin job to be disabled, got %v", jobs[0]["enabled"])
 	}
