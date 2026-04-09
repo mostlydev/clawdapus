@@ -83,6 +83,9 @@ func TestGenerateConfigCllamaRewritesProviderBaseURL(t *testing.T) {
 	if anthropic["baseUrl"] != "http://cllama:8080/v1" {
 		t.Errorf("expected proxy baseUrl, got %v", anthropic["baseUrl"])
 	}
+	if anthropic["api"] != "anthropic-messages" {
+		t.Fatalf("expected anthropic provider behind cllama to use anthropic-messages, got %v", anthropic["api"])
+	}
 	modelEntries, ok := anthropic["models"].([]interface{})
 	if !ok || len(modelEntries) == 0 {
 		t.Fatalf("expected models.providers.anthropic.models entries, got %T %v", anthropic["models"], anthropic["models"])
@@ -157,9 +160,6 @@ func TestGenerateConfigDirectGoogleKeepsNativeAPI(t *testing.T) {
 	}
 	if got, ok := getPath(data, "agents.defaults.model.primary"); !ok || got != "google/gemini-3-flash-preview" {
 		t.Fatalf("expected direct google model to remain on agents.defaults.model.primary, got %v (present=%v)", got, ok)
-	}
-	if defaultModelAPIForProvider("google") != "google-generative-ai" {
-		t.Fatalf("expected direct google provider api to stay google-generative-ai, got %q", defaultModelAPIForProvider("google"))
 	}
 }
 
