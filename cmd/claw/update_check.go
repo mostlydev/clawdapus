@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -90,8 +92,8 @@ func writeCache(c *updateCheckCache) {
 	_ = os.WriteFile(path, data, 0o644)
 }
 
-// maybeNotifyUpdate prints an update notice if a newer release is available.
-// Checks at most once per hour; never blocks on network errors.
+// maybeNotifyUpdate prints an update notice if a strictly newer release is
+// available. Checks at most once per hour; never blocks on network errors.
 func maybeNotifyUpdate() {
 	if version == "dev" {
 		return
@@ -99,7 +101,7 @@ func maybeNotifyUpdate() {
 
 	cache := readCache()
 	if cache != nil && time.Since(cache.CheckedAt) < updateCheckInterval {
-		if cache.LatestTag != "" && cache.LatestTag != version {
+		if isNewerRelease(cache.LatestTag, version) {
 			printUpdateNotice(cache.LatestTag)
 		}
 		return
@@ -111,9 +113,26 @@ func maybeNotifyUpdate() {
 		LatestTag: latest,
 	})
 
-	if latest != "" && latest != version {
+	if isNewerRelease(latest, version) {
 		printUpdateNotice(latest)
 	}
+}
+
+// isNewerRelease reports whether latest is a strictly higher semantic version
+// than current. Both inputs are expected to be unprefixed (e.g. "0.8.2"),
+// matching the format stored in the cache and stamped into the binary by
+// goreleaser. Returns false for empty, malformed, or equal/older versions so
+// stale caches after an upgrade don't flag a phantom "downgrade".
+func isNewerRelease(latest, current string) bool {
+	if latest == "" || current == "" {
+		return false
+	}
+	l := "v" + strings.TrimPrefix(latest, "v")
+	c := "v" + strings.TrimPrefix(current, "v")
+	if !semver.IsValid(l) || !semver.IsValid(c) {
+		return false
+	}
+	return semver.Compare(l, c) > 0
 }
 
 func printUpdateNotice(latest string) {

@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.2 <Badge type="tip" text="Latest" /> {#v0-8-2}
+## v0.8.3 <Badge type="tip" text="Latest" /> {#v0-8-3}
+
+*2026-04-09*
+
+- **Fix: update-check notifier prints phantom "downgrade" after upgrading** — the update-available notifier used a plain string inequality instead of a semver comparison, so a freshly upgraded binary reading its pre-upgrade cache (within the 1 hour TTL) would print `Update available: v0.8.2 → v0.8.1`. The notifier now uses strict semver ordering, so a stale cache whose `latest_tag` is older than the running binary no longer triggers a bogus notice. As a one-time workaround on an already-upgraded host, `rm ~/.claw/.claw-update-check` clears the stale cache.
+
+## v0.8.2 {#v0-8-2}
 
 *2026-04-09*
 
