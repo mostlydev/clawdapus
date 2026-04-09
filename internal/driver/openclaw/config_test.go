@@ -96,6 +96,73 @@ func TestGenerateConfigCllamaRewritesProviderBaseURL(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigCllamaGoogleUsesOpenAICompletions(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models:      map[string]string{"primary": "google/gemini-3-flash-preview"},
+		Cllama:      []string{"passthrough"},
+		CllamaToken: "weston:abc123hex",
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	modelsCfg, ok := config["models"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected models config")
+	}
+	providers, ok := modelsCfg["providers"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected models.providers config")
+	}
+	google, ok := providers["google"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected models.providers.google config")
+	}
+	if google["baseUrl"] != "http://cllama:8080/v1" {
+		t.Fatalf("expected proxy baseUrl, got %v", google["baseUrl"])
+	}
+	if google["apiKey"] != "weston:abc123hex" {
+		t.Fatalf("expected cllama bearer token, got %v", google["apiKey"])
+	}
+	if google["api"] != "openai-completions" {
+		t.Fatalf("expected google provider behind cllama to use openai-completions, got %v", google["api"])
+	}
+	modelEntries, ok := google["models"].([]interface{})
+	if !ok || len(modelEntries) != 1 {
+		t.Fatalf("expected one google model entry, got %T %v", google["models"], google["models"])
+	}
+	entry, ok := modelEntries[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected google model entry object, got %T", modelEntries[0])
+	}
+	if entry["id"] != "google/gemini-3-flash-preview" {
+		t.Fatalf("expected google model id to stay provider-prefixed for cllama, got %v", entry["id"])
+	}
+}
+
+func TestGenerateConfigDirectGoogleKeepsNativeAPI(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "google/gemini-3-flash-preview"},
+	}
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := getPath(data, "models.providers.google.api"); ok {
+		t.Fatalf("expected no models.providers.google config without cllama, got %v", got)
+	}
+	if got, ok := getPath(data, "agents.defaults.model.primary"); !ok || got != "google/gemini-3-flash-preview" {
+		t.Fatalf("expected direct google model to remain on agents.defaults.model.primary, got %v (present=%v)", got, ok)
+	}
+	if defaultModelAPIForProvider("google") != "google-generative-ai" {
+		t.Fatalf("expected direct google provider api to stay google-generative-ai, got %q", defaultModelAPIForProvider("google"))
+	}
+}
+
 func TestGenerateConfigNoCllamaNoProviderRewrite(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models: map[string]string{"primary": "anthropic/claude-sonnet-4"},
