@@ -45,7 +45,10 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 
 	if len(rc.Cllama) > 0 {
 		firstProxy := cllama.ProxyBaseURL(rc.Cllama[0])
-		providerModels := cllama.CollectProviderModels(rc.Models)
+		providerModels, err := cllama.CollectProviderModels(rc.Models)
+		if err != nil {
+			return nil, fmt.Errorf("config generation: %w", err)
+		}
 		for provider, modelIDs := range providerModels {
 			basePath := "models.providers." + provider
 			if err := setPath(config, basePath+".baseUrl", firstProxy); err != nil {
@@ -56,7 +59,11 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 					return nil, fmt.Errorf("config generation: cllama provider %q apiKey: %w", provider, err)
 				}
 			}
-			if err := setPath(config, basePath+".api", openclawModelAPIForIngress(cllama.IngressSurfaceForProvider(provider))); err != nil {
+			api, err := openclawModelAPIForIngress(cllama.IngressSurfaceForProvider(provider))
+			if err != nil {
+				return nil, fmt.Errorf("config generation: cllama provider %q api: %w", provider, err)
+			}
+			if err := setPath(config, basePath+".api", api); err != nil {
 				return nil, fmt.Errorf("config generation: cllama provider %q api: %w", provider, err)
 			}
 			modelDefs := make([]interface{}, 0, len(modelIDs))
@@ -371,12 +378,14 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func openclawModelAPIForIngress(surface cllama.IngressSurface) string {
+func openclawModelAPIForIngress(surface cllama.IngressSurface) (string, error) {
 	switch surface {
 	case cllama.IngressSurfaceAnthropicMessages:
-		return "anthropic-messages"
+		return "anthropic-messages", nil
+	case cllama.IngressSurfaceOpenAIChatCompletions:
+		return "openai-completions", nil
 	default:
-		return "openai-completions"
+		return "", fmt.Errorf("unsupported cllama ingress surface %q", surface)
 	}
 }
 

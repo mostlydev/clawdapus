@@ -27,7 +27,7 @@ Minimum required surfaces:
 
 - **Listen Port:** The proxy MUST listen on `0.0.0.0:8080`.
 - **Base URL Replacement:** Clawdapus configures the agent's runner (e.g., OpenClaw, Claude Code) to use `http://cllama-<type>:8080/v1` as its LLM base URL (first proxy in chain when chaining is enabled). The runner then targets one of the canonical ingress paths beneath that base URL.
-- **Provider Identity vs Transport:** Operator-facing model refs keep provider identity (`google/gemini-*`, `anthropic/*`, etc.). The proxy ingress surface is a transport contract selected by infrastructure; runners MUST NOT invent synthetic provider prefixes such as `cllama/google`.
+- **Provider Identity vs Transport:** Operator-facing model refs keep provider identity (`google/gemini-*`, `anthropic/*`, etc.). The proxy ingress surface is a transport contract selected by infrastructure; runners MUST NOT invent synthetic provider prefixes such as `cllama/google`, and the shared ingress contract rejects them when compiling cllama-facing config.
 - **Vendor-Native Extensions:** Additional vendor-native ingress surfaces MAY exist, but only as explicit, documented exceptions when a concrete runner cannot target the canonical surfaces. They are not the default contract.
 - **Implementation Scope (Phase 4):** The wire protocol supports chained proxies, but runtime enforcement currently allows only one proxy type per pod. Declaring multiple proxy types fails fast until Phase 5 chain execution is implemented.
 

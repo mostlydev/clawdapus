@@ -56,13 +56,34 @@ func TestCollectProviderModelsDeduplicatesAndSorts(t *testing.T) {
 		"cheap":     "google/gemini-2.5-flash",
 	}
 
-	got := CollectProviderModels(models)
+	got, err := CollectProviderModels(models)
+	if err != nil {
+		t.Fatalf("CollectProviderModels() unexpected error: %v", err)
+	}
 	want := map[string][]string{
 		"anthropic": {"anthropic/claude-sonnet-4"},
 		"google":    {"google/gemini-2.5-flash", "google/gemini-2.5-pro"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CollectProviderModels() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSplitProviderModelRefRejectsSyntheticIngressProviderPrefix(t *testing.T) {
+	if provider, modelID, ok := SplitProviderModelRef("cllama/google/gemini-3-flash-preview"); ok {
+		t.Fatalf("expected synthetic ingress provider prefix to be rejected, got provider=%q model=%q", provider, modelID)
+	}
+}
+
+func TestCollectProviderModelsRejectsSyntheticIngressProviderPrefix(t *testing.T) {
+	_, err := CollectProviderModels(map[string]string{
+		"primary": "cllama/google/gemini-3-flash-preview",
+	})
+	if err == nil {
+		t.Fatal("expected synthetic ingress provider prefix to fail")
+	}
+	if err.Error() != `invalid cllama provider/model ref for slot "primary": "cllama/google/gemini-3-flash-preview"` {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

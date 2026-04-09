@@ -1,6 +1,7 @@
 package cllama
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -33,7 +34,8 @@ func NormalizeProviderID(provider string) string {
 }
 
 // SplitProviderModelRef splits a provider/model ref and normalizes the provider
-// to the canonical ID Clawdapus uses for cllama wiring.
+// to the canonical ID Clawdapus uses for cllama wiring. Bare model IDs default
+// to the anthropic provider for compatibility with existing model-ref handling.
 func SplitProviderModelRef(ref string) (string, string, bool) {
 	trimmed := strings.TrimSpace(ref)
 	if trimmed == "" {
@@ -50,6 +52,9 @@ func SplitProviderModelRef(ref string) (string, string, bool) {
 
 	provider = NormalizeProviderID(provider)
 	modelID = strings.TrimSpace(modelID)
+	if provider == "cllama" {
+		return "", "", false
+	}
 	if provider == "" || modelID == "" {
 		return "", "", false
 	}
@@ -68,12 +73,15 @@ func ProviderQualifiedModelRef(ref string) (string, string, bool) {
 
 // CollectProviderModels groups declared model refs by normalized provider and
 // emits deterministic provider-prefixed model IDs.
-func CollectProviderModels(models map[string]string) map[string][]string {
+func CollectProviderModels(models map[string]string) (map[string][]string, error) {
 	byProvider := make(map[string]map[string]struct{})
-	for _, rawRef := range models {
+	for slot, rawRef := range models {
+		if strings.TrimSpace(rawRef) == "" {
+			continue
+		}
 		provider, modelRef, ok := ProviderQualifiedModelRef(rawRef)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("invalid cllama provider/model ref for slot %q: %q", slot, rawRef)
 		}
 		if _, exists := byProvider[provider]; !exists {
 			byProvider[provider] = make(map[string]struct{})
@@ -90,7 +98,7 @@ func CollectProviderModels(models map[string]string) map[string][]string {
 		sort.Strings(modelIDs)
 		out[provider] = modelIDs
 	}
-	return out
+	return out, nil
 }
 
 // IngressSurfaceForProvider returns the canonical cllama ingress surface a
@@ -104,7 +112,9 @@ func IngressSurfaceForProvider(provider string) IngressSurface {
 	}
 }
 
-// RequestPath returns the canonical HTTP path for the ingress surface.
+// RequestPath returns the canonical HTTP path for the ingress surface. Runner
+// config templates and proxy docs should derive paths from this contract
+// instead of duplicating string literals.
 func (surface IngressSurface) RequestPath() string {
 	switch surface {
 	case IngressSurfaceAnthropicMessages:

@@ -2,7 +2,8 @@
 
 **Date:** 2026-04-09
 **Status:** Accepted
-**Depends on:** ADR-008 (cllama Sidecar Standard), ADR-019 (Model Policy Authority and Declared Failover)
+**Depends on:** ADR-008 (cllama Sidecar Standard)
+**Related to:** ADR-019 (Model Policy Authority and Declared Failover)
 **Implementation:** Issue #134
 
 ## Context
@@ -29,6 +30,7 @@ Without an explicit contract:
 3. Provider identity remains in operator-facing model refs.
    - Example: `google/gemini-3-flash-preview`, `anthropic/claude-sonnet-4`
    - We do not invent synthetic provider prefixes such as `cllama/google`.
+   - The shared ingress contract rejects reserved synthetic ingress prefixes when compiling cllama-facing config.
 4. When `cllama` is enabled, drivers compile declared model refs to one of the canonical ingress surfaces through shared infrastructure code.
 5. Anthropic-family providers, and other explicit Anthropic-wire exceptions, route through the Anthropic Messages surface.
 6. All other providers route through the OpenAI Chat Completions surface by default.
@@ -61,3 +63,4 @@ The result is a smaller and more legible trust boundary. Runners stay untrusted.
 
 - This ADR extends ADR-008; it does not replace the broader sidecar-standard decision.
 - This ADR does not change ADR-019 model-policy authority. It only formalizes the runner-to-proxy transport contract.
+- Only OpenClaw needed an immediate integration change for this ADR. The other in-tree drivers do not currently compile provider identity into runner-specific API-surface enums; they only rewrite base URLs, API keys, or generic custom-provider fields when cllama is enabled.
