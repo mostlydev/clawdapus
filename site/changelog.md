@@ -29,9 +29,15 @@ outline: deep
 
 ## Unreleased
 
-- **Native Gemini provider support** ([#119](https://github.com/mostlydev/clawdapus/issues/119)) — cllama now supports direct `google/<model>` routing through Google's OpenAI-compatible endpoint. `GEMINI_API_KEY` is the primary seed env var, `GOOGLE_API_KEY` is accepted as a lower-priority alias, `claw up` compiles Google keys into `providers.json`, and the provider-key strip path now also removes xAI/Gemini secrets from agent envs.
+<!-- Nothing yet -->
 
-## v0.8.0 <Badge type="tip" text="Latest" /> {#v0-8-0}
+## v0.8.1 <Badge type="tip" text="Latest" /> {#v0-8-1}
+
+*2026-04-08*
+
+- **Native Gemini provider support** ([#119](https://github.com/mostlydev/clawdapus/issues/119)) — cllama now supports direct `google/<model>` routing through Google's OpenAI-compatible endpoint. `GEMINI_API_KEY` is the primary seed env var, `GOOGLE_API_KEY` is accepted as a lower-priority alias, `claw up` compiles Google keys into `providers.json`, and the provider-key strip path now also removes xAI/Gemini secrets from agent envs. Pinned cllama image bumped to [v0.3.3](https://github.com/mostlydev/cllama/releases/tag/v0.3.3).
+
+## v0.8.0 {#v0-8-0}
 
 *2026-04-08*
 
