@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.1 <Badge type="tip" text="Latest" /> {#v0-8-1}
+## v0.8.2 <Badge type="tip" text="Latest" /> {#v0-8-2}
+
+*2026-04-09*
+
+- **Fix: OpenClaw Google models behind cllama** ([#127](https://github.com/mostlydev/clawdapus/issues/127)) — when `x-claw.cllama` is set and a `google/*` model is routed through the proxy, OpenClaw now compiles `models.providers.google.api` as `openai-completions` instead of the vendor-native `google-generative-ai` surface. Direct (non-cllama) Google routing is unchanged. This removes the `404 page not found` failure mode reported when running pods like `x-claw.cllama: passthrough` with `google/gemini-3-flash-preview`. Regression coverage added for both the cllama-rewrite case and the direct-provider case.
+
+## v0.8.1 {#v0-8-1}
 
 *2026-04-08*
 
