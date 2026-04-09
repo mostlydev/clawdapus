@@ -56,7 +56,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 					return nil, fmt.Errorf("config generation: cllama provider %q apiKey: %w", provider, err)
 				}
 			}
-			if err := setPath(config, basePath+".api", defaultModelAPIForProvider(provider)); err != nil {
+			if err := setPath(config, basePath+".api", cllamaModelAPIForProvider(provider)); err != nil {
 				return nil, fmt.Errorf("config generation: cllama provider %q api: %w", provider, err)
 			}
 			modelDefs := make([]interface{}, 0, len(modelIDs))
@@ -455,6 +455,17 @@ func defaultModelAPIForProvider(provider string) string {
 	case "ollama":
 		return "ollama"
 	default:
+		return "openai-completions"
+	}
+}
+
+func cllamaModelAPIForProvider(provider string) string {
+	switch normalizeProviderID(provider) {
+	case "anthropic", "synthetic", "minimax-portal", "kimi-coding", "cloudflare-ai-gateway", "xiaomi":
+		return "anthropic-messages"
+	default:
+		// cllama exposes OpenAI-compatible routing for non-Anthropic providers,
+		// even when the upstream vendor has a native API surface.
 		return "openai-completions"
 	}
 }
