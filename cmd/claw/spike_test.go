@@ -330,12 +330,19 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// ── Verify tiverton's jobs.json ──────────────────────────────────────────
 
-	jobsPath := filepath.Join(runtimeDir, "tiverton", "state", "cron", "jobs.json")
+	jobsPath := filepath.Join(runtimeDir, "tiverton", "config", "cron", "jobs.json")
 	jobsData := spikeReadFile(t, jobsPath)
-	var jobs []map[string]interface{}
-	if err := json.Unmarshal([]byte(jobsData), &jobs); err != nil {
+	var jobsStore struct {
+		Version int                      `json:"version"`
+		Jobs    []map[string]interface{} `json:"jobs"`
+	}
+	if err := json.Unmarshal([]byte(jobsData), &jobsStore); err != nil {
 		t.Fatalf("parse jobs.json: %v", err)
 	}
+	if jobsStore.Version != 1 {
+		t.Fatalf("jobs.json: expected version=1, got %d", jobsStore.Version)
+	}
+	jobs := jobsStore.Jobs
 	if len(jobs) == 0 {
 		t.Fatal("jobs.json: expected at least one job, got empty array")
 	}
@@ -366,10 +373,8 @@ func TestSpikeComposeUp(t *testing.T) {
 	// ── Verify compose.generated.yml ────────────────────────────────────────
 
 	composeSrc := spikeReadFile(t, generatedPath)
-	for _, want := range []string{"/app/state/cron", "/app/config"} {
-		if !strings.Contains(composeSrc, want) {
-			t.Errorf("compose.generated.yml: expected to contain %q", want)
-		}
+	if !strings.Contains(composeSrc, "/app/config") {
+		t.Errorf("compose.generated.yml: expected to contain %q", "/app/config")
 	}
 	if !strings.Contains(composeSrc, "cllama:") {
 		t.Errorf("compose.generated.yml: expected cllama service")
@@ -412,7 +417,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	}
 
 	// jobs.json must be readable and contain the real channel ID
-	out2, err2 := exec.Command("docker", "exec", containerName, "cat", "/app/state/cron/jobs.json").Output()
+	out2, err2 := exec.Command("docker", "exec", containerName, "cat", "/app/config/cron/jobs.json").Output()
 	if err2 != nil {
 		t.Errorf("docker exec cat jobs.json: %v", err2)
 	} else if !strings.Contains(string(out2), channelID) {

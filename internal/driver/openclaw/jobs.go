@@ -25,6 +25,11 @@ type job struct {
 	State         jobState    `json:"state"`
 }
 
+type jobStore struct {
+	Version int   `json:"version"`
+	Jobs    []job `json:"jobs"`
+}
+
 type jobSchedule struct {
 	Expr string `json:"expr"`
 	TZ   string `json:"tz"`
@@ -82,7 +87,10 @@ func GenerateJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 		jobs = append(jobs, j)
 	}
-	return json.MarshalIndent(jobs, "", "  ")
+	return json.MarshalIndent(jobStore{
+		Version: 1,
+		Jobs:    jobs,
+	}, "", "  ")
 }
 
 func deterministicJobID(parts ...string) string {

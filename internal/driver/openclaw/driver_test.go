@@ -256,7 +256,7 @@ func TestMaterializeInlinesClawdapusContextIntoMountedContract(t *testing.T) {
 	}
 }
 
-func TestMaterializeJobsDirMountedNotFile(t *testing.T) {
+func TestMaterializeWritesJobsUnderConfigDir(t *testing.T) {
 	dir := t.TempDir()
 	agentFile := filepath.Join(dir, "AGENTS.md")
 	os.WriteFile(agentFile, []byte("# Contract"), 0644)
@@ -278,12 +278,13 @@ func TestMaterializeJobsDirMountedNotFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// jobs.json must exist in the state/cron/ directory on the host
-	jobsPath := filepath.Join(dir, "state", "cron", "jobs.json")
+	// jobs.json must exist in the config/cron/ directory on the host.
+	// The parent /app/config bind mount covers this path inside the container.
+	jobsPath := filepath.Join(dir, "config", "cron", "jobs.json")
 	if _, err := os.Stat(jobsPath); err != nil {
-		t.Fatalf("jobs.json not written at state/cron/jobs.json: %v", err)
+		t.Fatalf("jobs.json not written at config/cron/jobs.json: %v", err)
 	}
-	jobsDirInfo, err := os.Stat(filepath.Join(dir, "state", "cron"))
+	jobsDirInfo, err := os.Stat(filepath.Join(dir, "config", "cron"))
 	if err != nil {
 		t.Fatalf("stat jobs dir: %v", err)
 	}
@@ -298,20 +299,23 @@ func TestMaterializeJobsDirMountedNotFile(t *testing.T) {
 		t.Fatalf("jobs.json mode = %o, want 666", got)
 	}
 
-	// The mount target must be the cron/ DIRECTORY, not the jobs.json file.
-	// Mounting the file causes EBUSY when openclaw does atomic rename next to it.
-	var jobsMount *driver.Mount
+	var configMount *driver.Mount
 	for i := range result.Mounts {
-		if result.Mounts[i].ContainerPath == "/app/state/cron" {
-			jobsMount = &result.Mounts[i]
+		if result.Mounts[i].ContainerPath == "/app/config" {
+			configMount = &result.Mounts[i]
 			break
 		}
 	}
-	if jobsMount == nil {
-		t.Fatal("expected a mount at /app/state/cron (directory), not /app/state/cron/jobs.json")
+	if configMount == nil {
+		t.Fatal("expected /app/config mount to cover config/cron/jobs.json")
 	}
-	if jobsMount.ReadOnly {
-		t.Error("jobs cron dir must be read-write so openclaw can update job state")
+	if configMount.ReadOnly {
+		t.Error("/app/config must be read-write so openclaw can update cron job state")
+	}
+	for i := range result.Mounts {
+		if result.Mounts[i].ContainerPath == "/app/state/cron" {
+			t.Fatal("unexpected legacy /app/state/cron mount")
+		}
 	}
 }
 

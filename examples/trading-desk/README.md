@@ -106,8 +106,8 @@ the required per-service Discord IDs/topology are missing.
 | `openclaw.json` cllama rewrite | `models.providers.<provider>.baseUrl` points to `cllama`, `apiKey` is per-agent token |
 | `jobs.json` structure | `agentTurn` payload, `delivery.to` = resolved channel ID |
 | cllama context files | `.claw-runtime/context/<agent>/` contains `AGENTS.md`, `CLAWDAPUS.md`, `metadata.json` |
-| Compose mounts | `/app/config` directory, `/app/state/cron` directory |
-| Container readability | `/app/config/openclaw.json`, `/app/state/cron/jobs.json`, `/claw/AGENTS.md` |
+| Compose mounts | `/app/config` directory |
+| Container readability | `/app/config/openclaw.json`, `/app/config/cron/jobs.json`, `/claw/AGENTS.md` |
 | Skills populated | `/claw/skills/` contains extracted skill files |
 | Health check | Docker healthcheck reports healthy |
 | Discord greetings | Messages appear in the channel via REST API polling |

@@ -29,7 +29,7 @@ PRIVILEGE worker root
 PRIVILEGE runtime claw-user
 
 RUN apt-get update && apt-get install -y bash ca-certificates cron curl git jq tini
-RUN npm install -g openclaw@2026.2.9
+RUN npm install -g openclaw@2026.4.9
 WORKDIR /workspace
 `
 
