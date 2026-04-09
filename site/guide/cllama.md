@@ -20,7 +20,7 @@ A single proxy instance serves the entire pod. Bearer tokens resolve which agent
 
 Isolation is achieved by strictly separating secrets:
 
-- **The proxy holds the real API keys.** Provider credentials (OpenRouter, Anthropic, OpenAI) are configured in the pod-level `cllama-defaults.env` block and never enter agent containers.
+- **The proxy holds the real API keys.** Provider credentials (OpenRouter, Anthropic, OpenAI, Gemini/Google) are configured in the pod-level `cllama-defaults.env` block and never enter agent containers.
 - **Agents get unique bearer tokens.** Each agent (and each ordinal of a scaled agent) receives a unique token generated during `claw up`.
 - **No credentials, no bypass.** Because agents lack the credentials to call providers directly, all successful inference *must* pass through the proxy -- even if a malicious prompt tricks the agent into ignoring its configured base URL.
 
@@ -173,7 +173,7 @@ The cllama container receives its configuration through environment variables in
 |---|---|
 | `CLAW_POD` | The name of the pod (e.g., `crypto-ops`). |
 | `CLAW_CONTEXT_ROOT` | Path to the shared context mount root (defaults to `/claw/context`). |
-| `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, etc. |
+| `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, etc. |
 
 ### Where Provider Keys Go
 
@@ -187,7 +187,13 @@ x-claw:
     env:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
 ```
+
+For native Gemini routing, declare models as `google/<model>`. `GEMINI_API_KEY`
+is the primary env name; `GOOGLE_API_KEY` is accepted as a lower-priority
+alias. `GOOGLE_BASE_URL` can override the default OpenAI-compatible Google
+endpoint when needed.
 
 ::: warning cllama-env, Not environment
 Provider API keys belong in `x-claw.cllama-defaults.env` (or service-level `x-claw.cllama-env`), never in the service's compose `environment:` block. Putting real keys in `environment:` defeats credential starvation -- the agent container would have direct provider access.
@@ -233,6 +239,28 @@ services:
       cllama: passthrough
       cllama-env: *cllama-keys
 ```
+
+### Native Gemini Routing
+
+Direct Gemini works through Google's OpenAI-compatible endpoint. Use the
+`google/<model>` provider prefix and seed the key through `x-claw.cllama-env`.
+
+```yaml
+services:
+  analyst:
+    x-claw:
+      agent: analyst
+      cllama: passthrough
+      models:
+        primary: google/gemini-2.5-flash
+      cllama-env:
+        GEMINI_API_KEY: ${GEMINI_API_KEY}
+        # optional override for proxies or alternate endpoints
+        GOOGLE_BASE_URL: ${GOOGLE_BASE_URL}
+```
+
+If both `GEMINI_API_KEY` and `GOOGLE_API_KEY` are present, cllama prefers
+`GEMINI_API_KEY` as the active seed key.
 
 ### Count Expansion with cllama
 
