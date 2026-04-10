@@ -64,14 +64,8 @@ func TestBuildMasterPrincipalHasAllVerbsAndOpaqueToken(t *testing.T) {
 }
 
 func TestLoadStoreRejectsInvalidGlobPattern(t *testing.T) {
-	store := &Store{
-		Principals: []Principal{{
-			Name:     "octopus",
-			Token:    "capi_deadbeef",
-			Services: []string{"[bad"},
-		}},
-	}
-	if err := validateStore(store); err == nil {
+	path := writeStoreFixture(t, `{"principals":[{"name":"octopus","token":"capi_deadbeef","services":["[bad"]}]}`)
+	if _, err := LoadStore(path); err == nil {
 		t.Fatal("expected invalid pattern error")
 	}
 }
@@ -102,33 +96,22 @@ func TestPrincipalComposeServiceScope(t *testing.T) {
 	}
 }
 
-func TestValidateStoreRejectsUnknownVerb(t *testing.T) {
-	store := &Store{
-		Principals: []Principal{{
-			Name:  "bad",
-			Token: "capi_x",
-			Verbs: []string{"fleet.explode"},
-		}},
+func TestLoadStoreFiltersUnknownVerbs(t *testing.T) {
+	path := writeStoreFixture(t, `{"principals":[{"name":"future","token":"capi_x","verbs":["fleet.status","schedule.pause","fleet.logs"]}]}`)
+	store, err := LoadStore(path)
+	if err != nil {
+		t.Fatalf("LoadStore: %v", err)
 	}
-	if err := validateStore(store); err == nil {
-		t.Fatal("expected unknown verb error")
+	if len(store.Principals) != 1 {
+		t.Fatalf("expected one principal, got %d", len(store.Principals))
 	}
-}
-
-func TestValidateStoreAcceptsAllKnownVerbs(t *testing.T) {
-	store := &Store{
-		Principals: []Principal{{
-			Name:  "full",
-			Token: "capi_x",
-			Verbs: AllVerbs,
-		}},
-	}
-	if err := validateStore(store); err != nil {
-		t.Fatalf("expected all known verbs to be valid: %v", err)
+	wantVerbs := []string{VerbFleetStatus, VerbFleetLogs}
+	if !reflect.DeepEqual(store.Principals[0].Verbs, wantVerbs) {
+		t.Fatalf("verbs=%v want %v", store.Principals[0].Verbs, wantVerbs)
 	}
 }
 
-func TestLoadStoreWithWarningsFiltersUnknownVerbs(t *testing.T) {
+func TestLoadStoreWithWarningsReportsUnknownVerbs(t *testing.T) {
 	path := writeStoreFixture(t, `{"principals":[{"name":"future","token":"capi_x","verbs":["fleet.status","schedule.pause","fleet.logs"]}]}`)
 	store, warnings, err := LoadStoreWithWarnings(path)
 	if err != nil {

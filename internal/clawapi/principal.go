@@ -205,23 +205,11 @@ func matchesAny(patterns []string, value string) bool {
 	return false
 }
 
-func validateStore(store *Store) error {
-	if err := validateStoreStructure(store); err != nil {
-		return err
-	}
-	for _, principal := range store.Principals {
-		if err := validateVerbs(principal.Verbs); err != nil {
-			return fmt.Errorf("principal %q: %w", principal.Name, err)
-		}
-	}
-	return nil
-}
-
 func normalizeStore(store *Store) ([]string, error) {
 	if err := validateStoreStructure(store); err != nil {
 		return nil, err
 	}
-	warnings := make([]string, 0)
+	var warnings []string
 	for i := range store.Principals {
 		filtered, unknown := filterKnownVerbs(store.Principals[i].Verbs)
 		for _, verb := range unknown {
@@ -262,19 +250,9 @@ func validateStoreStructure(store *Store) error {
 	return nil
 }
 
-func validateVerbs(verbs []string) error {
-	for _, verb := range verbs {
-		verb = strings.TrimSpace(verb)
-		if !isKnownVerb(verb) {
-			return fmt.Errorf("unknown verb %q", verb)
-		}
-	}
-	return nil
-}
-
 func filterKnownVerbs(verbs []string) ([]string, []string) {
 	filtered := make([]string, 0, len(verbs))
-	unknown := make([]string, 0)
+	var unknown []string
 	for _, verb := range verbs {
 		verb = strings.TrimSpace(verb)
 		if verb == "" {
