@@ -77,9 +77,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	store, err := clawapi.LoadStore(cfg.PrincipalsPath)
+	store, warnings, err := clawapi.LoadStoreWithWarnings(cfg.PrincipalsPath)
 	if err != nil {
 		return err
+	}
+	for _, warning := range warnings {
+		fmt.Fprintf(stderr, "claw-api warning: %s\n", warning)
 	}
 	var scheduleState *scheduleStateStore
 	if scheduleManifest != nil {

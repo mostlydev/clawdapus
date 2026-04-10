@@ -1,6 +1,9 @@
 package clawapi
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -125,6 +128,57 @@ func TestValidateStoreAcceptsAllKnownVerbs(t *testing.T) {
 	}
 }
 
+func TestLoadStoreWithWarningsFiltersUnknownVerbs(t *testing.T) {
+	path := writeStoreFixture(t, `{"principals":[{"name":"future","token":"capi_x","verbs":["fleet.status","schedule.pause","fleet.logs"]}]}`)
+	store, warnings, err := LoadStoreWithWarnings(path)
+	if err != nil {
+		t.Fatalf("LoadStoreWithWarnings: %v", err)
+	}
+	if len(store.Principals) != 1 {
+		t.Fatalf("expected one principal, got %d", len(store.Principals))
+	}
+	wantVerbs := []string{VerbFleetStatus, VerbFleetLogs}
+	if !reflect.DeepEqual(store.Principals[0].Verbs, wantVerbs) {
+		t.Fatalf("verbs=%v want %v", store.Principals[0].Verbs, wantVerbs)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `ignoring unknown verb "schedule.pause"`) {
+		t.Fatalf("expected unknown-verb warning, got %v", warnings)
+	}
+}
+
+func TestLoadStoreWithWarningsKeepsPrincipalWhenAllVerbsAreUnknown(t *testing.T) {
+	path := writeStoreFixture(t, `{"principals":[{"name":"future","token":"capi_x","verbs":["schedule.pause"]}]}`)
+	store, warnings, err := LoadStoreWithWarnings(path)
+	if err != nil {
+		t.Fatalf("LoadStoreWithWarnings: %v", err)
+	}
+	if len(store.Principals) != 1 {
+		t.Fatalf("expected one principal, got %d", len(store.Principals))
+	}
+	if len(store.Principals[0].Verbs) != 0 {
+		t.Fatalf("expected unknown verbs to be dropped, got %v", store.Principals[0].Verbs)
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("expected 2 warnings, got %v", warnings)
+	}
+	if !strings.Contains(warnings[0], `ignoring unknown verb "schedule.pause"`) {
+		t.Fatalf("expected unknown-verb warning, got %v", warnings)
+	}
+	if !strings.Contains(warnings[1], `has no recognized verbs`) {
+		t.Fatalf("expected inert-principal warning, got %v", warnings)
+	}
+	principal, err := store.ResolveBearer("Bearer capi_x")
+	if err != nil {
+		t.Fatalf("ResolveBearer: %v", err)
+	}
+	if principal.Name != "future" {
+		t.Fatalf("unexpected principal: %+v", principal)
+	}
+	if principal.AllowsVerb(VerbFleetStatus) {
+		t.Fatalf("did not expect inert principal to authorize fleet.status")
+	}
+}
+
 func TestPrincipalPodScopeGrantsComposeServiceAccess(t *testing.T) {
 	p := Principal{
 		Name:  "master",
@@ -195,4 +249,13 @@ func TestBuildSchedulerPrincipalIsScheduleScoped(t *testing.T) {
 	if !p.AllowsPod("trading-desk") {
 		t.Fatalf("expected pod scope, got %+v", p)
 	}
+}
+
+func writeStoreFixture(t *testing.T, raw string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "principals.json")
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write store fixture: %v", err)
+	}
+	return path
 }
