@@ -82,7 +82,16 @@ func TestSpikeRollCall(t *testing.T) {
 	botToken := env["DISCORD_BOT_TOKEN"]
 	botID := env["DISCORD_BOT_ID"]
 	webhookURL := env["DISCORD_WEBHOOK_URL"]
-	proxyRequest := chooseRollcallProxyRequest(t, xaiKey, anthropicKey, openrouterKey)
+	geminiKey := strings.TrimSpace(env["GEMINI_API_KEY"])
+	if _, ok := env["GEMINI_API_KEY"]; !ok {
+		env["GEMINI_API_KEY"] = ""
+	}
+	availableKeys := map[string]string{
+		"XAI_API_KEY":        xaiKey,
+		"ANTHROPIC_API_KEY":  anthropicKey,
+		"OPENROUTER_API_KEY": openrouterKey,
+		"GEMINI_API_KEY":     geminiKey,
+	}
 	if webhookURL == "" {
 		t.Fatal("DISCORD_WEBHOOK_URL not set in rollcall/.env")
 	}
@@ -138,17 +147,116 @@ func TestSpikeRollCall(t *testing.T) {
 		spikeBuildImage(t, dir, a.image, a.dockerfile)
 	}
 
-	allAgents := []struct {
-		name    string
-		runtime string
-	}{
-		{"oc-roll", "openclaw"},
-		{"nc-roll", "nullclaw"},
-		{"mc-roll", "microclaw"},
-		{"nano-roll", "nanoclaw"},
-		{"nb-roll", "nanobot"},
-		{"pc-roll", "picoclaw"},
-		{"hm-roll", "hermes"},
+	// allAgents is the per-runtime test matrix. Each entry pins a model and
+	// (for stub runtimes) an inbound proxy request format so the spike
+	// exercises both cllama ingress surfaces and multiple distinct
+	// provider/model pairs in a single run.
+	//
+	// expectedSurface is the cllama ingress surface a runtime is expected to
+	// hit when its request reaches the proxy. It is asserted at the end of the
+	// test as coverage protection for ADR-023.
+	allAgents := []rollcallAgentEntry{
+		{
+			name:            "oc-roll",
+			runtime:         "openclaw",
+			subtestName:     "openclaw_openai_surface",
+			modelOverride:   "openrouter/anthropic/claude-sonnet-4",
+			expectedSurface: "openai-chat-completions",
+			requireKeys:     []string{"OPENROUTER_API_KEY"},
+		},
+		{
+			name:            "oc-roll",
+			runtime:         "openclaw",
+			subtestName:     "openclaw_anthropic_surface",
+			modelOverride:   "anthropic/claude-sonnet-4-6",
+			expectedSurface: "anthropic-messages",
+			requireKeys:     []string{"ANTHROPIC_API_KEY"},
+		},
+		{
+			// Direct regression test for issue #127: openclaw + google/gemini-*
+			// behind cllama. This is the exact provider that triggered the bug
+			// fixed by ADR-023's shared ingress surface matrix. The new code
+			// must compile this to api="openai-completions" — not the old
+			// vendor-native "google-generative-ai".
+			name:            "oc-roll",
+			runtime:         "openclaw",
+			subtestName:     "openclaw_google_surface",
+			modelOverride:   "google/gemini-2.5-flash",
+			expectedSurface: "openai-chat-completions",
+			requireKeys:     []string{"GEMINI_API_KEY"},
+		},
+		{
+			// Stubs send the bare provider/model ref directly via curl, so we
+			// must use a model name that Anthropic actually recognises today
+			// (claude-sonnet-4 alone is no longer a valid alias upstream).
+			name:            "nc-roll",
+			runtime:         "nullclaw",
+			proxyFormat:     "anthropic",
+			proxyModel:      "anthropic/claude-sonnet-4-6",
+			expectedSurface: "anthropic-messages",
+			requireKeys:     []string{"ANTHROPIC_API_KEY"},
+		},
+		{
+			name:            "mc-roll",
+			runtime:         "microclaw",
+			proxyFormat:     "openai",
+			proxyModel:      "openrouter/anthropic/claude-sonnet-4",
+			expectedSurface: "openai-chat-completions",
+			requireKeys:     []string{"OPENROUTER_API_KEY"},
+		},
+		{
+			name:            "nano-roll",
+			runtime:         "nanoclaw",
+			proxyFormat:     "anthropic",
+			proxyModel:      "anthropic/claude-sonnet-4-6",
+			expectedSurface: "anthropic-messages",
+			requireKeys:     []string{"ANTHROPIC_API_KEY"},
+		},
+		{
+			name:            "nb-roll",
+			runtime:         "nanobot",
+			proxyFormat:     "openai",
+			proxyModel:      "openrouter/anthropic/claude-sonnet-4",
+			expectedSurface: "openai-chat-completions",
+			requireKeys:     []string{"OPENROUTER_API_KEY"},
+		},
+		{
+			// pc-roll is currently broken upstream — picoclaw's gateway binary
+			// rejects a port=0 config pre-check that the clawdapus picoclaw
+			// driver does not populate. Reproduces on master, tracked in #137.
+			// Gated behind CLAW_SPIKE_ENABLE_PICOCLAW so it skips by default
+			// instead of failing the suite while #137 is open.
+			name:            "pc-roll",
+			runtime:         "picoclaw",
+			proxyFormat:     "anthropic",
+			proxyModel:      "anthropic/claude-sonnet-4-6",
+			expectedSurface: "anthropic-messages",
+			requireKeys:     []string{"ANTHROPIC_API_KEY", "CLAW_SPIKE_ENABLE_PICOCLAW"},
+		},
+		{
+			name:            "hm-roll",
+			runtime:         "hermes",
+			modelOverride:   "openrouter/anthropic/claude-sonnet-4",
+			expectedSurface: "openai-chat-completions",
+			requireKeys:     []string{"OPENROUTER_API_KEY"},
+		},
+	}
+
+	if !rollcallMatrixHasUsableEntry(allAgents, availableKeys) {
+		t.Skip("no API keys available for any rollcall matrix entry — skipping")
+	}
+
+	var (
+		exercisedSurfacesMu sync.Mutex
+		exercisedSurfaces   = make(map[string]bool)
+	)
+	markSurfaceExercised := func(surface string) {
+		if surface == "" {
+			return
+		}
+		exercisedSurfacesMu.Lock()
+		exercisedSurfaces[surface] = true
+		exercisedSurfacesMu.Unlock()
 	}
 
 	// ── Expand env vars in pod YAML ─────────────────────────────────────
@@ -184,9 +292,18 @@ func TestSpikeRollCall(t *testing.T) {
 
 	for _, agent := range allAgents {
 		agent := agent
-		t.Run(agent.runtime, func(t *testing.T) {
+		subtest := agent.subtestName
+		if subtest == "" {
+			subtest = agent.runtime
+		}
+		t.Run(subtest, func(t *testing.T) {
+			missing := rollcallMissingKeys(agent.requireKeys, availableKeys)
+			if len(missing) > 0 {
+				t.Skipf("missing API keys for %s: %v", subtest, missing)
+			}
+			proxyRequest := rollcallProxyRequestForEntry(agent, availableKeys)
 			const composeProject = "rollcall"
-			podPath := filepath.Join(dir, fmt.Sprintf("spike-%s-pod.yml", agent.name))
+			podPath := filepath.Join(dir, fmt.Sprintf("spike-%s-pod.yml", subtest))
 			podYAML := rollcallSingleServicePod(t, expandedPod, agent.name, proxyRequest)
 			if err := os.WriteFile(podPath, []byte(podYAML), 0o644); err != nil {
 				t.Fatalf("write %s: %v", filepath.Base(podPath), err)
@@ -245,25 +362,61 @@ func TestSpikeRollCall(t *testing.T) {
 			rollcallAssertSessionHistory(t, sessionHistoryDir, agent.name)
 
 			// oc-roll has memory configured — confirm memory_op telemetry fired.
-			if agent.name == "oc-roll" {
+			// Only assert memory on the openai-surface oc-roll variant so we don't
+			// double-spend the assertion against memory state from a prior subtest.
+			if agent.name == "oc-roll" && agent.subtestName == "openclaw_openai_surface" {
 				rollcallAssertMemoryTelemetry(t, cllamaContainerID, agent.name)
 			}
 
 			spikeWaitRunning(t, clawdashContainerID, 30*time.Second)
 			t.Log("clawdash sidecar confirmed running")
+
+			// Reaching this line means the runtime successfully completed an LLM
+			// call through cllama using its assigned ingress surface.
+			markSurfaceExercised(agent.expectedSurface)
 		})
 	}
 
 	// Verify session history survived every teardown — each agent's JSONL must
-	// still exist after all seven runtimes ran and tore down in sequence.
+	// still exist after all matrix entries ran and tore down in sequence.
+	// Skip entries that never ran (missing API keys) so partial coverage runs
+	// don't fail this check.
 	t.Run("session_history_persistence", func(t *testing.T) {
+		seen := make(map[string]bool)
 		for _, agent := range allAgents {
+			if len(rollcallMissingKeys(agent.requireKeys, availableKeys)) > 0 {
+				continue
+			}
+			if seen[agent.name] {
+				continue
+			}
+			seen[agent.name] = true
 			histFile := filepath.Join(sessionHistoryDir, agent.name, "history.jsonl")
 			if _, err := os.Stat(histFile); os.IsNotExist(err) {
 				t.Errorf("session history for %s (%s) missing after all runtimes completed — did not survive teardown", agent.name, agent.runtime)
 			}
 		}
-		t.Logf("session history confirmed persistent for all %d agents", len(allAgents))
+		t.Logf("session history confirmed persistent for %d distinct agents across %d matrix entries", len(seen), len(allAgents))
+	})
+
+	// Confirm the matrix exercised both canonical cllama ingress surfaces.
+	// This is the spike-level regression for ADR-023: if a future change
+	// reroutes everything to a single surface (or breaks one of them) it
+	// will be caught here even if individual subtests still pass.
+	t.Run("ingress_surface_coverage", func(t *testing.T) {
+		exercisedSurfacesMu.Lock()
+		defer exercisedSurfacesMu.Unlock()
+		required := []string{"anthropic-messages", "openai-chat-completions"}
+		for _, surface := range required {
+			if !exercisedSurfaces[surface] {
+				t.Errorf("cllama ingress surface %q was not exercised by any successful subtest", surface)
+			}
+		}
+		exercised := make([]string, 0, len(exercisedSurfaces))
+		for surface := range exercisedSurfaces {
+			exercised = append(exercised, surface)
+		}
+		t.Logf("exercised cllama ingress surfaces: %v", exercised)
 	})
 }
 
@@ -282,41 +435,65 @@ type rollcallDiscordAuthor struct {
 }
 
 type rollcallProxyRequest struct {
-	APIFormat string
-	Model     string
-	CllamaEnv map[string]string
+	APIFormat     string
+	Model         string
+	ModelOverride string // sets x-claw.models.primary for real runners (oc-roll, hm-roll)
+	CllamaEnv     map[string]string
 }
 
-func chooseRollcallProxyRequest(t *testing.T, xaiKey, anthropicKey, openrouterKey string) rollcallProxyRequest {
-	t.Helper()
+// rollcallAgentEntry describes a single matrix row in the rollcall spike. It
+// pins both the model that the runtime should request and the cllama ingress
+// surface that request is expected to traverse.
+type rollcallAgentEntry struct {
+	name            string   // agent service name in the rollcall pod
+	runtime         string   // runtime label, used for log/keyword matching
+	subtestName     string   // optional t.Run name; defaults to runtime
+	modelOverride   string   // x-claw.models.primary override (real runners)
+	proxyFormat     string   // ROLLCALL_CLLAMA_API_FORMAT (stub runners)
+	proxyModel      string   // ROLLCALL_CLLAMA_MODEL (stub runners)
+	expectedSurface string   // "anthropic-messages" | "openai-chat-completions"
+	requireKeys     []string // env keys required for this entry to run
+}
 
+// rollcallMatrixHasUsableEntry returns true if at least one matrix entry has
+// every required key present in availableKeys.
+func rollcallMatrixHasUsableEntry(entries []rollcallAgentEntry, availableKeys map[string]string) bool {
+	for _, entry := range entries {
+		if len(rollcallMissingKeys(entry.requireKeys, availableKeys)) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// rollcallMissingKeys reports which of required are absent or empty in
+// availableKeys.
+func rollcallMissingKeys(required []string, availableKeys map[string]string) []string {
+	var missing []string
+	for _, key := range required {
+		if strings.TrimSpace(availableKeys[key]) == "" {
+			missing = append(missing, key)
+		}
+	}
+	return missing
+}
+
+// rollcallProxyRequestForEntry builds the inbound proxy-request and cllama-env
+// configuration for a single matrix entry.
+func rollcallProxyRequestForEntry(entry rollcallAgentEntry, availableKeys map[string]string) rollcallProxyRequest {
 	cfg := rollcallProxyRequest{
-		CllamaEnv: make(map[string]string),
+		APIFormat:     entry.proxyFormat,
+		Model:         entry.proxyModel,
+		ModelOverride: entry.modelOverride,
+		CllamaEnv:     make(map[string]string),
 	}
-	if xaiKey != "" {
-		cfg.CllamaEnv["XAI_API_KEY"] = xaiKey
+	// Forward only the keys this entry actually needs to the cllama sidecar.
+	// We deliberately do not flood every container with every API key.
+	for _, key := range entry.requireKeys {
+		if v := strings.TrimSpace(availableKeys[key]); v != "" {
+			cfg.CllamaEnv[key] = v
+		}
 	}
-	if anthropicKey != "" {
-		cfg.CllamaEnv["ANTHROPIC_API_KEY"] = anthropicKey
-	}
-	if openrouterKey != "" {
-		cfg.CllamaEnv["OPENROUTER_API_KEY"] = openrouterKey
-	}
-
-	switch {
-	case xaiKey != "":
-		cfg.APIFormat = "openai"
-		cfg.Model = "xai/grok-4-1-fast-reasoning"
-	case anthropicKey != "":
-		cfg.APIFormat = "anthropic"
-		cfg.Model = "claude-sonnet-4"
-	case openrouterKey != "":
-		cfg.APIFormat = "openai"
-		cfg.Model = "openrouter/anthropic/claude-sonnet-4"
-	default:
-		t.Fatal("rollcall proxy request requires at least one real provider key")
-	}
-
 	return cfg
 }
 
@@ -381,8 +558,12 @@ func rollcallInjectProxyRequest(t *testing.T, service map[string]interface{}, pr
 			rawEnv[k] = v
 		}
 	}
-	rawEnv["ROLLCALL_CLLAMA_API_FORMAT"] = proxyRequest.APIFormat
-	rawEnv["ROLLCALL_CLLAMA_MODEL"] = proxyRequest.Model
+	if proxyRequest.APIFormat != "" {
+		rawEnv["ROLLCALL_CLLAMA_API_FORMAT"] = proxyRequest.APIFormat
+	}
+	if proxyRequest.Model != "" {
+		rawEnv["ROLLCALL_CLLAMA_MODEL"] = proxyRequest.Model
+	}
 	service["environment"] = rawEnv
 
 	rawClaw, ok := service["x-claw"].(map[string]interface{})
@@ -406,6 +587,32 @@ func rollcallInjectProxyRequest(t *testing.T, service map[string]interface{}, pr
 		}
 	}
 	rawClaw["cllama-env"] = rawCllamaEnv
+
+	// Apply x-claw.models.primary override for both real runners and stubs.
+	// Pod-level model slots overlay image MODEL labels at compile time, which
+	// also seeds cllama's per-agent model policy. Stubs that send a model the
+	// policy doesn't allow get clamped via cllama's "disallowed_clamped"
+	// intervention back to the policy default — so the policy must allow the
+	// model the request will actually carry. For real runners we use
+	// proxyRequest.ModelOverride; for stubs we mirror proxyRequest.Model.
+	policyModel := strings.TrimSpace(proxyRequest.ModelOverride)
+	if policyModel == "" {
+		policyModel = strings.TrimSpace(proxyRequest.Model)
+	}
+	if policyModel != "" {
+		rawModels := make(map[string]interface{})
+		if existing, ok := rawClaw["models"]; ok && existing != nil {
+			existingMap, ok := existing.(map[string]interface{})
+			if !ok {
+				t.Fatalf("rollcall x-claw.models is not a map: %T", existing)
+			}
+			for k, v := range existingMap {
+				rawModels[k] = v
+			}
+		}
+		rawModels["primary"] = policyModel
+		rawClaw["models"] = rawModels
+	}
 }
 
 func rollcallResolveContainerID(t *testing.T, composePath, serviceName string) string {

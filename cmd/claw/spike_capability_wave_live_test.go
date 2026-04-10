@@ -73,12 +73,7 @@ func TestSpikeCapabilityWaveLive(t *testing.T) {
 	t.Setenv("CLLAMA_UI_PORT", env["CLLAMA_UI_PORT"])
 	t.Setenv("CLAWDASH_ADDR", env["CLAWDASH_ADDR"])
 
-	proxyRequest := chooseRollcallProxyRequest(
-		t,
-		strings.TrimSpace(env["XAI_API_KEY"]),
-		strings.TrimSpace(env["ANTHROPIC_API_KEY"]),
-		strings.TrimSpace(env["OPENROUTER_API_KEY"]),
-	)
+	proxyRequest := capabilityWaveProxyRequest(t, env)
 
 	spikeBuildImage(t, dir, "openclaw:latest", "Dockerfile.openclaw-base")
 	spikeBuildImage(t, dir, "rollcall-openclaw:latest", "agents/oc-roll/Clawfile")
@@ -158,6 +153,37 @@ func TestSpikeCapabilityWaveLive(t *testing.T) {
 
 	spikeWaitRunning(t, clawdashContainerID, 30*time.Second)
 	t.Log("clawdash sidecar confirmed running")
+}
+
+// capabilityWaveProxyRequest picks a single inbound proxy-request shape for
+// the capability-wave-live spike. Unlike TestSpikeRollCall this test runs only
+// one runtime, so it just needs one provider/model that the local environment
+// can serve.
+func capabilityWaveProxyRequest(t *testing.T, env map[string]string) rollcallProxyRequest {
+	t.Helper()
+
+	xaiKey := strings.TrimSpace(env["XAI_API_KEY"])
+	anthropicKey := strings.TrimSpace(env["ANTHROPIC_API_KEY"])
+	openrouterKey := strings.TrimSpace(env["OPENROUTER_API_KEY"])
+
+	cfg := rollcallProxyRequest{CllamaEnv: make(map[string]string)}
+	switch {
+	case xaiKey != "":
+		cfg.APIFormat = "openai"
+		cfg.Model = "xai/grok-4-1-fast-reasoning"
+		cfg.CllamaEnv["XAI_API_KEY"] = xaiKey
+	case anthropicKey != "":
+		cfg.APIFormat = "anthropic"
+		cfg.Model = "claude-sonnet-4"
+		cfg.CllamaEnv["ANTHROPIC_API_KEY"] = anthropicKey
+	case openrouterKey != "":
+		cfg.APIFormat = "openai"
+		cfg.Model = "openrouter/anthropic/claude-sonnet-4"
+		cfg.CllamaEnv["OPENROUTER_API_KEY"] = openrouterKey
+	default:
+		t.Fatal("capability-wave proxy request requires at least one real provider key")
+	}
+	return cfg
 }
 
 func capabilityWaveLivePod(t *testing.T, expandedPod string, proxyRequest rollcallProxyRequest) string {
