@@ -1,6 +1,9 @@
 package clawapi
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -61,14 +64,8 @@ func TestBuildMasterPrincipalHasAllVerbsAndOpaqueToken(t *testing.T) {
 }
 
 func TestLoadStoreRejectsInvalidGlobPattern(t *testing.T) {
-	store := &Store{
-		Principals: []Principal{{
-			Name:     "octopus",
-			Token:    "capi_deadbeef",
-			Services: []string{"[bad"},
-		}},
-	}
-	if err := validateStore(store); err == nil {
+	path := writeStoreFixture(t, `{"principals":[{"name":"octopus","token":"capi_deadbeef","services":["[bad"]}]}`)
+	if _, err := LoadStore(path); err == nil {
 		t.Fatal("expected invalid pattern error")
 	}
 }
@@ -99,29 +96,69 @@ func TestPrincipalComposeServiceScope(t *testing.T) {
 	}
 }
 
-func TestValidateStoreRejectsUnknownVerb(t *testing.T) {
-	store := &Store{
-		Principals: []Principal{{
-			Name:  "bad",
-			Token: "capi_x",
-			Verbs: []string{"fleet.explode"},
-		}},
+func TestLoadStoreFiltersUnknownVerbs(t *testing.T) {
+	path := writeStoreFixture(t, `{"principals":[{"name":"future","token":"capi_x","verbs":["fleet.status","schedule.pause","fleet.logs"]}]}`)
+	store, err := LoadStore(path)
+	if err != nil {
+		t.Fatalf("LoadStore: %v", err)
 	}
-	if err := validateStore(store); err == nil {
-		t.Fatal("expected unknown verb error")
+	if len(store.Principals) != 1 {
+		t.Fatalf("expected one principal, got %d", len(store.Principals))
+	}
+	wantVerbs := []string{VerbFleetStatus, VerbFleetLogs}
+	if !reflect.DeepEqual(store.Principals[0].Verbs, wantVerbs) {
+		t.Fatalf("verbs=%v want %v", store.Principals[0].Verbs, wantVerbs)
 	}
 }
 
-func TestValidateStoreAcceptsAllKnownVerbs(t *testing.T) {
-	store := &Store{
-		Principals: []Principal{{
-			Name:  "full",
-			Token: "capi_x",
-			Verbs: AllVerbs,
-		}},
+func TestLoadStoreWithWarningsReportsUnknownVerbs(t *testing.T) {
+	path := writeStoreFixture(t, `{"principals":[{"name":"future","token":"capi_x","verbs":["fleet.status","schedule.pause","fleet.logs"]}]}`)
+	store, warnings, err := LoadStoreWithWarnings(path)
+	if err != nil {
+		t.Fatalf("LoadStoreWithWarnings: %v", err)
 	}
-	if err := validateStore(store); err != nil {
-		t.Fatalf("expected all known verbs to be valid: %v", err)
+	if len(store.Principals) != 1 {
+		t.Fatalf("expected one principal, got %d", len(store.Principals))
+	}
+	wantVerbs := []string{VerbFleetStatus, VerbFleetLogs}
+	if !reflect.DeepEqual(store.Principals[0].Verbs, wantVerbs) {
+		t.Fatalf("verbs=%v want %v", store.Principals[0].Verbs, wantVerbs)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `ignoring unknown verb "schedule.pause"`) {
+		t.Fatalf("expected unknown-verb warning, got %v", warnings)
+	}
+}
+
+func TestLoadStoreWithWarningsKeepsPrincipalWhenAllVerbsAreUnknown(t *testing.T) {
+	path := writeStoreFixture(t, `{"principals":[{"name":"future","token":"capi_x","verbs":["schedule.pause"]}]}`)
+	store, warnings, err := LoadStoreWithWarnings(path)
+	if err != nil {
+		t.Fatalf("LoadStoreWithWarnings: %v", err)
+	}
+	if len(store.Principals) != 1 {
+		t.Fatalf("expected one principal, got %d", len(store.Principals))
+	}
+	if len(store.Principals[0].Verbs) != 0 {
+		t.Fatalf("expected unknown verbs to be dropped, got %v", store.Principals[0].Verbs)
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("expected 2 warnings, got %v", warnings)
+	}
+	if !strings.Contains(warnings[0], `ignoring unknown verb "schedule.pause"`) {
+		t.Fatalf("expected unknown-verb warning, got %v", warnings)
+	}
+	if !strings.Contains(warnings[1], `has no recognized verbs`) {
+		t.Fatalf("expected inert-principal warning, got %v", warnings)
+	}
+	principal, err := store.ResolveBearer("Bearer capi_x")
+	if err != nil {
+		t.Fatalf("ResolveBearer: %v", err)
+	}
+	if principal.Name != "future" {
+		t.Fatalf("unexpected principal: %+v", principal)
+	}
+	if principal.AllowsVerb(VerbFleetStatus) {
+		t.Fatalf("did not expect inert principal to authorize fleet.status")
 	}
 }
 
@@ -195,4 +232,13 @@ func TestBuildSchedulerPrincipalIsScheduleScoped(t *testing.T) {
 	if !p.AllowsPod("trading-desk") {
 		t.Fatalf("expected pod scope, got %+v", p)
 	}
+}
+
+func writeStoreFixture(t *testing.T, raw string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "principals.json")
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write store fixture: %v", err)
+	}
+	return path
 }

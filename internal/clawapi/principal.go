@@ -43,18 +43,24 @@ type Principal struct {
 }
 
 func LoadStore(filePath string) (*Store, error) {
+	store, _, err := LoadStoreWithWarnings(filePath)
+	return store, err
+}
+
+func LoadStoreWithWarnings(filePath string) (*Store, []string, error) {
 	raw, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("read claw-api principals %q: %w", filePath, err)
+		return nil, nil, fmt.Errorf("read claw-api principals %q: %w", filePath, err)
 	}
 	var store Store
 	if err := json.Unmarshal(raw, &store); err != nil {
-		return nil, fmt.Errorf("parse claw-api principals %q: %w", filePath, err)
+		return nil, nil, fmt.Errorf("parse claw-api principals %q: %w", filePath, err)
 	}
-	if err := validateStore(&store); err != nil {
-		return nil, fmt.Errorf("validate claw-api principals %q: %w", filePath, err)
+	warnings, err := normalizeStore(&store)
+	if err != nil {
+		return nil, nil, fmt.Errorf("validate claw-api principals %q: %w", filePath, err)
 	}
-	return &store, nil
+	return &store, warnings, nil
 }
 
 func (s *Store) ResolveBearer(header string) (*Principal, error) {
@@ -199,7 +205,25 @@ func matchesAny(patterns []string, value string) bool {
 	return false
 }
 
-func validateStore(store *Store) error {
+func normalizeStore(store *Store) ([]string, error) {
+	if err := validateStoreStructure(store); err != nil {
+		return nil, err
+	}
+	var warnings []string
+	for i := range store.Principals {
+		filtered, unknown := filterKnownVerbs(store.Principals[i].Verbs)
+		for _, verb := range unknown {
+			warnings = append(warnings, fmt.Sprintf("ignoring unknown verb %q for principal %q", verb, store.Principals[i].Name))
+		}
+		if len(filtered) == 0 && len(store.Principals[i].Verbs) > 0 {
+			warnings = append(warnings, fmt.Sprintf("principal %q has no recognized verbs; token will authorize nothing", store.Principals[i].Name))
+		}
+		store.Principals[i].Verbs = filtered
+	}
+	return warnings, nil
+}
+
+func validateStoreStructure(store *Store) error {
 	if store == nil {
 		return fmt.Errorf("store is nil")
 	}
@@ -222,28 +246,34 @@ func validateStore(store *Store) error {
 		if err := validatePatterns("compose_services", principal.ComposeServices); err != nil {
 			return fmt.Errorf("principal %q: %w", principal.Name, err)
 		}
-		if err := validateVerbs(principal.Verbs); err != nil {
-			return fmt.Errorf("principal %q: %w", principal.Name, err)
-		}
 	}
 	return nil
 }
 
-func validateVerbs(verbs []string) error {
+func filterKnownVerbs(verbs []string) ([]string, []string) {
+	filtered := make([]string, 0, len(verbs))
+	var unknown []string
 	for _, verb := range verbs {
 		verb = strings.TrimSpace(verb)
-		known := false
-		for _, v := range AllVerbs {
-			if v == verb {
-				known = true
-				break
-			}
+		if verb == "" {
+			continue
 		}
-		if !known {
-			return fmt.Errorf("unknown verb %q", verb)
+		if isKnownVerb(verb) {
+			filtered = append(filtered, verb)
+			continue
+		}
+		unknown = append(unknown, verb)
+	}
+	return filtered, unknown
+}
+
+func isKnownVerb(verb string) bool {
+	for _, v := range AllVerbs {
+		if v == verb {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 func validatePatterns(label string, patterns []string) error {
