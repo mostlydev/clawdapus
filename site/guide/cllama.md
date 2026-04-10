@@ -50,16 +50,20 @@ Token validation is fail-closed: unknown or missing tokens are denied before any
 
 ## Transport Model
 
-The proxy exposes an HTTP API compatible with the OpenAI Chat Completions API.
+The proxy exposes a canonical **ingress surface matrix** — a small set of runner-facing HTTP surfaces that together form the cllama transport contract. See [ADR-023](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/023-cllama-ingress-surface-matrix.md) for the architectural rationale.
+
+| Surface | Path | Payload family | Default use |
+|---------|------|----------------|-------------|
+| OpenAI Chat Completions | `POST /v1/chat/completions` | OpenAI-compatible chat/completions | All non-Anthropic providers unless an explicit exception is documented |
+| Anthropic Messages | `POST /v1/messages` | Anthropic Messages | Anthropic-family providers and explicit Anthropic-wire exceptions |
 
 | Property | Value |
 |----------|-------|
-| Endpoint | `POST /v1/chat/completions` |
 | Listen port | `0.0.0.0:8080` |
 | Base URL (as seen by runner) | `http://cllama-<type>:8080/v1` |
 | Auth header | `Authorization: Bearer <agent-id>:<secure-secret>` |
 
-Clawdapus configures each agent's runner to use the proxy URL as its LLM base URL. The runner thinks it is talking directly to the model provider. Two distinct code paths handle OpenAI format (`messages[]`) and Anthropic format (top-level `system` field).
+Clawdapus configures each agent's runner to use the proxy URL as its LLM base URL, and the runner targets one of the canonical ingress paths beneath that base URL. Provider identity (`google/gemini-*`, `anthropic/*`, etc.) stays in operator-facing model refs — runners must not invent synthetic provider prefixes such as `cllama/google`. Two distinct code paths handle OpenAI format (`messages[]`) and Anthropic format (top-level `system` field).
 
 ### OpenAI Format
 

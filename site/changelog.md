@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.4 <Badge type="tip" text="Latest" /> {#v0-8-4}
+## v0.8.5 <Badge type="tip" text="Latest" /> {#v0-8-5}
+
+*2026-04-10*
+
+- **Formalize the cllama ingress surface matrix** ([#134](https://github.com/mostlydev/clawdapus/issues/134), [ADR-023](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/023-cllama-ingress-surface-matrix.md)) — `cllama` now has an explicit, minimum ingress surface contract: OpenAI Chat Completions (`POST /v1/chat/completions`) for non-Anthropic providers and Anthropic Messages (`POST /v1/messages`) for Anthropic-family providers. The previous spec described cllama as OpenAI-only even though the reference implementation has supported both surfaces for a while; `docs/CLLAMA_SPEC.md` and ADR-008 are reconciled with the runtime. Provider identity (`google/gemini-*`, `anthropic/*`, etc.) stays in operator-facing model refs — synthetic `cllama/<provider>` prefixes are explicitly rejected at parse time. The OpenClaw driver no longer owns the canonical provider-to-surface decision: it delegates to the shared `internal/cllama` contract and maps the resulting surface to its own `models.providers.*.api` enum, failing closed on unknown canonical surfaces. This is the architectural backstop behind the Gemini-behind-cllama fix that shipped in v0.8.2.
+- **Spike-level regression coverage for ADR-023** ([#139](https://github.com/mostlydev/clawdapus/pull/139)) — `TestSpikeRollCall` is now a multi-model matrix: a dedicated `openclaw + google/gemini-2.5-flash` variant directly regression-tests the #127 incident that triggered the ADR, a new `openclaw + anthropic/claude-sonnet-4-6` variant covers the Anthropic Messages surface, and the stubs exercise distinct provider/model pairs across both surfaces. A final `ingress_surface_coverage` subtest fails the suite if a future change silently reroutes everything to a single surface. `pc-roll` is temporarily gated behind `CLAW_SPIKE_ENABLE_PICOCLAW` while [#137](https://github.com/mostlydev/clawdapus/issues/137) (pre-existing upstream picoclaw `gateway.port=0` crash, reproduces on master) is open.
+
+## v0.8.4 {#v0-8-4}
 
 *2026-04-09*
 
