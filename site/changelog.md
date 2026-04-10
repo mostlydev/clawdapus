@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.5 <Badge type="tip" text="Latest" /> {#v0-8-5}
+## v0.8.6 <Badge type="tip" text="Latest" /> {#v0-8-6}
+
+*2026-04-10*
+
+- **Fix: `claw-api` no longer crash-loops on unknown principal verbs** ([#120](https://github.com/mostlydev/clawdapus/issues/120), [#143](https://github.com/mostlydev/clawdapus/pull/143)) — when a newer `claw` CLI compiled a `principals.json` containing verbs an older deployed `claw-api` image didn't recognize (e.g. `schedule.read` emitted by v0.6.1+ against a pre-`schedule.*` image), the API container hard-failed validation and crash-looped, taking the entire governance surface offline with only `unknown verb "..."` in container logs. The runtime loader is now tolerant: unrecognized verbs are filtered out of the in-memory principal store and logged as warnings on startup, and the service comes up normally. Compile-time validation in `claw up` stays strict — unknown verbs in `x-claw.principals` or hand-written `principals.json` still fail hard. Originally observed on the Tiverton trading-desk deployment.
+
+## v0.8.5 {#v0-8-5}
 
 *2026-04-10*
 
