@@ -45,7 +45,10 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 
 	if len(rc.Cllama) > 0 {
 		firstProxy := cllama.ProxyBaseURL(rc.Cllama[0])
-		providerModels := collectCllamaProviderModels(rc.Models)
+		providerModels, err := cllama.CollectProviderModels(rc.Models)
+		if err != nil {
+			return nil, fmt.Errorf("config generation: %w", err)
+		}
 		for provider, modelIDs := range providerModels {
 			basePath := "models.providers." + provider
 			if err := setPath(config, basePath+".baseUrl", firstProxy); err != nil {
@@ -56,7 +59,11 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 					return nil, fmt.Errorf("config generation: cllama provider %q apiKey: %w", provider, err)
 				}
 			}
-			if err := setPath(config, basePath+".api", cllamaModelAPIForProvider(provider)); err != nil {
+			api, err := openclawModelAPIForIngress(cllama.IngressSurfaceForProvider(provider))
+			if err != nil {
+				return nil, fmt.Errorf("config generation: cllama provider %q api: %w", provider, err)
+			}
+			if err := setPath(config, basePath+".api", api); err != nil {
 				return nil, fmt.Errorf("config generation: cllama provider %q api: %w", provider, err)
 			}
 			modelDefs := make([]interface{}, 0, len(modelIDs))
@@ -371,102 +378,14 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func collectCllamaProviderModels(models map[string]string) map[string][]string {
-	byProvider := make(map[string]map[string]struct{})
-	for _, rawRef := range models {
-		provider, modelRef, ok := cllamaProviderModelRef(rawRef)
-		if !ok {
-			continue
-		}
-		if _, exists := byProvider[provider]; !exists {
-			byProvider[provider] = make(map[string]struct{})
-		}
-		byProvider[provider][modelRef] = struct{}{}
-	}
-
-	out := make(map[string][]string, len(byProvider))
-	for provider, ids := range byProvider {
-		modelIDs := make([]string, 0, len(ids))
-		for id := range ids {
-			modelIDs = append(modelIDs, id)
-		}
-		sort.Strings(modelIDs)
-		out[provider] = modelIDs
-	}
-	return out
-}
-
-func cllamaProviderModelRef(ref string) (string, string, bool) {
-	provider, modelID, ok := splitModelRef(ref)
-	if !ok {
-		return "", "", false
-	}
-	return provider, provider + "/" + modelID, true
-}
-
-func splitModelRef(ref string) (string, string, bool) {
-	trimmed := strings.TrimSpace(ref)
-	if trimmed == "" {
-		return "", "", false
-	}
-
-	parts := strings.SplitN(trimmed, "/", 2)
-	if len(parts) == 1 {
-		// openclaw treats unqualified model refs as anthropic/<model>.
-		return "anthropic", parts[0], true
-	}
-
-	provider := normalizeProviderID(parts[0])
-	modelID := strings.TrimSpace(parts[1])
-	if provider == "" || modelID == "" {
-		return "", "", false
-	}
-	return provider, modelID, true
-}
-
-func normalizeProviderID(provider string) string {
-	normalized := strings.ToLower(strings.TrimSpace(provider))
-	switch normalized {
-	case "z.ai", "z-ai":
-		return "zai"
-	case "opencode-zen":
-		return "opencode"
-	case "qwen":
-		return "qwen-portal"
-	case "kimi-code":
-		return "kimi-coding"
-	case "bytedance", "doubao":
-		return "volcengine"
+func openclawModelAPIForIngress(surface cllama.IngressSurface) (string, error) {
+	switch surface {
+	case cllama.IngressSurfaceAnthropicMessages:
+		return "anthropic-messages", nil
+	case cllama.IngressSurfaceOpenAIChatCompletions:
+		return "openai-completions", nil
 	default:
-		return normalized
-	}
-}
-
-func defaultModelAPIForProvider(provider string) string {
-	switch normalizeProviderID(provider) {
-	case "anthropic", "synthetic", "minimax-portal", "kimi-coding", "cloudflare-ai-gateway", "xiaomi":
-		return "anthropic-messages"
-	case "google":
-		return "google-generative-ai"
-	case "github-copilot":
-		return "github-copilot"
-	case "amazon-bedrock":
-		return "bedrock-converse-stream"
-	case "ollama":
-		return "ollama"
-	default:
-		return "openai-completions"
-	}
-}
-
-func cllamaModelAPIForProvider(provider string) string {
-	switch normalizeProviderID(provider) {
-	case "anthropic", "synthetic", "minimax-portal", "kimi-coding", "cloudflare-ai-gateway", "xiaomi":
-		return "anthropic-messages"
-	default:
-		// cllama exposes OpenAI-compatible routing for non-Anthropic providers,
-		// even when the upstream vendor has a native API surface.
-		return "openai-completions"
+		return "", fmt.Errorf("unsupported cllama ingress surface %q", surface)
 	}
 }
 

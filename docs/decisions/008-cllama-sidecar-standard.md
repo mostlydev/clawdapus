@@ -12,7 +12,7 @@ Initially, `cllama` was conceived as a specific proxy component injected by Claw
 We formalize `cllama` as a **mini-standard** rather than a single hardcoded implementation.
 
 1. **The cllama Contract:** A `cllama` sidecar is any container image that:
-   - Exposes an OpenAI-compatible proxy endpoint.
+   - Exposes the cllama ingress surface matrix. The minimum required surfaces are OpenAI Chat Completions (`POST /v1/chat/completions`) and Anthropic Messages (`POST /v1/messages`).
    - Accepts Clawdapus orchestration context (e.g., agent identity, loaded policy modules, capability labels, and the behavioral contract) injected via environment variables or volume mounts by the Clawdapus pod emitter.
    - Emits standardized logs or labels back to Clawdapus for audit and drift scoring.
 2. **Identity and Authorization Awareness:** The Clawdapus driver injects pod-level context and shared per-agent mounts. The sidecar resolves caller identity from bearer tokens (`<agent-id>:<secret>`) and the mounted context (`/claw/context/<agent-id>/`), enabling dynamic rights enforcement per agent.
@@ -21,9 +21,11 @@ We formalize `cllama` as a **mini-standard** rather than a single hardcoded impl
 
 ## Rationale
 
-Formalizing `cllama` as a standard makes the policy pipeline pluggable. Operators can build custom sidecars with proprietary DLP (Data Loss Prevention) rules, specific compliance checks, or advanced drift scoring, simply by conforming to the OpenAI-compatible proxy interface and consuming the injected Clawdapus context. 
+Formalizing `cllama` as a standard makes the policy pipeline pluggable. Operators can build custom sidecars with proprietary DLP (Data Loss Prevention) rules, specific compliance checks, or advanced drift scoring, simply by conforming to the documented cllama ingress surfaces and consuming the injected Clawdapus context.
 
 Passing identity and rights into the sidecar elevates it from a dumb proxy to a context-aware governance enforcement point, capable of blocking a specific agent from taking an action based on its unique constraints.
+
+ADR-023 later makes the ingress surface matrix explicit so provider identity and runner transport cannot drift apart in driver code.
 
 ## Consequences
 

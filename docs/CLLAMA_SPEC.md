@@ -16,10 +16,19 @@ This document defines the contract between Clawdapus (the orchestrator) and a `c
 
 ## 2. API Contract
 
-A `cllama` sidecar MUST expose an HTTP API compatible with the OpenAI Chat Completions API (`POST /v1/chat/completions`).
+A `cllama` sidecar MUST expose a canonical ingress surface matrix for runner traffic.
+
+Minimum required surfaces:
+
+| Surface | Path | Payload family | Default use |
+|---|---|---|---|
+| OpenAI Chat Completions | `POST /v1/chat/completions` | OpenAI-compatible chat/completions | All non-Anthropic providers unless an explicit exception is documented |
+| Anthropic Messages | `POST /v1/messages` | Anthropic Messages | Anthropic-family providers and explicit Anthropic-wire exceptions |
 
 - **Listen Port:** The proxy MUST listen on `0.0.0.0:8080`.
-- **Base URL Replacement:** Clawdapus configures the agent's runner (e.g., OpenClaw, Claude Code) to use `http://cllama-<type>:8080/v1` as its LLM base URL (first proxy in chain when chaining is enabled).
+- **Base URL Replacement:** Clawdapus configures the agent's runner (e.g., OpenClaw, Claude Code) to use `http://cllama-<type>:8080/v1` as its LLM base URL (first proxy in chain when chaining is enabled). The runner then targets one of the canonical ingress paths beneath that base URL.
+- **Provider Identity vs Transport:** Operator-facing model refs keep provider identity (`google/gemini-*`, `anthropic/*`, etc.). The proxy ingress surface is a transport contract selected by infrastructure; runners MUST NOT invent synthetic provider prefixes such as `cllama/google`, and the shared ingress contract rejects them when compiling cllama-facing config.
+- **Vendor-Native Extensions:** Additional vendor-native ingress surfaces MAY exist, but only as explicit, documented exceptions when a concrete runner cannot target the canonical surfaces. They are not the default contract.
 - **Implementation Scope (Phase 4):** The wire protocol supports chained proxies, but runtime enforcement currently allows only one proxy type per pod. Declaring multiple proxy types fails fast until Phase 5 chain execution is implemented.
 
 ## 3. Context Injection (The Environment & Shared Mounts)
@@ -161,7 +170,7 @@ Phase 1 is retention only. cllama writes the history; no read API exists. Agents
 Clawdapus provides a reference image: `ghcr.io/mostlydev/cllama`.
 
 The passthrough reference:
-- Adheres to the v1 HTTP API and Listen Port.
+- Adheres to the v1 ingress surface matrix and Listen Port.
 - Validates the environment (`CLAW_POD`, `CLAW_CONTEXT_ROOT`, provider credentials), bearer-token identity resolution, and mounts.
 - Acts as a pure, transparent proxy (no decoration, no amendment).
 - Emits structured logs of all traffic.

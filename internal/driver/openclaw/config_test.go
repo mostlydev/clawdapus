@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
@@ -144,6 +145,23 @@ func TestGenerateConfigCllamaGoogleUsesOpenAICompletions(t *testing.T) {
 	}
 	if entry["id"] != "google/gemini-3-flash-preview" {
 		t.Fatalf("expected google model id to stay provider-prefixed for cllama, got %v", entry["id"])
+	}
+}
+
+func TestGenerateConfigCllamaRejectsSyntheticIngressProviderPrefix(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{
+			"primary": "cllama/google/gemini-3-flash-preview",
+		},
+		Cllama: []string{"passthrough"},
+	}
+
+	_, err := GenerateConfig(rc)
+	if err == nil {
+		t.Fatal("expected synthetic ingress provider prefix to fail")
+	}
+	if !strings.Contains(err.Error(), `invalid cllama provider/model ref for slot "primary": "cllama/google/gemini-3-flash-preview"`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -334,6 +352,16 @@ func TestGenerateConfigSetsGatewayModeLocal(t *testing.T) {
 	}
 	if gateway["mode"] != "local" {
 		t.Errorf("expected gateway.mode=local, got %v", gateway["mode"])
+	}
+}
+
+func TestOpenclawModelAPIForIngressRejectsUnknownSurface(t *testing.T) {
+	_, err := openclawModelAPIForIngress(cllama.IngressSurface("vendor-native"))
+	if err == nil {
+		t.Fatal("expected unknown ingress surface to fail")
+	}
+	if err.Error() != `unsupported cllama ingress surface "vendor-native"` {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
