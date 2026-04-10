@@ -262,7 +262,7 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 		"skills_dir":            "/claw-data/skills",
 		"working_dir":           "/claw-data/working_dir",
 		"working_dir_isolation": "chat",
-		"timezone":              "UTC",
+		"timezone":              resolvedTimezone(rc.Timezone),
 		"web_enabled":           true,
 		"web_host":              "127.0.0.1",
 		"web_port":              10961,
@@ -349,6 +349,14 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 
 	cfg["channels"] = channels
 	return cfg, nil
+}
+
+func resolvedTimezone(raw string) string {
+	timezone := strings.TrimSpace(raw)
+	if timezone == "" {
+		return "UTC"
+	}
+	return timezone
 }
 
 func discordAllowedChannels(h *driver.HandleInfo) []uint64 {

@@ -62,6 +62,10 @@ type jobState struct {
 func GenerateJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 	now := time.Now().UnixMilli()
 	jobs := make([]job, 0, len(rc.Invocations))
+	timezone := strings.TrimSpace(rc.Timezone)
+	if timezone == "" {
+		timezone = "UTC"
+	}
 	for _, inv := range rc.Invocations {
 		name := inv.Name
 		if name == "" {
@@ -78,7 +82,7 @@ func GenerateJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 			Enabled:       inv.Origin != driver.OriginPod,
 			CreatedAtMs:   now,
 			UpdatedAtMs:   now,
-			Schedule:      jobSchedule{Expr: inv.Schedule, TZ: "UTC", Kind: "cron"},
+			Schedule:      jobSchedule{Expr: inv.Schedule, TZ: timezone, Kind: "cron"},
 			SessionTarget: "isolated",
 			WakeMode:      "now",
 			Payload:       jobPayload{Kind: "agentTurn", Message: inv.Message, TimeoutSeconds: 300},

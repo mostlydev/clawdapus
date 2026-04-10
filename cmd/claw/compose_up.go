@@ -410,6 +410,12 @@ func runComposeUp(podFile string) error {
 	if err != nil {
 		return err
 	}
+	for _, rc := range resolvedClaws {
+		if rc == nil {
+			continue
+		}
+		rc.Timezone = resolveAgentTimezone(rc.Environment, runtimeEnv)
+	}
 	proxies := make([]pod.CllamaProxyConfig, 0)
 	cllamaDashboardPort := envOrDefault("CLLAMA_UI_PORT", "8181")
 	if cllamaEnabled {
@@ -511,7 +517,6 @@ func runComposeUp(podFile string) error {
 				return fmt.Errorf("service %q: read AGENTS.md for cllama context: %w", name, err)
 			}
 
-			agentTimezone := resolveAgentTimezone(rc.Environment, runtimeEnv)
 			if rc.Count > 1 {
 				for i := 0; i < rc.Count; i++ {
 					ordinalName := fmt.Sprintf("%s-%d", name, i)
@@ -548,7 +553,7 @@ func runComposeUp(podFile string) error {
 							"pod":      p.Name,
 							"type":     rc.ClawType,
 							"token":    tokens[ordinalName],
-							"timezone": agentTimezone,
+							"timezone": rc.Timezone,
 						}, rc.Models),
 					})
 				}
@@ -585,7 +590,7 @@ func runComposeUp(podFile string) error {
 					"pod":      p.Name,
 					"type":     rc.ClawType,
 					"token":    tokens[name],
-					"timezone": agentTimezone,
+					"timezone": rc.Timezone,
 				}, rc.Models),
 			})
 		}
