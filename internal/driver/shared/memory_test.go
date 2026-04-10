@@ -114,3 +114,44 @@ func TestPreparePortableMemoryImportsFromExtraRuntimeRoot(t *testing.T) {
 		t.Fatalf("unexpected migrated memory: %q", string(data))
 	}
 }
+
+func TestPreparePortableMemoryNormalizesExistingPermissions(t *testing.T) {
+	stateDir := t.TempDir()
+	memoryDir := filepath.Join(stateDir, "memory")
+	nestedDir := filepath.Join(memoryDir, "notes")
+
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memoryDir, "MEMORY.md"), []byte("canonical"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "2026-04-10.md"), []byte("note"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	gotDir, err := PreparePortableMemory(stateDir)
+	if err != nil {
+		t.Fatalf("PreparePortableMemory returned error: %v", err)
+	}
+	if gotDir != memoryDir {
+		t.Fatalf("unexpected memory dir: %q", gotDir)
+	}
+
+	checks := map[string]os.FileMode{
+		memoryDir:                                 0o777,
+		filepath.Join(memoryDir, "MEMORY.md"):     0o666,
+		filepath.Join(memoryDir, "USER.md"):       0o666,
+		nestedDir:                                 0o777,
+		filepath.Join(nestedDir, "2026-04-10.md"): 0o666,
+	}
+	for path, want := range checks {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Fatalf("%s mode=%o want %o", path, got, want)
+		}
+	}
+}
