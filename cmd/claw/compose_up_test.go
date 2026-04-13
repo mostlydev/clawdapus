@@ -3096,45 +3096,40 @@ func TestBuildServiceSurfaceInfoOmitsEndpointsWhenToolsDeclared(t *testing.T) {
 	}
 }
 
+func testConversationWallService(token string, channelIDs ...string) *pod.Service {
+	environment := make(map[string]string)
+	if token != "" {
+		environment["DISCORD_BOT_TOKEN"] = token
+	}
+
+	channels := make([]driver.ChannelInfo, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		channels = append(channels, driver.ChannelInfo{ID: channelID})
+	}
+
+	return &pod.Service{
+		Environment: environment,
+		Claw: &pod.ClawBlock{
+			Handles: map[string]*driver.HandleInfo{
+				"discord": {
+					Guilds: []driver.GuildInfo{{
+						ID:       "guild-1",
+						Channels: channels,
+					}},
+				},
+			},
+		},
+	}
+}
+
 func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
+	t.Setenv("CLAW_WALL_POLL_INTERVAL", "")
+
 	p := &pod.Pod{
 		Name: "desk",
 		Services: map[string]*pod.Service{
-			"observer": {
-				Environment: map[string]string{
-					"DISCORD_BOT_TOKEN": "${OBSERVER_DISCORD_BOT_TOKEN}",
-				},
-				Claw: &pod.ClawBlock{
-					Handles: map[string]*driver.HandleInfo{
-						"discord": {
-							Guilds: []driver.GuildInfo{{
-								ID: "guild-1",
-								Channels: []driver.ChannelInfo{
-									{ID: "chan-2"},
-								},
-							}},
-						},
-					},
-				},
-			},
-			"trader": {
-				Environment: map[string]string{
-					"DISCORD_BOT_TOKEN": "${TRADER_DISCORD_BOT_TOKEN}",
-				},
-				Claw: &pod.ClawBlock{
-					Handles: map[string]*driver.HandleInfo{
-						"discord": {
-							Guilds: []driver.GuildInfo{{
-								ID: "guild-1",
-								Channels: []driver.ChannelInfo{
-									{ID: "chan-2"},
-									{ID: "chan-1"},
-								},
-							}},
-						},
-					},
-				},
-			},
+			"observer": testConversationWallService("${OBSERVER_DISCORD_BOT_TOKEN}", "chan-2", "chan-9"),
+			"trader":   testConversationWallService("${TRADER_DISCORD_BOT_TOKEN}", "chan-2", "chan-1"),
 		},
 	}
 
@@ -3157,8 +3152,14 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	if !slices.Equal(wall.Expose, []string{conversationWallInternalPort}) {
 		t.Fatalf("expected claw-wall expose %v, got %v", []string{conversationWallInternalPort}, wall.Expose)
 	}
-	if wall.Environment["CLAW_WALL_TOKENS"] != "chan-1:${TRADER_DISCORD_BOT_TOKEN},chan-2:${OBSERVER_DISCORD_BOT_TOKEN},chan-2:${TRADER_DISCORD_BOT_TOKEN}" {
+	if wall.Environment["CLAW_WALL_TOKENS"] != "chan-1:${TRADER_DISCORD_BOT_TOKEN},chan-2:${OBSERVER_DISCORD_BOT_TOKEN}" {
 		t.Fatalf("unexpected CLAW_WALL_TOKENS: %q", wall.Environment["CLAW_WALL_TOKENS"])
+	}
+	if strings.Contains(wall.Environment["CLAW_WALL_TOKENS"], "chan-9") {
+		t.Fatalf("expected unconsumed channel to be excluded, got %q", wall.Environment["CLAW_WALL_TOKENS"])
+	}
+	if wall.Environment["CLAW_WALL_POLL_INTERVAL"] != conversationWallPollInterval {
+		t.Fatalf("unexpected CLAW_WALL_POLL_INTERVAL: %q", wall.Environment["CLAW_WALL_POLL_INTERVAL"])
 	}
 
 	traderFeeds := p.Services["trader"].Claw.Feeds
@@ -3176,20 +3177,92 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	}
 }
 
+func TestInjectConversationWallPrefersMasterTokenWhenMasterDeclaresChannel(t *testing.T) {
+	p := &pod.Pod{
+		Name:   "desk",
+		Master: "zmaster",
+		Services: map[string]*pod.Service{
+			"observer": testConversationWallService("${OBSERVER_DISCORD_BOT_TOKEN}", "chan-2"),
+			"trader":   testConversationWallService("${TRADER_DISCORD_BOT_TOKEN}", "chan-2"),
+			"zmaster":  testConversationWallService("${MASTER_DISCORD_BOT_TOKEN}", "chan-2"),
+		},
+	}
+
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"observer": {ServiceName: "observer"},
+		"trader":   {ServiceName: "trader", Cllama: []string{"passthrough"}},
+		"zmaster":  {ServiceName: "zmaster"},
+	}
+
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		t.Fatalf("injectConversationWall: %v", err)
+	}
+
+	wall := p.Services[conversationWallServiceName]
+	if wall == nil {
+		t.Fatal("expected claw-wall service to be injected")
+	}
+	if wall.Environment["CLAW_WALL_TOKENS"] != "chan-2:${MASTER_DISCORD_BOT_TOKEN}" {
+		t.Fatalf("unexpected CLAW_WALL_TOKENS: %q", wall.Environment["CLAW_WALL_TOKENS"])
+	}
+}
+
+func TestInjectConversationWallFallsBackWhenMasterDoesNotDeclareChannel(t *testing.T) {
+	p := &pod.Pod{
+		Name:   "desk",
+		Master: "zmaster",
+		Services: map[string]*pod.Service{
+			"observer": testConversationWallService("${OBSERVER_DISCORD_BOT_TOKEN}", "chan-2"),
+			"trader":   testConversationWallService("", "chan-2"),
+			"zmaster":  testConversationWallService("${MASTER_DISCORD_BOT_TOKEN}", "chan-9"),
+		},
+	}
+
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"observer": {ServiceName: "observer"},
+		"trader":   {ServiceName: "trader", Cllama: []string{"passthrough"}},
+		"zmaster":  {ServiceName: "zmaster"},
+	}
+
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		t.Fatalf("injectConversationWall: %v", err)
+	}
+
+	wall := p.Services[conversationWallServiceName]
+	if wall == nil {
+		t.Fatal("expected claw-wall service to be injected")
+	}
+	if wall.Environment["CLAW_WALL_TOKENS"] != "chan-2:${OBSERVER_DISCORD_BOT_TOKEN}" {
+		t.Fatalf("unexpected CLAW_WALL_TOKENS: %q", wall.Environment["CLAW_WALL_TOKENS"])
+	}
+}
+
+func TestInjectConversationWallRejectsConsumedChannelWithoutEligibleReader(t *testing.T) {
+	p := &pod.Pod{
+		Name: "desk",
+		Services: map[string]*pod.Service{
+			"observer": testConversationWallService("${OBSERVER_DISCORD_BOT_TOKEN}", "chan-9"),
+			"trader":   testConversationWallService("", "chan-2"),
+		},
+	}
+
+	err := injectConversationWall(p, map[string]*driver.ResolvedClaw{
+		"observer": {ServiceName: "observer"},
+		"trader":   {ServiceName: "trader", Cllama: []string{"passthrough"}},
+	})
+	if err == nil {
+		t.Fatal("expected missing-reader error")
+	}
+	if !strings.Contains(err.Error(), "chan-2") {
+		t.Fatalf("expected channel ID in error, got %v", err)
+	}
+}
+
 func TestInjectConversationWallRejectsReservedServiceName(t *testing.T) {
 	p := &pod.Pod{
 		Services: map[string]*pod.Service{
 			conversationWallServiceName: {Image: "busybox"},
-			"trader": {
-				Environment: map[string]string{"DISCORD_BOT_TOKEN": "token"},
-				Claw: &pod.ClawBlock{
-					Handles: map[string]*driver.HandleInfo{
-						"discord": {
-							Guilds: []driver.GuildInfo{{Channels: []driver.ChannelInfo{{ID: "chan-1"}}}},
-						},
-					},
-				},
-			},
+			"trader":                    testConversationWallService("token", "chan-1"),
 		},
 	}
 

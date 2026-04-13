@@ -97,7 +97,7 @@ func loadConfig() (config, error) {
 		return config{}, fmt.Errorf("claw-wall: CLAW_WALL_LIMIT must be at least 1")
 	}
 
-	pollSeconds, err := envInt("CLAW_WALL_POLL_INTERVAL", 15)
+	pollSeconds, err := envInt("CLAW_WALL_POLL_INTERVAL", 30)
 	if err != nil {
 		return config{}, err
 	}
