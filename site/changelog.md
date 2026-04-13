@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.6 <Badge type="tip" text="Latest" /> {#v0-8-6}
+## v0.8.7 <Badge type="tip" text="Latest" /> {#v0-8-7}
+
+*2026-04-12*
+
+- **Fix: `claw-wall` Discord rate limit handling** ([#147](https://github.com/mostlydev/clawdapus/issues/147), [#148](https://github.com/mostlydev/clawdapus/pull/148)) — `claw-wall` was polling duplicate channel/token pairs and retrying every non-200 response on the next tick, which could amplify Discord rate limits across multi-bot pods. Three coordinated fixes: (1) compile-time token selection now picks exactly one reader token per consumed Discord channel, preferring the master service's token when available, and fails hard if a consumed channel has no eligible reader; (2) the poller now parses Discord `429` responses into typed rate-limit data with channel-scoped and token-scoped cooldowns that honor `Retry-After` backoff; (3) the default poll interval increases from 15s to 30s, configurable via `CLAW_WALL_POLL_INTERVAL`. Originally observed on the Tiverton trading-desk deployment.
+
+## v0.8.6 {#v0-8-6}
 
 *2026-04-10*
 
