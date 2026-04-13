@@ -42,6 +42,7 @@ const (
 	conversationWallFeedName     = "channel-context"
 	conversationWallFeedTTL      = 30
 	conversationWallFeedLimit    = 20
+	conversationWallPollInterval = "30"
 	conversationWallInternalPort = "8080"
 	conversationWallDockerfile   = "dockerfiles/claw-wall/Dockerfile"
 	clawInternalNetworkName      = "claw-internal"
@@ -1464,17 +1465,22 @@ type conversationWallTokenPair struct {
 	Token     string
 }
 
+type conversationWallTokenCandidate struct {
+	ServiceName string
+	Token       string
+}
+
 func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw) error {
 	if p == nil {
 		return nil
 	}
 
-	tokenPairs := make([]conversationWallTokenPair, 0)
+	consumedChannelSet := make(map[string]struct{})
 	triggerServices := make(map[string][]string)
 
 	for _, name := range sortedResolvedClawNames(resolvedClaws) {
 		rc := resolvedClaws[name]
-		if rc == nil {
+		if rc == nil || len(rc.Cllama) == 0 {
 			continue
 		}
 		svc := p.Services[name]
@@ -1487,19 +1493,8 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 			continue
 		}
 
-		token := strings.TrimSpace(svc.Environment["DISCORD_BOT_TOKEN"])
-		if token == "" {
-			return fmt.Errorf("service %q: HANDLE discord with channel IDs requires DISCORD_BOT_TOKEN for conversation wall injection", name)
-		}
 		for _, channelID := range channelIDs {
-			tokenPairs = append(tokenPairs, conversationWallTokenPair{
-				ChannelID: channelID,
-				Token:     token,
-			})
-		}
-
-		if len(rc.Cllama) == 0 {
-			continue
+			consumedChannelSet[channelID] = struct{}{}
 		}
 		triggerServices[name] = channelIDs
 	}
@@ -1510,9 +1505,41 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 	if _, exists := p.Services[conversationWallServiceName]; exists {
 		return fmt.Errorf("service name %q is reserved for the conversation wall sidecar", conversationWallServiceName)
 	}
-	if len(tokenPairs) == 0 {
-		return fmt.Errorf("conversation wall injection triggered but no Discord channel/token pairs were found")
+
+	consumedChannelIDs := sortedConversationWallChannelIDs(consumedChannelSet)
+	candidatesByChannel := make(map[string][]conversationWallTokenCandidate, len(consumedChannelIDs))
+	for _, name := range sortedConversationWallServiceNames(p.Services) {
+		svc := p.Services[name]
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		token := strings.TrimSpace(svc.Environment["DISCORD_BOT_TOKEN"])
+		if token == "" {
+			continue
+		}
+		for _, channelID := range discordHandleChannelIDs(svc.Claw.Handles) {
+			if _, consumed := consumedChannelSet[channelID]; !consumed {
+				continue
+			}
+			candidatesByChannel[channelID] = append(candidatesByChannel[channelID], conversationWallTokenCandidate{
+				ServiceName: name,
+				Token:       token,
+			})
+		}
 	}
+
+	tokenPairs := make([]conversationWallTokenPair, 0, len(consumedChannelIDs))
+	for _, channelID := range consumedChannelIDs {
+		token, err := selectConversationWallToken(channelID, p.Master, candidatesByChannel[channelID])
+		if err != nil {
+			return err
+		}
+		tokenPairs = append(tokenPairs, conversationWallTokenPair{
+			ChannelID: channelID,
+			Token:     token,
+		})
+	}
+
 	for name, channelIDs := range triggerServices {
 		svc := p.Services[name]
 		if svc == nil || svc.Claw == nil {
@@ -1522,9 +1549,12 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 	}
 
 	p.Services[conversationWallServiceName] = &pod.Service{
-		Image:       resolveConversationWallImageRef(),
-		Environment: map[string]string{"CLAW_WALL_TOKENS": formatConversationWallTokenPairs(tokenPairs)},
-		Expose:      []string{conversationWallInternalPort},
+		Image: resolveConversationWallImageRef(),
+		Environment: map[string]string{
+			"CLAW_WALL_TOKENS":        formatConversationWallTokenPairs(tokenPairs),
+			"CLAW_WALL_POLL_INTERVAL": envOrDefault("CLAW_WALL_POLL_INTERVAL", conversationWallPollInterval),
+		},
+		Expose: []string{conversationWallInternalPort},
 		Compose: map[string]interface{}{
 			"networks":  []string{"claw-internal"},
 			"restart":   "on-failure",
@@ -1542,6 +1572,36 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 		},
 	}
 	return nil
+}
+
+func selectConversationWallToken(channelID, master string, candidates []conversationWallTokenCandidate) (string, error) {
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("conversation wall injection triggered but channel %q has no eligible Discord reader token", channelID)
+	}
+	for _, candidate := range candidates {
+		if candidate.ServiceName == master {
+			return candidate.Token, nil
+		}
+	}
+	return candidates[0].Token, nil
+}
+
+func sortedConversationWallChannelIDs(channels map[string]struct{}) []string {
+	channelIDs := make([]string, 0, len(channels))
+	for channelID := range channels {
+		channelIDs = append(channelIDs, channelID)
+	}
+	sort.Strings(channelIDs)
+	return channelIDs
+}
+
+func sortedConversationWallServiceNames(services map[string]*pod.Service) []string {
+	names := make([]string, 0, len(services))
+	for name := range services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func appendConversationWallFeed(feeds []pod.FeedEntry, channelIDs []string) []pod.FeedEntry {

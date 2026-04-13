@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,9 @@ type discordPoller struct {
 	targets      []tokenPair
 	fetchLimit   int
 	latestByPair map[string]string
+	baseURL      string
+	cooldowns    *rateLimitTracker
+	now          func() time.Time
 }
 
 type discordAPIMessage struct {
@@ -104,6 +108,9 @@ func newDiscordPoller(client *http.Client, store *conversationStore, targets []t
 		targets:      targets,
 		fetchLimit:   fetchLimit,
 		latestByPair: make(map[string]string),
+		baseURL:      "https://discord.com/api/v10",
+		cooldowns:    newRateLimitTracker(),
+		now:          time.Now,
 	}
 }
 
@@ -124,9 +131,20 @@ func (p *discordPoller) Run(ctx context.Context, interval time.Duration, logWrit
 
 func (p *discordPoller) pollOnce(ctx context.Context, logWriter io.Writer) {
 	for _, target := range p.targets {
+		if p.cooldowns.blocked(target, p.now()) {
+			continue
+		}
+
 		latestID := p.latestByPair[pairKey(target)]
 		messages, newestID, err := p.fetchMessages(ctx, target, latestID)
 		if err != nil {
+			var rateLimitErr *discordRateLimitError
+			if errors.As(err, &rateLimitErr) {
+				if logWriter != nil && rateLimitErr.FirstOccurrence {
+					fmt.Fprintf(logWriter, "claw-wall: %v\n", rateLimitErr)
+				}
+				continue
+			}
 			if logWriter != nil {
 				fmt.Fprintf(logWriter, "claw-wall: poll channel %s failed: %v\n", target.ChannelID, err)
 			}
@@ -142,7 +160,12 @@ func (p *discordPoller) pollOnce(ctx context.Context, logWriter io.Writer) {
 }
 
 func (p *discordPoller) fetchMessages(ctx context.Context, target tokenPair, afterID string) ([]wallMessage, string, error) {
-	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages?limit=%d", target.ChannelID, p.fetchLimit)
+	baseURL := strings.TrimRight(strings.TrimSpace(p.baseURL), "/")
+	if baseURL == "" {
+		baseURL = "https://discord.com/api/v10"
+	}
+
+	url := fmt.Sprintf("%s/channels/%s/messages?limit=%d", baseURL, target.ChannelID, p.fetchLimit)
 	if strings.TrimSpace(afterID) != "" {
 		url += "&after=" + afterID
 	}
@@ -160,7 +183,14 @@ func (p *discordPoller) fetchMessages(ctx context.Context, target tokenPair, aft
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if limit := parseDiscordRateLimit(resp, body, p.now()); limit != nil {
+			return nil, "", &discordRateLimitError{
+				Target:          target,
+				Limit:           *limit,
+				FirstOccurrence: p.cooldowns.record(target, *limit),
+			}
+		}
 		return nil, "", fmt.Errorf("discord returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
