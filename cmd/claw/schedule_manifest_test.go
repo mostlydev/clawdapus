@@ -72,7 +72,34 @@ func TestBuildScheduleManifestIncludesOnlyPodOriginInvocations(t *testing.T) {
 	}
 }
 
-func TestBuildScheduleManifestUsesUTCWithoutCalendar(t *testing.T) {
+func TestBuildScheduleManifestUsesServiceTimezoneWithoutCalendar(t *testing.T) {
+	manifest, err := buildScheduleManifest(&pod.Pod{Name: "ops"}, map[string]*driver.ResolvedClaw{
+		"bot": {
+			ServiceName: "bot",
+			ClawType:    "nullclaw",
+			Timezone:    "America/New_York",
+			Invocations: []driver.Invocation{
+				{
+					ID:       "podjob01",
+					Schedule: "*/10 * * * *",
+					Message:  "Heartbeat",
+					Origin:   driver.OriginPod,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildScheduleManifest returned error: %v", err)
+	}
+	if len(manifest.Invocations) != 1 {
+		t.Fatalf("expected one invocation, got %d", len(manifest.Invocations))
+	}
+	if manifest.Invocations[0].Timezone != "America/New_York" {
+		t.Fatalf("expected service timezone, got %q", manifest.Invocations[0].Timezone)
+	}
+}
+
+func TestBuildScheduleManifestFallsBackToUTCWithoutServiceTimezone(t *testing.T) {
 	manifest, err := buildScheduleManifest(&pod.Pod{Name: "ops"}, map[string]*driver.ResolvedClaw{
 		"bot": {
 			ServiceName: "bot",
@@ -94,7 +121,7 @@ func TestBuildScheduleManifestUsesUTCWithoutCalendar(t *testing.T) {
 		t.Fatalf("expected one invocation, got %d", len(manifest.Invocations))
 	}
 	if manifest.Invocations[0].Timezone != "UTC" {
-		t.Fatalf("expected UTC default timezone, got %q", manifest.Invocations[0].Timezone)
+		t.Fatalf("expected UTC fallback timezone, got %q", manifest.Invocations[0].Timezone)
 	}
 }
 

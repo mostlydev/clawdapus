@@ -554,6 +554,20 @@ func TestReadDotEnvFileParsesQuotedValuesAndComments(t *testing.T) {
 	}
 }
 
+func TestResolveAgentTimezoneUsesResolvedTZ(t *testing.T) {
+	got := resolveAgentTimezone(map[string]string{"TZ": "${BOT_TZ}"}, map[string]string{"BOT_TZ": "America/New_York"})
+	if got != "America/New_York" {
+		t.Fatalf("expected America/New_York, got %q", got)
+	}
+}
+
+func TestResolveAgentTimezoneFallsBackToUTCOnInvalidTZ(t *testing.T) {
+	got := resolveAgentTimezone(map[string]string{"TZ": "Mars/Olympus"}, map[string]string{})
+	if got != "UTC" {
+		t.Fatalf("expected UTC fallback, got %q", got)
+	}
+}
+
 func TestValidateCllamaEnvFilesRejectsProviderKeys(t *testing.T) {
 	tmpDir := t.TempDir()
 	envPath := filepath.Join(tmpDir, "bot.env")
