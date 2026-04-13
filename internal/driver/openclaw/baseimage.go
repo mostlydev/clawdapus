@@ -73,6 +73,7 @@ wait "$GATEWAY_PID"
 ENTRYPOINT_EOF
 RUN chmod +x /usr/local/bin/openclaw-entrypoint.sh
 
+USER root
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/openclaw-entrypoint.sh"]
 `
 

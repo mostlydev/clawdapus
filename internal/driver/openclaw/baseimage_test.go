@@ -24,6 +24,9 @@ func TestBaseImageProvider(t *testing.T) {
 	if !strings.Contains(dockerfile, "openclaw.ai/install.sh") {
 		t.Fatal("Dockerfile should install openclaw")
 	}
+	if !strings.Contains(dockerfile, "\nUSER root\n") {
+		t.Fatal("Dockerfile should explicitly run as root so ~/.openclaw resolves to /root/.openclaw")
+	}
 	if !strings.Contains(dockerfile, "/usr/local/bin/openclaw-entrypoint.sh") {
 		t.Fatal("Dockerfile should install the entrypoint outside /claw")
 	}
