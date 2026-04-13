@@ -310,9 +310,9 @@ In `mediated` mode, cllama gains the ability to inject tools into LLM requests a
 
 #### Tool injection
 
-When `tools.json` is loaded for an agent in `mediated` mode, cllama becomes the sole upstream tool presenter for that request. It replaces the outgoing request's `tools[]` field with managed tools only (LLM-facing schemas only). Managed tools are namespaced as `<service>.<tool>` (e.g., `trading-api.get_market_context`), which distinguishes them from runner-native tools when logs or transcripts are inspected.
+When `tools.json` is loaded for an agent in `mediated` mode, cllama appends managed tools to any runner-native tool definitions already present on the outbound request. Managed tools are namespaced as `<service>.<tool>` (e.g., `trading-api.get_market_context`), which distinguishes them from runner-native tools when logs or transcripts are inspected.
 
-Additive composition of runner-local and pod-shared tools belongs to `native` mode, where the runner is the sole tool client. `mediated` mode is intentionally narrower: pod-shared tools are executed by cllama, and the upstream tool round is treated as cllama-owned.
+For OpenAI-compatible requests, legacy `functions[]` are normalized into `tools[]` before merge so additive composition preserves older runner tool clients as well. Existing `tool_choice` intent is preserved when safe; if it targets a managed tool by canonical name, cllama rewrites the name to the provider-safe presented alias.
 
 #### Streaming behavior
 
@@ -324,13 +324,17 @@ Requests where cllama has NO managed tools to inject are unaffected — streamin
 
 **Why not speculative streaming?** Detecting tool_calls mid-stream requires parsing provider-specific SSE chunk formats, buffering partial JSON, and handling edge cases where tool_calls arrive late. The complexity couples cllama to provider serialization details. Forcing non-streaming is simple, correct, and provider-agnostic. The latency cost (no token streaming during tool-augmented requests) is acceptable for chat agents, which are the primary tool consumers.
 
-#### Response handling: single executor per response
+#### Response handling: ownership-partitioned executor
 
 A fundamental constraint: when the LLM returns tool_calls, the protocol requires results for ALL calls before it will continue. Two independent executors (cllama + runner) cannot both fulfill a single response's tool_calls without one fabricating results for the other's tools. Fabricated results let the LLM reason over output that never happened.
 
-The right way to support mixed local + pod tools is `native` mode, where the runner owns the full loop. `mediated` mode cannot safely provide transparent mixed execution.
+`mediated` mode therefore partitions by response ownership rather than pretending both executors can satisfy the same tool round.
 
-**v1 rule: `mediated` mode is request-scoped exclusive.** When cllama is acting as the tool executor for a request, runner-local tools are not combined into that upstream tool round. If the upstream response nevertheless contains unexpected non-managed tool calls, this is a defensive fallback path: either the model hallucinated a tool name or a client/request mismatch leaked an unexpected tool reference. cllama refuses execution of these calls and feeds structured errors back to the LLM within the mediated loop (see below), giving the model a chance to re-emit only managed tools or respond in text.
+**Current rule:** runner-native and managed tools can coexist on the same request surface, but a single model response still has one owner:
+- If a response contains managed tool calls only, cllama owns that round and executes them internally.
+- If a response contains runner-native tool calls only, cllama passes the response back to the runner unchanged. If the downstream client originally requested streaming, cllama synthesizes an equivalent SSE stream so the runner still receives its expected protocol shape.
+- If a single response mixes managed and runner-native tool calls, cllama fails closed.
+- If cllama has already hidden managed rounds inside the current request, it also fails closed on any later runner-native tool call. Handing control back to the runner after hidden mediation would break transcript continuity.
 
 **If the response contains managed tool_calls only:**
 1. cllama validates each call against the manifest (reject unknown tools — fail closed)
@@ -339,15 +343,18 @@ The right way to support mixed local + pod tools is `native` mode, where the run
 4. Repeats until the LLM returns terminal text
 5. Returns the final response to the runner
 
-**If the response contains non-managed tool_calls in `mediated` mode:**
-- Treat them as invalid for this request and feed back structured tool errors inside the mediated loop
-- The error message should be prescriptive: `This request is in mediated mode. Action required: re-emit only managed service tools for this turn, or respond in text.`
+**If the response contains runner-native tool_calls only before any hidden managed round:**
+- Return the response to the runner so its native tool loop can continue normally.
+
+**If the response contains mixed ownership or tries to switch back to runner-native tools after hidden managed rounds:**
+- Fail closed with a direct proxy error rather than fabricating transcript state.
 
 **If the response contains only text:**
 - Return directly (or re-stream if the runner requested streaming).
 
 This single-executor model handles the common cases cleanly:
 - Service-only tool chains: cllama handles transparently, runner sees text
+- Runner-only tool chains in mediated requests: cllama preserves them, runner remains the executor
 - Native additive tool chains: runner handles both local and pod-shared tools in `native` mode
 - Mixed batches in `mediated` mode: refuse execution, feed errors back
 
