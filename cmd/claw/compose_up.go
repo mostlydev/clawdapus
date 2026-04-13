@@ -1789,6 +1789,9 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		principals[i] = m.Principal
 	}
 	store := clawapi.Store{Principals: principals}
+	for _, warning := range clawapi.PrincipalVersionSkewWarnings(&store, p.ClawAPI.Image) {
+		fmt.Printf("[claw] warning: %s\n", warning)
+	}
 	if err := writeClawAPIPrincipalStore(runtimeDir, p.ClawAPI.PrincipalsHostPath, store); err != nil {
 		return nil, fmt.Errorf("write claw-api principals: %w", err)
 	}

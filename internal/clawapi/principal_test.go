@@ -144,6 +144,9 @@ func TestLoadStoreWithWarningsKeepsPrincipalWhenAllVerbsAreUnknown(t *testing.T)
 	if len(warnings) != 2 {
 		t.Fatalf("expected 2 warnings, got %v", warnings)
 	}
+	if !reflect.DeepEqual(store.NormalizationWarnings, warnings) {
+		t.Fatalf("expected warnings to be retained on store, got %v want %v", store.NormalizationWarnings, warnings)
+	}
 	if !strings.Contains(warnings[0], `ignoring unknown verb "schedule.pause"`) {
 		t.Fatalf("expected unknown-verb warning, got %v", warnings)
 	}
@@ -159,6 +162,53 @@ func TestLoadStoreWithWarningsKeepsPrincipalWhenAllVerbsAreUnknown(t *testing.T)
 	}
 	if principal.AllowsVerb(VerbFleetStatus) {
 		t.Fatalf("did not expect inert principal to authorize fleet.status")
+	}
+	if !reflect.DeepEqual(store.InertPrincipalNames(), []string{"future"}) {
+		t.Fatalf("expected inert principal summary, got %v", store.InertPrincipalNames())
+	}
+}
+
+func TestPrincipalVersionSkewWarningsWarnForOlderImage(t *testing.T) {
+	store := &Store{Principals: []Principal{{
+		Name:  "claw-scheduler",
+		Token: "capi_sched",
+		Verbs: []string{VerbScheduleRead, VerbScheduleControl},
+		Pods:  []string{"ops"},
+	}}}
+
+	warnings := PrincipalVersionSkewWarnings(store, "ghcr.io/mostlydev/claw-api:v0.4.2")
+	if len(warnings) != 2 {
+		t.Fatalf("expected 2 warnings, got %v", warnings)
+	}
+	if !strings.Contains(warnings[0], `ghcr.io/mostlydev/claw-api:v0.4.2`) || !strings.Contains(warnings[0], `known minimum v0.6.0`) {
+		t.Fatalf("expected version warning, got %v", warnings)
+	}
+}
+
+func TestPrincipalVersionSkewWarningsSkipSupportedImage(t *testing.T) {
+	store := &Store{Principals: []Principal{{
+		Name:  "claw-scheduler",
+		Token: "capi_sched",
+		Verbs: []string{VerbScheduleRead, VerbScheduleControl},
+		Pods:  []string{"ops"},
+	}}}
+
+	if warnings := PrincipalVersionSkewWarnings(store, "ghcr.io/mostlydev/claw-api:v0.6.0"); len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %v", warnings)
+	}
+}
+
+func TestPrincipalVersionSkewWarningsWarnWhenImageTagUnknown(t *testing.T) {
+	store := &Store{Principals: []Principal{{
+		Name:  "claw-scheduler",
+		Token: "capi_sched",
+		Verbs: []string{VerbScheduleRead},
+		Pods:  []string{"ops"},
+	}}}
+
+	warnings := PrincipalVersionSkewWarnings(store, "ghcr.io/mostlydev/claw-api:latest")
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `is not version-pinned`) {
+		t.Fatalf("expected uncertainty warning, got %v", warnings)
 	}
 }
 

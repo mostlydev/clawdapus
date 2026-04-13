@@ -916,6 +916,41 @@ func TestPrepareClawAPIRuntimeWithMasterAndInvokeAlsoWritesSchedulerPrincipal(t 
 	}
 }
 
+func TestPrepareClawAPIRuntimeWarnsWhenClawAPIImageMayNotSupportPrincipalVerb(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name: "ops",
+		Services: map[string]*pod.Service{
+			"westin": {
+				Claw: &pod.ClawBlock{
+					Invoke: []pod.InvokeEntry{{
+						Schedule: "0 9 * * 1-5",
+						Message:  "Open the market.",
+					}},
+				},
+			},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Image:              "ghcr.io/mostlydev/claw-api:v0.4.2",
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	out, err := captureStdout(t, func() error {
+		_, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+			"westin": {Count: 1},
+		})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("prepareClawAPIRuntime: %v", err)
+	}
+	if !strings.Contains(out, `ghcr.io/mostlydev/claw-api:v0.4.2`) || !strings.Contains(out, `known minimum v0.6.0`) {
+		t.Fatalf("expected skew warning in output, got %q", out)
+	}
+}
+
 func TestPrepareClawAPIRuntimeRejectsInjectIntoReservedMasterService(t *testing.T) {
 	runtimeDir := t.TempDir()
 	p := &pod.Pod{

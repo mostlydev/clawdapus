@@ -103,7 +103,22 @@ func newHandler(manifest *manifestpkg.PodManifest, scheduleManifest *schedulepkg
 func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/health":
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		principalCount := 0
+		inert := []string(nil)
+		warnings := []string(nil)
+		if h.store != nil {
+			principalCount = len(h.store.Principals)
+			inert = h.store.InertPrincipalNames()
+			warnings = h.store.NormalizationWarnings
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true,
+			"principals": map[string]any{
+				"count":                  principalCount,
+				"inert":                  inert,
+				"normalization_warnings": warnings,
+			},
+		})
 		return
 	case r.Method == http.MethodGet && r.URL.Path == "/fleet/status":
 		h.handleStatus(w, r)
