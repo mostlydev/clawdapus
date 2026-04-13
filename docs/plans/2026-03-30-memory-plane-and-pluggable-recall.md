@@ -181,14 +181,17 @@ Completed:
 - tombstone-aware replay hygiene in `claw memory backfill`, so forgotten source-event IDs are not re-retained on later rebuilds
 - `cllama` now loads `tools.json` into typed agent context
 - managed OpenAI-compatible tool presentation and mediation in `cllama`, including:
-  - replacement of outgoing runner-local `tools[]` with compiled managed tools
+  - merge of outgoing runner-local `tools[]` with compiled managed tools
   - HTTP execution of declared managed tools
   - bounded mediation with `max_rounds`, per-tool timeout, total timeout, and response size limits
-  - structured tool error feedback back into the model within the mediated loop
+  - pass-through of runner-native-only tool responses before any hidden managed round
+  - fail-closed handling for mixed managed/native responses or runner-native calls after hidden managed rounds
   - synthetic downstream SSE re-streaming when the runner requested `stream: true`
 - managed Anthropic-format tool presentation and mediation in `cllama`, including:
-  - replacement of outgoing runner-local `tools` / `tool_choice` with compiled managed tools
+  - merge of outgoing runner-local `tools` with compiled managed tools while preserving safe `tool_choice`
   - HTTP execution of declared managed tools via `tool_use` / `tool_result`
+  - pass-through of runner-native-only tool responses before any hidden managed round
+  - fail-closed handling for mixed managed/native responses or runner-native calls after hidden managed rounds
   - synthetic downstream SSE re-streaming when the runner requested `stream: true`
 - ADR-020 session-history extensions for mediated requests, including:
   - `status`
