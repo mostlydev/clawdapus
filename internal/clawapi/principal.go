@@ -9,6 +9,8 @@ import (
 	"os"
 	"path"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -29,7 +31,8 @@ var AllWriteVerbs = []string{VerbFleetRestart, VerbFleetQuarantine, VerbFleetBud
 var AllVerbs = append(append([]string{}, AllReadVerbs...), AllWriteVerbs...)
 
 type Store struct {
-	Principals []Principal `json:"principals"`
+	Principals            []Principal `json:"principals"`
+	NormalizationWarnings []string    `json:"-"`
 }
 
 type Principal struct {
@@ -60,7 +63,21 @@ func LoadStoreWithWarnings(filePath string) (*Store, []string, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("validate claw-api principals %q: %w", filePath, err)
 	}
+	store.NormalizationWarnings = append([]string(nil), warnings...)
 	return &store, warnings, nil
+}
+
+func (s *Store) InertPrincipalNames() []string {
+	if s == nil {
+		return nil
+	}
+	names := make([]string, 0)
+	for _, principal := range s.Principals {
+		if len(principal.Verbs) == 0 {
+			names = append(names, principal.Name)
+		}
+	}
+	return names
 }
 
 func (s *Store) ResolveBearer(header string) (*Principal, error) {
@@ -291,6 +308,85 @@ func validatePatterns(label string, patterns []string) error {
 
 func containsGlobMeta(pattern string) bool {
 	return strings.ContainsAny(pattern, "*?[\\")
+}
+
+var minClawAPIImageVersionByVerb = map[string]string{
+	VerbScheduleRead:    "v0.6.0",
+	VerbScheduleControl: "v0.6.0",
+}
+
+func PrincipalVersionSkewWarnings(store *Store, imageRef string) []string {
+	if store == nil {
+		return nil
+	}
+	imageRef = strings.TrimSpace(imageRef)
+	if imageRef == "" {
+		return nil
+	}
+
+	tag, tagged := imageTagFromRef(imageRef)
+	version, versioned := normalizeSemverTag(tag)
+
+	seen := make(map[string]struct{})
+	warnings := make([]string, 0)
+	for _, principal := range store.Principals {
+		for _, verb := range principal.Verbs {
+			minVersion, tracked := minClawAPIImageVersionByVerb[verb]
+			if !tracked {
+				continue
+			}
+
+			var warning string
+			switch {
+			case !tagged || !versioned:
+				warning = fmt.Sprintf("claw-api image %q is not version-pinned; cannot verify support for principal %q verb %q (known minimum %s)", imageRef, principal.Name, verb, minVersion)
+			case semver.Compare(version, minVersion) < 0:
+				warning = fmt.Sprintf("claw-api image %q may not support principal %q verb %q (known minimum %s)", imageRef, principal.Name, verb, minVersion)
+			default:
+				continue
+			}
+			if _, ok := seen[warning]; ok {
+				continue
+			}
+			seen[warning] = struct{}{}
+			warnings = append(warnings, warning)
+		}
+	}
+	return warnings
+}
+
+func imageTagFromRef(imageRef string) (string, bool) {
+	imageRef = strings.TrimSpace(imageRef)
+	if imageRef == "" {
+		return "", false
+	}
+	if i := strings.Index(imageRef, "@"); i >= 0 {
+		imageRef = imageRef[:i]
+	}
+	slash := strings.LastIndex(imageRef, "/")
+	colon := strings.LastIndex(imageRef, ":")
+	if colon <= slash {
+		return "", false
+	}
+	tag := strings.TrimSpace(imageRef[colon+1:])
+	if tag == "" {
+		return "", false
+	}
+	return tag, true
+}
+
+func normalizeSemverTag(tag string) (string, bool) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return "", false
+	}
+	if tag[0] >= '0' && tag[0] <= '9' {
+		tag = "v" + tag
+	}
+	if !semver.IsValid(tag) {
+		return "", false
+	}
+	return tag, true
 }
 
 func secureEqual(a, b string) bool {
