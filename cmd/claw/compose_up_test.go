@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -665,7 +666,7 @@ func TestMaterializeContractIncludesBuildsGeneratedContractAndReferenceSkill(t *
 	}
 }
 
-func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
+func TestPrepareRuntimeDirStagesPreviousTreeUntilCommit(t *testing.T) {
 	tmpDir := t.TempDir()
 	runtimeDir := filepath.Join(tmpDir, ".claw-runtime")
 	staleDir := filepath.Join(runtimeDir, "nb-roll", "skills", "handle-discord.md")
@@ -677,8 +678,9 @@ func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
 		t.Fatalf("write stale file: %v", err)
 	}
 
-	if err := resetRuntimeDir(runtimeDir); err != nil {
-		t.Fatalf("reset runtime dir: %v", err)
+	stage, err := prepareRuntimeDir(runtimeDir)
+	if err != nil {
+		t.Fatalf("prepare runtime dir: %v", err)
 	}
 
 	info, err := os.Stat(runtimeDir)
@@ -688,11 +690,63 @@ func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
 	if !info.IsDir() {
 		t.Fatalf("expected runtime dir to exist as directory")
 	}
-	if _, err := os.Stat(staleDir); !os.IsNotExist(err) {
-		t.Fatalf("expected stale dir to be removed, got err=%v", err)
+	if stage.PreviousPath == "" {
+		t.Fatal("expected previous runtime dir to be preserved during staging")
 	}
-	if _, err := os.Stat(staleFile); !os.IsNotExist(err) {
-		t.Fatalf("expected stale file to be removed, got err=%v", err)
+	if _, err := os.Stat(staleDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected stale dir to be absent from fresh runtime dir, got err=%v", err)
+	}
+	if _, err := os.Stat(staleFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected stale file to be absent from fresh runtime dir, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stage.PreviousPath, "nb-roll", "skills", "handle-discord.md")); err != nil {
+		t.Fatalf("expected staged previous runtime tree to preserve stale dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stage.PreviousPath, "stale.txt")); err != nil {
+		t.Fatalf("expected staged previous runtime tree to preserve stale file: %v", err)
+	}
+
+	if err := stage.Commit(); err != nil {
+		t.Fatalf("commit runtime dir: %v", err)
+	}
+	if _, err := os.Stat(stage.PreviousPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected previous runtime dir to be removed after commit, got err=%v", err)
+	}
+}
+
+func TestPrepareRuntimeDirRollbackRestoresPreviousTree(t *testing.T) {
+	tmpDir := t.TempDir()
+	runtimeDir := filepath.Join(tmpDir, ".claw-runtime")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	originalPath := filepath.Join(runtimeDir, "AGENTS.generated.md")
+	if err := os.WriteFile(originalPath, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write original runtime file: %v", err)
+	}
+
+	stage, err := prepareRuntimeDir(runtimeDir)
+	if err != nil {
+		t.Fatalf("prepare runtime dir: %v", err)
+	}
+	replacementPath := filepath.Join(runtimeDir, "AGENTS.generated.md")
+	if err := os.WriteFile(replacementPath, []byte("new"), 0o644); err != nil {
+		t.Fatalf("write replacement runtime file: %v", err)
+	}
+
+	if err := stage.Rollback(); err != nil {
+		t.Fatalf("rollback runtime dir: %v", err)
+	}
+
+	data, err := os.ReadFile(originalPath)
+	if err != nil {
+		t.Fatalf("read restored runtime file: %v", err)
+	}
+	if string(data) != "old" {
+		t.Fatalf("restored runtime file = %q, want %q", string(data), "old")
+	}
+	if _, err := os.Stat(stage.PreviousPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected previous runtime dir to be consumed by rollback, got err=%v", err)
 	}
 }
 

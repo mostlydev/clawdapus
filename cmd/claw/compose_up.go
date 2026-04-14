@@ -87,7 +87,7 @@ var composeUpCmd = &cobra.Command{
 	},
 }
 
-func runComposeUp(podFile string) error {
+func runComposeUp(podFile string) (err error) {
 	p, podDir, err := loadPodDefinition(podFile)
 	if err != nil {
 		return err
@@ -127,9 +127,25 @@ func runComposeUp(podFile string) error {
 	if err := preMigratePortableMemory(runtimeDir, memoryRoot, p); err != nil {
 		return fmt.Errorf("migrate portable memory: %w", err)
 	}
-	if err := resetRuntimeDir(runtimeDir); err != nil {
-		return fmt.Errorf("reset runtime dir: %w", err)
+	runtimeStage, err := prepareRuntimeDir(runtimeDir)
+	if err != nil {
+		return fmt.Errorf("prepare runtime dir: %w", err)
 	}
+	composeApplied := false
+	defer func() {
+		if err == nil || runtimeStage == nil {
+			return
+		}
+		if composeApplied {
+			if runtimeStage.PreviousPath != "" {
+				fmt.Printf("[claw] warning: preserving previous runtime dir at %s after failed apply\n", runtimeStage.PreviousPath)
+			}
+			return
+		}
+		if rollbackErr := runtimeStage.Rollback(); rollbackErr != nil {
+			err = fmt.Errorf("%w (also failed to restore previous runtime dir: %v)", err, rollbackErr)
+		}
+	}()
 	// Governance dir is separate from runtimeDir so it survives claw up resets.
 	governanceDir := filepath.Join(podDir, ".claw-governance")
 	if err := os.MkdirAll(governanceDir, 0o777); err != nil {
@@ -767,6 +783,7 @@ func runComposeUp(podFile string) error {
 		composeArgs = append(composeArgs, "-d")
 	}
 
+	composeApplied = true
 	if err := runComposeDockerCommand(composeArgs...); err != nil {
 		return fmt.Errorf("docker compose up failed: %w", err)
 	}
@@ -794,6 +811,10 @@ func runComposeUp(podFile string) error {
 				fmt.Printf("[claw] %s (%s): post-apply verified\n", generatedService, shortContainerIDForPostApply(containerID))
 			}
 		}
+	}
+
+	if err := runtimeStage.Commit(); err != nil {
+		fmt.Printf("[claw] warning: could not remove previous runtime dir %s: %v\n", runtimeStage.PreviousPath, err)
 	}
 
 	fmt.Println("[claw] pod is up")
@@ -877,11 +898,61 @@ func unsupportedManagedCapabilityList(claw *pod.ClawBlock) []string {
 	return capabilities
 }
 
-func resetRuntimeDir(path string) error {
-	if err := os.RemoveAll(path); err != nil {
+type runtimeDirStage struct {
+	ActivePath   string
+	PreviousPath string
+}
+
+func prepareRuntimeDir(path string) (*runtimeDirStage, error) {
+	stage := &runtimeDirStage{ActivePath: path}
+
+	info, err := os.Stat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		// No prior runtime tree — create a fresh one below.
+	case err != nil:
+		return nil, err
+	default:
+		if !info.IsDir() {
+			return nil, fmt.Errorf("runtime dir %q exists but is not a directory", path)
+		}
+		stage.PreviousPath = fmt.Sprintf("%s.previous-%d", path, time.Now().UnixNano())
+		if err := os.Rename(path, stage.PreviousPath); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		if stage.PreviousPath != "" {
+			_ = os.Rename(stage.PreviousPath, path)
+		}
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		if stage.PreviousPath != "" {
+			_ = os.RemoveAll(path)
+			_ = os.Rename(stage.PreviousPath, path)
+		}
+		return nil, err
+	}
+	return stage, nil
+}
+
+func (s *runtimeDirStage) Rollback() error {
+	if s == nil || s.PreviousPath == "" {
+		return nil
+	}
+	if err := os.RemoveAll(s.ActivePath); err != nil {
 		return err
 	}
-	return os.MkdirAll(path, 0o700)
+	return os.Rename(s.PreviousPath, s.ActivePath)
+}
+
+func (s *runtimeDirStage) Commit() error {
+	if s == nil || s.PreviousPath == "" {
+		return nil
+	}
+	return os.RemoveAll(s.PreviousPath)
 }
 
 func preMigratePortableMemory(runtimeDir, memoryRoot string, p *pod.Pod) error {
