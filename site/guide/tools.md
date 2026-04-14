@@ -178,7 +178,8 @@ When the LLM returns a response containing tool calls, cllama dispatches based o
 
 1. **Managed tool calls only** — cllama validates each call against the manifest, executes the tools via HTTP against the declared services, and constructs a follow-up LLM request with the tool results appended. This loop repeats until the LLM returns terminal text. The runner never sees the intermediate managed rounds — only the terminal text is returned.
 2. **Runner-native tool calls only** — cllama passes the response back to the runner unchanged. The runner executes its own tools and continues the conversation normally.
-3. **A mix of managed and runner-native tool calls in the same response** — cllama fail-closes with a precise error rather than dropping or replacing tools. Once cllama has hidden a managed round inside the current request, it also fail-closes on any later runner-native tool call, since handing control back to the runner after hidden mediation would break transcript continuity.
+3. **A mix of managed and runner-native tool calls in the same response** — cllama fail-closes with a precise error rather than dropping or replacing tools.
+4. **Managed first, native later in the same overall turn** — if cllama has already hidden managed rounds and a later model response contains only runner-native tool calls, cllama returns that native tool-call response to the runner and stores a one-shot continuity handoff. On the runner's follow-up request with the native tool result, cllama reinjects the hidden managed assistant/tool transcript immediately before the native tool-call message so the upstream model still sees a coherent history.
 
 Unknown managed tool names are rejected at validation time.
 

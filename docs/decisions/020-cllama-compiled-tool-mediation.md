@@ -1,7 +1,7 @@
 # ADR-020: Compiled Tool Plane with Native and Mediated Execution Modes
 
 **Date:** 2026-03-29
-**Status:** Implemented (mediated path — Phase 3 + Phase 4 complete; see implementation notes below)
+**Status:** Implemented (mediated path — Phase 3 + Phase 4 complete, including additive native-tool preservation and managed→native handoff; see implementation notes below)
 **Depends on:** ADR-007 (Credential Starvation), ADR-017 (Service Self-Description), ADR-019 (Model Policy Authority)
 **Amends:** ADR-018 (Session History) — extends the recording contract to include tool execution traces and failed requests
 **Evolves:** ADR-004 (Service Surface Skills) — skills remain as behavioral guidance; tools add a callable interface
@@ -334,7 +334,7 @@ A fundamental constraint: when the LLM returns tool_calls, the protocol requires
 - If a response contains managed tool calls only, cllama owns that round and executes them internally.
 - If a response contains runner-native tool calls only, cllama passes the response back to the runner unchanged. If the downstream client originally requested streaming, cllama synthesizes an equivalent SSE stream so the runner still receives its expected protocol shape.
 - If a single response mixes managed and runner-native tool calls, cllama fails closed.
-- If cllama has already hidden managed rounds inside the current request, it also fails closed on any later runner-native tool call. Handing control back to the runner after hidden mediation would break transcript continuity.
+- If cllama has already hidden managed rounds inside the current request and a later response contains runner-native tool calls only, cllama hands that response back to the runner and stores a one-shot continuity handoff so the hidden managed transcript is reinserted before the runner's follow-up tool-result request.
 
 **If the response contains managed tool_calls only:**
 1. cllama validates each call against the manifest (reject unknown tools — fail closed)
@@ -346,7 +346,7 @@ A fundamental constraint: when the LLM returns tool_calls, the protocol requires
 **If the response contains runner-native tool_calls only before any hidden managed round:**
 - Return the response to the runner so its native tool loop can continue normally.
 
-**If the response contains mixed ownership or tries to switch back to runner-native tools after hidden managed rounds:**
+**If the response contains mixed ownership in one model response:**
 - Fail closed with a direct proxy error rather than fabricating transcript state.
 
 **If the response contains only text:**
@@ -530,7 +530,7 @@ These are analogous projections, not semantic equivalents. Clawdapus covers simi
 This is the critical path for the mediated compatibility layer. Consider subdividing into 3a (injection + single-round execution) and 3b (multi-round loop + continuity + re-streaming).
 
 - Load `tools.json` in cllama agent context loader (`agentctx`)
-- Replace outgoing request's `tools[]` with managed tools in `handleOpenAI`
+- Append managed tools to the outgoing request's `tools[]` alongside runner-native tools in `handleOpenAI`
 - Force `stream: false` when managed tools are injected
 - Detect `tool_calls` in response, execute managed tools via HTTP
 - Implement tool execution loop with budget, timeouts, and result truncation
@@ -566,11 +566,13 @@ The capability-evolution wave (this ADR + ADR-021) landed together. Current stat
 - Hard error at `claw up` time when non-cllama services declare `x-claw.tools` or `x-claw.memory`
 - cllama loads `tools.json` and injects managed tools into OpenAI-compatible upstream requests
 - cllama loads `tools.json` and injects managed tools into Anthropic-format upstream requests
+- cllama preserves runner-native tools additively on the same request surface and fail-closes only on mixed ownership within one model response
 - Bounded mediation loop with `max_rounds`, per-tool timeout, total timeout, and `max_tool_result_bytes` truncation
 - Structured tool error feedback within the mediated loop
 - Synthetic SSE re-streaming when the runner requested streaming
 - SSE keepalive/progress comments during long mediated loops
 - Cross-turn continuity: hidden tool rounds reinjected into subsequent upstream requests (both formats)
+- One-shot managed→native handoff continuity: if hidden managed rounds are followed by a native-only tool response, the hidden transcript is reinserted before the runner's follow-up tool-result request
 - Session history `tool_trace`, `status`, and `usage.total_rounds` extensions
 - `claw audit` merges session-history `tool_call` events with proxy log events
 
