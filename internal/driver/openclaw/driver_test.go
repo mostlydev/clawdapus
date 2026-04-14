@@ -111,9 +111,8 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Errorf("expected %s=%s, got %q", shared.PortableMemoryEnv, shared.PortableMemoryDir, result.Environment[shared.PortableMemoryEnv])
 	}
 
-	// ~/.openclaw must be a single tmpfs covering all openclaw state subdirs.
-	// The mount options are part of the contract because the container home stays writable
-	// even though the root filesystem is read-only.
+	// /root must be tmpfs-overlaid (not /root/.openclaw) so non-root runtime users
+	// can traverse into ~/.openclaw. See openclawStateTmpfs comment for the full why.
 	tmpfsSet := make(map[string]bool, len(result.Tmpfs))
 	for _, p := range result.Tmpfs {
 		tmpfsSet[p] = true
@@ -122,7 +121,7 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Errorf("expected writable /claw tmpfs %q for workspace writes like SOUL.md, got %v", openclawWorkspaceTmpfs, result.Tmpfs)
 	}
 	if !tmpfsSet[openclawStateTmpfs] {
-		t.Errorf("expected writable %s tmpfs %q, got %v", openclawHomeDir, openclawStateTmpfs, result.Tmpfs)
+		t.Errorf("expected writable /root tmpfs %q, got %v", openclawStateTmpfs, result.Tmpfs)
 	}
 	if tmpfsSet["/app/state"] {
 		t.Error("unexpected legacy /app/state tmpfs")
@@ -143,6 +142,54 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	}
 	if !foundMemoryMount {
 		t.Fatal("expected portable memory mount")
+	}
+}
+
+// TestMaterializeStateTmpfsCoversParentRoot is a regression lock for the v0.8.8
+// crash-loop: PR #149 originally tmpfs'd /root/.openclaw, which left /root with the
+// image's baked-in mode 0700 root:root. Any openclaw image whose runtime USER is not
+// root (e.g. the upstream ghcr.io/openclaw/openclaw image, which uses USER node) could
+// not even traverse /root to reach the writable tmpfs at /root/.openclaw, so the
+// gateway died on startup with `EACCES: permission denied, mkdir '/root/.openclaw/config'`.
+// The fix moves the tmpfs one level up, to /root, so the parent is always traversable.
+func TestMaterializeStateTmpfsCoversParentRoot(t *testing.T) {
+	dir := t.TempDir()
+	agentFile := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agentFile, []byte("# Contract"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Driver{}
+	rc := &driver.ResolvedClaw{
+		ClawType:      "openclaw",
+		Agent:         "AGENTS.md",
+		AgentHostPath: agentFile,
+	}
+	result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: dir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, entry := range result.Tmpfs {
+		path, _, _ := strings.Cut(entry, ":")
+		if path == "/root/.openclaw" {
+			t.Fatalf("openclaw state tmpfs is mounted at /root/.openclaw, which leaves /root at its image-baked perms (typically 0700 root:root). Non-root runtime users will hit EACCES traversing /root. Mount the tmpfs at /root instead. Tmpfs entries: %v", result.Tmpfs)
+		}
+	}
+
+	rootCovered := false
+	for _, entry := range result.Tmpfs {
+		path, _, _ := strings.Cut(entry, ":")
+		if path == "/root" {
+			rootCovered = true
+			if !strings.Contains(entry, "mode=1777") {
+				t.Errorf("/root tmpfs is missing mode=1777, got %q. Without world-traversable mode the non-root runtime user still cannot reach ~/.openclaw.", entry)
+			}
+			break
+		}
+	}
+	if !rootCovered {
+		t.Fatalf("expected a tmpfs at /root so non-root runtime users can traverse into ~/.openclaw, got %v", result.Tmpfs)
 	}
 }
 

@@ -1,0 +1,24 @@
+FROM alpine:3.20
+
+CLAW_TYPE openclaw
+AGENT AGENTS.md
+
+MODEL primary test/stub-model
+
+CONFIGURE openclaw config set agents.defaults.heartbeat.every 30m
+
+RUN apk add --no-cache bash jq tini && \
+    addgroup -g 1000 stub && \
+    adduser -D -u 1000 -G stub stub
+COPY openclaw /usr/local/bin/openclaw
+RUN chmod +x /usr/local/bin/openclaw
+COPY entrypoint.sh /usr/local/bin/openclaw-entrypoint.sh
+RUN chmod +x /usr/local/bin/openclaw-entrypoint.sh
+
+# The whole point of this fixture: run as non-root so the openclaw driver's
+# tmpfs layout has to be reachable from a user that cannot traverse /root by
+# default. If the driver regresses to tmpfs-ing /root/.openclaw alone, the
+# entrypoint here will fail before the gateway starts.
+USER 1000:1000
+
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/openclaw-entrypoint.sh"]

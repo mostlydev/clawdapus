@@ -23,7 +23,17 @@ const openclawHomeDir = "/root/.openclaw"
 const openclawConfigDir = openclawHomeDir + "/config"
 const openclawConfigPath = openclawConfigDir + "/openclaw.json"
 const openclawWorkspaceTmpfs = "/claw:mode=1777,uid=0,gid=0"
-const openclawStateTmpfs = openclawHomeDir + ":mode=1777,uid=0,gid=0"
+
+// openclawStateTmpfs mounts the writable tmpfs at /root, NOT at /root/.openclaw.
+// Most upstream openclaw base images (e.g. ghcr.io/openclaw/openclaw) ship a non-root
+// runtime USER such as `node`, while leaving /root at its baked-in mode 0700 root:root
+// from the image layer. A tmpfs at /root/.openclaw alone is unreachable for that user
+// because traversing into /root requires execute on the parent, and the read-only image
+// layer cannot be chmod'd at runtime. Mounting the tmpfs one level higher overlays /root
+// with a fresh mode-1777 tmpfs that any user can traverse, while Docker still creates
+// /root/.openclaw on top of it as the bind-mount target for the config directory. This
+// keeps the canonical ~/.openclaw layout intact for both root- and non-root images.
+const openclawStateTmpfs = "/root:mode=1777,uid=0,gid=0"
 
 func init() {
 	driver.Register("openclaw", &Driver{})
@@ -167,9 +177,10 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			openclawWorkspaceTmpfs,
 			"/tmp",
 			"/run",
-			// The canonical ~/.openclaw home covers all runtime state subdirs (identity, logs,
-			// memory, exec approvals, agents, canvas, etc.) while staying compatible with
-			// upstream home-dir assumptions.
+			// Tmpfs at /root (not /root/.openclaw) overlays the read-only image layer
+			// with a writable mode-1777 directory so non-root runtime users can traverse
+			// into ~/.openclaw. Docker creates /root/.openclaw on top of this tmpfs as the
+			// bind-mount target for the config directory.
 			openclawStateTmpfs,
 		},
 		ReadOnly: true,

@@ -47,7 +47,7 @@ Guild-level `policy` is rejected at config generation time rather than producing
 
 cllama wiring for OpenClaw uses `models.providers.<provider>.{baseUrl, apiKey, api, models}` -- not `agents.defaults.model.baseURL/apiKey`.
 
-OpenClaw state uses its canonical home directory inside the container: `~/.openclaw` (`/root/.openclaw`). Clawdapus mounts the generated config at `/root/.openclaw/config/openclaw.json` and keeps the full home writable on tmpfs so upstream plugins and `os.homedir()`-based paths resolve naturally.
+OpenClaw state uses its canonical home directory inside the container: `~/.openclaw` (`/root/.openclaw`). Clawdapus mounts the generated config at `/root/.openclaw/config/openclaw.json`. The writable tmpfs is mounted one level higher, at `/root` itself (mode 1777), so any container `USER` — including non-root runtime users like `node` shipped by upstream OpenClaw images — can traverse into `~/.openclaw` regardless of the image layer's baked-in `/root` permissions.
 
 ### hermes
 
