@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.9 <Badge type="tip" text="Latest" /> {#v0-8-9}
+## v0.8.10 <Badge type="tip" text="Latest" /> {#v0-8-10}
+
+*2026-04-13*
+
+- Release note correction: the OpenClaw non-root canonical-home fix shipped in v0.8.9 requires two tmpfs mounts, not one. `/root` must be tmpfs-backed so non-root runtime users can traverse into the canonical home, and `/root/.openclaw` must also be tmpfs-backed so Docker does not leave the state root behind as `0755 root:root` when it creates the nested config bind mount. Without the second tmpfs, the first state write still fails with `EACCES: permission denied, mkdir '/root/.openclaw/agents'`. The runtime contract and code remain the same; this release makes the published changelog match the actual fix that is already on `master`.
+
+## v0.8.9 {#v0-8-9}
 
 *2026-04-13*
 
