@@ -111,8 +111,9 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Errorf("expected %s=%s, got %q", shared.PortableMemoryEnv, shared.PortableMemoryDir, result.Environment[shared.PortableMemoryEnv])
 	}
 
-	// /root must be tmpfs-overlaid (not /root/.openclaw) so non-root runtime users
-	// can traverse into ~/.openclaw. See openclawStateTmpfs comment for the full why.
+	// /root must be tmpfs-overlaid so non-root runtime users can traverse into
+	// ~/.openclaw, and ~/.openclaw itself must be tmpfs-overlaid so Docker does not
+	// leave it behind as 0755 root:root when creating the nested config bind mount.
 	tmpfsSet := make(map[string]bool, len(result.Tmpfs))
 	for _, p := range result.Tmpfs {
 		tmpfsSet[p] = true
@@ -122,6 +123,9 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	}
 	if !tmpfsSet[openclawStateTmpfs] {
 		t.Errorf("expected writable /root tmpfs %q, got %v", openclawStateTmpfs, result.Tmpfs)
+	}
+	if !tmpfsSet[openclawHomeTmpfs] {
+		t.Errorf("expected writable ~/.openclaw tmpfs %q, got %v", openclawHomeTmpfs, result.Tmpfs)
 	}
 	if tmpfsSet["/app/state"] {
 		t.Error("unexpected legacy /app/state tmpfs")
@@ -145,14 +149,13 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	}
 }
 
-// TestMaterializeStateTmpfsCoversParentRoot is a regression lock for the v0.8.8
-// crash-loop: PR #149 originally tmpfs'd /root/.openclaw, which left /root with the
-// image's baked-in mode 0700 root:root. Any openclaw image whose runtime USER is not
-// root (e.g. the upstream ghcr.io/openclaw/openclaw image, which uses USER node) could
-// not even traverse /root to reach the writable tmpfs at /root/.openclaw, so the
-// gateway died on startup with `EACCES: permission denied, mkdir '/root/.openclaw/config'`.
-// The fix moves the tmpfs one level up, to /root, so the parent is always traversable.
-func TestMaterializeStateTmpfsCoversParentRoot(t *testing.T) {
+// TestMaterializeStateTmpfsCoversParentRootAndHomeWritable is a regression lock for the
+// canonical-home crash-loop family. The first fix moved the tmpfs one level up to /root
+// so non-root runtime users could traverse into ~/.openclaw. The follow-up fix keeps a
+// second tmpfs at ~/.openclaw itself because Docker otherwise creates that intermediate
+// directory as 0755 root:root when mounting ~/.openclaw/config, which breaks the first
+// state write (`mkdir ~/.openclaw/agents`) for non-root users.
+func TestMaterializeStateTmpfsCoversParentRootAndHomeWritable(t *testing.T) {
 	dir := t.TempDir()
 	agentFile := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agentFile, []byte("# Contract"), 0o644); err != nil {
@@ -170,14 +173,8 @@ func TestMaterializeStateTmpfsCoversParentRoot(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, entry := range result.Tmpfs {
-		path, _, _ := strings.Cut(entry, ":")
-		if path == "/root/.openclaw" {
-			t.Fatalf("openclaw state tmpfs is mounted at /root/.openclaw, which leaves /root at its image-baked perms (typically 0700 root:root). Non-root runtime users will hit EACCES traversing /root. Mount the tmpfs at /root instead. Tmpfs entries: %v", result.Tmpfs)
-		}
-	}
-
 	rootCovered := false
+	homeCovered := false
 	for _, entry := range result.Tmpfs {
 		path, _, _ := strings.Cut(entry, ":")
 		if path == "/root" {
@@ -185,11 +182,20 @@ func TestMaterializeStateTmpfsCoversParentRoot(t *testing.T) {
 			if !strings.Contains(entry, "mode=1777") {
 				t.Errorf("/root tmpfs is missing mode=1777, got %q. Without world-traversable mode the non-root runtime user still cannot reach ~/.openclaw.", entry)
 			}
-			break
+			continue
+		}
+		if path == openclawHomeDir {
+			homeCovered = true
+			if !strings.Contains(entry, "mode=1777") {
+				t.Errorf("%s tmpfs is missing mode=1777, got %q. Docker otherwise leaves ~/.openclaw as 0755 root:root when mounting the nested config directory, and non-root runtime users fail on mkdir ~/.openclaw/agents.", openclawHomeDir, entry)
+			}
 		}
 	}
 	if !rootCovered {
 		t.Fatalf("expected a tmpfs at /root so non-root runtime users can traverse into ~/.openclaw, got %v", result.Tmpfs)
+	}
+	if !homeCovered {
+		t.Fatalf("expected a tmpfs at %s so non-root runtime users can create ~/.openclaw/agents, got %v", openclawHomeDir, result.Tmpfs)
 	}
 }
 

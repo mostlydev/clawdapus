@@ -35,6 +35,14 @@ const openclawWorkspaceTmpfs = "/claw:mode=1777,uid=0,gid=0"
 // keeps the canonical ~/.openclaw layout intact for both root- and non-root images.
 const openclawStateTmpfs = "/root:mode=1777,uid=0,gid=0"
 
+// openclawHomeTmpfs keeps ~/.openclaw itself writable after the /root overlay is in place.
+// With only the /root tmpfs plus a bind mount at /root/.openclaw/config, Docker creates the
+// intermediate /root/.openclaw directory as 0755 root:root. Non-root runtime users can then
+// read the mounted config file but still fail on the first state write
+// (`mkdir ~/.openclaw/agents`). Mounting a second tmpfs at ~/.openclaw fixes that while
+// preserving the canonical upstream path layout and config bind mount.
+const openclawHomeTmpfs = openclawHomeDir + ":mode=1777,uid=0,gid=0"
+
 func init() {
 	driver.Register("openclaw", &Driver{})
 }
@@ -179,9 +187,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			"/run",
 			// Tmpfs at /root (not /root/.openclaw) overlays the read-only image layer
 			// with a writable mode-1777 directory so non-root runtime users can traverse
-			// into ~/.openclaw. Docker creates /root/.openclaw on top of this tmpfs as the
-			// bind-mount target for the config directory.
+			// into ~/.openclaw regardless of the image-baked /root permissions.
 			openclawStateTmpfs,
+			// Tmpfs at ~/.openclaw keeps the canonical state root writable after Docker
+			// creates the nested config bind mount at ~/.openclaw/config.
+			openclawHomeTmpfs,
 		},
 		ReadOnly: true,
 		Restart:  "on-failure",

@@ -14,28 +14,32 @@ import (
 )
 
 // TestSpikeOpenClawNonRootHomeReachable is a live regression test for the
-// v0.8.8 → v0.8.9 OpenClaw canonical-home crash loop.
+// OpenClaw canonical-home non-root crash-loop family.
 //
 // PR #149 (v0.8.8) moved the openclaw runtime state to /root/.openclaw and
-// mounted ONLY /root/.openclaw as a tmpfs. That worked for openclaw images
-// whose USER is root, but the upstream ghcr.io/openclaw/openclaw image (and
-// any image that follows the documented `apt install … && USER node` pattern)
-// runs the gateway as a non-root user. /root in the read-only image layer is
-// mode 0700 root:root, so the non-root user could not even traverse into
-// /root, and every gateway start failed with:
+// initially mounted ONLY /root/.openclaw as a tmpfs. That worked for images
+// whose USER is root, but non-root users could not even traverse into /root:
 //
 //	Gateway failed to start: Error: EACCES: permission denied,
 //	mkdir '/root/.openclaw/config'
 //
-// The fix moves the tmpfs one level up to /root, so the parent directory is
-// always traversable regardless of the image's USER directive.
+// The next fix added a tmpfs at /root so the parent became traversable, but
+// Docker still created /root/.openclaw itself as 0755 root:root when mounting
+// /root/.openclaw/config. That let non-root users read the config file yet
+// still fail on the first state write:
+//
+//	Error: EACCES: permission denied, mkdir '/root/.openclaw/agents'
+//
+// The correct runtime contract is therefore both:
+//   - /root tmpfs, so non-root users can traverse into ~/.openclaw
+//   - ~/.openclaw tmpfs, so the state root itself is writable
 //
 // This spike builds a minimal openclaw stub image whose Clawfile sets
 // USER 1000:1000 and whose entrypoint asserts (before exec'ing the gateway)
-// that every component of /root/.openclaw/config is statable and the config
-// file is readable. If the driver ever regresses to tmpfs-ing /root/.openclaw
-// alone, the entrypoint exits non-zero before the gateway starts, the
-// container fails to come up, and this test fails with a clear message.
+// that every component of /root/.openclaw/config is statable, the config file
+// is readable, and ~/.openclaw/agents is writable. If either half regresses,
+// the entrypoint exits non-zero before the gateway starts, the container fails
+// to come up, and this test fails with a clear message.
 //
 // Requires: Docker available locally.
 // Run with: go test -tags spike -run TestSpikeOpenClawNonRootHomeReachable ./cmd/claw/...
@@ -163,5 +167,8 @@ services:
 	// /root tmpfs traversal works end-to-end.
 	if out, err := exec.Command("docker", "exec", containerID, "cat", "/root/.openclaw/config/openclaw.json").CombinedOutput(); err != nil {
 		t.Fatalf("uid %s cannot read /root/.openclaw/config/openclaw.json after container is up: %v\n%s", uid, err, out)
+	}
+	if out, err := exec.Command("docker", "exec", containerID, "mkdir", "-p", "/root/.openclaw/agents/post-start-probe").CombinedOutput(); err != nil {
+		t.Fatalf("uid %s cannot create ~/.openclaw/agents after container is up: %v\n%s", uid, err, out)
 	}
 }

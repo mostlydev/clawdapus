@@ -427,7 +427,7 @@ Clawdapus refuses to start containers when:
 ### Config injection issues (OpenClaw)
 - Config dir (`/root/.openclaw/config`) must be bind-mounted as directory, not file
 - OpenClaw does atomic writes via rename — file-only mounts cause EBUSY
-- OpenClaw home is canonical `~/.openclaw` (`/root/.openclaw`) rather than a separate `/app/state` shim
+- OpenClaw home is canonical `~/.openclaw` (`/root/.openclaw`) rather than a separate `/app/state` shim; both `/root` and `/root/.openclaw` are tmpfs-backed so non-root users can traverse and write state
 - Check generated `openclaw.json` in the runtime directory
 - OpenClaw health: `claw health -f <pod>.yml`
 
