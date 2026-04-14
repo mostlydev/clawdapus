@@ -31,7 +31,18 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.7 <Badge type="tip" text="Latest" /> {#v0-8-7}
+## v0.8.8 <Badge type="tip" text="Latest" /> {#v0-8-8}
+
+*2026-04-13*
+
+- **Managed tool mediation is now additive** ([#151](https://github.com/mostlydev/clawdapus/issues/151), [#152](https://github.com/mostlydev/clawdapus/pull/152), [cllama#7](https://github.com/mostlydev/cllama/pull/7)) — when an upstream runner already declares its own tools, cllama no longer overwrites them on the way out to the model. Compiled managed tools are appended to the runner's outbound `tools[]` (OpenAI format) or Anthropic `tools` array, so OpenClaw and other drivers keep their native tool surface even when managed mediation is active. Runner-native tool calls in the model's response pass straight back to the runner unchanged, managed tool calls are still executed inside cllama as before, and a response that mixes both fail-closes with a precise error rather than silently dropping or replacing tools. ADR-020 is updated to reflect the additive contract, and a new live spike (`TestSpikeOpenClawAdditiveToolsLive`) proves an OpenClaw agent can hit a native tool followed by a managed tool in the same session. Pinned cllama image bumped to [v0.3.4](https://github.com/mostlydev/cllama/releases/tag/v0.3.4).
+- **`claw-api` warns on principal verb skew and surfaces inert principals** ([#144](https://github.com/mostlydev/clawdapus/issues/144), [#150](https://github.com/mostlydev/clawdapus/pull/150)) — follow-up to the v0.8.6 fail-open fix. `claw up` now compares the verbs it emits in `principals.json` against the verb set known to be supported by the pinned `claw-api` image and prints a warning before deployment when a newer CLI is targeting an older API image. The `claw-api` `/health` endpoint now returns `principal_count`, `inert_principals` (principals that loaded with zero recognized verbs), and `normalization_warnings`, so operators can see normalization drops without tailing container stderr. Compile-time validation in `claw up` for user-declared verbs in `x-claw.principals` stays strict.
+- **Honor service `TZ` in compiled schedules** ([#135](https://github.com/mostlydev/clawdapus/issues/135), [#145](https://github.com/mostlydev/clawdapus/pull/145)) — `claw up` now resolves a single service timezone from the Docker `TZ` env at compile time and uses it for pod-origin schedule manifest entries when no explicit calendar override is present. The same timezone flows into OpenClaw cron jobs and microclaw config instead of the previous hard-coded UTC. Schedules that depended on local-time semantics (e.g. `0 9 * * *` meaning 9am local) now fire when operators expect them to.
+- **OpenClaw runtime uses the canonical `~/.openclaw` home** ([#121](https://github.com/mostlydev/clawdapus/issues/121), [#149](https://github.com/mostlydev/clawdapus/pull/149)) — the OpenClaw driver now mounts state and config under the canonical `~/.openclaw` layout inside the container (config at `/root/.openclaw/config/openclaw.json`), and the legacy `OPENCLAW_HOME` shim is gone. The base image and tmpfs config make the root-home contract explicit, removing a class of subtle path drift between Clawdapus and upstream OpenClaw.
+- Doc fix: the `claw-api` principal verb validation behavior is now documented accurately — unknown verbs in `x-claw.principals` fail hard at pod parse time, while unknown verbs in `principals.json` are dropped with warnings at runtime.
+- Test coverage: the OpenClaw provider config compilation matrix is now exercised end-to-end across the cllama-rewrite and direct-provider paths.
+
+## v0.8.7 {#v0-8-7}
 
 *2026-04-12*
 

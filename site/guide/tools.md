@@ -166,7 +166,7 @@ Tool names are namespaced as `<service>.<tool>` to prevent collisions across ser
 
 ### Tool Injection
 
-When `tools.json` is loaded, cllama replaces the outgoing LLM request's `tools[]` with the compiled managed tool schemas. Both OpenAI-compatible and Anthropic formats are supported.
+When `tools.json` is loaded, cllama appends the compiled managed tool schemas to whatever `tools[]` the runner already declared on the outgoing LLM request, so runner-native tools (e.g. OpenClaw built-ins) and managed tools coexist on the same request surface. Tools from `tools.json` are namespaced as `<service>.<tool>` to keep them distinguishable from runner-native tool names. Both OpenAI-compatible and Anthropic formats are supported.
 
 When managed tools are injected, cllama forces `stream: false` on the upstream request. If the runner originally requested streaming, cllama re-streams the final text response as synthetic SSE chunks after the tool chain completes. During long mediated loops, SSE keepalive comments are emitted to prevent the runner from timing out.
 
@@ -174,15 +174,13 @@ Requests where no managed tools are compiled pass through unchanged, including s
 
 ### Mediation Loop
 
-When the LLM returns a `tool_call`:
+When the LLM returns a response containing tool calls, cllama dispatches based on which tools were called:
 
-1. cllama validates the call against the manifest — unknown tools are rejected
-2. cllama executes the tool via HTTP against the declared service
-3. cllama constructs a follow-up LLM request with the tool result appended
-4. This loop repeats until the LLM returns terminal text
-5. cllama returns the final response to the runner
+1. **Managed tool calls only** — cllama validates each call against the manifest, executes the tools via HTTP against the declared services, and constructs a follow-up LLM request with the tool results appended. This loop repeats until the LLM returns terminal text. The runner never sees the intermediate managed rounds — only the terminal text is returned.
+2. **Runner-native tool calls only** — cllama passes the response back to the runner unchanged. The runner executes its own tools and continues the conversation normally.
+3. **A mix of managed and runner-native tool calls in the same response** — cllama fail-closes with a precise error rather than dropping or replacing tools. Once cllama has hidden a managed round inside the current request, it also fail-closes on any later runner-native tool call, since handing control back to the runner after hidden mediation would break transcript continuity.
 
-The runner never sees the intermediate tool rounds. Only the terminal text is returned.
+Unknown managed tool names are rejected at validation time.
 
 **Budget limits** (configurable in pod YAML, compiled into `tools.json`):
 
