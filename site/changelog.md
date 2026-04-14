@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.8 <Badge type="tip" text="Latest" /> {#v0-8-8}
+## v0.8.9 <Badge type="tip" text="Latest" /> {#v0-8-9}
+
+*2026-04-13*
+
+- **Fix: OpenClaw pods crash-loop on startup when the runtime container `USER` is not root** ([#149](https://github.com/mostlydev/clawdapus/pull/149) regression, fixed in this release) — v0.8.8's canonical-home rewrite mounted the writable tmpfs at `/root/.openclaw`, leaving `/root` itself at the image layer's baked-in `drwx------ root:root`. Any OpenClaw image whose runtime user is not root — including the upstream `ghcr.io/openclaw/openclaw` image and the documented "`RUN apt install ... && USER node`" pattern that lets agents add packages safely — could not even traverse `/root` to reach the writable subtree, so the gateway died on every restart with `Error: EACCES: permission denied, mkdir '/root/.openclaw/config'` and the pod cycled forever. The driver now mounts the tmpfs one level higher, at `/root` itself with mode `1777`. Docker still creates `/root/.openclaw` on top of it as the bind-mount target for the config directory, the canonical `~/.openclaw` layout and `OPENCLAW_CONFIG_PATH`/`OPENCLAW_STATE_DIR` contract are unchanged, and any container `USER` (root or not) can now traverse in. A new live regression spike (`TestSpikeOpenClawNonRootHomeReachable`) builds a stub OpenClaw image with `USER 1000:1000` and asserts the entrypoint can stat each component of `/root/.openclaw/config` before the gateway starts; verified the spike fails on the v0.8.8 layout. Originally observed on the Tiverton trading-desk deployment within minutes of the v0.8.8 upgrade.
+
+## v0.8.8 {#v0-8-8}
 
 *2026-04-13*
 
