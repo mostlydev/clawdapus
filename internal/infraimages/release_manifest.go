@@ -7,7 +7,7 @@ const (
 	DefaultClawAPITag    = DefaultClawInfraTag
 	DefaultClawdashTag   = DefaultClawInfraTag
 	DefaultClawWallTag   = DefaultClawInfraTag
-	DefaultCllamaTag     = "v0.3.4"
+	DefaultCllamaTag     = "v0.3.5"
 	DefaultHermesBaseTag = "v2026.3.17"
 )
 

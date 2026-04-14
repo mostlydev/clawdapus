@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.10 <Badge type="tip" text="Latest" /> {#v0-8-10}
+## v0.8.11 <Badge type="tip" text="Latest" /> {#v0-8-11}
+
+*2026-04-14*
+
+- **Fix: `claw up -d` on a live pod can corrupt `.claw-runtime` and leave bind mounts as directories** ([#153](https://github.com/mostlydev/clawdapus/issues/153)) — the previous pipeline did `os.RemoveAll(.claw-runtime)` before `docker compose up -d` recreated the affected containers. That left a window where live containers were still bound to host paths that no longer existed, so when Docker recreated them it auto-created the missing bind-mount sources (`AGENTS.effective.md`, `CLAWDAPUS.md`, per-service config dirs) as *directories* on the host. The next `claw up -d` then crashed in materialization with `chmod config dir: operation not permitted` or `open AGENTS.generated.md: permission denied`, and the only recovery was `claw down`, move `.claw-runtime` aside, and redeploy. `runComposeUp` now rotates the runtime tree instead of destroying it: it renames the existing `.claw-runtime` to a generation-suffixed sibling, stages a fresh one for the new generation, and only removes the previous tree after compose apply succeeds. If apply fails, the old tree is restored in place so the live pod is unaffected and operators have a rollback target. Originally observed on the Tiverton trading-desk deployment. A new live spike (`TestSpikeComposeUpRuntimeRotation`) proves an in-place redeploy no longer leaves any bind-mount sources as directories.
+- **Pinned cllama bumped to [v0.3.5](https://github.com/mostlydev/cllama/releases/tag/v0.3.5)** — the proxy now supports native tool handoff after managed rounds: once a managed tool mediation round completes, the runner's next turn can immediately drive a runner-native tool call without the proxy re-injecting managed tools into the outbound request. Builds on the v0.3.4 additive mediation contract.
+
+## v0.8.10 {#v0-8-10}
 
 *2026-04-13*
 
