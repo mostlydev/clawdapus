@@ -122,6 +122,9 @@ func TestMaterializeWritesConfigAndSeededAgents(t *testing.T) {
 	if result.SkillLayout != "directory" {
 		t.Fatalf("unexpected skill layout: %q", result.SkillLayout)
 	}
+	if result.User != "0:0" {
+		t.Fatalf("unexpected user: %q", result.User)
+	}
 	if result.Environment["CLAW_MANAGED"] != "true" {
 		t.Fatalf("expected CLAW_MANAGED=true, got %q", result.Environment["CLAW_MANAGED"])
 	}

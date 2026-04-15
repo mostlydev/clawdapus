@@ -98,6 +98,9 @@ func TestMaterializeWritesConfigAndSeededMemory(t *testing.T) {
 	if result.SkillLayout != "directory" {
 		t.Fatalf("unexpected skill layout: %q", result.SkillLayout)
 	}
+	if result.User != "microclaw" {
+		t.Fatalf("unexpected user: %q", result.User)
+	}
 	if result.Environment["MICROCLAW_CONFIG"] != "/app/config/microclaw.config.yaml" {
 		t.Fatalf("expected MICROCLAW_CONFIG env, got %q", result.Environment["MICROCLAW_CONFIG"])
 	}

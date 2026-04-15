@@ -184,6 +184,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		Tmpfs:       []string{"/tmp"},
 		ReadOnly:    false,
 		Restart:     "on-failure",
+		User:        "microclaw",
 		SkillDir:    "/claw-data/skills",
 		SkillLayout: "directory",
 		Healthcheck: &driver.Healthcheck{

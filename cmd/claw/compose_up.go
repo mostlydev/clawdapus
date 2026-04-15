@@ -962,6 +962,17 @@ func preMigratePortableMemory(runtimeDir, memoryRoot string, p *pod.Pod) error {
 	for name := range p.Services {
 		legacyRoot := filepath.Join(runtimeDir, name)
 		stateDir := filepath.Join(memoryRoot, name)
+		memoryDir := filepath.Join(stateDir, "memory")
+		needsRepair, reason, err := portableMemoryNeedsRepair(memoryDir)
+		if err != nil {
+			return fmt.Errorf("service %q: inspect portable memory: %w", name, err)
+		}
+		if needsRepair {
+			fmt.Printf("[claw] repairing portable memory for service %q (%s)\n", name, reason)
+			if err := repairPortableMemoryWithDocker(memoryDir); err != nil {
+				return fmt.Errorf("service %q: repair portable memory: %w", name, err)
+			}
+		}
 		if _, err := shared.PreparePortableMemory(stateDir, legacyRoot); err != nil {
 			return fmt.Errorf("service %q: %w", name, err)
 		}

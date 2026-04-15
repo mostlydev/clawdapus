@@ -136,6 +136,80 @@ services:
 	}
 }
 
+func TestEmitComposeAppliesDriverUserWhenComposeUserAbsent(t *testing.T) {
+	p := &Pod{
+		Name: "user-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "ghcr.io/example/bot:latest",
+				Claw:  &ClawBlock{},
+			},
+		},
+	}
+
+	out, err := EmitCompose(p, map[string]*driver.MaterializeResult{
+		"bot": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+			User:     "1000:1000",
+		},
+	})
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	var cf struct {
+		Services map[string]struct {
+			User string `yaml:"user"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
+		t.Fatalf("unmarshal compose: %v", err)
+	}
+	if got := cf.Services["bot"].User; got != "1000:1000" {
+		t.Fatalf("bot user=%q want 1000:1000", got)
+	}
+}
+
+func TestEmitComposePreservesExplicitComposeUserOverDriverUser(t *testing.T) {
+	const src = `
+x-claw:
+  pod: user-pod
+services:
+  bot:
+    image: ghcr.io/example/bot:latest
+    user: "2000:2000"
+    x-claw: {}
+`
+	p, err := Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	out, err := EmitCompose(p, map[string]*driver.MaterializeResult{
+		"bot": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+			User:     "1000:1000",
+		},
+	})
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	var cf struct {
+		Services map[string]struct {
+			User string `yaml:"user"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
+		t.Fatalf("unmarshal compose: %v", err)
+	}
+	if got := cf.Services["bot"].User; got != "2000:2000" {
+		t.Fatalf("bot user=%q want 2000:2000", got)
+	}
+}
+
 func TestEmitComposeExpandsCount(t *testing.T) {
 	p := &Pod{
 		Name: "scale-pod",

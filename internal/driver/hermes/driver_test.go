@@ -167,6 +167,9 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	if result.SkillLayout != "directory" {
 		t.Fatalf("unexpected SkillLayout: %q", result.SkillLayout)
 	}
+	if result.User != "0:0" {
+		t.Fatalf("unexpected User: %q", result.User)
+	}
 	if result.Environment["HERMES_HOME"] != hermesHomeDir {
 		t.Fatalf("unexpected HERMES_HOME: %q", result.Environment["HERMES_HOME"])
 	}

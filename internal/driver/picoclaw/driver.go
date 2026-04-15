@@ -172,6 +172,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		Tmpfs:       []string{"/tmp"},
 		ReadOnly:    true,
 		Restart:     "on-failure",
+		User:        "picoclaw",
 		SkillDir:    picoclawWorkspaceDir + "/skills",
 		SkillLayout: "directory",
 		Healthcheck: &driver.Healthcheck{

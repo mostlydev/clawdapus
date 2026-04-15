@@ -162,6 +162,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		Tmpfs:       []string{"/tmp"},
 		ReadOnly:    true,
 		Restart:     "on-failure",
+		User:        "0:0",
 		SkillDir:    "/root/.nanobot/workspace/skills",
 		SkillLayout: "directory",
 		Healthcheck: &driver.Healthcheck{

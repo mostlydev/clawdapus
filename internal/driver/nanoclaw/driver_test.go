@@ -138,6 +138,9 @@ func TestMaterializeBasic(t *testing.T) {
 	if result.SkillLayout != "directory" {
 		t.Errorf("expected directory skill layout, got %q", result.SkillLayout)
 	}
+	if result.User != "0:0" {
+		t.Errorf("expected User=0:0, got %q", result.User)
+	}
 
 	// Check mounts
 	hasDockerSocket := false

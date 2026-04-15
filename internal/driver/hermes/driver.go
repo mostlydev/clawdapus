@@ -216,6 +216,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		Tmpfs:       []string{"/tmp", "/run"},
 		ReadOnly:    true,
 		Restart:     "on-failure",
+		User:        "0:0",
 		SkillDir:    hermesHomeDir + "/skills",
 		SkillLayout: "directory",
 		Healthcheck: &driver.Healthcheck{

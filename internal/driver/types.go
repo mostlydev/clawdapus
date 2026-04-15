@@ -181,6 +181,7 @@ type MaterializeResult struct {
 	Mounts      []Mount
 	Tmpfs       []string          // paths needing tmpfs (for read_only: true)
 	Environment map[string]string // additional env vars
+	User        string            // optional compose user override (lower priority than explicit compose user)
 	Healthcheck *Healthcheck
 	ReadOnly    bool   // default: true
 	Restart     string // default: "on-failure"

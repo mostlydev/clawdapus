@@ -211,6 +211,11 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				}
 				serviceOut["tmpfs"] = tmpfs
 			}
+			if trimmed := strings.TrimSpace(result.User); trimmed != "" {
+				if _, exists := serviceOut["user"]; !exists {
+					serviceOut["user"] = trimmed
+				}
+			}
 
 			// Mounts from driver
 			var mounts []interface{}
