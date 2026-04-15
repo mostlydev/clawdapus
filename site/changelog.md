@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.12 <Badge type="tip" text="Latest" /> {#v0-8-12}
+## v0.8.13 <Badge type="tip" text="Latest" /> {#v0-8-13}
+
+*2026-04-15*
+
+- **Hotfix: portable memory normalization no longer aborts `claw up` on cross-UID ownership** — v0.8.12's new `normalizePortableMemoryPermissions` pass would hard-fail with `chmod: operation not permitted` whenever the host user running `claw up` did not own every file under `.claw-memory/<service>/memory/`, which is the common case on upgrade deploys where the previous generation's runtime wrote memory files under a container UID. The pass is now idempotent — when the current mode already matches the target (`0o777` for directories, `0o666` for files) the file is skipped entirely — and when `chmod` itself fails with a permission error, `claw up` emits a warning on stderr and continues instead of aborting the deploy. Originally observed as a hard regression on the Tiverton trading-desk deployment immediately after the v0.8.12 upgrade.
+
+## v0.8.12 {#v0-8-12}
 
 *2026-04-15*
 

@@ -115,6 +115,51 @@ func TestPreparePortableMemoryImportsFromExtraRuntimeRoot(t *testing.T) {
 	}
 }
 
+func TestPreparePortableMemoryIsIdempotentOnAlreadyNormalizedTree(t *testing.T) {
+	stateDir := t.TempDir()
+	memoryDir := filepath.Join(stateDir, "memory")
+	nestedDir := filepath.Join(memoryDir, "notes")
+
+	if err := os.MkdirAll(nestedDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(memoryDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(nestedDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(nestedDir, "2026-04-15.md")
+	if err := os.WriteFile(nested, []byte("entry"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(nested, 0o666); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := PreparePortableMemory(stateDir); err != nil {
+		t.Fatalf("first PreparePortableMemory returned error: %v", err)
+	}
+	if _, err := PreparePortableMemory(stateDir); err != nil {
+		t.Fatalf("second (idempotent) PreparePortableMemory returned error: %v", err)
+	}
+
+	checks := map[string]os.FileMode{
+		memoryDir: 0o777,
+		nestedDir: 0o777,
+		nested:    0o666,
+	}
+	for path, want := range checks {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Fatalf("%s mode=%o want %o", path, got, want)
+		}
+	}
+}
+
 func TestPreparePortableMemoryNormalizesExistingPermissions(t *testing.T) {
 	stateDir := t.TempDir()
 	memoryDir := filepath.Join(stateDir, "memory")

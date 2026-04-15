@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,17 +54,36 @@ func normalizePortableMemoryPermissions(memoryDir string) error {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
-		if info.IsDir() {
-			if err := os.Chmod(path, 0o777); err != nil {
-				return fmt.Errorf("chmod portable memory dir %q: %w", path, err)
+		var target os.FileMode
+		var kind string
+		switch {
+		case info.IsDir():
+			target = 0o777
+			kind = "dir"
+		case info.Mode().IsRegular():
+			target = 0o666
+			kind = "file"
+		default:
+			return nil
+		}
+		// Idempotent skip: already at target, do nothing. This is the hot path
+		// on redeploy when a previous generation already normalized the tree.
+		if info.Mode().Perm() == target {
+			return nil
+		}
+		if err := os.Chmod(path, target); err != nil {
+			// Soft-fail when the host user cannot chmod files owned by a
+			// different UID (common when a container writer owns the memory
+			// tree). Warn loudly but do not abort the deploy — the runtime
+			// mount is typically usable via group/world bits even without a
+			// perfect normalization pass.
+			if errors.Is(err, os.ErrPermission) {
+				fmt.Fprintf(os.Stderr,
+					"claw: warning: cannot normalize portable memory %s %q (current mode %o, target %o): %v; continuing\n",
+					kind, path, info.Mode().Perm(), target, err)
+				return nil
 			}
-			return nil
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		if err := os.Chmod(path, 0o666); err != nil {
-			return fmt.Errorf("chmod portable memory file %q: %w", path, err)
+			return fmt.Errorf("chmod portable memory %s %q: %w", kind, path, err)
 		}
 		return nil
 	})
