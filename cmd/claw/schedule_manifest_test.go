@@ -28,6 +28,7 @@ func TestBuildScheduleManifestIncludesOnlyPodOriginInvocations(t *testing.T) {
 					Schedule: "15 8 * * 1-5",
 					Message:  "Pre-market synthesis",
 					Name:     "Pre-market synthesis",
+					To:       "alerts-chan",
 					Origin:   driver.OriginPod,
 					When:     &schedule.When{Calendar: "us-equities", Session: schedule.SessionRegular},
 				},
@@ -56,8 +57,9 @@ func TestBuildScheduleManifestIncludesOnlyPodOriginInvocations(t *testing.T) {
 	if first.Wake.Adapter != "openclaw-exec" {
 		t.Fatalf("expected openclaw adapter, got %q", first.Wake.Adapter)
 	}
-	if len(first.Wake.Command) != 4 || first.Wake.Command[3] != "podjob01" {
-		t.Fatalf("expected native cron run command, got %v", first.Wake.Command)
+	want := []string{"openclaw", "cron", "run", "podjob01"}
+	if strings.Join(first.Wake.Command, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("expected openclaw cron wake command, got %v", first.Wake.Command)
 	}
 	if first.AgentID != "tiverton-0" {
 		t.Fatalf("expected first ordinal agent id tiverton-0, got %q", first.AgentID)
@@ -69,6 +71,35 @@ func TestBuildScheduleManifestIncludesOnlyPodOriginInvocations(t *testing.T) {
 	}
 	if second.ID == first.ID {
 		t.Fatalf("expected per-ordinal manifest ids to differ, got %q", first.ID)
+	}
+}
+
+func TestBuildScheduleManifestOpenClawWakeUsesNativeJobID(t *testing.T) {
+	manifest, err := buildScheduleManifest(&pod.Pod{Name: "ops"}, map[string]*driver.ResolvedClaw{
+		"bot": {
+			ServiceName: "bot",
+			ClawType:    "openclaw",
+			Invocations: []driver.Invocation{
+				{
+					ID:       "podjob01",
+					Schedule: "*/10 * * * *",
+					Message:  "Heartbeat",
+					Origin:   driver.OriginPod,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildScheduleManifest returned error: %v", err)
+	}
+	if len(manifest.Invocations) != 1 {
+		t.Fatalf("expected one invocation, got %d", len(manifest.Invocations))
+	}
+	want := []string{
+		"openclaw", "cron", "run", "podjob01",
+	}
+	if strings.Join(manifest.Invocations[0].Wake.Command, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("expected openclaw wake command to target native cron id, got %v", manifest.Invocations[0].Wake.Command)
 	}
 }
 

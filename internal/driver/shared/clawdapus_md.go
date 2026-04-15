@@ -53,6 +53,17 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 	}
 	b.WriteString("\n")
 
+	if len(rc.Invocations) > 0 {
+		b.WriteString("## Scheduling\n\n")
+		b.WriteString("Some scheduled invocations are infrastructure-owned.\n\n")
+		b.WriteString("- **Compile-time source:** Clawdapus compiles image and pod INVOKE entries into runner/runtime artifacts during `claw up`.\n")
+		if rc.ClawType == "openclaw" {
+			b.WriteString("- **Wake authority:** pod-origin schedules are fired by `claw-api`, not by relying on OpenClaw's own cron timing.\n")
+			b.WriteString("- **Do not treat native cron as durable state:** runner-native cron entries you create yourself may conflict with infrastructure-owned schedules and can be overwritten by the next `claw up`.\n")
+		}
+		b.WriteString("- **Operator rule:** if a new recurring task should persist, add it to the pod or image definition instead of creating it ad hoc inside the runner.\n\n")
+	}
+
 	// Surfaces
 	b.WriteString("## Surfaces\n\n")
 	if len(rc.Surfaces) == 0 {
