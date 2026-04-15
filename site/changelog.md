@@ -30,6 +30,7 @@ outline: deep
 ## Unreleased
 
 - **Fix: OpenClaw scheduled jobs are materialized under the canonical cron store again** ([#159](https://github.com/mostlydev/clawdapus/issues/159)) — the OpenClaw driver now mounts a writable `~/.openclaw/cron/` directory and writes `jobs.json` there instead of under the config directory. Current OpenClaw builds resolve cron definitions from `~/.openclaw/cron/jobs.json`, so the previous layout left `openclaw cron list` empty and `openclaw cron run <id>` failed against jobs Clawdapus thought it had compiled. `claw up` now emits the native store where OpenClaw actually reads it, preserves the dedicated cron directory mount, and keeps pod-origin wakes targeting the runner-native `openclaw cron run <id>` contract.
+- **Fix: OpenClaw scheduler wakes no longer burn failures during startup lag** ([#160](https://github.com/mostlydev/clawdapus/issues/160)) — `claw-api` now treats OpenClaw wakes as adapter-aware operations instead of generic 30 second execs. The scheduler defers `openclaw-exec` wakes while Docker health is still `starting` or `unhealthy`, so boot lag stops being recorded as a failed fire, and OpenClaw wakes now get a longer exec budget before being marked as timed out. This reduces false degradation on desks where the runner is still coming up even though the schedule is otherwise valid.
 
 ## v0.8.11 <Badge type="tip" text="Latest" /> {#v0-8-11}
 
