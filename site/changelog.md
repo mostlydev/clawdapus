@@ -29,10 +29,18 @@ outline: deep
 
 ## Unreleased
 
+<!-- Nothing yet -->
+
+## v0.8.12 <Badge type="tip" text="Latest" /> {#v0-8-12}
+
+*2026-04-15*
+
 - **Fix: OpenClaw scheduled jobs are materialized under the canonical cron store again** ([#159](https://github.com/mostlydev/clawdapus/issues/159)) — the OpenClaw driver now mounts a writable `~/.openclaw/cron/` directory and writes `jobs.json` there instead of under the config directory. Current OpenClaw builds resolve cron definitions from `~/.openclaw/cron/jobs.json`, so the previous layout left `openclaw cron list` empty and `openclaw cron run <id>` failed against jobs Clawdapus thought it had compiled. `claw up` now emits the native store where OpenClaw actually reads it, preserves the dedicated cron directory mount, and keeps pod-origin wakes targeting the runner-native `openclaw cron run <id>` contract.
 - **Fix: OpenClaw scheduler wakes no longer burn failures during startup lag** ([#160](https://github.com/mostlydev/clawdapus/issues/160)) — `claw-api` now treats OpenClaw wakes as adapter-aware operations instead of generic 30 second execs. The scheduler defers `openclaw-exec` wakes while Docker health is still `starting` or `unhealthy`, so boot lag stops being recorded as a failed fire, and OpenClaw wakes now get a longer exec budget before being marked as timed out. This reduces false degradation on desks where the runner is still coming up even though the schedule is otherwise valid.
+- **Configurable OpenClaw job timeouts** ([#140](https://github.com/mostlydev/clawdapus/issues/140), [#141](https://github.com/mostlydev/clawdapus/issues/141)) — the OpenClaw driver now threads `agents.defaults.timeoutSeconds` through the compiled config so operators can raise the per-invocation budget above the prior hard-coded 300 second default. Invalid values (non-positive, non-integer) are rejected at `claw up` time rather than silently ignored. Covers long-running scheduled tasks whose real runtime exceeds the legacy fixed budget.
+- **Fix: portable memory directory permissions are normalized on every `claw up`** — `PreparePortableMemory` now reapplies `0777` to directories and `0666` to files under the portable memory tree regardless of prior state, via a dedicated `normalizePortableMemoryPermissions` pass. Fixes the class of startup failures where a memory plane authored by one container user was unreadable or unwritable by a subsequent redeploy running as a different UID.
 
-## v0.8.11 <Badge type="tip" text="Latest" /> {#v0-8-11}
+## v0.8.11 {#v0-8-11}
 
 *2026-04-14*
 
