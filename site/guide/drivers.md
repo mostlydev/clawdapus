@@ -47,6 +47,8 @@ Guild-level `policy` is rejected at config generation time rather than producing
 
 cllama wiring for OpenClaw uses `models.providers.<provider>.{baseUrl, apiKey, api, models}` -- not `agents.defaults.model.baseURL/apiKey`.
 
+OpenClaw state uses its canonical home directory inside the container: `~/.openclaw` (`/root/.openclaw`). Clawdapus mounts the generated config at `/root/.openclaw/config/openclaw.json`. The runtime keeps writable tmpfs mounts at both `/root` and `/root/.openclaw` (mode 1777): the parent `/root` overlay guarantees non-root users can traverse into the home directory, and the nested `~/.openclaw` overlay guarantees Docker does not leave the state root behind as `0755 root:root` when it creates the config bind-mount target.
+
 ### hermes
 
 The Hermes driver writes a `SOUL.md` identity file during materialization to override the default Hermes runner identity. When a persona is configured, the persona's SOUL.md takes priority.

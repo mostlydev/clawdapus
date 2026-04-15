@@ -31,7 +31,49 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.5 <Badge type="tip" text="Latest" /> {#v0-8-5}
+## v0.8.11 <Badge type="tip" text="Latest" /> {#v0-8-11}
+
+*2026-04-14*
+
+- **Fix: `claw up -d` on a live pod can corrupt `.claw-runtime` and leave bind mounts as directories** ([#153](https://github.com/mostlydev/clawdapus/issues/153)) — the previous pipeline did `os.RemoveAll(.claw-runtime)` before `docker compose up -d` recreated the affected containers. That left a window where live containers were still bound to host paths that no longer existed, so when Docker recreated them it auto-created the missing bind-mount sources (`AGENTS.effective.md`, `CLAWDAPUS.md`, per-service config dirs) as *directories* on the host. The next `claw up -d` then crashed in materialization with `chmod config dir: operation not permitted` or `open AGENTS.generated.md: permission denied`, and the only recovery was `claw down`, move `.claw-runtime` aside, and redeploy. `runComposeUp` now rotates the runtime tree instead of destroying it: it renames the existing `.claw-runtime` to a generation-suffixed sibling, stages a fresh one for the new generation, and only removes the previous tree after compose apply succeeds. If apply fails, the old tree is restored in place so the live pod is unaffected and operators have a rollback target. Originally observed on the Tiverton trading-desk deployment. A new live spike (`TestSpikeComposeUpRuntimeRotation`) proves an in-place redeploy no longer leaves any bind-mount sources as directories.
+- **Pinned cllama bumped to [v0.3.5](https://github.com/mostlydev/cllama/releases/tag/v0.3.5)** — the proxy now supports native tool handoff after managed rounds: once a managed tool mediation round completes, the runner's next turn can immediately drive a runner-native tool call without the proxy re-injecting managed tools into the outbound request. Builds on the v0.3.4 additive mediation contract.
+
+## v0.8.10 {#v0-8-10}
+
+*2026-04-13*
+
+- Release note correction: the OpenClaw non-root canonical-home fix shipped in v0.8.9 requires two tmpfs mounts, not one. `/root` must be tmpfs-backed so non-root runtime users can traverse into the canonical home, and `/root/.openclaw` must also be tmpfs-backed so Docker does not leave the state root behind as `0755 root:root` when it creates the nested config bind mount. Without the second tmpfs, the first state write still fails with `EACCES: permission denied, mkdir '/root/.openclaw/agents'`. The runtime contract and code remain the same; this release makes the published changelog match the actual fix that is already on `master`.
+
+## v0.8.9 {#v0-8-9}
+
+*2026-04-13*
+
+- **Fix: OpenClaw pods crash-loop on startup when the runtime container `USER` is not root** ([#149](https://github.com/mostlydev/clawdapus/pull/149) regression, fixed in this release) — v0.8.8's canonical-home rewrite mounted the writable tmpfs at `/root/.openclaw`, leaving `/root` itself at the image layer's baked-in `drwx------ root:root`. Any OpenClaw image whose runtime user is not root — including the upstream `ghcr.io/openclaw/openclaw` image and the documented "`RUN apt install ... && USER node`" pattern that lets agents add packages safely — could not even traverse `/root` to reach the writable subtree, so the gateway died on every restart with `Error: EACCES: permission denied, mkdir '/root/.openclaw/config'` and the pod cycled forever. The fix is two coordinated tmpfs mounts: `/root` itself at mode `1777` so non-root users can traverse the parent, and `~/.openclaw` (`/root/.openclaw`) at mode `1777` so the canonical state root stays writable after Docker creates the nested `/root/.openclaw/config` bind mount (without the second tmpfs, Docker leaves `/root/.openclaw` as `0755 root:root` and non-root users still fail on the first state write like `mkdir ~/.openclaw/agents`). The canonical `~/.openclaw` layout and `OPENCLAW_CONFIG_PATH`/`OPENCLAW_STATE_DIR` contract are unchanged, and any container `USER` (root or not) now both traverses in and writes state. The live regression spike `TestSpikeOpenClawNonRootHomeReachable` now proves both the config read path and the first state write before the gateway starts. Originally observed on the Tiverton trading-desk deployment within minutes of the v0.8.8 upgrade.
+
+## v0.8.8 {#v0-8-8}
+
+*2026-04-13*
+
+- **Managed tool mediation is now additive** ([#151](https://github.com/mostlydev/clawdapus/issues/151), [#152](https://github.com/mostlydev/clawdapus/pull/152), [cllama#7](https://github.com/mostlydev/cllama/pull/7)) — when an upstream runner already declares its own tools, cllama no longer overwrites them on the way out to the model. Compiled managed tools are appended to the runner's outbound `tools[]` (OpenAI format) or Anthropic `tools` array, so OpenClaw and other drivers keep their native tool surface even when managed mediation is active. Runner-native tool calls in the model's response pass straight back to the runner unchanged, managed tool calls are still executed inside cllama as before, and a response that mixes both fail-closes with a precise error rather than silently dropping or replacing tools. ADR-020 is updated to reflect the additive contract, and a new live spike (`TestSpikeOpenClawAdditiveToolsLive`) proves an OpenClaw agent can hit a native tool followed by a managed tool in the same session. Pinned cllama image bumped to [v0.3.4](https://github.com/mostlydev/cllama/releases/tag/v0.3.4).
+- **`claw-api` warns on principal verb skew and surfaces inert principals** ([#144](https://github.com/mostlydev/clawdapus/issues/144), [#150](https://github.com/mostlydev/clawdapus/pull/150)) — follow-up to the v0.8.6 fail-open fix. `claw up` now compares the verbs it emits in `principals.json` against the verb set known to be supported by the pinned `claw-api` image and prints a warning before deployment when a newer CLI is targeting an older API image. The `claw-api` `/health` endpoint now returns `principal_count`, `inert_principals` (principals that loaded with zero recognized verbs), and `normalization_warnings`, so operators can see normalization drops without tailing container stderr. Compile-time validation in `claw up` for user-declared verbs in `x-claw.principals` stays strict.
+- **Honor service `TZ` in compiled schedules** ([#135](https://github.com/mostlydev/clawdapus/issues/135), [#145](https://github.com/mostlydev/clawdapus/pull/145)) — `claw up` now resolves a single service timezone from the Docker `TZ` env at compile time and uses it for pod-origin schedule manifest entries when no explicit calendar override is present. The same timezone flows into OpenClaw cron jobs and microclaw config instead of the previous hard-coded UTC. Schedules that depended on local-time semantics (e.g. `0 9 * * *` meaning 9am local) now fire when operators expect them to.
+- **OpenClaw runtime uses the canonical `~/.openclaw` home** ([#121](https://github.com/mostlydev/clawdapus/issues/121), [#149](https://github.com/mostlydev/clawdapus/pull/149)) — the OpenClaw driver now mounts state and config under the canonical `~/.openclaw` layout inside the container (config at `/root/.openclaw/config/openclaw.json`), and the legacy `OPENCLAW_HOME` shim is gone. The base image and tmpfs config make the root-home contract explicit, removing a class of subtle path drift between Clawdapus and upstream OpenClaw.
+- Doc fix: the `claw-api` principal verb validation behavior is now documented accurately — unknown verbs in `x-claw.principals` fail hard at pod parse time, while unknown verbs in `principals.json` are dropped with warnings at runtime.
+- Test coverage: the OpenClaw provider config compilation matrix is now exercised end-to-end across the cllama-rewrite and direct-provider paths.
+
+## v0.8.7 {#v0-8-7}
+
+*2026-04-12*
+
+- **Fix: `claw-wall` Discord rate limit handling** ([#147](https://github.com/mostlydev/clawdapus/issues/147), [#148](https://github.com/mostlydev/clawdapus/pull/148)) — `claw-wall` was polling duplicate channel/token pairs and retrying every non-200 response on the next tick, which could amplify Discord rate limits across multi-bot pods. Three coordinated fixes: (1) compile-time token selection now picks exactly one reader token per consumed Discord channel, preferring the master service's token when available, and fails hard if a consumed channel has no eligible reader; (2) the poller now parses Discord `429` responses into typed rate-limit data with channel-scoped and token-scoped cooldowns that honor `Retry-After` backoff; (3) the default poll interval increases from 15s to 30s, configurable via `CLAW_WALL_POLL_INTERVAL`. Originally observed on the Tiverton trading-desk deployment.
+
+## v0.8.6 {#v0-8-6}
+
+*2026-04-10*
+
+- **Fix: `claw-api` no longer crash-loops on unknown principal verbs** ([#120](https://github.com/mostlydev/clawdapus/issues/120), [#143](https://github.com/mostlydev/clawdapus/pull/143)) — when a newer `claw` CLI compiled a `principals.json` containing verbs an older deployed `claw-api` image didn't recognize (e.g. `schedule.read` emitted by v0.6.1+ against a pre-`schedule.*` image), the API container hard-failed validation and crash-looped, taking the entire governance surface offline with only `unknown verb "..."` in container logs. The runtime loader is now tolerant: unrecognized verbs are filtered out of the in-memory principal store and logged as warnings on startup, and the service comes up normally. Compile-time validation in `claw up` stays strict — unknown verbs in `x-claw.principals` or hand-written `principals.json` still fail hard. Originally observed on the Tiverton trading-desk deployment.
+
+## v0.8.5 {#v0-8-5}
 
 *2026-04-10*
 

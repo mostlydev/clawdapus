@@ -42,6 +42,7 @@ const (
 	conversationWallFeedName     = "channel-context"
 	conversationWallFeedTTL      = 30
 	conversationWallFeedLimit    = 20
+	conversationWallPollInterval = "30"
 	conversationWallInternalPort = "8080"
 	conversationWallDockerfile   = "dockerfiles/claw-wall/Dockerfile"
 	clawInternalNetworkName      = "claw-internal"
@@ -86,7 +87,7 @@ var composeUpCmd = &cobra.Command{
 	},
 }
 
-func runComposeUp(podFile string) error {
+func runComposeUp(podFile string) (err error) {
 	p, podDir, err := loadPodDefinition(podFile)
 	if err != nil {
 		return err
@@ -126,9 +127,25 @@ func runComposeUp(podFile string) error {
 	if err := preMigratePortableMemory(runtimeDir, memoryRoot, p); err != nil {
 		return fmt.Errorf("migrate portable memory: %w", err)
 	}
-	if err := resetRuntimeDir(runtimeDir); err != nil {
-		return fmt.Errorf("reset runtime dir: %w", err)
+	runtimeStage, err := prepareRuntimeDir(runtimeDir)
+	if err != nil {
+		return fmt.Errorf("prepare runtime dir: %w", err)
 	}
+	composeApplied := false
+	defer func() {
+		if err == nil || runtimeStage == nil {
+			return
+		}
+		if composeApplied {
+			if runtimeStage.PreviousPath != "" {
+				fmt.Printf("[claw] warning: preserving previous runtime dir at %s after failed apply\n", runtimeStage.PreviousPath)
+			}
+			return
+		}
+		if rollbackErr := runtimeStage.Rollback(); rollbackErr != nil {
+			err = fmt.Errorf("%w (also failed to restore previous runtime dir: %v)", err, rollbackErr)
+		}
+	}()
 	// Governance dir is separate from runtimeDir so it survives claw up resets.
 	governanceDir := filepath.Join(podDir, ".claw-governance")
 	if err := os.MkdirAll(governanceDir, 0o777); err != nil {
@@ -410,6 +427,12 @@ func runComposeUp(podFile string) error {
 	if err != nil {
 		return err
 	}
+	for _, rc := range resolvedClaws {
+		if rc == nil {
+			continue
+		}
+		rc.Timezone = resolveAgentTimezone(rc.Environment, runtimeEnv)
+	}
 	proxies := make([]pod.CllamaProxyConfig, 0)
 	cllamaDashboardPort := envOrDefault("CLLAMA_UI_PORT", "8181")
 	if cllamaEnabled {
@@ -511,7 +534,6 @@ func runComposeUp(podFile string) error {
 				return fmt.Errorf("service %q: read AGENTS.md for cllama context: %w", name, err)
 			}
 
-			agentTimezone := resolveAgentTimezone(rc.Environment, runtimeEnv)
 			if rc.Count > 1 {
 				for i := 0; i < rc.Count; i++ {
 					ordinalName := fmt.Sprintf("%s-%d", name, i)
@@ -548,7 +570,7 @@ func runComposeUp(podFile string) error {
 							"pod":      p.Name,
 							"type":     rc.ClawType,
 							"token":    tokens[ordinalName],
-							"timezone": agentTimezone,
+							"timezone": rc.Timezone,
 						}, rc.Models),
 					})
 				}
@@ -585,7 +607,7 @@ func runComposeUp(podFile string) error {
 					"pod":      p.Name,
 					"type":     rc.ClawType,
 					"token":    tokens[name],
-					"timezone": agentTimezone,
+					"timezone": rc.Timezone,
 				}, rc.Models),
 			})
 		}
@@ -761,6 +783,7 @@ func runComposeUp(podFile string) error {
 		composeArgs = append(composeArgs, "-d")
 	}
 
+	composeApplied = true
 	if err := runComposeDockerCommand(composeArgs...); err != nil {
 		return fmt.Errorf("docker compose up failed: %w", err)
 	}
@@ -788,6 +811,10 @@ func runComposeUp(podFile string) error {
 				fmt.Printf("[claw] %s (%s): post-apply verified\n", generatedService, shortContainerIDForPostApply(containerID))
 			}
 		}
+	}
+
+	if err := runtimeStage.Commit(); err != nil {
+		fmt.Printf("[claw] warning: could not remove previous runtime dir %s: %v\n", runtimeStage.PreviousPath, err)
 	}
 
 	fmt.Println("[claw] pod is up")
@@ -871,11 +898,61 @@ func unsupportedManagedCapabilityList(claw *pod.ClawBlock) []string {
 	return capabilities
 }
 
-func resetRuntimeDir(path string) error {
-	if err := os.RemoveAll(path); err != nil {
+type runtimeDirStage struct {
+	ActivePath   string
+	PreviousPath string
+}
+
+func prepareRuntimeDir(path string) (*runtimeDirStage, error) {
+	stage := &runtimeDirStage{ActivePath: path}
+
+	info, err := os.Stat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		// No prior runtime tree — create a fresh one below.
+	case err != nil:
+		return nil, err
+	default:
+		if !info.IsDir() {
+			return nil, fmt.Errorf("runtime dir %q exists but is not a directory", path)
+		}
+		stage.PreviousPath = fmt.Sprintf("%s.previous-%d", path, time.Now().UnixNano())
+		if err := os.Rename(path, stage.PreviousPath); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		if stage.PreviousPath != "" {
+			_ = os.Rename(stage.PreviousPath, path)
+		}
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		if stage.PreviousPath != "" {
+			_ = os.RemoveAll(path)
+			_ = os.Rename(stage.PreviousPath, path)
+		}
+		return nil, err
+	}
+	return stage, nil
+}
+
+func (s *runtimeDirStage) Rollback() error {
+	if s == nil || s.PreviousPath == "" {
+		return nil
+	}
+	if err := os.RemoveAll(s.ActivePath); err != nil {
 		return err
 	}
-	return os.MkdirAll(path, 0o700)
+	return os.Rename(s.PreviousPath, s.ActivePath)
+}
+
+func (s *runtimeDirStage) Commit() error {
+	if s == nil || s.PreviousPath == "" {
+		return nil
+	}
+	return os.RemoveAll(s.PreviousPath)
 }
 
 func preMigratePortableMemory(runtimeDir, memoryRoot string, p *pod.Pod) error {
@@ -1464,17 +1541,22 @@ type conversationWallTokenPair struct {
 	Token     string
 }
 
+type conversationWallTokenCandidate struct {
+	ServiceName string
+	Token       string
+}
+
 func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw) error {
 	if p == nil {
 		return nil
 	}
 
-	tokenPairs := make([]conversationWallTokenPair, 0)
+	consumedChannelSet := make(map[string]struct{})
 	triggerServices := make(map[string][]string)
 
 	for _, name := range sortedResolvedClawNames(resolvedClaws) {
 		rc := resolvedClaws[name]
-		if rc == nil {
+		if rc == nil || len(rc.Cllama) == 0 {
 			continue
 		}
 		svc := p.Services[name]
@@ -1487,19 +1569,8 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 			continue
 		}
 
-		token := strings.TrimSpace(svc.Environment["DISCORD_BOT_TOKEN"])
-		if token == "" {
-			return fmt.Errorf("service %q: HANDLE discord with channel IDs requires DISCORD_BOT_TOKEN for conversation wall injection", name)
-		}
 		for _, channelID := range channelIDs {
-			tokenPairs = append(tokenPairs, conversationWallTokenPair{
-				ChannelID: channelID,
-				Token:     token,
-			})
-		}
-
-		if len(rc.Cllama) == 0 {
-			continue
+			consumedChannelSet[channelID] = struct{}{}
 		}
 		triggerServices[name] = channelIDs
 	}
@@ -1510,9 +1581,41 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 	if _, exists := p.Services[conversationWallServiceName]; exists {
 		return fmt.Errorf("service name %q is reserved for the conversation wall sidecar", conversationWallServiceName)
 	}
-	if len(tokenPairs) == 0 {
-		return fmt.Errorf("conversation wall injection triggered but no Discord channel/token pairs were found")
+
+	consumedChannelIDs := sortedConversationWallChannelIDs(consumedChannelSet)
+	candidatesByChannel := make(map[string][]conversationWallTokenCandidate, len(consumedChannelIDs))
+	for _, name := range sortedConversationWallServiceNames(p.Services) {
+		svc := p.Services[name]
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		token := strings.TrimSpace(svc.Environment["DISCORD_BOT_TOKEN"])
+		if token == "" {
+			continue
+		}
+		for _, channelID := range discordHandleChannelIDs(svc.Claw.Handles) {
+			if _, consumed := consumedChannelSet[channelID]; !consumed {
+				continue
+			}
+			candidatesByChannel[channelID] = append(candidatesByChannel[channelID], conversationWallTokenCandidate{
+				ServiceName: name,
+				Token:       token,
+			})
+		}
 	}
+
+	tokenPairs := make([]conversationWallTokenPair, 0, len(consumedChannelIDs))
+	for _, channelID := range consumedChannelIDs {
+		token, err := selectConversationWallToken(channelID, p.Master, candidatesByChannel[channelID])
+		if err != nil {
+			return err
+		}
+		tokenPairs = append(tokenPairs, conversationWallTokenPair{
+			ChannelID: channelID,
+			Token:     token,
+		})
+	}
+
 	for name, channelIDs := range triggerServices {
 		svc := p.Services[name]
 		if svc == nil || svc.Claw == nil {
@@ -1522,9 +1625,12 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 	}
 
 	p.Services[conversationWallServiceName] = &pod.Service{
-		Image:       resolveConversationWallImageRef(),
-		Environment: map[string]string{"CLAW_WALL_TOKENS": formatConversationWallTokenPairs(tokenPairs)},
-		Expose:      []string{conversationWallInternalPort},
+		Image: resolveConversationWallImageRef(),
+		Environment: map[string]string{
+			"CLAW_WALL_TOKENS":        formatConversationWallTokenPairs(tokenPairs),
+			"CLAW_WALL_POLL_INTERVAL": envOrDefault("CLAW_WALL_POLL_INTERVAL", conversationWallPollInterval),
+		},
+		Expose: []string{conversationWallInternalPort},
 		Compose: map[string]interface{}{
 			"networks":  []string{"claw-internal"},
 			"restart":   "on-failure",
@@ -1542,6 +1648,36 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 		},
 	}
 	return nil
+}
+
+func selectConversationWallToken(channelID, master string, candidates []conversationWallTokenCandidate) (string, error) {
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("conversation wall injection triggered but channel %q has no eligible Discord reader token", channelID)
+	}
+	for _, candidate := range candidates {
+		if candidate.ServiceName == master {
+			return candidate.Token, nil
+		}
+	}
+	return candidates[0].Token, nil
+}
+
+func sortedConversationWallChannelIDs(channels map[string]struct{}) []string {
+	channelIDs := make([]string, 0, len(channels))
+	for channelID := range channels {
+		channelIDs = append(channelIDs, channelID)
+	}
+	sort.Strings(channelIDs)
+	return channelIDs
+}
+
+func sortedConversationWallServiceNames(services map[string]*pod.Service) []string {
+	names := make([]string, 0, len(services))
+	for name := range services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func appendConversationWallFeed(feeds []pod.FeedEntry, channelIDs []string) []pod.FeedEntry {
@@ -1724,6 +1860,9 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		principals[i] = m.Principal
 	}
 	store := clawapi.Store{Principals: principals}
+	for _, warning := range clawapi.PrincipalVersionSkewWarnings(&store, p.ClawAPI.Image) {
+		fmt.Printf("[claw] warning: %s\n", warning)
+	}
 	if err := writeClawAPIPrincipalStore(runtimeDir, p.ClawAPI.PrincipalsHostPath, store); err != nil {
 		return nil, fmt.Errorf("write claw-api principals: %w", err)
 	}

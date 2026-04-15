@@ -45,6 +45,7 @@ cmd/clawdash/node_modules/
 .claw-auth/
 testdata/*
 !testdata/openclaw-stub/
+!testdata/openclaw-stub-nonroot/
 !testdata/microclaw-stub/
 !testdata/tool-stub/
 *-notes.md

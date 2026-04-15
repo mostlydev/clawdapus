@@ -9,6 +9,8 @@ import (
 	"os"
 	"path"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -29,7 +31,8 @@ var AllWriteVerbs = []string{VerbFleetRestart, VerbFleetQuarantine, VerbFleetBud
 var AllVerbs = append(append([]string{}, AllReadVerbs...), AllWriteVerbs...)
 
 type Store struct {
-	Principals []Principal `json:"principals"`
+	Principals            []Principal `json:"principals"`
+	NormalizationWarnings []string    `json:"-"`
 }
 
 type Principal struct {
@@ -43,18 +46,38 @@ type Principal struct {
 }
 
 func LoadStore(filePath string) (*Store, error) {
+	store, _, err := LoadStoreWithWarnings(filePath)
+	return store, err
+}
+
+func LoadStoreWithWarnings(filePath string) (*Store, []string, error) {
 	raw, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("read claw-api principals %q: %w", filePath, err)
+		return nil, nil, fmt.Errorf("read claw-api principals %q: %w", filePath, err)
 	}
 	var store Store
 	if err := json.Unmarshal(raw, &store); err != nil {
-		return nil, fmt.Errorf("parse claw-api principals %q: %w", filePath, err)
+		return nil, nil, fmt.Errorf("parse claw-api principals %q: %w", filePath, err)
 	}
-	if err := validateStore(&store); err != nil {
-		return nil, fmt.Errorf("validate claw-api principals %q: %w", filePath, err)
+	warnings, err := normalizeStore(&store)
+	if err != nil {
+		return nil, nil, fmt.Errorf("validate claw-api principals %q: %w", filePath, err)
 	}
-	return &store, nil
+	store.NormalizationWarnings = append([]string(nil), warnings...)
+	return &store, warnings, nil
+}
+
+func (s *Store) InertPrincipalNames() []string {
+	if s == nil {
+		return nil
+	}
+	names := make([]string, 0)
+	for _, principal := range s.Principals {
+		if len(principal.Verbs) == 0 {
+			names = append(names, principal.Name)
+		}
+	}
+	return names
 }
 
 func (s *Store) ResolveBearer(header string) (*Principal, error) {
@@ -199,7 +222,25 @@ func matchesAny(patterns []string, value string) bool {
 	return false
 }
 
-func validateStore(store *Store) error {
+func normalizeStore(store *Store) ([]string, error) {
+	if err := validateStoreStructure(store); err != nil {
+		return nil, err
+	}
+	var warnings []string
+	for i := range store.Principals {
+		filtered, unknown := filterKnownVerbs(store.Principals[i].Verbs)
+		for _, verb := range unknown {
+			warnings = append(warnings, fmt.Sprintf("ignoring unknown verb %q for principal %q", verb, store.Principals[i].Name))
+		}
+		if len(filtered) == 0 && len(store.Principals[i].Verbs) > 0 {
+			warnings = append(warnings, fmt.Sprintf("principal %q has no recognized verbs; token will authorize nothing", store.Principals[i].Name))
+		}
+		store.Principals[i].Verbs = filtered
+	}
+	return warnings, nil
+}
+
+func validateStoreStructure(store *Store) error {
 	if store == nil {
 		return fmt.Errorf("store is nil")
 	}
@@ -222,28 +263,34 @@ func validateStore(store *Store) error {
 		if err := validatePatterns("compose_services", principal.ComposeServices); err != nil {
 			return fmt.Errorf("principal %q: %w", principal.Name, err)
 		}
-		if err := validateVerbs(principal.Verbs); err != nil {
-			return fmt.Errorf("principal %q: %w", principal.Name, err)
-		}
 	}
 	return nil
 }
 
-func validateVerbs(verbs []string) error {
+func filterKnownVerbs(verbs []string) ([]string, []string) {
+	filtered := make([]string, 0, len(verbs))
+	var unknown []string
 	for _, verb := range verbs {
 		verb = strings.TrimSpace(verb)
-		known := false
-		for _, v := range AllVerbs {
-			if v == verb {
-				known = true
-				break
-			}
+		if verb == "" {
+			continue
 		}
-		if !known {
-			return fmt.Errorf("unknown verb %q", verb)
+		if isKnownVerb(verb) {
+			filtered = append(filtered, verb)
+			continue
+		}
+		unknown = append(unknown, verb)
+	}
+	return filtered, unknown
+}
+
+func isKnownVerb(verb string) bool {
+	for _, v := range AllVerbs {
+		if v == verb {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 func validatePatterns(label string, patterns []string) error {
@@ -261,6 +308,85 @@ func validatePatterns(label string, patterns []string) error {
 
 func containsGlobMeta(pattern string) bool {
 	return strings.ContainsAny(pattern, "*?[\\")
+}
+
+var minClawAPIImageVersionByVerb = map[string]string{
+	VerbScheduleRead:    "v0.6.0",
+	VerbScheduleControl: "v0.6.0",
+}
+
+func PrincipalVersionSkewWarnings(store *Store, imageRef string) []string {
+	if store == nil {
+		return nil
+	}
+	imageRef = strings.TrimSpace(imageRef)
+	if imageRef == "" {
+		return nil
+	}
+
+	tag, tagged := imageTagFromRef(imageRef)
+	version, versioned := normalizeSemverTag(tag)
+
+	seen := make(map[string]struct{})
+	warnings := make([]string, 0)
+	for _, principal := range store.Principals {
+		for _, verb := range principal.Verbs {
+			minVersion, tracked := minClawAPIImageVersionByVerb[verb]
+			if !tracked {
+				continue
+			}
+
+			var warning string
+			switch {
+			case !tagged || !versioned:
+				warning = fmt.Sprintf("claw-api image %q is not version-pinned; cannot verify support for principal %q verb %q (known minimum %s)", imageRef, principal.Name, verb, minVersion)
+			case semver.Compare(version, minVersion) < 0:
+				warning = fmt.Sprintf("claw-api image %q may not support principal %q verb %q (known minimum %s)", imageRef, principal.Name, verb, minVersion)
+			default:
+				continue
+			}
+			if _, ok := seen[warning]; ok {
+				continue
+			}
+			seen[warning] = struct{}{}
+			warnings = append(warnings, warning)
+		}
+	}
+	return warnings
+}
+
+func imageTagFromRef(imageRef string) (string, bool) {
+	imageRef = strings.TrimSpace(imageRef)
+	if imageRef == "" {
+		return "", false
+	}
+	if i := strings.Index(imageRef, "@"); i >= 0 {
+		imageRef = imageRef[:i]
+	}
+	slash := strings.LastIndex(imageRef, "/")
+	colon := strings.LastIndex(imageRef, ":")
+	if colon <= slash {
+		return "", false
+	}
+	tag := strings.TrimSpace(imageRef[colon+1:])
+	if tag == "" {
+		return "", false
+	}
+	return tag, true
+}
+
+func normalizeSemverTag(tag string) (string, bool) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return "", false
+	}
+	if tag[0] >= '0' && tag[0] <= '9' {
+		tag = "v" + tag
+	}
+	if !semver.IsValid(tag) {
+		return "", false
+	}
+	return tag, true
 }
 
 func secureEqual(a, b string) bool {

@@ -57,6 +57,9 @@ func TestGenerateJobsJSONSingleInvocation(t *testing.T) {
 	if schedule["expr"] != "15 8 * * 1-5" {
 		t.Errorf("expected schedule.expr=%q, got %v", "15 8 * * 1-5", schedule["expr"])
 	}
+	if schedule["tz"] != "UTC" {
+		t.Errorf("expected schedule.tz=UTC fallback, got %v", schedule["tz"])
+	}
 
 	payload := j["payload"].(map[string]interface{})
 	if payload["kind"] != "agentTurn" {
@@ -227,5 +230,28 @@ func TestGenerateJobsJSONRejectsInvalidConfiguredAgentTimeout(t *testing.T) {
 	}
 	if _, err := GenerateJobsJSON(rc); err == nil {
 		t.Fatal("expected invalid timeoutSeconds configure to fail")
+	}
+}
+
+func TestGenerateJobsJSONUsesResolvedTimezone(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "tiverton",
+		Timezone:    "America/New_York",
+		Invocations: []driver.Invocation{
+			{
+				Schedule: "15 8 * * 1-5",
+				Message:  "Pre-market synthesis",
+			},
+		},
+	}
+	data, err := GenerateJobsJSON(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	jobs := parseJobStore(t, data)
+	schedule := jobs[0]["schedule"].(map[string]interface{})
+	if schedule["tz"] != "America/New_York" {
+		t.Fatalf("expected schedule.tz=America/New_York, got %v", schedule["tz"])
 	}
 }

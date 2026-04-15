@@ -373,8 +373,8 @@ func TestSpikeComposeUp(t *testing.T) {
 	// ── Verify compose.generated.yml ────────────────────────────────────────
 
 	composeSrc := spikeReadFile(t, generatedPath)
-	if !strings.Contains(composeSrc, "/app/config") {
-		t.Errorf("compose.generated.yml: expected to contain %q", "/app/config")
+	if !strings.Contains(composeSrc, "/root/.openclaw/config") {
+		t.Errorf("compose.generated.yml: expected to contain %q", "/root/.openclaw/config")
 	}
 	if !strings.Contains(composeSrc, "cllama:") {
 		t.Errorf("compose.generated.yml: expected cllama service")
@@ -409,7 +409,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	spikeWaitRunning(t, containerName, 45*time.Second)
 
 	// Config file must be readable inside container and contain 'discord'
-	out, err := exec.Command("docker", "exec", containerName, "cat", "/app/config/openclaw.json").Output()
+	out, err := exec.Command("docker", "exec", containerName, "cat", "/root/.openclaw/config/openclaw.json").Output()
 	if err != nil {
 		t.Errorf("docker exec cat openclaw.json: %v", err)
 	} else if !strings.Contains(string(out), "discord") {
@@ -417,7 +417,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	}
 
 	// jobs.json must be readable and contain the real channel ID
-	out2, err2 := exec.Command("docker", "exec", containerName, "cat", "/app/config/cron/jobs.json").Output()
+	out2, err2 := exec.Command("docker", "exec", containerName, "cat", "/root/.openclaw/config/cron/jobs.json").Output()
 	if err2 != nil {
 		t.Errorf("docker exec cat jobs.json: %v", err2)
 	} else if !strings.Contains(string(out2), channelID) {

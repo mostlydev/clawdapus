@@ -50,6 +50,10 @@ func buildScheduleManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw)
 		if rc == nil {
 			continue
 		}
+		serviceTimezone := strings.TrimSpace(rc.Timezone)
+		if serviceTimezone == "" {
+			serviceTimezone = "UTC"
+		}
 		for _, inv := range rc.Invocations {
 			if inv.Origin != driver.OriginPod {
 				continue
@@ -61,7 +65,7 @@ func buildScheduleManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw)
 				continue
 			}
 
-			timezone := "UTC"
+			timezone := serviceTimezone
 			if inv.When != nil {
 				cal, err := schedule.LookupCalendar(inv.When.Calendar)
 				if err != nil {

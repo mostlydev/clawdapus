@@ -27,8 +27,61 @@ func TestHandlerHealthEndpoint(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), `"ok":true`) {
-		t.Fatalf("unexpected health body: %s", w.Body.String())
+	var body struct {
+		OK         bool `json:"ok"`
+		Principals struct {
+			Count                 int      `json:"count"`
+			Inert                 []string `json:"inert"`
+			NormalizationWarnings []string `json:"normalization_warnings"`
+		} `json:"principals"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal health body: %v body=%s", err, w.Body.String())
+	}
+	if !body.OK || body.Principals.Count != 0 || len(body.Principals.Inert) != 0 || len(body.Principals.NormalizationWarnings) != 0 {
+		t.Fatalf("unexpected health body: %+v raw=%s", body, w.Body.String())
+	}
+}
+
+func TestHandlerHealthEndpointIncludesPrincipalNormalizationDetails(t *testing.T) {
+	h := newHandler(&manifestpkg.PodManifest{PodName: "ops"}, nil, nil, nil, &clawapi.Store{
+		Principals: []clawapi.Principal{{
+			Name:  "future",
+			Token: "capi_x",
+			Verbs: nil,
+			Pods:  []string{"ops"},
+		}},
+		NormalizationWarnings: []string{
+			`ignoring unknown verb "schedule.pause" for principal "future"`,
+			`principal "future" has no recognized verbs; token will authorize nothing`,
+		},
+	}, nil, nil, clawapi.DefaultThresholds(), t.TempDir())
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body struct {
+		Principals struct {
+			Count                 int      `json:"count"`
+			Inert                 []string `json:"inert"`
+			NormalizationWarnings []string `json:"normalization_warnings"`
+		} `json:"principals"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal health body: %v body=%s", err, w.Body.String())
+	}
+	if body.Principals.Count != 1 {
+		t.Fatalf("expected principal count 1, got %+v", body.Principals)
+	}
+	if !strings.Contains(strings.Join(body.Principals.NormalizationWarnings, "\n"), `has no recognized verbs`) {
+		t.Fatalf("expected normalization warning in health body, got %+v", body.Principals)
+	}
+	if len(body.Principals.Inert) != 1 || body.Principals.Inert[0] != "future" {
+		t.Fatalf("expected inert principal in health body, got %+v", body.Principals)
 	}
 }
 

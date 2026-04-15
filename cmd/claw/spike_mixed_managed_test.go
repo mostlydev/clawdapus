@@ -138,7 +138,7 @@ services:
 	if !openSvc.ReadOnly {
 		t.Fatalf("expected open service to remain read_only")
 	}
-	if openSvc.Environment["OPENCLAW_CONFIG_PATH"] != "/app/config/openclaw.json" {
+	if openSvc.Environment["OPENCLAW_CONFIG_PATH"] != "/root/.openclaw/config/openclaw.json" {
 		t.Fatalf("unexpected open OPENCLAW_CONFIG_PATH: %q", openSvc.Environment["OPENCLAW_CONFIG_PATH"])
 	}
 

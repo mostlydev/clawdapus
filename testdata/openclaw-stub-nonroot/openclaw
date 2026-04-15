@@ -1,0 +1,22 @@
+#!/bin/sh
+# Stub openclaw binary for the non-root regression spike. Same surface as
+# testdata/openclaw-stub/openclaw — handles health/gateway/config — but kept
+# in its own fixture so the non-root variant is self-contained.
+
+case "$1" in
+  health)
+    echo '{"status":"ok","detail":"healthy","version":"test-nonroot"}'
+    exit 0
+    ;;
+  gateway)
+    echo "openclaw-stub-nonroot: gateway running (pid $$, uid $(id -u))" >&2
+    exec sleep infinity
+    ;;
+  config)
+    exit 0
+    ;;
+  *)
+    echo "openclaw-stub-nonroot: unknown command: $1" >&2
+    exit 1
+    ;;
+esac

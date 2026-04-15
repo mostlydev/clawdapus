@@ -76,6 +76,7 @@ func TestMaterializeWritesConfigAndSeededMemory(t *testing.T) {
 	rc, tmp := newTestRC(t)
 	rc.Models = map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"}
 	rc.Environment["OPENROUTER_API_KEY"] = "or-key"
+	rc.Timezone = "America/New_York"
 
 	runtimeDir := filepath.Join(tmp, "runtime")
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
@@ -137,6 +138,9 @@ func TestMaterializeWritesConfigAndSeededMemory(t *testing.T) {
 	}
 	if got := cfg["data_dir"]; got != "/claw-data" {
 		t.Fatalf("expected data_dir=/claw-data, got %v", got)
+	}
+	if got := cfg["timezone"]; got != "America/New_York" {
+		t.Fatalf("expected timezone=America/New_York, got %v", got)
 	}
 
 	channels, _ := cfg["channels"].(map[string]interface{})

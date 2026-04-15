@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -554,6 +555,20 @@ func TestReadDotEnvFileParsesQuotedValuesAndComments(t *testing.T) {
 	}
 }
 
+func TestResolveAgentTimezoneUsesResolvedTZ(t *testing.T) {
+	got := resolveAgentTimezone(map[string]string{"TZ": "${BOT_TZ}"}, map[string]string{"BOT_TZ": "America/New_York"})
+	if got != "America/New_York" {
+		t.Fatalf("expected America/New_York, got %q", got)
+	}
+}
+
+func TestResolveAgentTimezoneFallsBackToUTCOnInvalidTZ(t *testing.T) {
+	got := resolveAgentTimezone(map[string]string{"TZ": "Mars/Olympus"}, map[string]string{})
+	if got != "UTC" {
+		t.Fatalf("expected UTC fallback, got %q", got)
+	}
+}
+
 func TestValidateCllamaEnvFilesRejectsProviderKeys(t *testing.T) {
 	tmpDir := t.TempDir()
 	envPath := filepath.Join(tmpDir, "bot.env")
@@ -651,7 +666,7 @@ func TestMaterializeContractIncludesBuildsGeneratedContractAndReferenceSkill(t *
 	}
 }
 
-func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
+func TestPrepareRuntimeDirStagesPreviousTreeUntilCommit(t *testing.T) {
 	tmpDir := t.TempDir()
 	runtimeDir := filepath.Join(tmpDir, ".claw-runtime")
 	staleDir := filepath.Join(runtimeDir, "nb-roll", "skills", "handle-discord.md")
@@ -663,8 +678,9 @@ func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
 		t.Fatalf("write stale file: %v", err)
 	}
 
-	if err := resetRuntimeDir(runtimeDir); err != nil {
-		t.Fatalf("reset runtime dir: %v", err)
+	stage, err := prepareRuntimeDir(runtimeDir)
+	if err != nil {
+		t.Fatalf("prepare runtime dir: %v", err)
 	}
 
 	info, err := os.Stat(runtimeDir)
@@ -674,11 +690,63 @@ func TestResetRuntimeDirClearsStaleContents(t *testing.T) {
 	if !info.IsDir() {
 		t.Fatalf("expected runtime dir to exist as directory")
 	}
-	if _, err := os.Stat(staleDir); !os.IsNotExist(err) {
-		t.Fatalf("expected stale dir to be removed, got err=%v", err)
+	if stage.PreviousPath == "" {
+		t.Fatal("expected previous runtime dir to be preserved during staging")
 	}
-	if _, err := os.Stat(staleFile); !os.IsNotExist(err) {
-		t.Fatalf("expected stale file to be removed, got err=%v", err)
+	if _, err := os.Stat(staleDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected stale dir to be absent from fresh runtime dir, got err=%v", err)
+	}
+	if _, err := os.Stat(staleFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected stale file to be absent from fresh runtime dir, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stage.PreviousPath, "nb-roll", "skills", "handle-discord.md")); err != nil {
+		t.Fatalf("expected staged previous runtime tree to preserve stale dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stage.PreviousPath, "stale.txt")); err != nil {
+		t.Fatalf("expected staged previous runtime tree to preserve stale file: %v", err)
+	}
+
+	if err := stage.Commit(); err != nil {
+		t.Fatalf("commit runtime dir: %v", err)
+	}
+	if _, err := os.Stat(stage.PreviousPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected previous runtime dir to be removed after commit, got err=%v", err)
+	}
+}
+
+func TestPrepareRuntimeDirRollbackRestoresPreviousTree(t *testing.T) {
+	tmpDir := t.TempDir()
+	runtimeDir := filepath.Join(tmpDir, ".claw-runtime")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	originalPath := filepath.Join(runtimeDir, "AGENTS.generated.md")
+	if err := os.WriteFile(originalPath, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write original runtime file: %v", err)
+	}
+
+	stage, err := prepareRuntimeDir(runtimeDir)
+	if err != nil {
+		t.Fatalf("prepare runtime dir: %v", err)
+	}
+	replacementPath := filepath.Join(runtimeDir, "AGENTS.generated.md")
+	if err := os.WriteFile(replacementPath, []byte("new"), 0o644); err != nil {
+		t.Fatalf("write replacement runtime file: %v", err)
+	}
+
+	if err := stage.Rollback(); err != nil {
+		t.Fatalf("rollback runtime dir: %v", err)
+	}
+
+	data, err := os.ReadFile(originalPath)
+	if err != nil {
+		t.Fatalf("read restored runtime file: %v", err)
+	}
+	if string(data) != "old" {
+		t.Fatalf("restored runtime file = %q, want %q", string(data), "old")
+	}
+	if _, err := os.Stat(stage.PreviousPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected previous runtime dir to be consumed by rollback, got err=%v", err)
 	}
 }
 
@@ -899,6 +967,41 @@ func TestPrepareClawAPIRuntimeWithMasterAndInvokeAlsoWritesSchedulerPrincipal(t 
 	}
 	if !strings.Contains(string(raw), "claw-scheduler") {
 		t.Fatalf("expected scheduler principal in principals.json, got %s", string(raw))
+	}
+}
+
+func TestPrepareClawAPIRuntimeWarnsWhenClawAPIImageMayNotSupportPrincipalVerb(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Name: "ops",
+		Services: map[string]*pod.Service{
+			"westin": {
+				Claw: &pod.ClawBlock{
+					Invoke: []pod.InvokeEntry{{
+						Schedule: "0 9 * * 1-5",
+						Message:  "Open the market.",
+					}},
+				},
+			},
+		},
+		ClawAPI: &pod.ClawAPIConfig{
+			Image:              "ghcr.io/mostlydev/claw-api:v0.4.2",
+			Addr:               ":8080",
+			PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+		},
+	}
+
+	out, err := captureStdout(t, func() error {
+		_, err := prepareClawAPIRuntime(runtimeDir, p, map[string]*driver.ResolvedClaw{
+			"westin": {Count: 1},
+		})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("prepareClawAPIRuntime: %v", err)
+	}
+	if !strings.Contains(out, `ghcr.io/mostlydev/claw-api:v0.4.2`) || !strings.Contains(out, `known minimum v0.6.0`) {
+		t.Fatalf("expected skew warning in output, got %q", out)
 	}
 }
 
@@ -3096,45 +3199,40 @@ func TestBuildServiceSurfaceInfoOmitsEndpointsWhenToolsDeclared(t *testing.T) {
 	}
 }
 
+func testConversationWallService(token string, channelIDs ...string) *pod.Service {
+	environment := make(map[string]string)
+	if token != "" {
+		environment["DISCORD_BOT_TOKEN"] = token
+	}
+
+	channels := make([]driver.ChannelInfo, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		channels = append(channels, driver.ChannelInfo{ID: channelID})
+	}
+
+	return &pod.Service{
+		Environment: environment,
+		Claw: &pod.ClawBlock{
+			Handles: map[string]*driver.HandleInfo{
+				"discord": {
+					Guilds: []driver.GuildInfo{{
+						ID:       "guild-1",
+						Channels: channels,
+					}},
+				},
+			},
+		},
+	}
+}
+
 func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
+	t.Setenv("CLAW_WALL_POLL_INTERVAL", "")
+
 	p := &pod.Pod{
 		Name: "desk",
 		Services: map[string]*pod.Service{
-			"observer": {
-				Environment: map[string]string{
-					"DISCORD_BOT_TOKEN": "${OBSERVER_DISCORD_BOT_TOKEN}",
-				},
-				Claw: &pod.ClawBlock{
-					Handles: map[string]*driver.HandleInfo{
-						"discord": {
-							Guilds: []driver.GuildInfo{{
-								ID: "guild-1",
-								Channels: []driver.ChannelInfo{
-									{ID: "chan-2"},
-								},
-							}},
-						},
-					},
-				},
-			},
-			"trader": {
-				Environment: map[string]string{
-					"DISCORD_BOT_TOKEN": "${TRADER_DISCORD_BOT_TOKEN}",
-				},
-				Claw: &pod.ClawBlock{
-					Handles: map[string]*driver.HandleInfo{
-						"discord": {
-							Guilds: []driver.GuildInfo{{
-								ID: "guild-1",
-								Channels: []driver.ChannelInfo{
-									{ID: "chan-2"},
-									{ID: "chan-1"},
-								},
-							}},
-						},
-					},
-				},
-			},
+			"observer": testConversationWallService("${OBSERVER_DISCORD_BOT_TOKEN}", "chan-2", "chan-9"),
+			"trader":   testConversationWallService("${TRADER_DISCORD_BOT_TOKEN}", "chan-2", "chan-1"),
 		},
 	}
 
@@ -3157,8 +3255,14 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	if !slices.Equal(wall.Expose, []string{conversationWallInternalPort}) {
 		t.Fatalf("expected claw-wall expose %v, got %v", []string{conversationWallInternalPort}, wall.Expose)
 	}
-	if wall.Environment["CLAW_WALL_TOKENS"] != "chan-1:${TRADER_DISCORD_BOT_TOKEN},chan-2:${OBSERVER_DISCORD_BOT_TOKEN},chan-2:${TRADER_DISCORD_BOT_TOKEN}" {
+	if wall.Environment["CLAW_WALL_TOKENS"] != "chan-1:${TRADER_DISCORD_BOT_TOKEN},chan-2:${OBSERVER_DISCORD_BOT_TOKEN}" {
 		t.Fatalf("unexpected CLAW_WALL_TOKENS: %q", wall.Environment["CLAW_WALL_TOKENS"])
+	}
+	if strings.Contains(wall.Environment["CLAW_WALL_TOKENS"], "chan-9") {
+		t.Fatalf("expected unconsumed channel to be excluded, got %q", wall.Environment["CLAW_WALL_TOKENS"])
+	}
+	if wall.Environment["CLAW_WALL_POLL_INTERVAL"] != conversationWallPollInterval {
+		t.Fatalf("unexpected CLAW_WALL_POLL_INTERVAL: %q", wall.Environment["CLAW_WALL_POLL_INTERVAL"])
 	}
 
 	traderFeeds := p.Services["trader"].Claw.Feeds
@@ -3176,20 +3280,92 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	}
 }
 
+func TestInjectConversationWallPrefersMasterTokenWhenMasterDeclaresChannel(t *testing.T) {
+	p := &pod.Pod{
+		Name:   "desk",
+		Master: "zmaster",
+		Services: map[string]*pod.Service{
+			"observer": testConversationWallService("${OBSERVER_DISCORD_BOT_TOKEN}", "chan-2"),
+			"trader":   testConversationWallService("${TRADER_DISCORD_BOT_TOKEN}", "chan-2"),
+			"zmaster":  testConversationWallService("${MASTER_DISCORD_BOT_TOKEN}", "chan-2"),
+		},
+	}
+
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"observer": {ServiceName: "observer"},
+		"trader":   {ServiceName: "trader", Cllama: []string{"passthrough"}},
+		"zmaster":  {ServiceName: "zmaster"},
+	}
+
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		t.Fatalf("injectConversationWall: %v", err)
+	}
+
+	wall := p.Services[conversationWallServiceName]
+	if wall == nil {
+		t.Fatal("expected claw-wall service to be injected")
+	}
+	if wall.Environment["CLAW_WALL_TOKENS"] != "chan-2:${MASTER_DISCORD_BOT_TOKEN}" {
+		t.Fatalf("unexpected CLAW_WALL_TOKENS: %q", wall.Environment["CLAW_WALL_TOKENS"])
+	}
+}
+
+func TestInjectConversationWallFallsBackWhenMasterDoesNotDeclareChannel(t *testing.T) {
+	p := &pod.Pod{
+		Name:   "desk",
+		Master: "zmaster",
+		Services: map[string]*pod.Service{
+			"observer": testConversationWallService("${OBSERVER_DISCORD_BOT_TOKEN}", "chan-2"),
+			"trader":   testConversationWallService("", "chan-2"),
+			"zmaster":  testConversationWallService("${MASTER_DISCORD_BOT_TOKEN}", "chan-9"),
+		},
+	}
+
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"observer": {ServiceName: "observer"},
+		"trader":   {ServiceName: "trader", Cllama: []string{"passthrough"}},
+		"zmaster":  {ServiceName: "zmaster"},
+	}
+
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		t.Fatalf("injectConversationWall: %v", err)
+	}
+
+	wall := p.Services[conversationWallServiceName]
+	if wall == nil {
+		t.Fatal("expected claw-wall service to be injected")
+	}
+	if wall.Environment["CLAW_WALL_TOKENS"] != "chan-2:${OBSERVER_DISCORD_BOT_TOKEN}" {
+		t.Fatalf("unexpected CLAW_WALL_TOKENS: %q", wall.Environment["CLAW_WALL_TOKENS"])
+	}
+}
+
+func TestInjectConversationWallRejectsConsumedChannelWithoutEligibleReader(t *testing.T) {
+	p := &pod.Pod{
+		Name: "desk",
+		Services: map[string]*pod.Service{
+			"observer": testConversationWallService("${OBSERVER_DISCORD_BOT_TOKEN}", "chan-9"),
+			"trader":   testConversationWallService("", "chan-2"),
+		},
+	}
+
+	err := injectConversationWall(p, map[string]*driver.ResolvedClaw{
+		"observer": {ServiceName: "observer"},
+		"trader":   {ServiceName: "trader", Cllama: []string{"passthrough"}},
+	})
+	if err == nil {
+		t.Fatal("expected missing-reader error")
+	}
+	if !strings.Contains(err.Error(), "chan-2") {
+		t.Fatalf("expected channel ID in error, got %v", err)
+	}
+}
+
 func TestInjectConversationWallRejectsReservedServiceName(t *testing.T) {
 	p := &pod.Pod{
 		Services: map[string]*pod.Service{
 			conversationWallServiceName: {Image: "busybox"},
-			"trader": {
-				Environment: map[string]string{"DISCORD_BOT_TOKEN": "token"},
-				Claw: &pod.ClawBlock{
-					Handles: map[string]*driver.HandleInfo{
-						"discord": {
-							Guilds: []driver.GuildInfo{{Channels: []driver.ChannelInfo{{ID: "chan-1"}}}},
-						},
-					},
-				},
-			},
+			"trader":                    testConversationWallService("token", "chan-1"),
 		},
 	}
 

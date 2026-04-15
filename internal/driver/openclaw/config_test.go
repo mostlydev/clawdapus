@@ -31,6 +31,52 @@ func getPath(data []byte, path string) (interface{}, bool) {
 	return current, true
 }
 
+func decodeConfig(t *testing.T, data []byte) map[string]interface{} {
+	t.Helper()
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	return config
+}
+
+func providerConfigEntry(t *testing.T, config map[string]interface{}, provider string) map[string]interface{} {
+	t.Helper()
+
+	modelsCfg, ok := config["models"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected models config")
+	}
+	providers, ok := modelsCfg["providers"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected models.providers config")
+	}
+	entry, ok := providers[provider].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected models.providers.%s config", provider)
+	}
+	return entry
+}
+
+func firstProviderModelID(t *testing.T, providerConfig map[string]interface{}) string {
+	t.Helper()
+
+	modelEntries, ok := providerConfig["models"].([]interface{})
+	if !ok || len(modelEntries) != 1 {
+		t.Fatalf("expected exactly one provider model entry, got %T %v", providerConfig["models"], providerConfig["models"])
+	}
+	entry, ok := modelEntries[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected provider model entry object, got %T", modelEntries[0])
+	}
+	modelID, ok := entry["id"].(string)
+	if !ok {
+		t.Fatalf("expected provider model id string, got %T", entry["id"])
+	}
+	return modelID
+}
+
 func TestGenerateConfigSetsModelPrimary(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models: map[string]string{
@@ -178,6 +224,155 @@ func TestGenerateConfigDirectGoogleKeepsNativeAPI(t *testing.T) {
 	}
 	if got, ok := getPath(data, "agents.defaults.model.primary"); !ok || got != "google/gemini-3-flash-preview" {
 		t.Fatalf("expected direct google model to remain on agents.defaults.model.primary, got %v (present=%v)", got, ok)
+	}
+}
+
+func TestGenerateConfigDirectProviderMatrixLeavesModelsUnrewritten(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+	}{
+		{name: "google", model: "google/gemini-3-flash-preview"},
+		{name: "github copilot", model: "github-copilot/gpt-4o"},
+		{name: "amazon bedrock", model: "amazon-bedrock/anthropic.claude-3-7-sonnet"},
+		{name: "ollama", model: "ollama/llama3.2"},
+		{name: "anthropic", model: "anthropic/claude-sonnet-4"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := &driver.ResolvedClaw{
+				Models: map[string]string{"primary": tc.model},
+			}
+
+			data, err := GenerateConfig(rc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := getPath(data, "models.providers"); ok {
+				t.Fatalf("expected no models.providers config without cllama, got %v", got)
+			}
+			if got, ok := getPath(data, "agents.defaults.model.primary"); !ok || got != tc.model {
+				t.Fatalf("expected direct model ref %q to remain on agents.defaults.model.primary, got %v (present=%v)", tc.model, got, ok)
+			}
+		})
+	}
+}
+
+func TestGenerateConfigCllamaProviderAPIMatrix(t *testing.T) {
+	tests := []struct {
+		name         string
+		model        string
+		wantProvider string
+		wantAPI      string
+		wantModelID  string
+	}{
+		{
+			name:         "google uses openai completions",
+			model:        "google/gemini-3-flash-preview",
+			wantProvider: "google",
+			wantAPI:      "openai-completions",
+			wantModelID:  "google/gemini-3-flash-preview",
+		},
+		{
+			name:         "github copilot uses openai completions",
+			model:        "github-copilot/gpt-4o",
+			wantProvider: "github-copilot",
+			wantAPI:      "openai-completions",
+			wantModelID:  "github-copilot/gpt-4o",
+		},
+		{
+			name:         "amazon bedrock uses openai completions",
+			model:        "amazon-bedrock/anthropic.claude-3-7-sonnet",
+			wantProvider: "amazon-bedrock",
+			wantAPI:      "openai-completions",
+			wantModelID:  "amazon-bedrock/anthropic.claude-3-7-sonnet",
+		},
+		{
+			name:         "ollama uses openai completions",
+			model:        "ollama/llama3.2",
+			wantProvider: "ollama",
+			wantAPI:      "openai-completions",
+			wantModelID:  "ollama/llama3.2",
+		},
+		{
+			name:         "anthropic uses anthropic messages",
+			model:        "anthropic/claude-sonnet-4",
+			wantProvider: "anthropic",
+			wantAPI:      "anthropic-messages",
+			wantModelID:  "anthropic/claude-sonnet-4",
+		},
+		{
+			name:         "synthetic uses anthropic messages",
+			model:        "synthetic/openai/gpt-4o-mini",
+			wantProvider: "synthetic",
+			wantAPI:      "anthropic-messages",
+			wantModelID:  "synthetic/openai/gpt-4o-mini",
+		},
+		{
+			name:         "minimax portal uses anthropic messages",
+			model:        "minimax-portal/minimax-text-01",
+			wantProvider: "minimax-portal",
+			wantAPI:      "anthropic-messages",
+			wantModelID:  "minimax-portal/minimax-text-01",
+		},
+		{
+			name:         "kimi alias normalizes and uses anthropic messages",
+			model:        "kimi-code/kimi-k2.5",
+			wantProvider: "kimi-coding",
+			wantAPI:      "anthropic-messages",
+			wantModelID:  "kimi-coding/kimi-k2.5",
+		},
+		{
+			name:         "cloudflare ai gateway uses anthropic messages",
+			model:        "cloudflare-ai-gateway/compat-model",
+			wantProvider: "cloudflare-ai-gateway",
+			wantAPI:      "anthropic-messages",
+			wantModelID:  "cloudflare-ai-gateway/compat-model",
+		},
+		{
+			name:         "xiaomi uses anthropic messages",
+			model:        "xiaomi/mi-llm",
+			wantProvider: "xiaomi",
+			wantAPI:      "anthropic-messages",
+			wantModelID:  "xiaomi/mi-llm",
+		},
+		{
+			name:         "z ai alias normalizes and uses openai completions",
+			model:        "z.ai/glm-4.5",
+			wantProvider: "zai",
+			wantAPI:      "openai-completions",
+			wantModelID:  "zai/glm-4.5",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := &driver.ResolvedClaw{
+				Models:      map[string]string{"primary": tc.model},
+				Cllama:      []string{"passthrough"},
+				CllamaToken: "weston:abc123hex",
+			}
+
+			data, err := GenerateConfig(rc)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			entry := providerConfigEntry(t, decodeConfig(t, data), tc.wantProvider)
+			if entry["baseUrl"] != "http://cllama:8080/v1" {
+				t.Fatalf("expected proxy baseUrl, got %v", entry["baseUrl"])
+			}
+			if entry["apiKey"] != "weston:abc123hex" {
+				t.Fatalf("expected cllama bearer token, got %v", entry["apiKey"])
+			}
+			if entry["api"] != tc.wantAPI {
+				t.Fatalf("expected provider %q behind cllama to use %q, got %v", tc.wantProvider, tc.wantAPI, entry["api"])
+			}
+			if got := firstProviderModelID(t, entry); got != tc.wantModelID {
+				t.Fatalf("expected provider model id %q, got %q", tc.wantModelID, got)
+			}
+		})
 	}
 }
 

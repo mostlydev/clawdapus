@@ -95,25 +95,25 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	}
 
 	// Verify env vars are set correctly
-	if result.Environment["OPENCLAW_CONFIG_PATH"] != "/app/config/openclaw.json" {
-		t.Errorf("expected OPENCLAW_CONFIG_PATH=/app/config/openclaw.json, got %q", result.Environment["OPENCLAW_CONFIG_PATH"])
+	if result.Environment["OPENCLAW_CONFIG_PATH"] != openclawConfigPath {
+		t.Errorf("expected OPENCLAW_CONFIG_PATH=%s, got %q", openclawConfigPath, result.Environment["OPENCLAW_CONFIG_PATH"])
 	}
-	if result.Environment["OPENCLAW_STATE_DIR"] != "/app/state" {
-		t.Errorf("expected OPENCLAW_STATE_DIR=/app/state, got %q", result.Environment["OPENCLAW_STATE_DIR"])
+	if result.Environment["OPENCLAW_STATE_DIR"] != openclawHomeDir {
+		t.Errorf("expected OPENCLAW_STATE_DIR=%s, got %q", openclawHomeDir, result.Environment["OPENCLAW_STATE_DIR"])
 	}
-	// Shim for openclaw/openclaw#29736: exec-approvals resolves paths via OPENCLAW_HOME.
-	if result.Environment["OPENCLAW_HOME"] != "/app/state" {
-		t.Errorf("expected OPENCLAW_HOME=/app/state (shim for openclaw#29736), got %q", result.Environment["OPENCLAW_HOME"])
+	if _, ok := result.Environment["OPENCLAW_HOME"]; ok {
+		t.Fatalf("OPENCLAW_HOME should not be set when using canonical ~/.openclaw state, got %q", result.Environment["OPENCLAW_HOME"])
 	}
-	if result.Environment["HOME"] != "/app/state" {
-		t.Errorf("expected HOME=/app/state so ~/.openclaw resolves onto writable state, got %q", result.Environment["HOME"])
+	if result.Environment["HOME"] != "/root" {
+		t.Errorf("expected HOME=/root so ~/.openclaw resolves onto writable state, got %q", result.Environment["HOME"])
 	}
 	if result.Environment[shared.PortableMemoryEnv] != shared.PortableMemoryDir {
 		t.Errorf("expected %s=%s, got %q", shared.PortableMemoryEnv, shared.PortableMemoryDir, result.Environment[shared.PortableMemoryEnv])
 	}
 
-	// /app/state must be a single tmpfs covering all openclaw state subdirs.
-	// The options are part of the contract because OpenClaw now runs as uid/gid 1000.
+	// /root must be tmpfs-overlaid so non-root runtime users can traverse into
+	// ~/.openclaw, and ~/.openclaw itself must be tmpfs-overlaid so Docker does not
+	// leave it behind as 0755 root:root when creating the nested config bind mount.
 	tmpfsSet := make(map[string]bool, len(result.Tmpfs))
 	for _, p := range result.Tmpfs {
 		tmpfsSet[p] = true
@@ -122,10 +122,13 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Errorf("expected writable /claw tmpfs %q for workspace writes like SOUL.md, got %v", openclawWorkspaceTmpfs, result.Tmpfs)
 	}
 	if !tmpfsSet[openclawStateTmpfs] {
-		t.Errorf("expected writable /app/state tmpfs %q, got %v", openclawStateTmpfs, result.Tmpfs)
+		t.Errorf("expected writable /root tmpfs %q, got %v", openclawStateTmpfs, result.Tmpfs)
 	}
-	if tmpfsSet["/root/.openclaw"] {
-		t.Error("unexpected tmpfs /root/.openclaw — should use /app/state now")
+	if !tmpfsSet[openclawHomeTmpfs] {
+		t.Errorf("expected writable ~/.openclaw tmpfs %q, got %v", openclawHomeTmpfs, result.Tmpfs)
+	}
+	if tmpfsSet["/app/state"] {
+		t.Error("unexpected legacy /app/state tmpfs")
 	}
 
 	if result.Restart != "on-failure" {
@@ -143,6 +146,56 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 	}
 	if !foundMemoryMount {
 		t.Fatal("expected portable memory mount")
+	}
+}
+
+// TestMaterializeStateTmpfsCoversParentRootAndHomeWritable is a regression lock for the
+// canonical-home crash-loop family. The first fix moved the tmpfs one level up to /root
+// so non-root runtime users could traverse into ~/.openclaw. The follow-up fix keeps a
+// second tmpfs at ~/.openclaw itself because Docker otherwise creates that intermediate
+// directory as 0755 root:root when mounting ~/.openclaw/config, which breaks the first
+// state write (`mkdir ~/.openclaw/agents`) for non-root users.
+func TestMaterializeStateTmpfsCoversParentRootAndHomeWritable(t *testing.T) {
+	dir := t.TempDir()
+	agentFile := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agentFile, []byte("# Contract"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Driver{}
+	rc := &driver.ResolvedClaw{
+		ClawType:      "openclaw",
+		Agent:         "AGENTS.md",
+		AgentHostPath: agentFile,
+	}
+	result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: dir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rootCovered := false
+	homeCovered := false
+	for _, entry := range result.Tmpfs {
+		path, _, _ := strings.Cut(entry, ":")
+		if path == "/root" {
+			rootCovered = true
+			if !strings.Contains(entry, "mode=1777") {
+				t.Errorf("/root tmpfs is missing mode=1777, got %q. Without world-traversable mode the non-root runtime user still cannot reach ~/.openclaw.", entry)
+			}
+			continue
+		}
+		if path == openclawHomeDir {
+			homeCovered = true
+			if !strings.Contains(entry, "mode=1777") {
+				t.Errorf("%s tmpfs is missing mode=1777, got %q. Docker otherwise leaves ~/.openclaw as 0755 root:root when mounting the nested config directory, and non-root runtime users fail on mkdir ~/.openclaw/agents.", openclawHomeDir, entry)
+			}
+		}
+	}
+	if !rootCovered {
+		t.Fatalf("expected a tmpfs at /root so non-root runtime users can traverse into ~/.openclaw, got %v", result.Tmpfs)
+	}
+	if !homeCovered {
+		t.Fatalf("expected a tmpfs at %s so non-root runtime users can create ~/.openclaw/agents, got %v", openclawHomeDir, result.Tmpfs)
 	}
 }
 
@@ -279,7 +332,7 @@ func TestMaterializeWritesJobsUnderConfigDir(t *testing.T) {
 	}
 
 	// jobs.json must exist in the config/cron/ directory on the host.
-	// The parent /app/config bind mount covers this path inside the container.
+	// The parent ~/.openclaw/config bind mount covers this path inside the container.
 	jobsPath := filepath.Join(dir, "config", "cron", "jobs.json")
 	if _, err := os.Stat(jobsPath); err != nil {
 		t.Fatalf("jobs.json not written at config/cron/jobs.json: %v", err)
@@ -301,20 +354,23 @@ func TestMaterializeWritesJobsUnderConfigDir(t *testing.T) {
 
 	var configMount *driver.Mount
 	for i := range result.Mounts {
-		if result.Mounts[i].ContainerPath == "/app/config" {
+		if result.Mounts[i].ContainerPath == openclawConfigDir {
 			configMount = &result.Mounts[i]
 			break
 		}
 	}
 	if configMount == nil {
-		t.Fatal("expected /app/config mount to cover config/cron/jobs.json")
+		t.Fatalf("expected %s mount to cover config/cron/jobs.json", openclawConfigDir)
 	}
 	if configMount.ReadOnly {
-		t.Error("/app/config must be read-write so openclaw can update cron job state")
+		t.Errorf("%s must be read-write so openclaw can update cron job state", openclawConfigDir)
 	}
 	for i := range result.Mounts {
 		if result.Mounts[i].ContainerPath == "/app/state/cron" {
 			t.Fatal("unexpected legacy /app/state/cron mount")
+		}
+		if result.Mounts[i].ContainerPath == "/root/.openclaw/cron" {
+			t.Fatal("unexpected direct /root/.openclaw/cron mount; jobs should stay under config dir")
 		}
 	}
 }

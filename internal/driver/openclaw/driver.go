@@ -19,8 +19,29 @@ import (
 
 type Driver struct{}
 
-const openclawWorkspaceTmpfs = "/claw:mode=1777,uid=1000,gid=1000"
-const openclawStateTmpfs = "/app/state:mode=1777,uid=1000,gid=1000"
+const openclawHomeDir = "/root/.openclaw"
+const openclawConfigDir = openclawHomeDir + "/config"
+const openclawConfigPath = openclawConfigDir + "/openclaw.json"
+const openclawWorkspaceTmpfs = "/claw:mode=1777,uid=0,gid=0"
+
+// openclawStateTmpfs mounts the writable tmpfs at /root, NOT at /root/.openclaw.
+// Most upstream openclaw base images (e.g. ghcr.io/openclaw/openclaw) ship a non-root
+// runtime USER such as `node`, while leaving /root at its baked-in mode 0700 root:root
+// from the image layer. A tmpfs at /root/.openclaw alone is unreachable for that user
+// because traversing into /root requires execute on the parent, and the read-only image
+// layer cannot be chmod'd at runtime. Mounting the tmpfs one level higher overlays /root
+// with a fresh mode-1777 tmpfs that any user can traverse, while Docker still creates
+// /root/.openclaw on top of it as the bind-mount target for the config directory. This
+// keeps the canonical ~/.openclaw layout intact for both root- and non-root images.
+const openclawStateTmpfs = "/root:mode=1777,uid=0,gid=0"
+
+// openclawHomeTmpfs keeps ~/.openclaw itself writable after the /root overlay is in place.
+// With only the /root tmpfs plus a bind mount at /root/.openclaw/config, Docker creates the
+// intermediate /root/.openclaw directory as 0755 root:root. Non-root runtime users can then
+// read the mounted config file but still fail on the first state write
+// (`mkdir ~/.openclaw/agents`). Mounting a second tmpfs at ~/.openclaw fixes that while
+// preserving the canonical upstream path layout and config bind mount.
+const openclawHomeTmpfs = openclawHomeDir + ":mode=1777,uid=0,gid=0"
 
 func init() {
 	driver.Register("openclaw", &Driver{})
@@ -85,8 +106,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		{
 			// Bind-mount the directory (not the file) so openclaw can write temp files
 			// alongside the config during atomic save operations.
+			// This lives under the canonical ~/.openclaw home on purpose: state and config
+			// share the upstream layout, but OPENCLAW_CONFIG_PATH still keeps config access
+			// explicit rather than inferred from OPENCLAW_STATE_DIR.
 			HostPath:      configDir,
-			ContainerPath: "/app/config",
+			ContainerPath: openclawConfigDir,
 			ReadOnly:      false,
 		},
 		{
@@ -111,7 +135,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 
 	// Generate jobs.json if there are scheduled invocations.
 	// OpenClaw 2026.3.24 resolves its cron store under CONFIG_DIR/cron/jobs.json,
-	// so keep it under the writable config directory instead of /app/state.
+	// so keep it under the writable config directory inside the canonical home.
 	if len(rc.Invocations) > 0 {
 		jobsData, err := GenerateJobsJSON(rc)
 		if err != nil {
@@ -142,18 +166,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	env := map[string]string{
 		"CLAW_MANAGED":           "true",
 		shared.PortableMemoryEnv: shared.PortableMemoryDir,
-		"OPENCLAW_CONFIG_PATH":   "/app/config/openclaw.json",
-		"OPENCLAW_STATE_DIR":     "/app/state",
-		// SHIM(openclaw/openclaw#29736): exec-approvals path resolution uses OPENCLAW_HOME
-		// to expand ~/.openclaw/exec-approvals.{json,sock} before OPENCLAW_STATE_DIR is
-		// consulted. Without this the approval layer tries to mkdir inside the read-only
-		// container home dir and every exec tool call fails with ENOENT. Remove once the
-		// upstream issue is resolved and we've bumped past the fixed release.
-		"OPENCLAW_HOME": "/app/state",
-		// Some openclaw runtime paths still resolve through HOME rather than OPENCLAW_HOME.
-		// Keep HOME aligned with the writable state tmpfs so live Discord runtimes do not
-		// fall back to /root/.openclaw and fail closed on read-only filesystem state.
-		"HOME": "/app/state",
+		"OPENCLAW_CONFIG_PATH":   openclawConfigPath,
+		"OPENCLAW_STATE_DIR":     openclawHomeDir,
+		// Keep HOME aligned with the canonical writable openclaw home so upstream plugins
+		// and any os.UserHomeDir()/~ resolution land on the same tmpfs-backed path.
+		"HOME": "/root",
 	}
 	if rc.PersonaHostPath != "" {
 		env["CLAW_PERSONA_DIR"] = "/claw/persona"
@@ -168,10 +185,13 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			openclawWorkspaceTmpfs,
 			"/tmp",
 			"/run",
-			// /app/state covers all openclaw state subdirs (identity, logs, memory, agents, etc.).
-			// OpenClaw 2026.3.24 runs as uid/gid 1000, so the tmpfs must be writable by that user
-			// or startup will fail on /app/state/{agents,canvas}.
+			// Tmpfs at /root (not /root/.openclaw) overlays the read-only image layer
+			// with a writable mode-1777 directory so non-root runtime users can traverse
+			// into ~/.openclaw regardless of the image-baked /root permissions.
 			openclawStateTmpfs,
+			// Tmpfs at ~/.openclaw keeps the canonical state root writable after Docker
+			// creates the nested config bind mount at ~/.openclaw/config.
+			openclawHomeTmpfs,
 		},
 		ReadOnly: true,
 		Restart:  "on-failure",
