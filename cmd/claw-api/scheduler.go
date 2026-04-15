@@ -58,6 +58,9 @@ type dispatchOptions struct {
 	ignoreDegraded bool
 }
 
+const defaultWakeExecTimeout = 30 * time.Second
+const openclawWakeExecTimeout = 2 * time.Minute
+
 func newScheduler(manifest *schedulepkg.Manifest, docker *client.Client, state *scheduleStateStore, log io.Writer) (*scheduler, error) {
 	if manifest == nil || len(manifest.Invocations) == 0 {
 		return nil, nil
@@ -229,7 +232,15 @@ func (s *scheduler) dispatchWithOptions(ctx context.Context, entry *scheduledInv
 		return result
 	}
 
-	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	if detail, skip := s.deferWakeForHealth(ctx, target.ID, entry.manifest.Wake.Adapter); skip {
+		result.status = "skipped"
+		result.detail = detail
+		result.skipped = true
+		s.logf("schedule %s: skipped (%s)", entry.manifest.ID, result.detail)
+		return result
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, wakeExecTimeout(entry.manifest.Wake.Adapter))
 	defer cancel()
 	stdout, stderr, exitCode, err := shared.ExecInContainer(execCtx, s.docker, target.ID, entry.manifest.Wake.Command)
 	if err != nil {
@@ -273,6 +284,41 @@ func (s *scheduler) dispatchWithOptions(ctx context.Context, entry *scheduledInv
 	result.attempted = true
 	result.fired = true
 	return result
+}
+
+func wakeExecTimeout(adapter string) time.Duration {
+	switch strings.TrimSpace(adapter) {
+	case "openclaw-exec":
+		return openclawWakeExecTimeout
+	default:
+		return defaultWakeExecTimeout
+	}
+}
+
+func deferWakeForHealthStatus(adapter string, state *types.ContainerState) (string, bool) {
+	if strings.TrimSpace(adapter) != "openclaw-exec" || state == nil || state.Health == nil {
+		return "", false
+	}
+	status := strings.ToLower(strings.TrimSpace(state.Health.Status))
+	switch status {
+	case "", "healthy":
+		return "", false
+	case "starting":
+		return "target-health-starting", true
+	default:
+		return "target-health-" + status, true
+	}
+}
+
+func (s *scheduler) deferWakeForHealth(ctx context.Context, containerID, adapter string) (string, bool) {
+	if s == nil || s.docker == nil {
+		return "", false
+	}
+	info, err := s.docker.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", false
+	}
+	return deferWakeForHealthStatus(adapter, info.State)
 }
 
 func (s *scheduler) lookupTargetContainer(ctx context.Context, target string) (types.Container, error) {
