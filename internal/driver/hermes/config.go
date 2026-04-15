@@ -41,6 +41,9 @@ func GenerateConfig(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, err
 			"timeout": 180,
 		},
 	}
+	if platformToolsets := platformToolsetsForHandles(rc.Handles); len(platformToolsets) > 0 {
+		config["platform_toolsets"] = platformToolsets
+	}
 
 	for _, cmd := range rc.Configures {
 		path, value, err := shared.ParseConfigSetCommand(cmd, "hermes")
@@ -57,6 +60,24 @@ func GenerateConfig(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, err
 		return nil, fmt.Errorf("config generation: marshal yaml: %w", err)
 	}
 	return data, nil
+}
+
+func platformToolsetsForHandles(handles map[string]*driver.HandleInfo) map[string]any {
+	presets := map[string]string{
+		"discord":  "hermes-discord",
+		"slack":    "hermes-slack",
+		"telegram": "hermes-telegram",
+	}
+	toolsets := make(map[string]any)
+	for rawPlatform := range handles {
+		platform := strings.ToLower(strings.TrimSpace(rawPlatform))
+		preset, ok := presets[platform]
+		if !ok {
+			continue
+		}
+		toolsets[platform] = []string{preset}
+	}
+	return toolsets
 }
 
 func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, error) {
@@ -274,6 +295,8 @@ func allowedEnvPassthroughKeys() []string {
 		"DISCORD_HOME_CHANNEL",
 		"DISCORD_HOME_CHANNEL_NAME",
 		"DISCORD_REQUIRE_MENTION",
+		"FIRECRAWL_API_KEY",
+		"FIRECRAWL_API_URL",
 		"GATEWAY_ALLOWED_USERS",
 		"GATEWAY_ALLOW_ALL_USERS",
 		"HERMES_TOOL_PROGRESS_MODE",

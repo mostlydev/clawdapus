@@ -1,6 +1,7 @@
 package hermes
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -169,4 +170,91 @@ func TestGenerateConfigIncludesCllamaRouting(t *testing.T) {
 	if got := model["provider"]; got != "custom" {
 		t.Fatalf("expected custom provider, got %#v", got)
 	}
+}
+
+func TestGenerateConfigIncludesPlatformToolsetsForActiveHandles(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {},
+			"slack":   {},
+		},
+		Environment: map[string]string{
+			"DISCORD_BOT_TOKEN":  "discord-token",
+			"SLACK_BOT_TOKEN":    "slack-bot",
+			"SLACK_APP_TOKEN":    "slack-app",
+			"OPENROUTER_API_KEY": "or-key",
+		},
+	}
+
+	mc, err := resolveModelConfig(rc)
+	if err != nil {
+		t.Fatalf("resolveModelConfig returned error: %v", err)
+	}
+	data, err := GenerateConfig(rc, mc)
+	if err != nil {
+		t.Fatalf("GenerateConfig returned error: %v", err)
+	}
+
+	var cfg map[string]any
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("parse generated yaml: %v", err)
+	}
+
+	toolsets, _ := cfg["platform_toolsets"].(map[string]any)
+	if toolsets == nil {
+		t.Fatal("expected platform_toolsets in generated config")
+	}
+	if got := toolsets["discord"]; !equalToolsetList(got, "hermes-discord") {
+		t.Fatalf("unexpected discord platform_toolsets entry: %#v", got)
+	}
+	if got := toolsets["slack"]; !equalToolsetList(got, "hermes-slack") {
+		t.Fatalf("unexpected slack platform_toolsets entry: %#v", got)
+	}
+	if _, exists := toolsets["telegram"]; exists {
+		t.Fatalf("did not expect telegram platform_toolsets entry, got %#v", toolsets["telegram"])
+	}
+}
+
+func TestGenerateEnvFileIncludesFirecrawlVars(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {},
+		},
+		Environment: map[string]string{
+			"DISCORD_BOT_TOKEN":  "discord-token",
+			"FIRECRAWL_API_KEY":  "fc-key",
+			"FIRECRAWL_API_URL":  "https://firecrawl.internal",
+			"OPENROUTER_API_KEY": "or-key",
+		},
+	}
+
+	mc, err := resolveModelConfig(rc)
+	if err != nil {
+		t.Fatalf("resolveModelConfig returned error: %v", err)
+	}
+	data, err := GenerateEnvFile(rc, mc)
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	for _, want := range []string{
+		"FIRECRAWL_API_KEY=fc-key\n",
+		"FIRECRAWL_API_URL=https://firecrawl.internal\n",
+	} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("expected env output to contain %q, got:\n%s", want, env)
+		}
+	}
+}
+
+func equalToolsetList(got any, want string) bool {
+	raw, ok := got.([]any)
+	if !ok || len(raw) != 1 {
+		return false
+	}
+	value, ok := raw[0].(string)
+	return ok && value == want
 }
