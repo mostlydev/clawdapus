@@ -35,6 +35,16 @@ All planned work is tracked as GitHub issues and prioritized on the [project boa
 
 **The project board is the single source of truth for priorities.** Column order within a status column reflects relative priority. Work the top item unless there is a blocking reason not to.
 
+**Closing keywords in PR bodies are required.** The board has automation enabled for *Item closed*, *Pull request merged*, and *Auto-close issue*. These workflows only fire when GitHub can link a PR to its issue, which requires a closing keyword in the PR body:
+
+```
+Closes #137
+Fixes #137, #146
+Resolves #137
+```
+
+Branch names like `issue-137-*` are a human convention — GitHub does **not** infer the linkage from them. If the PR body omits a closing keyword, the issue stays Open and the card stays in Ready after merge, requiring manual cleanup. Always include `Closes #<n>` (one per covered issue) when opening a PR.
+
 ## Compilation Principles
 
 `claw up` is a compiler. These principles govern the pipeline and must not be violated by new features:
