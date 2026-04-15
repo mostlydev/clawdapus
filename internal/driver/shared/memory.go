@@ -34,12 +34,39 @@ func PreparePortableMemory(stateDir string, extraImportRoots ...string) (string,
 		} else if !os.IsNotExist(err) {
 			return "", fmt.Errorf("stat portable memory file %q: %w", path, err)
 		}
-		if err := os.WriteFile(path, nil, 0o644); err != nil {
+		if err := os.WriteFile(path, nil, 0o666); err != nil {
 			return "", fmt.Errorf("seed portable memory file %q: %w", path, err)
 		}
 	}
+	if err := normalizePortableMemoryPermissions(memoryDir); err != nil {
+		return "", err
+	}
 
 	return memoryDir, nil
+}
+
+func normalizePortableMemoryPermissions(memoryDir string) error {
+	return filepath.Walk(memoryDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk portable memory %q: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if info.IsDir() {
+			if err := os.Chmod(path, 0o777); err != nil {
+				return fmt.Errorf("chmod portable memory dir %q: %w", path, err)
+			}
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		if err := os.Chmod(path, 0o666); err != nil {
+			return fmt.Errorf("chmod portable memory file %q: %w", path, err)
+		}
+		return nil
+	})
 }
 
 func legacyPortableMemoryDirs(runtimeDir string) []string {

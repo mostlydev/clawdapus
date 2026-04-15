@@ -4,11 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
+
+const defaultInvocationTimeoutSeconds = 300
 
 type job struct {
 	ID            string      `json:"id"`
@@ -61,6 +64,10 @@ type jobState struct {
 // so re-running claw up is idempotent.
 func GenerateJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 	now := time.Now().UnixMilli()
+	timeoutSeconds, err := resolvedInvocationTimeoutSeconds(rc)
+	if err != nil {
+		return nil, err
+	}
 	jobs := make([]job, 0, len(rc.Invocations))
 	timezone := strings.TrimSpace(rc.Timezone)
 	if timezone == "" {
@@ -85,7 +92,7 @@ func GenerateJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 			Schedule:      jobSchedule{Expr: inv.Schedule, TZ: timezone, Kind: "cron"},
 			SessionTarget: "isolated",
 			WakeMode:      "now",
-			Payload:       jobPayload{Kind: "agentTurn", Message: inv.Message, TimeoutSeconds: 300},
+			Payload:       jobPayload{Kind: "agentTurn", Message: inv.Message, TimeoutSeconds: timeoutSeconds},
 			Delivery:      jobDelivery{Mode: "announce", BestEffort: true, To: inv.To},
 			State:         jobState{},
 		}
@@ -95,6 +102,46 @@ func GenerateJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 		Version: 1,
 		Jobs:    jobs,
 	}, "", "  ")
+}
+
+func resolvedInvocationTimeoutSeconds(rc *driver.ResolvedClaw) (int, error) {
+	timeoutSeconds := defaultInvocationTimeoutSeconds
+	if rc == nil {
+		return timeoutSeconds, nil
+	}
+	for _, cmd := range rc.Configures {
+		path, value, err := parseConfigSetCommand(cmd)
+		if err != nil {
+			return 0, fmt.Errorf("jobs generation: %w", err)
+		}
+		if path != "agents.defaults.timeoutSeconds" {
+			continue
+		}
+		timeoutSeconds, err = positiveIntConfigValue(path, value)
+		if err != nil {
+			return 0, fmt.Errorf("jobs generation: %w", err)
+		}
+	}
+	return timeoutSeconds, nil
+}
+
+func positiveIntConfigValue(path string, value any) (int, error) {
+	switch v := value.(type) {
+	case float64:
+		parsed := int(v)
+		if float64(parsed) != v || parsed <= 0 {
+			return 0, fmt.Errorf("%s must be a positive integer, got %v", path, value)
+		}
+		return parsed, nil
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || parsed <= 0 {
+			return 0, fmt.Errorf("%s must be a positive integer, got %q", path, v)
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("%s must be a positive integer, got %T", path, value)
+	}
 }
 
 func deterministicJobID(parts ...string) string {

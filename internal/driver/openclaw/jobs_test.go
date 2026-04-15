@@ -68,6 +68,9 @@ func TestGenerateJobsJSONSingleInvocation(t *testing.T) {
 	if payload["message"] != "Pre-market synthesis" {
 		t.Errorf("expected payload.message=%q, got %v", "Pre-market synthesis", payload["message"])
 	}
+	if payload["timeoutSeconds"] != float64(300) {
+		t.Errorf("expected payload.timeoutSeconds=300, got %v", payload["timeoutSeconds"])
+	}
 
 	delivery := j["delivery"].(map[string]interface{})
 	if delivery["to"] != "111222333444" {
@@ -184,6 +187,49 @@ func TestGenerateJobsJSONDisablesPodOriginJobs(t *testing.T) {
 	}
 	if jobs[0]["id"] != "podjob01" {
 		t.Fatalf("expected explicit invocation id to be preserved, got %v", jobs[0]["id"])
+	}
+}
+
+func TestGenerateJobsJSONUsesConfiguredAgentTimeout(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "allen",
+		Configures: []string{
+			"openclaw config set agents.defaults.timeoutSeconds 900",
+		},
+		Invocations: []driver.Invocation{
+			{
+				Schedule: "0 7 * * 1-5",
+				Message:  "Morning research scan",
+			},
+		},
+	}
+	data, err := GenerateJobsJSON(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	jobs := parseJobStore(t, data)
+	payload := jobs[0]["payload"].(map[string]interface{})
+	if payload["timeoutSeconds"] != float64(900) {
+		t.Fatalf("expected configured payload timeoutSeconds=900, got %v", payload["timeoutSeconds"])
+	}
+}
+
+func TestGenerateJobsJSONRejectsInvalidConfiguredAgentTimeout(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "allen",
+		Configures: []string{
+			`openclaw config set agents.defaults.timeoutSeconds "slow"`,
+		},
+		Invocations: []driver.Invocation{
+			{
+				Schedule: "0 7 * * 1-5",
+				Message:  "Morning research scan",
+			},
+		},
+	}
+	if _, err := GenerateJobsJSON(rc); err == nil {
+		t.Fatal("expected invalid timeoutSeconds configure to fail")
 	}
 }
 
