@@ -22,6 +22,7 @@ type Driver struct{}
 const openclawHomeDir = "/root/.openclaw"
 const openclawConfigDir = openclawHomeDir + "/config"
 const openclawConfigPath = openclawConfigDir + "/openclaw.json"
+const openclawCronDir = openclawHomeDir + "/cron"
 const openclawWorkspaceTmpfs = "/claw:mode=1777,uid=0,gid=0"
 
 // openclawStateTmpfs mounts the writable tmpfs at /root, NOT at /root/.openclaw.
@@ -86,6 +87,14 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		return nil, fmt.Errorf("openclaw driver: chmod config file: %w", err)
 	}
 
+	cronDir := filepath.Join(opts.RuntimeDir, "cron")
+	if err := os.MkdirAll(cronDir, 0777); err != nil {
+		return nil, fmt.Errorf("openclaw driver: create cron dir: %w", err)
+	}
+	if err := os.Chmod(cronDir, 0o777); err != nil {
+		return nil, fmt.Errorf("openclaw driver: chmod cron dir: %w", err)
+	}
+
 	// Generate CLAWDAPUS.md — infrastructure context for the agent
 	podName := opts.PodName
 	if podName == "" {
@@ -114,6 +123,14 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			ReadOnly:      false,
 		},
 		{
+			// Cron definitions and run logs live under ~/.openclaw/cron in current
+			// OpenClaw builds. Mount the whole directory so the runner can atomically
+			// rewrite jobs.json and append run history under cron/runs/.
+			HostPath:      cronDir,
+			ContainerPath: openclawCronDir,
+			ReadOnly:      false,
+		},
+		{
 			// Always mount as AGENTS.md so openclaw finds it at workspace root (/claw/AGENTS.md).
 			HostPath:      agentMountPath,
 			ContainerPath: "/claw/AGENTS.md",
@@ -134,21 +151,15 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	// Generate jobs.json if there are scheduled invocations.
-	// OpenClaw 2026.3.24 resolves its cron store under CONFIG_DIR/cron/jobs.json,
-	// so keep it under the writable config directory inside the canonical home.
+	// OpenClaw resolves its cron store under ~/.openclaw/cron/jobs.json, separate
+	// from the config directory. Keep the cron dir writable because the runtime
+	// rewrites jobs atomically and appends run history below cron/runs/.
 	if len(rc.Invocations) > 0 {
 		jobsData, err := GenerateJobsJSON(rc)
 		if err != nil {
 			return nil, fmt.Errorf("openclaw driver: generate jobs.json: %w", err)
 		}
-		jobsDir := filepath.Join(configDir, "cron")
-		if err := os.MkdirAll(jobsDir, 0777); err != nil {
-			return nil, fmt.Errorf("openclaw driver: create jobs dir: %w", err)
-		}
-		if err := os.Chmod(jobsDir, 0o777); err != nil {
-			return nil, fmt.Errorf("openclaw driver: chmod jobs dir: %w", err)
-		}
-		jobsPath := filepath.Join(jobsDir, "jobs.json")
+		jobsPath := filepath.Join(cronDir, "jobs.json")
 		if err := os.WriteFile(jobsPath, jobsData, 0o666); err != nil {
 			return nil, fmt.Errorf("openclaw driver: write jobs.json: %w", err)
 		}

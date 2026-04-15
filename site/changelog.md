@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Fix: OpenClaw scheduled jobs are materialized under the canonical cron store again** ([#159](https://github.com/mostlydev/clawdapus/issues/159)) — the OpenClaw driver now mounts a writable `~/.openclaw/cron/` directory and writes `jobs.json` there instead of under the config directory. Current OpenClaw builds resolve cron definitions from `~/.openclaw/cron/jobs.json`, so the previous layout left `openclaw cron list` empty and `openclaw cron run <id>` failed against jobs Clawdapus thought it had compiled. `claw up` now emits the native store where OpenClaw actually reads it, preserves the dedicated cron directory mount, and keeps pod-origin wakes targeting the runner-native `openclaw cron run <id>` contract.
 
 ## v0.8.11 <Badge type="tip" text="Latest" /> {#v0-8-11}
 

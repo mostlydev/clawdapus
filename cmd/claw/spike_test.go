@@ -417,7 +417,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	}
 
 	// jobs.json must be readable and contain the real channel ID
-	out2, err2 := exec.Command("docker", "exec", containerName, "cat", "/root/.openclaw/config/cron/jobs.json").Output()
+	out2, err2 := exec.Command("docker", "exec", containerName, "cat", "/root/.openclaw/cron/jobs.json").Output()
 	if err2 != nil {
 		t.Errorf("docker exec cat jobs.json: %v", err2)
 	} else if !strings.Contains(string(out2), channelID) {

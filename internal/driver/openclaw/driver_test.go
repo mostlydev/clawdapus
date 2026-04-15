@@ -81,9 +81,17 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Fatalf("config file mode = %o, want 666", got)
 	}
 
-	// Result should include config mount + agent mount
-	if len(result.Mounts) < 2 {
-		t.Fatalf("expected at least 2 mounts, got %d", len(result.Mounts))
+	cronDirInfo, err := os.Stat(filepath.Join(dir, "cron"))
+	if err != nil {
+		t.Fatalf("stat cron dir: %v", err)
+	}
+	if got := cronDirInfo.Mode().Perm(); got != 0o777 {
+		t.Fatalf("cron dir mode = %o, want 777", got)
+	}
+
+	// Result should include config mount + cron mount + agent mount.
+	if len(result.Mounts) < 3 {
+		t.Fatalf("expected at least 3 mounts, got %d", len(result.Mounts))
 	}
 
 	if !result.ReadOnly {
@@ -309,7 +317,7 @@ func TestMaterializeInlinesClawdapusContextIntoMountedContract(t *testing.T) {
 	}
 }
 
-func TestMaterializeWritesJobsUnderConfigDir(t *testing.T) {
+func TestMaterializeWritesJobsUnderCronDir(t *testing.T) {
 	dir := t.TempDir()
 	agentFile := filepath.Join(dir, "AGENTS.md")
 	os.WriteFile(agentFile, []byte("# Contract"), 0644)
@@ -331,13 +339,11 @@ func TestMaterializeWritesJobsUnderConfigDir(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// jobs.json must exist in the config/cron/ directory on the host.
-	// The parent ~/.openclaw/config bind mount covers this path inside the container.
-	jobsPath := filepath.Join(dir, "config", "cron", "jobs.json")
+	jobsPath := filepath.Join(dir, "cron", "jobs.json")
 	if _, err := os.Stat(jobsPath); err != nil {
-		t.Fatalf("jobs.json not written at config/cron/jobs.json: %v", err)
+		t.Fatalf("jobs.json not written at cron/jobs.json: %v", err)
 	}
-	jobsDirInfo, err := os.Stat(filepath.Join(dir, "config", "cron"))
+	jobsDirInfo, err := os.Stat(filepath.Join(dir, "cron"))
 	if err != nil {
 		t.Fatalf("stat jobs dir: %v", err)
 	}
@@ -352,25 +358,22 @@ func TestMaterializeWritesJobsUnderConfigDir(t *testing.T) {
 		t.Fatalf("jobs.json mode = %o, want 666", got)
 	}
 
-	var configMount *driver.Mount
+	var cronMount *driver.Mount
 	for i := range result.Mounts {
-		if result.Mounts[i].ContainerPath == openclawConfigDir {
-			configMount = &result.Mounts[i]
+		if result.Mounts[i].ContainerPath == openclawCronDir {
+			cronMount = &result.Mounts[i]
 			break
 		}
 	}
-	if configMount == nil {
-		t.Fatalf("expected %s mount to cover config/cron/jobs.json", openclawConfigDir)
+	if cronMount == nil {
+		t.Fatalf("expected %s mount to cover cron/jobs.json", openclawCronDir)
 	}
-	if configMount.ReadOnly {
-		t.Errorf("%s must be read-write so openclaw can update cron job state", openclawConfigDir)
+	if cronMount.ReadOnly {
+		t.Errorf("%s must be read-write so openclaw can update cron job state", openclawCronDir)
 	}
 	for i := range result.Mounts {
 		if result.Mounts[i].ContainerPath == "/app/state/cron" {
 			t.Fatal("unexpected legacy /app/state/cron mount")
-		}
-		if result.Mounts[i].ContainerPath == "/root/.openclaw/cron" {
-			t.Fatal("unexpected direct /root/.openclaw/cron mount; jobs should stay under config dir")
 		}
 	}
 }
