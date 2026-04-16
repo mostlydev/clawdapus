@@ -61,6 +61,45 @@ func TestParseConfigSetCommandPreservesStringValue(t *testing.T) {
 	}
 }
 
+func TestParseConfigSetCommandIgnoresTrailingJSONFlag(t *testing.T) {
+	path, value, err := ParseConfigSetCommand(`openclaw config set agents.defaults.contextTokens 20000 --json`, "openclaw")
+	if err != nil {
+		t.Fatalf("ParseConfigSetCommand returned error: %v", err)
+	}
+	if path != "agents.defaults.contextTokens" {
+		t.Fatalf("unexpected path: %q", path)
+	}
+	if contextTokens, ok := value.(float64); !ok || contextTokens != 20000 {
+		t.Fatalf("expected numeric 20000, got %#v", value)
+	}
+}
+
+func TestParseConfigSetCommandIgnoresLeadingJSONFlag(t *testing.T) {
+	path, value, err := ParseConfigSetCommand(`openclaw config set --json agents.defaults.contextTokens 20000`, "openclaw")
+	if err != nil {
+		t.Fatalf("ParseConfigSetCommand returned error: %v", err)
+	}
+	if path != "agents.defaults.contextTokens" {
+		t.Fatalf("unexpected path: %q", path)
+	}
+	if contextTokens, ok := value.(float64); !ok || contextTokens != 20000 {
+		t.Fatalf("expected numeric 20000, got %#v", value)
+	}
+}
+
+func TestParseConfigSetCommandIgnoresStrictJSONFlag(t *testing.T) {
+	path, value, err := ParseConfigSetCommand(`openclaw config set --strict-json agents.defaults.contextTokens 20000`, "openclaw")
+	if err != nil {
+		t.Fatalf("ParseConfigSetCommand returned error: %v", err)
+	}
+	if path != "agents.defaults.contextTokens" {
+		t.Fatalf("unexpected path: %q", path)
+	}
+	if contextTokens, ok := value.(float64); !ok || contextTokens != 20000 {
+		t.Fatalf("expected numeric 20000, got %#v", value)
+	}
+}
+
 func TestParseConfigSetCommandRejectsUnexpectedPrefix(t *testing.T) {
 	_, _, err := ParseConfigSetCommand(`picoclaw config set agents.defaults.model_name "fallback"`, "hermes")
 	if err == nil {

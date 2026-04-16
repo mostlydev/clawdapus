@@ -57,12 +57,23 @@ func ParseConfigSetCommand(line, driverPrefix string) (path string, value any, e
 		)
 	}
 
-	path = strings.TrimSpace(parts[3])
+	args := parts[3:]
+	for len(args) > 0 && isConfigSetFlag(args[0]) {
+		args = args[1:]
+	}
+	for len(args) > 0 && isConfigSetFlag(args[len(args)-1]) {
+		args = args[:len(args)-1]
+	}
+	if len(args) < 2 {
+		return "", nil, fmt.Errorf("unrecognized CONFIGURE command: %q (expected '<path> <value>')", line)
+	}
+
+	path = strings.TrimSpace(args[0])
 	if path == "" {
 		return "", nil, fmt.Errorf("unrecognized CONFIGURE command: %q (expected non-empty path)", line)
 	}
 
-	valueText := strings.TrimSpace(strings.Join(parts[4:], " "))
+	valueText := strings.TrimSpace(strings.Join(args[1:], " "))
 	if valueText == "" {
 		return "", nil, fmt.Errorf("unrecognized CONFIGURE command: %q (expected non-empty value)", line)
 	}
@@ -73,6 +84,15 @@ func ParseConfigSetCommand(line, driverPrefix string) (path string, value any, e
 	}
 
 	return path, valueText, nil
+}
+
+func isConfigSetFlag(token string) bool {
+	switch token {
+	case "--json", "--strict-json":
+		return true
+	default:
+		return false
+	}
 }
 
 func PrimaryModelRef(models map[string]string) (string, error) {
