@@ -330,11 +330,11 @@ A fundamental constraint: when the LLM returns tool_calls, the protocol requires
 
 `mediated` mode therefore partitions by response ownership rather than pretending both executors can satisfy the same tool round.
 
-**Current rule:** runner-native and managed tools can coexist on the same request surface, but a single model response still has one owner:
+**Current rule:** runner-native and managed tools can coexist on the same request surface, but cllama preserves a monotonic execution boundary inside each mediated chain:
 - If a response contains managed tool calls only, cllama owns that round and executes them internally.
 - If a response contains runner-native tool calls only, cllama passes the response back to the runner unchanged. If the downstream client originally requested streaming, cllama synthesizes an equivalent SSE stream so the runner still receives its expected protocol shape.
-- If a single response mixes managed and runner-native tool calls, cllama fails closed.
-- If cllama has already hidden managed rounds inside the current request and a later response contains runner-native tool calls only, cllama hands that response back to the runner and stores a one-shot continuity handoff so the hidden managed transcript is reinserted before the runner's follow-up tool-result request.
+- If a single response contains a managed prefix followed by a runner-native suffix, cllama occludes the runner-native suffix, executes the managed prefix internally, appends the managed results into the hidden transcript, and asks the model to continue from that state. If the model later emits runner-native tool calls only, cllama hands that response back to the runner and stores the usual one-shot continuity handoff so the hidden managed transcript is reinserted before the runner's follow-up tool-result request.
+- If a single response contains runner-native calls before later managed calls, or otherwise interleaves ownership, cllama fails closed with an explicit retry instruction rather than silently reordering the model's plan.
 
 **If the response contains managed tool_calls only:**
 1. cllama validates each call against the manifest (reject unknown tools — fail closed)
@@ -346,17 +346,21 @@ A fundamental constraint: when the LLM returns tool_calls, the protocol requires
 **If the response contains runner-native tool_calls only before any hidden managed round:**
 - Return the response to the runner so its native tool loop can continue normally.
 
-**If the response contains mixed ownership in one model response:**
-- Fail closed with a direct proxy error rather than fabricating transcript state.
+**If the response contains a managed prefix and a runner-native suffix in one model response:**
+- Serialize the round. cllama executes the managed prefix first, feeds those results back upstream, and waits for the model to re-emit any runner-native step cleanly in a later response.
+
+**If the response contains runner-native calls before later managed calls, or otherwise interleaves ownership:**
+- Fail closed with a direct proxy error instructing the agent to emit managed service tools first and runner-native tools in a later response.
 
 **If the response contains only text:**
 - Return directly (or re-stream if the runner requested streaming).
 
-This single-executor model handles the common cases cleanly:
+This monotonic-executor model handles the common cases cleanly:
 - Service-only tool chains: cllama handles transparently, runner sees text
 - Runner-only tool chains in mediated requests: cllama preserves them, runner remains the executor
+- Managed-first mixed batches: cllama serializes the managed prefix before letting the runner resume
 - Native additive tool chains: runner handles both local and pod-shared tools in `native` mode
-- Mixed batches in `mediated` mode: refuse execution, feed errors back
+- Native-first or interleaved mixed batches in `mediated` mode: refuse execution, feed errors back
 
 **Future:** `native` mode is the preferred additive path. Any later two-phase mediated execution would require an explicit runner-side protocol extension and is not the architectural target.
 

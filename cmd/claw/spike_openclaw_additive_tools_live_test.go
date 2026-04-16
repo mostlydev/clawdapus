@@ -16,11 +16,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const openClawAdditiveMixedSerializationIntervention = "managed_prefix_native_suffix_serialized"
+
 // TestSpikeOpenClawAdditiveToolsLive exercises a real OpenClaw runner behind
 // cllama with managed tools enabled and validates additive tool availability in
 // one live session:
 //   - turn 1 reads a nonce file via a runner-native tool
 //   - turn 2 calls a cllama-mediated HTTP tool on the same session
+//   - turn 3 asks the model to emit managed+native tool calls in one response
+//     and proves cllama serialized the managed prefix before handing native
+//     execution back to the runner
 //   - session history contains both non-mediated and mediated entries
 func TestSpikeOpenClawAdditiveToolsLive(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -141,10 +146,25 @@ func TestSpikeOpenClawAdditiveToolsLive(t *testing.T) {
 		t.Fatalf("managed tool turn did not surface phrase %q\n%s", managedPhrase, managedOut)
 	}
 
+	mixedPhrase := fmt.Sprintf("mixed-additive-%d", time.Now().UnixNano())
+	mixedSince := time.Now().Add(-1 * time.Second)
+	mixedOut := openClawAdditiveRunMixedTurnWithRetry(
+		t,
+		agentContainerID,
+		cllamaContainerID,
+		nativeProof,
+		mixedPhrase,
+		mixedSince,
+	)
+	if !strings.Contains(mixedOut, mixedPhrase) || !strings.Contains(mixedOut, nativeProof) {
+		t.Fatalf("mixed tool turn did not surface phrase %q and proof %q\n%s", mixedPhrase, nativeProof, mixedOut)
+	}
+
 	rollcallAssertAuditTelemetry(t, podPath, "oc-additive", "openclaw", auditWindowStart)
 	rollcallAssertSessionHistory(t, sessionHistoryDir, "oc-additive")
 	rollcallAssertManagedToolTrace(t, sessionHistoryDir, "oc-additive", "tool-svc")
 	openClawAdditiveAssertHistoryMix(t, sessionHistoryDir, "oc-additive")
+	openClawAdditiveAssertMixedHandoffHistory(t, sessionHistoryDir, "oc-additive", proxyRequest.APIFormat)
 }
 
 func openClawAdditiveWriteFixture(t *testing.T, dir, baseTag, model, nativeProof string) {
@@ -171,6 +191,12 @@ Do not guess the file contents.
 
 If the user tells you to call the managed tool tool-svc.get_runtime_context,
 call it before you reply.
+
+## Combined tool rule
+
+If the user explicitly asks for both the managed tool and the native read tool
+in the same turn, emit both tool calls before any text reply. Call the managed
+tool first and then the native read tool. Do not skip either tool.
 
 ## Output rule
 
@@ -295,6 +321,60 @@ func openClawAdditiveRunAgent(t *testing.T, containerID, sessionID, message stri
 	return text
 }
 
+func openClawAdditiveRunMixedTurnWithRetry(t *testing.T, agentContainerID, cllamaContainerID, nativeProof, phrase string, logSince time.Time) string {
+	t.Helper()
+
+	prompt := fmt.Sprintf(
+		"Before any final text, emit exactly two tool calls in one response and no others. First call the managed tool tool-svc.get_runtime_context. Second call your native read tool on /proof/native-proof.txt. After both tool results arrive, reply with exactly %s %s and nothing else.",
+		phrase,
+		nativeProof,
+	)
+
+	var lastOut string
+	for attempt := 1; attempt <= 4; attempt++ {
+		sessionID := fmt.Sprintf("additive-mixed-live-%d-%d", time.Now().UnixNano(), attempt)
+		lastOut = openClawAdditiveRunAgent(t, agentContainerID, sessionID, prompt)
+		if !strings.Contains(lastOut, phrase) || !strings.Contains(lastOut, nativeProof) {
+			t.Logf("mixed turn attempt %d did not produce final text yet", attempt)
+			continue
+		}
+		if openClawAdditiveHasInterventionLog(t, cllamaContainerID, "oc-additive", openClawAdditiveMixedSerializationIntervention, logSince) {
+			t.Logf("mixed turn attempt %d confirmed live mixed-prefix serialization", attempt)
+			return lastOut
+		}
+		t.Logf("mixed turn attempt %d completed without serialization telemetry; retrying to force same-response mixed batch", attempt)
+	}
+
+	t.Fatalf("did not observe live mixed-prefix serialization after retries; last output:\n%s", lastOut)
+	return ""
+}
+
+func openClawAdditiveHasInterventionLog(t *testing.T, cllamaContainerID, agentName, reason string, since time.Time) bool {
+	t.Helper()
+
+	args := []string{"logs", "--since", since.UTC().Format(time.RFC3339), cllamaContainerID}
+	out, err := exec.Command("docker", args...).CombinedOutput()
+	if err != nil {
+		t.Logf("warning: could not read cllama logs for mixed-serialization check: %v", err)
+		return false
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry["type"] == "intervention" && entry["claw_id"] == agentName && entry["intervention"] == reason {
+			return true
+		}
+	}
+	return false
+}
+
 func openClawAdditiveAssertHistoryMix(t *testing.T, sessionHistoryDir, agentName string) {
 	t.Helper()
 
@@ -330,4 +410,58 @@ func openClawAdditiveAssertHistoryMix(t *testing.T, sessionHistoryDir, agentName
 		t.Fatalf("expected at least one mediated history entry for %s in %s", agentName, histFile)
 	}
 	t.Logf("session history for %s confirms both native-only and managed turns", agentName)
+}
+
+func openClawAdditiveAssertMixedHandoffHistory(t *testing.T, sessionHistoryDir, agentName, apiFormat string) {
+	t.Helper()
+
+	histFile := filepath.Join(sessionHistoryDir, agentName, "history.jsonl")
+	data, err := os.ReadFile(histFile)
+	if err != nil {
+		t.Fatalf("read session history for %s: %v", agentName, err)
+	}
+
+	var sawMixedHandoff bool
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry struct {
+			Usage struct {
+				TotalRounds int `json:"total_rounds"`
+			} `json:"usage"`
+			ToolTrace []json.RawMessage `json:"tool_trace"`
+			Response  struct {
+				Format string          `json:"format"`
+				JSON   json.RawMessage `json:"json"`
+				Text   string          `json:"text"`
+			} `json:"response"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("parse session history for %s: %v\n%s", agentName, err, line)
+		}
+		if len(entry.ToolTrace) == 0 || entry.Usage.TotalRounds < 2 {
+			continue
+		}
+
+		body := string(entry.Response.JSON)
+		if entry.Response.Format == "sse" {
+			body = entry.Response.Text
+		}
+		switch apiFormat {
+		case "anthropic":
+			if strings.Contains(body, `"tool_use"`) {
+				sawMixedHandoff = true
+			}
+		default:
+			if strings.Contains(body, `"tool_calls"`) {
+				sawMixedHandoff = true
+			}
+		}
+	}
+
+	if !sawMixedHandoff {
+		t.Fatalf("expected a mediated handoff history entry for %s in %s", agentName, histFile)
+	}
+	t.Logf("session history for %s confirms a mediated native handoff entry", agentName)
 }
