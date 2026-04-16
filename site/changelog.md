@@ -29,9 +29,17 @@ outline: deep
 
 ## Unreleased
 
-- **Managed-first mixed tool batches now serialize instead of hard-failing** ([#165](https://github.com/mostlydev/clawdapus/issues/165)) — when a mediated model response contains a managed tool prefix followed by runner-native tool calls, `cllama` no longer aborts the turn with `mixed managed and runner-native tool calls are not supported in one model response`. The proxy now occludes the runner-native suffix, executes the managed prefix internally, feeds those results back upstream, and waits for the model to re-issue any runner-native step cleanly in a later response. Native-first or interleaved mixed batches still fail closed, but the returned proxy error now explicitly tells the agent to emit managed service tools first and runner-native tools in a later response. OpenAI-compatible and Anthropic paths both have regression coverage.
+<!-- Nothing yet -->
 
-## v0.8.13 <Badge type="tip" text="Latest" /> {#v0-8-13}
+## v0.8.14 <Badge type="tip" text="Latest" /> {#v0-8-14}
+
+*2026-04-16*
+
+- **Managed-first mixed tool batches now serialize instead of hard-failing** ([#165](https://github.com/mostlydev/clawdapus/issues/165)) — when a mediated model response contains a managed tool prefix followed by runner-native tool calls, `cllama` no longer aborts the turn with `mixed managed and runner-native tool calls are not supported in one model response`. The proxy now occludes the runner-native suffix, executes the managed prefix internally, feeds those results back upstream, and waits for the model to re-issue any runner-native step cleanly in a later response. Native-first or interleaved mixed batches still fail closed, but the returned proxy error now explicitly tells the agent to emit managed service tools first and runner-native tools in a later response. OpenAI-compatible and Anthropic paths both have regression coverage. A new `managed_prefix_native_suffix_serialized` intervention log marks the path so operators can see when the proxy reordered a turn rather than failing it.
+- **Fix: `CONFIGURE openclaw config set ... --json` no longer corrupts numeric/typed config** ([#167](https://github.com/mostlydev/clawdapus/issues/167)) — the Clawfile `CONFIGURE` parser previously concatenated openclaw-CLI flags such as `--json` into the value, so `CONFIGURE openclaw config set agents.defaults.contextTokens 20000 --json` was stored as the string `"20000 --json"` and the gateway crash-looped on `expected number, received string`. The flag-first form (`set --json <path> <value>`) had the mirror bug, storing `--json` as a literal top-level config key. `ParseConfigSetCommand` now strips `openclaw config set` flags before assembling the path/value pair, and a regression test pins the typed payload.
+- **Pinned cllama bumped to [v0.3.6](https://github.com/mostlydev/cllama/releases/tag/v0.3.6)** — picks up the managed-prefix mixed tool serialization above.
+
+## v0.8.13 {#v0-8-13}
 
 *2026-04-15*
 
