@@ -421,6 +421,16 @@ func openClawAdditiveAssertMixedHandoffHistory(t *testing.T, sessionHistoryDir, 
 		t.Fatalf("read session history for %s: %v", agentName, err)
 	}
 
+	type toolCall struct {
+		Name       string `json:"name"`
+		Service    string `json:"service"`
+		StatusCode int    `json:"status_code"`
+	}
+	type toolRound struct {
+		Round     int        `json:"round"`
+		ToolCalls []toolCall `json:"tool_calls"`
+	}
+
 	var sawMixedHandoff bool
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -430,7 +440,7 @@ func openClawAdditiveAssertMixedHandoffHistory(t *testing.T, sessionHistoryDir, 
 			Usage struct {
 				TotalRounds int `json:"total_rounds"`
 			} `json:"usage"`
-			ToolTrace []json.RawMessage `json:"tool_trace"`
+			ToolTrace []toolRound `json:"tool_trace"`
 			Response  struct {
 				Format string          `json:"format"`
 				JSON   json.RawMessage `json:"json"`
@@ -444,24 +454,38 @@ func openClawAdditiveAssertMixedHandoffHistory(t *testing.T, sessionHistoryDir, 
 			continue
 		}
 
+		var sawManagedTool bool
+		for _, round := range entry.ToolTrace {
+			for _, call := range round.ToolCalls {
+				if call.Name == "tool-svc.get_runtime_context" && call.Service == "tool-svc" && call.StatusCode == 200 {
+					sawManagedTool = true
+					break
+				}
+			}
+			if sawManagedTool {
+				break
+			}
+		}
+		if !sawManagedTool {
+			continue
+		}
+
 		body := string(entry.Response.JSON)
 		if entry.Response.Format == "sse" {
 			body = entry.Response.Text
 		}
-		switch apiFormat {
-		case "anthropic":
-			if strings.Contains(body, `"tool_use"`) {
-				sawMixedHandoff = true
-			}
-		default:
-			if strings.Contains(body, `"tool_calls"`) {
-				sawMixedHandoff = true
-			}
+		handoffMarker := `"tool_calls"`
+		if apiFormat == "anthropic" {
+			handoffMarker = `"tool_use"`
+		}
+		if strings.Contains(body, `"runner_local"`) || strings.Contains(body, handoffMarker) {
+			sawMixedHandoff = true
+			t.Logf("session history for %s confirms mediated %s handoff after managed tool trace", agentName, apiFormat)
+			break
 		}
 	}
 
 	if !sawMixedHandoff {
-		t.Fatalf("expected a mediated handoff history entry for %s in %s", agentName, histFile)
+		t.Fatalf("expected a mediated %s handoff entry for %s with tool-svc.get_runtime_context trace and native handoff marker in %s", apiFormat, agentName, histFile)
 	}
-	t.Logf("session history for %s confirms a mediated native handoff entry", agentName)
 }
