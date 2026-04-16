@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Managed-first mixed tool batches now serialize instead of hard-failing** ([#165](https://github.com/mostlydev/clawdapus/issues/165)) — when a mediated model response contains a managed tool prefix followed by runner-native tool calls, `cllama` no longer aborts the turn with `mixed managed and runner-native tool calls are not supported in one model response`. The proxy now occludes the runner-native suffix, executes the managed prefix internally, feeds those results back upstream, and waits for the model to re-issue any runner-native step cleanly in a later response. Native-first or interleaved mixed batches still fail closed, but the returned proxy error now explicitly tells the agent to emit managed service tools first and runner-native tools in a later response. OpenAI-compatible and Anthropic paths both have regression coverage.
 
 ## v0.8.13 <Badge type="tip" text="Latest" /> {#v0-8-13}
 
