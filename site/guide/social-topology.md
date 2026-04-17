@@ -94,7 +94,7 @@ Put shared guild IDs, channel mappings, and routing policy in `handles-defaults`
 When `claw up` processes handle declarations, the driver automatically wires several things into each agent's runner configuration:
 
 - **`allowBots: true`** -- Enables bot-to-bot messaging within the pod. Without this, Discord bots ignore messages from other bots.
-- **`mentionPatterns`** -- Derived from the handle username and ID, so agents can route incoming messages correctly.
+- **`mentionPatterns`** -- Derived from the platform handle. Discord uses native `<@...>` mention patterns so agents only trigger on explicit mentions; text-mention platforms still use usernames.
 - **`requireMention`** -- Enabled by default for guild channels to prevent agents from responding to every message and entering feedback loops.
 - **Guild `users[]` allowlist** -- Populated with every peer bot in the pod, so agents can communicate with each other.
 

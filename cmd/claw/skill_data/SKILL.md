@@ -206,7 +206,7 @@ services:
 
 - **Credentials**: Standard `environment:` or `secrets:` blocks. Never in `x-claw:` (except `cllama-env` for proxy keys).
 - **`cllama-env`**: Provider API keys for the proxy. These go ONLY here — never in agent `environment:`. Credential starvation enforced.
-- **`handles`**: Discord bot IDs, usernames, guilds. Clawdapus auto-generates `mentionPatterns`, `allowBots: true`, peer `users[]` allowlist.
+- **`handles`**: Discord bot IDs, usernames, guilds. Clawdapus auto-generates native Discord `mentionPatterns`, `allowBots: true`, peer `users[]` allowlist.
 - **`surfaces`**: String form (`"channel://discord"`) = simple enable. Map form (`channel://discord: {dm: {...}}`) = routing config.
 - **`tools`**: Requires `cllama` on the consuming service. Services must publish tools via `claw.describe` descriptor v2. `allow: all` (implicit for scalar form) passes every tool; named lists are validated against the tool registry.
 - **`memory`**: Requires `cllama` on the consuming service. Target service must declare `memory` in its `claw.describe` descriptor v2.
@@ -433,7 +433,7 @@ Clawdapus refuses to start containers when:
 
 ### HANDLE/social topology issues
 - Handles broadcast as `CLAW_HANDLE_<UPPERCASED_NAME>_DISCORD_ID` etc.
-- `mentionPatterns` auto-derived: text `(?i)\b@?<username>\b` + native `<@!?<id>>`
+- `mentionPatterns` auto-derived: Discord uses native `<@!?<id>>`; text-mention platforms use `(?i)\b@?<username>\b`
 - `allowBots: true` is unconditional — required for bot-to-bot messaging
 - Peer handles: each agent's guild `users[]` includes own ID + all peer bot IDs
 

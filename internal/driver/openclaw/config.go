@@ -111,13 +111,6 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 
 			// Collect mention patterns into the shared slice (agents.list written after loop).
 			if h != nil {
-				username := h.Username
-				if username == "" {
-					username = rc.ServiceName
-				}
-				if username != "" {
-					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`\b@?%s\b`, regexp.QuoteMeta(username)))
-				}
 				if h.ID != "" {
 					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`<@!?%s>`, h.ID))
 				}

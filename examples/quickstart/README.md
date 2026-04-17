@@ -87,7 +87,7 @@ Structured JSON for every request: agent, model, tokens, cost, latency.
 
 - **Credential starvation:** Your OpenRouter key lives in the proxy only. The agent gets a bearer token. It literally cannot call providers directly — it doesn't have the keys.
 - **Behavioral contract:** `agents/assistant/AGENTS.md` is bind-mounted read-only. Even root inside the container can't modify it.
-- **Identity projection:** The HANDLE directive wires Discord config automatically — `allowBots`, `mentionPatterns`, guild membership. No manual config.
+- **Identity projection:** The HANDLE directive wires Discord config automatically — `allowBots`, native Discord `mentionPatterns`, guild membership. No manual config.
 - **Cost tracking:** The proxy extracts `usage` from every LLM response and tracks cost per agent/model/provider.
 
 ## Using Telegram or Slack instead

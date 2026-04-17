@@ -993,7 +993,8 @@ func TestGenerateConfigDiscordMentionPatterns(t *testing.T) {
 	if !ok || len(patterns) == 0 {
 		t.Fatal("expected mentionPatterns to be a non-empty array")
 	}
-	// Must contain the text pattern and the Discord native mention pattern
+	// Discord must require an explicit native mention; plain-name text matches
+	// are too permissive in shared channels.
 	patternStrs := make([]string, len(patterns))
 	for i, p := range patterns {
 		patternStrs[i] = p.(string)
@@ -1007,8 +1008,8 @@ func TestGenerateConfigDiscordMentionPatterns(t *testing.T) {
 			hasMention = true
 		}
 	}
-	if !hasText {
-		t.Errorf("expected text mention pattern, got %v", patternStrs)
+	if hasText {
+		t.Errorf("did not expect plain-name Discord mention pattern, got %v", patternStrs)
 	}
 	if !hasMention {
 		t.Errorf("expected Discord native mention pattern, got %v", patternStrs)
@@ -1273,8 +1274,8 @@ func TestGenerateConfigMultiPlatformMentionPatterns(t *testing.T) {
 	}
 	patterns := gc["mentionPatterns"].([]interface{})
 	// Should have patterns from BOTH platforms, not just whichever ran last.
-	// Discord contributes: \b@?multibot\b and <@!?111>
-	// Telegram contributes: \b@?multibot\b (deduped) — but no native mention
+	// Discord contributes: <@!?111>
+	// Telegram contributes: \b@?multibot\b
 	// Minimum: 2 unique patterns (text + discord native)
 	if len(patterns) < 2 {
 		t.Errorf("expected at least 2 mention patterns from multi-platform, got %d: %v", len(patterns), patterns)

@@ -459,7 +459,7 @@ CLAW_HANDLE_CRYPTO_CRUSHER_DISCORD_GUILDS=111222333
 
 `HANDLE discord` in a Clawfile declares the agent's platform identity. Clawdapus broadcasts every agent's handles as env vars into every service in the pod — including non-claw services. A trading API that needs to mention a bot in a webhook message knows its Discord ID without hardcoding anything.
 
-The driver also wires each agent's openclaw config automatically: `allowBots: true` (enables bot-to-bot messaging), `mentionPatterns` derived from the handle username and ID (so agents can route incoming messages correctly), and a guild `users[]` allowlist that includes every peer bot in the pod.
+The driver also wires each agent's openclaw config automatically: `allowBots: true` (enables bot-to-bot messaging), Discord `mentionPatterns` derived from the native handle ID so agents only trigger on explicit Discord mentions, and a guild `users[]` allowlist that includes every peer bot in the pod.
 
 When many services share the same Discord guild/channel topology, put that shared topology in pod-level `x-claw.handles-defaults` and let per-service `handles.discord` override only the identity fields that differ.
 
