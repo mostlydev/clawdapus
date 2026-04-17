@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.14 <Badge type="tip" text="Latest" /> {#v0-8-14}
+## v0.8.15 <Badge type="tip" text="Latest" /> {#v0-8-15}
+
+*2026-04-17*
+
+- **Discord mention matching now requires explicit native mentions** ([#170](https://github.com/mostlydev/clawdapus/issues/170)) — OpenClaw config generation for Discord handles no longer emits the plain-name text regex (`\b@?<username>\b`). Agents on Discord channels now only trigger on native `<@...>` mentions, preventing false activations when a bot's name appears in casual conversation. Non-Discord platforms (Telegram, Slack) still use text-based mention patterns. Mixed-platform services keep text patterns contributed by their non-Discord handles.
+
+## v0.8.14 {#v0-8-14}
 
 *2026-04-16*
 
