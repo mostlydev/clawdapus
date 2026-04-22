@@ -284,6 +284,32 @@ func TestBuildSchedulerPrincipalIsScheduleScoped(t *testing.T) {
 	}
 }
 
+func TestBuildDashboardPrincipalIsReadOnlyAndPodScoped(t *testing.T) {
+	p, err := BuildDashboardPrincipal("trading-desk")
+	if err != nil {
+		t.Fatalf("BuildDashboardPrincipal: %v", err)
+	}
+	if p.Name != "claw-dashboard" {
+		t.Fatalf("unexpected name: %q", p.Name)
+	}
+	for _, v := range AllReadVerbs {
+		if !p.AllowsVerb(v) {
+			t.Fatalf("dashboard principal missing read verb %q", v)
+		}
+	}
+	for _, v := range AllWriteVerbs {
+		if p.AllowsVerb(v) {
+			t.Fatalf("dashboard principal must not have write verb %q", v)
+		}
+	}
+	if !p.AllowsPod("trading-desk") {
+		t.Fatalf("expected pod scope, got %+v", p)
+	}
+	if p.Token == "" || !strings.HasPrefix(p.Token, "capi_") {
+		t.Fatalf("expected capi_ token, got %q", p.Token)
+	}
+}
+
 func writeStoreFixture(t *testing.T, raw string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "principals.json")

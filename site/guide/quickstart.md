@@ -103,7 +103,7 @@ claw down
 ## Dashboards
 
 - **cllama governance proxy** -- port **8181**. Every LLM call in real time: which agent, which model, token counts, cost.
-- **Clawdapus Dash** -- port **8082**. Live service health, topology wiring, and per-service drill-down.
+- **Clawdapus Dash** -- port **8082**. Live service health, topology wiring, per-service drill-down, and agent context inspection. The Agents view shows compiled contracts, redacted runtime manifests, and the latest live context snapshot captured by cllama.
 
 ## Alternative: Scaffold from Scratch
 

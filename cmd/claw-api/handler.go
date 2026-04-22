@@ -47,6 +47,20 @@ type apiHandler struct {
 	auditErr         io.Writer
 	thresholds       clawapi.Thresholds
 	governanceDir    string
+	contextRoot      string
+	cllamaAPIURL     string
+	cllamaAPIToken   string
+	httpClient       *http.Client
+}
+
+type handlerOption func(*apiHandler)
+
+func withAgentContextConfig(contextRoot, cllamaAPIURL, cllamaAPIToken string) handlerOption {
+	return func(h *apiHandler) {
+		h.contextRoot = strings.TrimSpace(contextRoot)
+		h.cllamaAPIURL = strings.TrimRight(strings.TrimSpace(cllamaAPIURL), "/")
+		h.cllamaAPIToken = strings.TrimSpace(cllamaAPIToken)
+	}
 }
 
 type serviceStatus struct {
@@ -82,11 +96,11 @@ type scheduleFireRequest struct {
 	BypassPause bool `json:"bypass_pause,omitempty"`
 }
 
-func newHandler(manifest *manifestpkg.PodManifest, scheduleManifest *schedulepkg.Manifest, scheduleState *scheduleStateStore, scheduler *scheduler, store *clawapi.Store, docker *client.Client, auditWriter io.Writer, thresholds clawapi.Thresholds, governanceDir string) http.Handler {
+func newHandler(manifest *manifestpkg.PodManifest, scheduleManifest *schedulepkg.Manifest, scheduleState *scheduleStateStore, scheduler *scheduler, store *clawapi.Store, docker *client.Client, auditWriter io.Writer, thresholds clawapi.Thresholds, governanceDir string, opts ...handlerOption) http.Handler {
 	if auditWriter == nil {
 		auditWriter = io.Discard
 	}
-	return &apiHandler{
+	h := &apiHandler{
 		manifest:         manifest,
 		scheduleManifest: scheduleManifest,
 		scheduleState:    scheduleState,
@@ -97,7 +111,13 @@ func newHandler(manifest *manifestpkg.PodManifest, scheduleManifest *schedulepkg
 		auditErr:         os.Stderr,
 		thresholds:       thresholds,
 		governanceDir:    governanceDir,
+		contextRoot:      "/claw/context",
+		httpClient:       &http.Client{Timeout: 5 * time.Second},
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +151,12 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodGet && r.URL.Path == "/fleet/alerts":
 		h.handleAlerts(w, r)
+		return
+	case r.Method == http.MethodGet && r.URL.Path == "/agents":
+		h.handleAgentsList(w, r)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/agents/"):
+		h.handleAgentDetail(w, r)
 		return
 	case r.Method == http.MethodGet && r.URL.Path == "/schedule":
 		h.handleScheduleList(w, r)
@@ -507,6 +533,12 @@ func (h *apiHandler) authorize(w http.ResponseWriter, r *http.Request, verb, tar
 	}
 	switch verb {
 	case clawapi.VerbFleetStatus, clawapi.VerbFleetAlerts:
+		if !principal.AllowsPod(h.manifest.PodName) && len(principal.Services) == 0 && len(principal.ClawIDs) == 0 {
+			h.logDecision(principal.Name, verb, target, false, "scope denied")
+			writeJSONError(w, http.StatusForbidden, "principal is out of scope")
+			return nil, false
+		}
+	case clawapi.VerbAgentContext:
 		if !principal.AllowsPod(h.manifest.PodName) && len(principal.Services) == 0 && len(principal.ClawIDs) == 0 {
 			h.logDecision(principal.Name, verb, target, false, "scope denied")
 			writeJSONError(w, http.StatusForbidden, "principal is out of scope")

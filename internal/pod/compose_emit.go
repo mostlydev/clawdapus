@@ -42,6 +42,9 @@ type ClawAPIConfig struct {
 	PrincipalsHostPath string // host path to principals.json
 	DockerSockHostPath string // host path to docker socket
 	GovernanceHostPath string // host path to .claw-governance/ dir (write plane override files)
+	ContextHostDir     string // host path to .claw-runtime/context/
+	CllamaAPIURL       string // internal cllama UI/API URL for context snapshots
+	CllamaAPIToken     string // CLLAMA_UI_TOKEN for internal cllama snapshot calls
 	PodName            string
 	Environment        map[string]string // extra env vars (e.g. CLAW_ALERT_* thresholds)
 }
@@ -372,6 +375,9 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 			fmt.Sprintf("%s:/claw/principals.json:ro", p.ClawAPI.PrincipalsHostPath),
 			fmt.Sprintf("%s:/var/run/docker.sock:ro", socketPath),
 		}
+		if strings.TrimSpace(p.ClawAPI.ContextHostDir) != "" {
+			clawAPIVolumes = append(clawAPIVolumes, fmt.Sprintf("%s:/claw/context:ro", p.ClawAPI.ContextHostDir))
+		}
 		if strings.TrimSpace(p.ClawAPI.ScheduleHostPath) != "" {
 			clawAPIVolumes = append(clawAPIVolumes, fmt.Sprintf("%s:/claw/schedule.json:ro", p.ClawAPI.ScheduleHostPath))
 		}
@@ -567,6 +573,13 @@ func surfaceAccessMode(surface driver.ResolvedSurface) (string, error) {
 	}
 }
 
+// ClawdashHostPort returns the numeric host port derived from the given
+// CLAWDASH_ADDR-style value (e.g. ":8082" or "0.0.0.0:9000"). It falls back
+// to the default port when the value cannot be parsed.
+func ClawdashHostPort(addr string) string {
+	return clawdashPort(addr)
+}
+
 func clawdashPort(addr string) string {
 	port := strings.TrimSpace(addr)
 	if strings.HasPrefix(addr, ":") {
@@ -621,6 +634,15 @@ func clawAPIEnvironment(cfg *ClawAPIConfig, addr string) map[string]string {
 	}
 	if strings.TrimSpace(cfg.ScheduleHostPath) != "" {
 		env["CLAW_API_SCHEDULE_MANIFEST"] = "/claw/schedule.json"
+	}
+	if strings.TrimSpace(cfg.ContextHostDir) != "" {
+		env["CLAW_CONTEXT_ROOT"] = "/claw/context"
+	}
+	if strings.TrimSpace(cfg.CllamaAPIURL) != "" {
+		env["CLAW_CLLAMA_API_URL"] = strings.TrimSpace(cfg.CllamaAPIURL)
+	}
+	if strings.TrimSpace(cfg.CllamaAPIToken) != "" {
+		env["CLAW_CLLAMA_API_TOKEN"] = strings.TrimSpace(cfg.CllamaAPIToken)
 	}
 	for k, v := range cfg.Environment {
 		env[k] = v

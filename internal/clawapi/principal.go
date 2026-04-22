@@ -19,6 +19,7 @@ const (
 	VerbFleetQueryMetrics  = "fleet.query_metrics"
 	VerbFleetAlerts        = "fleet.alerts"
 	VerbScheduleRead       = "schedule.read"
+	VerbAgentContext       = "agent.context"
 	VerbFleetRestart       = "fleet.restart"
 	VerbFleetQuarantine    = "fleet.quarantine"
 	VerbFleetBudgetSet     = "fleet.budget.set"
@@ -26,7 +27,7 @@ const (
 	VerbScheduleControl    = "schedule.control"
 )
 
-var AllReadVerbs = []string{VerbFleetStatus, VerbFleetLogs, VerbFleetQueryMetrics, VerbFleetAlerts, VerbScheduleRead}
+var AllReadVerbs = []string{VerbFleetStatus, VerbFleetLogs, VerbFleetQueryMetrics, VerbFleetAlerts, VerbScheduleRead, VerbAgentContext}
 var AllWriteVerbs = []string{VerbFleetRestart, VerbFleetQuarantine, VerbFleetBudgetSet, VerbFleetModelRestrict, VerbScheduleControl}
 var AllVerbs = append(append([]string{}, AllReadVerbs...), AllWriteVerbs...)
 
@@ -186,6 +187,20 @@ func BuildSchedulerPrincipal(podName string) (Principal, error) {
 		Name:  "claw-scheduler",
 		Token: token,
 		Verbs: []string{VerbScheduleRead, VerbScheduleControl},
+		Pods:  []string{podName},
+	}, nil
+}
+
+func BuildDashboardPrincipal(podName string) (Principal, error) {
+	token, err := GenerateToken()
+	if err != nil {
+		return Principal{}, err
+	}
+	verbs := append([]string{}, AllReadVerbs...)
+	return Principal{
+		Name:  "claw-dashboard",
+		Token: token,
+		Verbs: verbs,
 		Pods:  []string{podName},
 	}, nil
 }

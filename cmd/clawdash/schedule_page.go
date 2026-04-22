@@ -17,6 +17,7 @@ type schedulePageData struct {
 	PodName         string
 	ActiveTab       string
 	HasSchedule     bool
+	HasAgentContext bool
 	Summary         []dashStat
 	Cards           []scheduleCard
 	HasCards        bool
@@ -129,6 +130,7 @@ func (h *handler) renderSchedule(w http.ResponseWriter, r *http.Request) {
 		firstNonEmpty(strings.TrimSpace(r.URL.Query().Get("error")), errString(err)),
 		now,
 	)
+	data.HasAgentContext = h.hasAgentContext()
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = h.tpl.ExecuteTemplate(w, "schedule.html", data)

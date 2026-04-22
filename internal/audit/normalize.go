@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-const maxScanTokenSize = 1024 * 1024
-
 func NormalizeLine(line []byte) (*Event, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(line, &raw); err != nil {
@@ -165,51 +163,51 @@ func NormalizeSessionHistoryLine(line []byte) ([]Event, error) {
 }
 
 func ParseReader(r io.Reader) ([]Event, int, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxScanTokenSize)
+	br := bufio.NewReader(r)
 
 	events := make([]Event, 0)
 	skipped := 0
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	for {
+		chunk, readErr := br.ReadBytes('\n')
+		if line := strings.TrimSpace(string(chunk)); line != "" {
+			event, err := NormalizeLine([]byte(line))
+			if err != nil {
+				skipped++
+			} else {
+				events = append(events, *event)
+			}
 		}
-		event, err := NormalizeLine([]byte(line))
-		if err != nil {
-			skipped++
-			continue
+		if readErr != nil {
+			if readErr == io.EOF {
+				return events, skipped, nil
+			}
+			return events, skipped, readErr
 		}
-		events = append(events, *event)
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, skipped, err
-	}
-	return events, skipped, nil
 }
 
 func ParseSessionHistoryReader(r io.Reader) ([]Event, int, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxScanTokenSize)
+	br := bufio.NewReader(r)
 
 	events := make([]Event, 0)
 	skipped := 0
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	for {
+		chunk, readErr := br.ReadBytes('\n')
+		if line := strings.TrimSpace(string(chunk)); line != "" {
+			normalized, err := NormalizeSessionHistoryLine([]byte(line))
+			if err != nil {
+				skipped++
+			} else {
+				events = append(events, normalized...)
+			}
 		}
-		normalized, err := NormalizeSessionHistoryLine([]byte(line))
-		if err != nil {
-			skipped++
-			continue
+		if readErr != nil {
+			if readErr == io.EOF {
+				return events, skipped, nil
+			}
+			return events, skipped, readErr
 		}
-		events = append(events, normalized...)
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, skipped, err
-	}
-	return events, skipped, nil
 }
 
 func parseRawTimestamp(raw map[string]any) (time.Time, error) {

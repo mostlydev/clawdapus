@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>clawdapus dash - agents</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css" />
+  <script defer src="/static/alpine.js"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <div class="dash-shell">
+    <header class="dash-topbar">
+      <a href="/" class="dash-brand">
+        <div class="dash-brand-wordmark"><span>clawdash</span> fleet</div>
+      </a>
+
+      <nav class="dash-nav" aria-label="Primary">
+        <a href="/" class="dash-nav-link">Fleet</a>
+        <a href="/topology" class="dash-nav-link">Topology</a>
+        <a href="/agents" class="dash-nav-link dash-nav-link-active">Agents</a>
+        {{if .HasSchedule}}<a href="/schedule" class="dash-nav-link">Schedule</a>{{end}}
+      </nav>
+
+      <div class="dash-title">{{.PodName}}</div>
+    </header>
+
+    <section class="dash-page-head">
+      <div class="dash-page-kicker">{{.PodName}}</div>
+      <h1 class="dash-page-title">Agent Context</h1>
+      <p class="dash-page-copy">Compiled contracts and the latest proxy-captured prompt context for claws in this pod.</p>
+    </section>
+
+    {{if .HasError}}
+      <div class="dash-banner">{{.Error}}</div>
+    {{end}}
+
+    <section class="dash-strip" aria-label="Agent context summary">
+      <div class="dash-strip-grid">
+        {{range .Summary}}
+          <article class="dash-metric {{if .Tone}}{{printf "tone-%s" .Tone}}{{end}}">
+            <div class="dash-metric-label">{{.Label}}</div>
+            <div class="dash-metric-value">{{.Value}}</div>
+            <div class="dash-metric-hint">{{.Hint}}</div>
+          </article>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="dash-panel">
+      <div class="dash-section-head">
+        <div>
+          <div class="dash-brand-kicker">Governed context</div>
+          <h2 class="dash-section-title">Agent registry</h2>
+        </div>
+        <span class="dash-chip">{{len .Agents}} visible</span>
+      </div>
+
+      <div class="dash-list-head">
+        <div>Agent</div>
+        <div>Runtime</div>
+        <div>Service</div>
+        <div>Snapshot</div>
+        <div>Inspect</div>
+      </div>
+
+      <div class="dash-service-list">
+        {{if .HasAgents}}
+          {{range .Agents}}
+            <a class="dash-service-row" href="{{.DetailPath}}">
+              <div>
+                <div class="dash-service-name">{{.ClawID}}</div>
+                <div class="dash-service-meta">{{if .Service}}{{.Service}}{{else}}No service metadata{{end}}</div>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <span class="dash-pill badge-cyan">{{if .ClawType}}{{.ClawType}}{{else}}unknown{{end}}</span>
+              </div>
+              <div class="dash-service-meta">{{if .Service}}{{.Service}}{{else}}-{{end}}</div>
+              <div><span class="dash-pill {{.LiveTone}}">{{.LiveLabel}}</span></div>
+              <div class="dash-service-meta">Open context</div>
+            </a>
+          {{end}}
+        {{else}}
+          <div class="dash-empty">No agent context directories are visible to this dashboard principal.</div>
+        {{end}}
+      </div>
+    </section>
+  </div>
+</body>
+</html>
