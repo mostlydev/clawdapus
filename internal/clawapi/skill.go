@@ -21,6 +21,9 @@ func GenerateServiceSkill(port string) string {
 			"- `GET /fleet/metrics?claw_id=<id>&since=<duration-or-rfc3339>` returns normalized telemetry for one claw\n"+
 			"- `GET /fleet/logs?service=<name>&lines=<n>` returns recent logs for one in-scope service\n"+
 			"- `GET /fleet/alerts?since=<duration-or-rfc3339>` returns anomaly summaries only\n"+
+			"- `GET /agents` returns scoped agent context availability\n"+
+			"- `GET /agents/<claw-id>/contract` returns compiled AGENTS.md, CLAWDAPUS.md, and redacted context manifests\n"+
+			"- `GET /agents/<claw-id>/context` returns the last live context snapshot captured by cllama\n"+
 			"- `GET /schedule` returns current scheduled invocation state for in-scope services\n"+
 			"- `GET /schedule/<id>` returns detail for one scheduled invocation\n\n"+
 			"## Control Operations\n"+

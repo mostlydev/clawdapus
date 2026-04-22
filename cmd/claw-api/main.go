@@ -30,6 +30,9 @@ type config struct {
 	SchedulePath   string
 	PrincipalsPath string
 	GovernanceDir  string
+	ContextRoot    string
+	CllamaAPIURL   string
+	CllamaAPIToken string
 }
 
 type quietExitError struct{}
@@ -108,7 +111,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		go scheduler.Run(runtimeCtx)
 	}
 
-	handler := newHandler(manifest, scheduleManifest, scheduleState, scheduler, store, docker, stdout, clawapi.ThresholdsFromEnv(), cfg.GovernanceDir)
+	handler := newHandler(
+		manifest,
+		scheduleManifest,
+		scheduleState,
+		scheduler,
+		store,
+		docker,
+		stdout,
+		clawapi.ThresholdsFromEnv(),
+		cfg.GovernanceDir,
+		withAgentContextConfig(cfg.ContextRoot, cfg.CllamaAPIURL, cfg.CllamaAPIToken),
+	)
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           handler,
@@ -174,6 +188,9 @@ func configFromEnv() config {
 		SchedulePath:   envOr("CLAW_API_SCHEDULE_MANIFEST", ""),
 		PrincipalsPath: envOr("CLAW_API_PRINCIPALS", "/claw/principals.json"),
 		GovernanceDir:  envOr("CLAW_GOVERNANCE_DIR", "/claw-governance"),
+		ContextRoot:    envOr("CLAW_CONTEXT_ROOT", "/claw/context"),
+		CllamaAPIURL:   envOr("CLAW_CLLAMA_API_URL", ""),
+		CllamaAPIToken: envOr("CLAW_CLLAMA_API_TOKEN", ""),
 	}
 }
 

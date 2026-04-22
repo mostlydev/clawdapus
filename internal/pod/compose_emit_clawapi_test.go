@@ -131,3 +131,55 @@ func TestEmitComposeInjectsClawAPIScheduleManifestWhenConfigured(t *testing.T) {
 		t.Fatalf("expected schedule manifest env, got %v", clawAPISvc.Environment["CLAW_API_SCHEDULE_MANIFEST"])
 	}
 }
+
+func TestEmitComposeInjectsClawAPIContextMountAndCllamaCredentials(t *testing.T) {
+	p := &Pod{
+		Name: "ops-pod",
+		Services: map[string]*Service{
+			"octopus": {Image: "ghcr.io/example/octopus:latest", Claw: &ClawBlock{}},
+		},
+		ClawAPI: &ClawAPIConfig{
+			Image:              "ghcr.io/mostlydev/claw-api:latest",
+			Addr:               ":8080",
+			ManifestHostPath:   "/tmp/.claw-runtime/pod-manifest.json",
+			PrincipalsHostPath: "/tmp/.claw-runtime/claw-api/principals.json",
+			DockerSockHostPath: "/var/run/docker.sock",
+			ContextHostDir:     "/tmp/.claw-runtime/context",
+			CllamaAPIURL:       "http://cllama:8081",
+			CllamaAPIToken:     "ui-token",
+			PodName:            "ops-pod",
+		},
+	}
+
+	out, err := EmitCompose(p, map[string]*driver.MaterializeResult{
+		"octopus": {ReadOnly: true, Restart: "on-failure"},
+	})
+	if err != nil {
+		t.Fatalf("EmitCompose returned error: %v", err)
+	}
+
+	var cf struct {
+		Services map[string]struct {
+			Volumes     []string          `yaml:"volumes"`
+			Environment map[string]string `yaml:"environment"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &cf); err != nil {
+		t.Fatalf("parse compose yaml: %v", err)
+	}
+
+	clawAPISvc := cf.Services["claw-api"]
+	joinedVolumes := strings.Join(clawAPISvc.Volumes, ",")
+	if !strings.Contains(joinedVolumes, "/tmp/.claw-runtime/context:/claw/context:ro") {
+		t.Fatalf("expected context mount, got %v", clawAPISvc.Volumes)
+	}
+	if clawAPISvc.Environment["CLAW_CONTEXT_ROOT"] != "/claw/context" {
+		t.Fatalf("expected CLAW_CONTEXT_ROOT env, got %v", clawAPISvc.Environment["CLAW_CONTEXT_ROOT"])
+	}
+	if clawAPISvc.Environment["CLAW_CLLAMA_API_URL"] != "http://cllama:8081" {
+		t.Fatalf("expected CLAW_CLLAMA_API_URL env, got %v", clawAPISvc.Environment["CLAW_CLLAMA_API_URL"])
+	}
+	if clawAPISvc.Environment["CLAW_CLLAMA_API_TOKEN"] != "ui-token" {
+		t.Fatalf("expected CLAW_CLLAMA_API_TOKEN env, got %v", clawAPISvc.Environment["CLAW_CLLAMA_API_TOKEN"])
+	}
+}

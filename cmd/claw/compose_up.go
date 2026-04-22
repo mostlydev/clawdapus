@@ -665,6 +665,11 @@ func runComposeUp(podFile string) (err error) {
 				PodName:               p.Name,
 			})
 		}
+		if p.ClawAPI != nil {
+			p.ClawAPI.ContextHostDir = filepath.Join(runtimeDir, "context")
+			p.ClawAPI.CllamaAPIURL = fmt.Sprintf("http://%s:8081", cllama.ProxyServiceName(proxyTypes[0]))
+			p.ClawAPI.CllamaAPIToken = uiToken
+		}
 		fmt.Printf("[claw] cllama proxies enabled: %s (agents: %s)\n",
 			strings.Join(proxyTypes, ", "), strings.Join(cllamaAgents, ", "))
 	}
@@ -692,14 +697,14 @@ func runComposeUp(podFile string) (err error) {
 		CllamaCostsURL:     firstIf(cllamaEnabled, fmt.Sprintf("http://localhost:%s", cllamaDashboardPort)),
 		PodName:            p.Name,
 	}
-	if p.ClawAPI != nil && hasPodInvokeEntries(p) {
-		schedulerToken, err := lookupClawAPIPrincipalToken(p.ClawAPI.PrincipalsHostPath, "claw-scheduler")
+	if p.ClawAPI != nil {
+		dashboardToken, err := lookupClawAPIPrincipalToken(p.ClawAPI.PrincipalsHostPath, "claw-dashboard")
 		if err != nil {
 			return err
 		}
 		p.Clawdash.Environment = map[string]string{
 			"CLAW_API_URL":   fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr)),
-			"CLAW_API_TOKEN": schedulerToken,
+			"CLAW_API_TOKEN": dashboardToken,
 		}
 	}
 
@@ -818,6 +823,9 @@ func runComposeUp(podFile string) (err error) {
 	}
 
 	fmt.Println("[claw] pod is up")
+	if p.Clawdash != nil {
+		fmt.Printf("[claw] dashboard:  http://localhost:%s\n", pod.ClawdashHostPort(p.Clawdash.Addr))
+	}
 	return nil
 }
 
@@ -1811,6 +1819,12 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		}
 		auto = append(auto, schedulerPrincipal)
 	}
+
+	dashboardPrincipal, err := clawapi.BuildDashboardPrincipal(p.Name)
+	if err != nil {
+		return nil, err
+	}
+	auto = append(auto, dashboardPrincipal)
 
 	// 2. Build self principals for services declaring claw-api: self.
 	for name, svc := range p.Services {

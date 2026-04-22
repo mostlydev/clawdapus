@@ -14,6 +14,7 @@ type topologyPageData struct {
 	PodName         string
 	ActiveTab       string
 	HasSchedule     bool
+	HasAgentContext bool
 	Summary         []dashStat
 	Lanes           []topologyLane
 	CanvasWidth     int

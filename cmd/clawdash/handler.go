@@ -36,18 +36,27 @@ type statusSource interface {
 }
 
 type handler struct {
-	manifest        *manifestpkg.PodManifest
-	statusSource    statusSource
-	scheduleSource  scheduleControlSource
-	cllamaCostsURL  string
-	costLogFallback bool
-	httpClient      *http.Client
-	now             func() time.Time
-	tpl             *template.Template
-	static          http.Handler
+	manifest           *manifestpkg.PodManifest
+	statusSource       statusSource
+	scheduleSource     scheduleControlSource
+	agentContextSource agentContextSource
+	cllamaCostsURL     string
+	costLogFallback    bool
+	httpClient         *http.Client
+	now                func() time.Time
+	tpl                *template.Template
+	static             http.Handler
 }
 
-func newHandler(manifest *manifestpkg.PodManifest, source statusSource, scheduleSource scheduleControlSource, cllamaCostsURL string, costLogFallback bool) http.Handler {
+type handlerOption func(*handler)
+
+func withAgentContextSource(source agentContextSource) handlerOption {
+	return func(h *handler) {
+		h.agentContextSource = source
+	}
+}
+
+func newHandler(manifest *manifestpkg.PodManifest, source statusSource, scheduleSource scheduleControlSource, cllamaCostsURL string, costLogFallback bool, opts ...handlerOption) http.Handler {
 	funcs := template.FuncMap{
 		"statusClass":   statusClass,
 		"pathEscape":    url.PathEscape,
@@ -62,7 +71,7 @@ func newHandler(manifest *manifestpkg.PodManifest, source statusSource, schedule
 	if err != nil {
 		panic(err)
 	}
-	return &handler{
+	h := &handler{
 		manifest:        manifest,
 		statusSource:    source,
 		scheduleSource:  scheduleSource,
@@ -75,6 +84,10 @@ func newHandler(manifest *manifestpkg.PodManifest, source statusSource, schedule
 		tpl:    tpl,
 		static: http.StripPrefix("/static/", http.FileServerFS(staticFS)),
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +106,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/schedule/"):
 		h.handleScheduleAction(w, r)
+		return
+	case r.Method == http.MethodGet && r.URL.Path == "/agents":
+		h.renderAgents(w, r)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/agents/"):
+		h.renderAgentContextDetail(w, r)
 		return
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/detail/"):
 		h.renderDetail(w, r)
@@ -114,6 +133,7 @@ type fleetPageData struct {
 	PodName         string
 	ActiveTab       string
 	HasSchedule     bool
+	HasAgentContext bool
 	Summary         []dashStat
 	Attention       []dashAlert
 	HasAttention    bool
@@ -260,6 +280,7 @@ func (h *handler) buildFleetPageData(ctx context.Context, statuses map[string]se
 		PodName:         h.manifest.PodName,
 		ActiveTab:       "fleet",
 		HasSchedule:     h.hasSchedule(),
+		HasAgentContext: h.hasAgentContext(),
 		Summary:         summary,
 		Attention:       attention,
 		HasAttention:    len(attention) > 0,
@@ -281,6 +302,7 @@ type detailPageData struct {
 	PodName         string
 	ActiveTab       string
 	HasSchedule     bool
+	HasAgentContext bool
 	ServiceName     string
 	RoleBadge       string
 	RoleClass       string
@@ -429,6 +451,7 @@ func (h *handler) buildDetailPageData(name string, statuses map[string]serviceSt
 		PodName:         h.manifest.PodName,
 		ActiveTab:       "detail",
 		HasSchedule:     h.hasSchedule(),
+		HasAgentContext: h.hasAgentContext(),
 		ServiceName:     name,
 		RoleBadge:       roleBadge,
 		RoleClass:       roleClass,
@@ -457,12 +480,17 @@ func (h *handler) renderTopology(w http.ResponseWriter, r *http.Request) {
 	statuses, statusErr := h.snapshot(r.Context())
 	data := buildTopologyPageData(h.manifest, statuses, statusErr)
 	data.HasSchedule = h.hasSchedule()
+	data.HasAgentContext = h.hasAgentContext()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = h.tpl.ExecuteTemplate(w, "topology.html", data)
 }
 
 func (h *handler) hasSchedule() bool {
 	return h != nil && h.scheduleSource != nil
+}
+
+func (h *handler) hasAgentContext() bool {
+	return h != nil && h.agentContextSource != nil
 }
 
 type apiStatusResponse struct {

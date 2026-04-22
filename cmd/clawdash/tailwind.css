@@ -323,6 +323,119 @@
     @apply h-2 w-2 rounded-full;
   }
 
+  /* Live context — minimalist layout.
+     Relies on position + left-rail tags to imply order/source,
+     instead of stacking labeled boxes. */
+
+  .live-meta {
+    @apply flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-[18px] py-3 font-mono text-[12px] text-muted;
+  }
+
+  .live-meta-k {
+    @apply text-muted/70;
+  }
+
+  .live-meta-v {
+    @apply text-ink;
+  }
+
+  .live-meta-sep {
+    @apply text-muted/40;
+  }
+
+  .live-block {
+    @apply border-b border-line px-[18px] py-5 last:border-b-0;
+  }
+
+  .live-kicker {
+    @apply font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-muted;
+  }
+
+  .live-system-body {
+    @apply mt-3 whitespace-pre-wrap break-words font-mono text-[13px] leading-6 text-ink;
+  }
+
+  .live-inj-list {
+    @apply mt-3 list-none border-l border-line pl-4;
+  }
+
+  .live-inj {
+    @apply relative pb-4 last:pb-0;
+  }
+
+  .live-inj::before {
+    content: "";
+    @apply absolute -left-[17px] top-[7px] h-1.5 w-1.5 rounded-full bg-cyan/60;
+  }
+
+  .live-inj-tag {
+    @apply font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-cyan;
+  }
+
+  .live-inj-body {
+    @apply mt-1 whitespace-pre-wrap break-words font-mono text-[12px] leading-6 text-ink;
+  }
+
+  .live-inj-warn::before {
+    @apply bg-amber/70;
+  }
+
+  .live-inj-warn .live-inj-tag {
+    @apply text-amber;
+  }
+
+  .live-route-list {
+    @apply mt-3 space-y-1 font-mono text-[12px] text-muted;
+  }
+
+  .live-route-list li {
+    @apply flex items-center gap-2;
+  }
+
+  .live-route-sep {
+    @apply text-muted/40;
+  }
+
+  .live-route-primary {
+    @apply text-ink;
+  }
+
+  .live-details {
+    @apply border-b border-line px-[18px] py-3 font-mono text-[12px] text-muted last:border-b-0;
+  }
+
+  .live-details summary {
+    @apply cursor-pointer select-none text-muted hover:text-ink;
+  }
+
+  .live-details[open] summary {
+    @apply pb-3 text-ink;
+  }
+
+  .live-details pre {
+    @apply mt-2 whitespace-pre-wrap break-words text-[12px] leading-6 text-ink;
+  }
+
+  .live-recent {
+    @apply mt-3 divide-y divide-line border-y border-line text-[12px];
+  }
+
+  .live-recent-row {
+    @apply grid grid-cols-[auto_1fr_auto] items-baseline gap-x-4 px-0 py-2;
+  }
+
+  .live-recent-seq {
+    @apply font-mono text-[11px] text-muted/70;
+  }
+
+  .live-recent-model {
+    @apply font-mono text-ink;
+  }
+
+  .live-recent-meta {
+    @apply font-mono text-[11px] text-muted;
+  }
+
   .topology-stage {
     @apply overflow-x-auto p-[18px];
   }

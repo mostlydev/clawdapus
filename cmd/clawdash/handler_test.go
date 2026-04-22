@@ -78,6 +78,36 @@ func (f *fakeScheduleSource) Fire(_ context.Context, id string, bypassWhen, bypa
 	return f.err
 }
 
+type fakeAgentContextSource struct {
+	agents      []agentContextIndexEntry
+	contract    agentContractView
+	liveContext any
+	listErr     error
+	contractErr error
+	liveErr     error
+}
+
+func (f *fakeAgentContextSource) List(_ context.Context) ([]agentContextIndexEntry, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.agents, nil
+}
+
+func (f *fakeAgentContextSource) Contract(_ context.Context, _ string) (agentContractView, error) {
+	if f.contractErr != nil {
+		return agentContractView{}, f.contractErr
+	}
+	return f.contract, nil
+}
+
+func (f *fakeAgentContextSource) LiveContext(_ context.Context, _ string) (any, error) {
+	if f.liveErr != nil {
+		return nil, f.liveErr
+	}
+	return f.liveContext, nil
+}
+
 func testManifest() *manifestpkg.PodManifest {
 	return &manifestpkg.PodManifest{
 		PodName: "fleet",
@@ -333,6 +363,174 @@ func TestTopologyPageRenders(t *testing.T) {
 	}
 	if !strings.Contains(body, `href="/detail/bot"`) {
 		t.Fatalf("expected service detail link in topology body")
+	}
+}
+
+func TestAgentsPageRenders(t *testing.T) {
+	source := &fakeAgentContextSource{
+		agents: []agentContextIndexEntry{{
+			ClawID:         "bot-0",
+			Service:        "bot",
+			ClawType:       "openclaw",
+			HasLiveContext: true,
+		}},
+	}
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, nil, "http://localhost:8181", false, withAgentContextSource(source))
+	req := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Agent Context") || !strings.Contains(body, "bot-0") {
+		t.Fatalf("expected agent context list in body:\n%s", body)
+	}
+	if !strings.Contains(body, "live snapshot") {
+		t.Fatalf("expected live snapshot badge in body:\n%s", body)
+	}
+}
+
+func TestAgentContextDetailRendersContractAndLiveSnapshot(t *testing.T) {
+	source := &fakeAgentContextSource{
+		contract: agentContractView{
+			ClawID:      "bot-0",
+			AgentsMD:    "# Contract",
+			ClawdapusMD: "# Infrastructure",
+			Metadata: map[string]any{
+				"service": "bot",
+				"type":    "openclaw",
+			},
+			Feeds: map[string]any{"feeds": []any{"alerts"}},
+		},
+		liveContext: map[string]any{
+			"agent_id":   "bot-0",
+			"chosen_ref": "openrouter/anthropic/claude-sonnet-4",
+			"turn_count": float64(2),
+			"placements": []any{
+				map[string]any{
+					"order":         float64(1),
+					"kind":          "feed",
+					"label":         "market-open",
+					"carrier":       "openai.messages[0].content",
+					"message_index": float64(0),
+					"block_index":   float64(-1),
+					"start_char":    float64(12),
+					"end_char":      float64(42),
+					"occurrences":   float64(1),
+					"persistence":   "per_request",
+					"relation":      "system_context_before_conversation",
+				},
+			},
+			"recent_captures": []any{
+				map[string]any{
+					"sequence":        float64(1),
+					"captured_at":     "2026-04-17T20:00:00Z",
+					"chosen_ref":      "openrouter/anthropic/claude-sonnet-4",
+					"dynamic_inputs":  float64(2),
+					"feed_blocks":     float64(1),
+					"memory_recall":   true,
+					"time_context":    true,
+					"placement_count": float64(2),
+					"turn_count":      float64(1),
+				},
+				map[string]any{
+					"sequence":        float64(2),
+					"captured_at":     "2026-04-17T20:05:00Z",
+					"chosen_ref":      "openrouter/anthropic/claude-sonnet-4",
+					"dynamic_inputs":  float64(1),
+					"feed_blocks":     float64(0),
+					"time_context":    true,
+					"placement_count": float64(1),
+					"turn_count":      float64(2),
+					"managed_tool":    true,
+				},
+			},
+		},
+	}
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, nil, "http://localhost:8181", false, withAgentContextSource(source))
+	req := httptest.NewRequest(http.MethodGet, "/agents/bot-0", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, want := range []string{"# Contract", "# Infrastructure", "alerts", "openclaw", "Compiled manifests", "Runtime inputs"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected %q in body:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "chosen_ref") {
+		t.Fatalf("did not expect live snapshot raw JSON on default contract tab")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/agents/bot-0?tab=live", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for live tab, got %d body=%s", w.Code, w.Body.String())
+	}
+	body = w.Body.String()
+	for _, want := range []string{"Live context", "chosen_ref", "openrouter/anthropic/claude-sonnet-4", "mediated", "Recent captures", "5m"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected %q in live tab body:\n%s", want, body)
+		}
+	}
+}
+
+func TestAgentContextPageRequiresSource(t *testing.T) {
+	h := newHandler(testManifest(), fakeStatusSource{statuses: testStatuses()}, nil, "http://localhost:8181", false)
+	req := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestAgentContextHTTPClientUsesBearerAndPaths(t *testing.T) {
+	var paths []string
+	var auth []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		auth = append(auth, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/agents":
+			_, _ = w.Write([]byte(`{"agents":[{"claw_id":"bot-0","service":"bot","claw_type":"openclaw","has_live_context":true}]}`))
+		case "/agents/bot-0/contract":
+			_, _ = w.Write([]byte(`{"claw_id":"bot-0","agents_md":"# Contract","clawdapus_md":"# Infra","metadata":{"service":"bot","type":"openclaw"}}`))
+		case "/agents/bot-0/context":
+			_, _ = w.Write([]byte(`{"agent_id":"bot-0","turn_count":1}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newAgentContextHTTPClient(server.URL, "dash-token")
+	if _, err := client.List(context.Background()); err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	if _, err := client.Contract(context.Background(), "bot-0"); err != nil {
+		t.Fatalf("contract: %v", err)
+	}
+	if _, err := client.LiveContext(context.Background(), "bot-0"); err != nil {
+		t.Fatalf("live context: %v", err)
+	}
+
+	wantPaths := []string{"/agents", "/agents/bot-0/contract", "/agents/bot-0/context"}
+	if strings.Join(paths, ",") != strings.Join(wantPaths, ",") {
+		t.Fatalf("unexpected paths: got %v want %v", paths, wantPaths)
+	}
+	for _, got := range auth {
+		if got != "Bearer dash-token" {
+			t.Fatalf("expected bearer auth, got %q", got)
+		}
 	}
 }
 

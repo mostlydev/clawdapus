@@ -837,6 +837,13 @@ func TestPrepareClawAPIRuntimeWritesPrincipalsAndProjectsAuth(t *testing.T) {
 	if _, err := os.Stat(p.ClawAPI.PrincipalsHostPath); err != nil {
 		t.Fatalf("expected principals file to be written: %v", err)
 	}
+	raw, err := os.ReadFile(p.ClawAPI.PrincipalsHostPath)
+	if err != nil {
+		t.Fatalf("read principals: %v", err)
+	}
+	if !strings.Contains(string(raw), "claw-dashboard") || !strings.Contains(string(raw), clawapi.VerbAgentContext) {
+		t.Fatalf("expected dashboard principal with agent context verb, got %s", string(raw))
+	}
 }
 
 func TestPrepareClawAPIRuntimeUsesPostMergeMasterToken(t *testing.T) {
@@ -922,6 +929,9 @@ func TestPrepareClawAPIRuntimeWithoutMasterWritesSchedulerPrincipal(t *testing.T
 	}
 	if !strings.Contains(string(raw), "claw-scheduler") {
 		t.Fatalf("expected scheduler principal in principals.json, got %s", string(raw))
+	}
+	if !strings.Contains(string(raw), "claw-dashboard") {
+		t.Fatalf("expected dashboard principal in principals.json, got %s", string(raw))
 	}
 	if !strings.Contains(string(raw), clawapi.VerbScheduleRead) || !strings.Contains(string(raw), clawapi.VerbScheduleControl) {
 		t.Fatalf("expected schedule verbs in principals.json, got %s", string(raw))

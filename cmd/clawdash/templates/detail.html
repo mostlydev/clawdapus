@@ -21,6 +21,7 @@
       <nav class="dash-nav" aria-label="Primary">
         <a href="/" class="dash-nav-link">Fleet</a>
         <a href="/topology" class="dash-nav-link">Topology</a>
+        {{if .HasAgentContext}}<a href="/agents" class="dash-nav-link">Agents</a>{{end}}
         {{if .HasSchedule}}<a href="/schedule" class="dash-nav-link">Schedule</a>{{end}}
         <span class="dash-nav-link dash-nav-link-active">Detail</span>
       </nav>

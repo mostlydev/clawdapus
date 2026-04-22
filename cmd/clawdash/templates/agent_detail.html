@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>clawdapus dash - agent context</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css" />
+  <script defer src="/static/alpine.js"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <div class="dash-shell">
+    <header class="dash-topbar">
+      <a href="/" class="dash-brand">
+        <div class="dash-brand-wordmark"><span>clawdash</span> fleet</div>
+      </a>
+
+      <nav class="dash-nav" aria-label="Primary">
+        <a href="/" class="dash-nav-link">Fleet</a>
+        <a href="/topology" class="dash-nav-link">Topology</a>
+        <a href="/agents" class="dash-nav-link dash-nav-link-active">Agents</a>
+        {{if .HasSchedule}}<a href="/schedule" class="dash-nav-link">Schedule</a>{{end}}
+      </nav>
+
+      <div class="dash-title">{{.PodName}}</div>
+    </header>
+
+    <section class="dash-page-head">
+      <a class="dash-link" href="/agents">Agents</a>
+      <div class="dash-page-kicker mt-3">Context brief</div>
+      <h1 class="dash-page-title">{{.ClawID}}</h1>
+      <p class="dash-page-copy">What the agent is contracted to see at startup, plus the latest cllama-assembled live turn context.</p>
+      <div class="dash-page-meta">
+        {{if .ClawType}}<span class="dash-pill badge-cyan">{{.ClawType}}</span>{{end}}
+        {{if .Service}}<span class="dash-pill tone-neutral">{{.Service}}</span>{{end}}
+        {{if .IsLiveTab}}
+          {{if .HasLiveContext}}<span class="dash-pill tone-good">live snapshot</span>{{else}}<span class="dash-pill tone-neutral">no live snapshot</span>{{end}}
+        {{else}}
+          <span class="dash-pill tone-neutral">contract view</span>
+        {{end}}
+      </div>
+    </section>
+
+    {{if .HasContractErr}}
+      <div class="dash-banner">{{.ContractError}}</div>
+    {{end}}
+    {{if .HasLiveError}}
+      <div class="dash-banner">{{.LiveError}}</div>
+    {{end}}
+
+    <section class="dash-toolbar">
+      <div class="flex flex-wrap gap-2">
+        <a class="dash-pill {{if .IsContractTab}}badge-cyan{{else}}tone-neutral{{end}}" href="{{.ContractPath}}">Contract</a>
+        <a class="dash-pill {{if .IsLiveTab}}badge-cyan{{else}}tone-neutral{{end}}" href="{{.LivePath}}">Live context</a>
+      </div>
+    </section>
+
+    <section class="dash-stack mt-4">
+      {{if .IsLiveTab}}
+        <section class="dash-panel">
+          <div class="dash-section-head">
+            <div>
+              <div class="dash-brand-kicker">Last captured turn</div>
+              <h2 class="dash-section-title">Live context</h2>
+            </div>
+            <a class="dash-link" href="{{.LivePath}}">Refresh</a>
+          </div>
+
+          {{if .HasLiveContext}}
+            <div class="live-meta">
+              <span><span class="live-meta-k">captured</span> <span class="live-meta-v">{{if .LiveContext.CapturedAt}}{{.LiveContext.CapturedAt}}{{else}}-{{end}}</span></span>
+              <span class="live-meta-sep">·</span>
+              <span><span class="live-meta-k">format</span> <span class="live-meta-v">{{if .LiveContext.Format}}{{.LiveContext.Format}}{{else}}-{{end}}</span></span>
+              <span class="live-meta-sep">·</span>
+              <span><span class="live-meta-v">{{if .LiveContext.RequestedModel}}{{.LiveContext.RequestedModel}}{{else}}-{{end}}</span></span>
+              <span class="live-meta-sep">→</span>
+              <span><span class="live-meta-v">{{if .LiveContext.ChosenRef}}{{.LiveContext.ChosenRef}}{{else}}-{{end}}</span></span>
+              {{if .LiveContext.ManagedTool}}
+                <span class="live-meta-sep">·</span>
+                <span><span class="live-meta-k">mediated</span> <span class="live-meta-v">{{.LiveContext.TurnCount}} turn{{if ne .LiveContext.TurnCount 1}}s{{end}}</span></span>
+              {{end}}
+            </div>
+
+            <div class="live-block">
+              <div class="live-kicker">System message sent to provider</div>
+              {{if .LiveContext.HasSystemText}}
+                <pre class="live-system-body">{{.LiveContext.SystemText}}</pre>
+              {{else if .LiveContext.HasSystemJSON}}
+                <pre class="live-system-body">{{.LiveContext.SystemJSON}}</pre>
+              {{else}}
+                <div class="live-system-body text-muted">-</div>
+              {{end}}
+            </div>
+
+            {{if or .LiveContext.HasFeedBlocks .LiveContext.HasMemoryRecall .LiveContext.HasTimeContext .LiveContext.HasIntervention}}
+              <div class="live-block">
+                <div class="live-kicker">Injected into system context</div>
+                <ol class="live-inj-list">
+                  {{range .LiveContext.FeedBlocks}}
+                    <li class="live-inj">
+                      <div class="live-inj-tag">feed</div>
+                      <pre class="live-inj-body">{{.}}</pre>
+                    </li>
+                  {{end}}
+                  {{if .LiveContext.HasMemoryRecall}}
+                    <li class="live-inj">
+                      <div class="live-inj-tag">memory</div>
+                      <pre class="live-inj-body">{{.LiveContext.MemoryRecall}}</pre>
+                    </li>
+                  {{end}}
+                  {{if .LiveContext.HasTimeContext}}
+                    <li class="live-inj">
+                      <div class="live-inj-tag">time</div>
+                      <div class="live-inj-body">{{.LiveContext.TimeContext}}</div>
+                    </li>
+                  {{end}}
+                  {{if .LiveContext.HasIntervention}}
+                    <li class="live-inj live-inj-warn">
+                      <div class="live-inj-tag">intervention</div>
+                      <div class="live-inj-body">{{.LiveContext.Intervention}}</div>
+                    </li>
+                  {{end}}
+                </ol>
+              </div>
+            {{end}}
+
+            {{if .LiveContext.HasCandidates}}
+              <div class="live-block">
+                <div class="live-kicker">Routing — ordered candidates</div>
+                <ol class="live-route-list">
+                  {{range .LiveContext.Candidates}}
+                    <li><span>{{.Provider}}</span><span class="live-route-sep">→</span><span class="live-route-primary">{{.UpstreamModel}}</span></li>
+                  {{end}}
+                </ol>
+              </div>
+            {{end}}
+
+            {{if .LiveContext.HasRecentCaptures}}
+              <details class="live-details">
+                <summary>Recent captures · {{len .LiveContext.RecentCaptures}}</summary>
+                <div class="live-recent">
+                  {{range .LiveContext.RecentCaptures}}
+                    <div class="live-recent-row">
+                      <span class="live-recent-seq">#{{.Sequence}}</span>
+                      <span class="live-recent-model">{{.Model}}</span>
+                      <span class="live-recent-meta">{{.CapturedAt}}{{if .Interval}} · +{{.Interval}}{{end}} · {{.DynamicInputs}} in{{if .ManagedTool}} · mediated ({{.TurnCount}}){{end}}</span>
+                    </div>
+                  {{end}}
+                </div>
+              </details>
+            {{end}}
+
+            {{if .LiveContext.HasTools}}
+              <details class="live-details">
+                <summary>Tool schemas sent to provider</summary>
+                <pre>{{.LiveContext.ToolsJSON}}</pre>
+              </details>
+            {{end}}
+
+            <details class="live-details">
+              <summary>Raw snapshot JSON</summary>
+              <pre>{{.LiveContextJSON}}</pre>
+            </details>
+          {{else if .HasLiveError}}
+            <div class="dash-empty">{{.LiveError}}</div>
+          {{else}}
+            <div class="dash-empty">No live context has been captured for this agent yet.</div>
+          {{end}}
+        </section>
+      {{else if .HasContract}}
+        <section class="dash-panel">
+          <div class="dash-section-head">
+            <div>
+              <div class="dash-brand-kicker">Behavior contract</div>
+              <h2 class="dash-section-title">Agent instructions</h2>
+            </div>
+            <span class="dash-chip">AGENTS.md</span>
+          </div>
+          <div class="p-5 pt-4">
+            <pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">{{.Contract.AgentsMD}}</pre>
+          </div>
+        </section>
+
+        <section class="dash-panel">
+          <div class="dash-section-head">
+            <div>
+              <div class="dash-brand-kicker">Infrastructure context</div>
+              <h2 class="dash-section-title">Compiled environment</h2>
+            </div>
+            <span class="dash-chip">CLAWDAPUS.md</span>
+          </div>
+          <div class="p-5 pt-4">
+            <pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">{{.Contract.ClawdapusMD}}</pre>
+          </div>
+        </section>
+
+        <section class="dash-panel">
+          <div class="dash-section-head">
+            <div>
+              <div class="dash-brand-kicker">Compiled manifests</div>
+              <h2 class="dash-section-title">Runtime inputs</h2>
+            </div>
+          </div>
+          <div class="p-5 pt-4 dash-stack">
+            {{if .HasMetadataRows}}
+              <div class="dash-detail-stat">
+                <div class="dash-grid-label">Identity and policy</div>
+                <div class="overflow-x-auto mt-2">
+                  <table class="dash-table min-w-full">
+                    <tbody>
+                      {{range .MetadataRows}}<tr><th>{{.Key}}</th><td>{{.Value}}</td></tr>{{end}}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            {{end}}
+            {{if .HasFeedRows}}
+              <div class="dash-detail-stat">
+                <div class="dash-grid-label">Feeds</div>
+                <div class="overflow-x-auto mt-2">
+                  <table class="dash-table min-w-full">
+                    <thead><tr><th>Name</th><th>Source</th><th>Path</th><th>TTL</th><th>URL</th></tr></thead>
+                    <tbody>
+                      {{range .FeedRows}}
+                        <tr><td>{{.Name}}</td><td>{{.Source}}</td><td>{{.Path}}</td><td>{{.TTL}}</td><td>{{.URL}}</td></tr>
+                      {{end}}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            {{end}}
+            {{if .HasToolRows}}
+              <div class="dash-detail-stat">
+                <div class="dash-grid-label">Managed tools</div>
+                <div class="overflow-x-auto mt-2">
+                  <table class="dash-table min-w-full">
+                    <thead><tr><th>Name</th><th>Service</th><th>Method</th><th>Path</th><th>Transport</th></tr></thead>
+                    <tbody>
+                      {{range .ToolRows}}
+                        <tr><td>{{.Name}}</td><td>{{.Service}}</td><td>{{.Method}}</td><td>{{.Path}}</td><td>{{.Transport}}</td></tr>
+                      {{end}}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            {{end}}
+            {{if .HasMemoryRows}}
+              <div class="dash-detail-stat">
+                <div class="dash-grid-label">Memory</div>
+                <div class="overflow-x-auto mt-2">
+                  <table class="dash-table min-w-full">
+                    <tbody>
+                      {{range .MemoryRows}}<tr><th>{{.Key}}</th><td>{{.Value}}</td></tr>{{end}}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            {{end}}
+            {{if .HasServiceAuthRows}}
+              <div class="dash-detail-stat">
+                <div class="dash-grid-label">Service credentials</div>
+                <div class="overflow-x-auto mt-2">
+                  <table class="dash-table min-w-full">
+                    <thead><tr><th>Service</th><th>Auth type</th><th>Principal</th></tr></thead>
+                    <tbody>
+                      {{range .ServiceAuthRows}}
+                        <tr><td>{{.Service}}</td><td>{{.AuthType}}</td><td>{{.Principal}}</td></tr>
+                      {{end}}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            {{end}}
+            {{if and (not .HasMetadata) (not .HasFeeds) (not .HasTools) (not .HasMemory) (not .HasServiceAuth)}}
+              <div class="dash-empty">No generated JSON artifacts were returned for this agent.</div>
+            {{end}}
+            {{if or .HasMetadata .HasFeeds .HasTools .HasMemory .HasServiceAuth}}
+              <details class="dash-detail-stat">
+                <summary class="dash-grid-label">Raw runtime JSON</summary>
+                {{if .HasMetadata}}<pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">metadata.json
+{{.MetadataJSON}}</pre>{{end}}
+                {{if .HasFeeds}}<pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">feeds.json
+{{.FeedsJSON}}</pre>{{end}}
+                {{if .HasTools}}<pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">tools.json
+{{.ToolsJSON}}</pre>{{end}}
+                {{if .HasMemory}}<pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">memory.json
+{{.MemoryJSON}}</pre>{{end}}
+                {{if .HasServiceAuth}}<pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">service-auth
+{{.ServiceAuthJSON}}</pre>{{end}}
+              </details>
+            {{end}}
+          </div>
+        </section>
+      {{else}}
+        <section class="dash-panel">
+          <div class="dash-empty">Contract context could not be loaded for this agent.</div>
+        </section>
+      {{end}}
+    </section>
+  </div>
+</body>
+</html>

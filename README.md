@@ -57,7 +57,7 @@ claw down
 
 The cllama governance proxy dashboard runs on port **8181** — every LLM call in real time: which agent, which model, token counts, cost.
 
-The Clawdapus Dash fleet dashboard runs on port **8082** — live service health, topology wiring, and per-service drill-down.
+The Clawdapus Dash fleet dashboard runs on port **8082** — live service health, topology wiring, per-service drill-down, and agent context inspection. The Agents view shows each claw's compiled `AGENTS.md`/`CLAWDAPUS.md`, redacted runtime manifests, and the latest live context snapshot captured by cllama.
 
 The operator surface is four verbs:
 - `claw pull` fetches pinned runtime infra and registry-backed pod services

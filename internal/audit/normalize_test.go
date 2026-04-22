@@ -190,6 +190,36 @@ func TestParseSessionHistoryReaderSkipsNonMediatedEntries(t *testing.T) {
 	}
 }
 
+func TestParseSessionHistoryReaderHandlesLargeLines(t *testing.T) {
+	filler := strings.Repeat("x", 2*1024*1024)
+	line := `{"version":1,"id":"hist1_big","status":"ok","ts":"2026-04-17T12:00:00Z","claw_id":"weston","status_code":200,"usage":{"total_rounds":1},"filler":"` + filler + `","tool_trace":[{"round":1,"tool_calls":[{"name":"svc.tool","service":"svc","status_code":200}]}]}` + "\n"
+	events, skipped, err := ParseSessionHistoryReader(strings.NewReader(line))
+	if err != nil {
+		t.Fatalf("unexpected error on oversized line: %v", err)
+	}
+	if skipped != 0 {
+		t.Fatalf("expected 0 skipped lines, got %d", skipped)
+	}
+	if len(events) != 1 || events[0].ToolName != "svc.tool" {
+		t.Fatalf("unexpected events from oversized line: %+v", events)
+	}
+}
+
+func TestParseReaderHandlesLargeLines(t *testing.T) {
+	filler := strings.Repeat("x", 2*1024*1024)
+	line := `{"ts":"2026-04-17T12:00:00Z","claw_id":"weston","type":"request","filler":"` + filler + `"}` + "\n"
+	events, skipped, err := ParseReader(strings.NewReader(line))
+	if err != nil {
+		t.Fatalf("unexpected error on oversized line: %v", err)
+	}
+	if skipped != 0 {
+		t.Fatalf("expected 0 skipped lines, got %d", skipped)
+	}
+	if len(events) != 1 || events[0].Type != "request" {
+		t.Fatalf("unexpected events from oversized line: %+v", events)
+	}
+}
+
 func TestSummarizeCountsManagedToolCalls(t *testing.T) {
 	events := []Event{
 		{ClawID: "weston", Type: "tool_call", ToolName: "svc.ok", FinalStatus: "ok"},

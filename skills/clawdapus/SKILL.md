@@ -7,7 +7,7 @@ description: Use when working with the claw CLI, Clawfiles, claw-pod.yml, cllama
 
 Infrastructure-layer governance for AI agent containers. `claw` treats agents as untrusted workloads — reproducible, inspectable, diffable, killable.
 
-**Mental model:** Clawfile is to Dockerfile what claw-pod.yml is to docker-compose.yml. Standard Docker directives pass through unchanged. Claw directives compile to labels + generated scripts. Eject anytime — you still have working Docker artifacts.
+**Mental model:** Clawfile is to Dockerfile what claw-pod.yml is to docker-compose.yml. Standard Docker directives pass through unchanged. Claw directives compile into labels plus driver-specific runtime materialization. Eject anytime — you still have working Docker artifacts.
 
 ## CLI Commands
 
@@ -91,7 +91,7 @@ SURFACE service://trading-api               # infrastructure surface
 SURFACE volume://shared-research read-write
 
 SKILL policy/risk-limits.md                 # operator policy, mounted read-only
-CONFIGURE openclaw config set key value     # runs at container startup, NOT build time
+CONFIGURE openclaw config set key value     # driver-side config DSL, not arbitrary shell
 
 TRACK apt npm                               # mutation tracking wrappers
 PRIVILEGE worker root                       # privilege mode mapping
@@ -111,9 +111,18 @@ PRIVILEGE runtime claw-user
 | `INVOKE <cron> <name>` | System cron in `/etc/cron.d/claw`. Bot cannot modify. | Baked into image |
 | `SURFACE <scheme>://<target> [mode]` | Infrastructure boundary. See Surface Taxonomy. | Label -> compose wiring |
 | `SKILL <file>` | Reference markdown mounted read-only into runner skill directory. | Label -> host path validation + mount |
-| `CONFIGURE <cmd>` | **Runs at startup** via `/claw/configure.sh`. For init-time config mutations. NOT build time. | Generates script |
+| `CONFIGURE <cmd>` | Driver-specific config DSL. Use `<driver> config set <path> <value>`, not arbitrary shell. | Parsed by Clawdapus, then projected into generated runtime config/artifacts |
 | `TRACK <pkg-managers>` | Installs wrappers for `apt`, `pip`, `npm` to log mutations. | Build-time install |
 | `PRIVILEGE <mode> <user>` | Maps privilege modes to user specs. | Label -> Docker user/security |
+
+### `CONFIGURE` Semantics
+
+- Treat `CONFIGURE` as driver-side config mutation DSL, not as a generic startup hook.
+- The public contract is `CONFIGURE <driver> config set <path> <value>`.
+- Values are JSON-decoded when possible. Leave booleans, numbers, arrays, and objects unquoted; quote strings.
+- `CONFIGURE` applies after generated defaults, so it overrides what `HANDLE` and other driver defaults emitted.
+- For `openclaw`, Clawdapus applies `CONFIGURE` while generating `openclaw.json` during materialization. Do not assume downstream `openclaw config set ...` shell behavior is the same contract.
+- Dotted object paths are the supported shape today. Do not assume indexed list mutation like `agents.list[0].groupChat.mentionPatterns` is supported unless the code/docs explicitly say so.
 
 ## Surface Taxonomy
 

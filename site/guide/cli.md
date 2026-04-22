@@ -99,7 +99,7 @@ The pod file can be specified as a positional argument or via `-f`. Defaults to 
 8. Calls `docker compose up` against the generated file.
 9. For managed services (`-d` mode), runs post-apply health verification.
 
-**Generated artifacts** are written to `.claw-runtime/` next to the pod file. Per-agent context lives at `.claw-runtime/context/<agent-id>/`. These are generated outputs — inspect them for debugging, but do not hand-edit them.
+**Generated artifacts** are written to `.claw-runtime/` next to the pod file. Per-agent context lives at `.claw-runtime/context/<agent-id>/`. These are generated outputs — inspect them for debugging, but do not hand-edit them. When `claw-api` is present, Clawdapus Dash also exposes this context under its Agents view, including redacted runtime manifests and the latest live cllama context snapshot.
 
 `claw up` is strict by default. If an infra image is missing, it tells you to run `claw pull`. If a pod service image is not built, it tells you to run `claw build`. `claw up --fix` performs those remediation steps automatically.
 

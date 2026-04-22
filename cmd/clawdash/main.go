@@ -65,7 +65,8 @@ func run(cfg config) error {
 	defer source.Close()
 
 	scheduleSource := newScheduleHTTPClient(cfg.ClawAPIURL, cfg.ClawAPIToken)
-	h := newHandler(manifest, source, scheduleSource, cfg.CllamaCostsURL, cfg.CostLogFallback)
+	agentContextSource := newAgentContextHTTPClient(cfg.ClawAPIURL, cfg.ClawAPIToken)
+	h := newHandler(manifest, source, scheduleSource, cfg.CllamaCostsURL, cfg.CostLogFallback, withAgentContextSource(agentContextSource))
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           h,
