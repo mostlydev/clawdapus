@@ -56,6 +56,8 @@ claw memory forget <mem-svc>        # forget entries by ID with governed tombsto
 claw update                         # re-run install.sh to update binary
 ```
 
+On successful pod launch, `claw up` prints `[claw] dashboard:  http://localhost:<port>` when the pod declares a `clawdash` surface. Agents debugging a running pod should point the operator at that URL.
+
 Lifecycle commands block if `claw-pod.yml` is newer than `compose.generated.yml` — run `claw up` to regenerate. `claw down` is exempt.
 
 `-f` locates `compose.generated.yml` next to the pod file. Without `-f`, `claw up` uses `./claw-pod.yml`; other lifecycle commands look for `compose.generated.yml` in the current directory.
@@ -445,6 +447,17 @@ Clawdapus refuses to start containers when:
 - `mentionPatterns` auto-derived: Discord uses native `<@!?<id>>`; text-mention platforms use `(?i)\b@?<username>\b`
 - `allowBots: true` is unconditional — required for bot-to-bot messaging
 - Peer handles: each agent's guild `users[]` includes own ID + all peer bot IDs
+
+### Observability dashboard (clawdash)
+
+When a pod declares a `clawdash` surface, `claw up` publishes the operational dashboard at the emitted `http://localhost:<port>` URL. Relevant views:
+
+- **Fleet / Topology** — running services, wiring, driver types.
+- **Agents** — per-agent *contract* as compiled at `claw up` time (AGENTS.md, CLAWDAPUS.md, feed subscriptions, managed tools, memory wiring, metadata).
+- **Agents → Live Context** — the system message, tools array, injected feeds, memory recall, time context, and interventions that were assembled for the most recent inference turn. Sourced from the cllama snapshot store (`/internal/context/<agent-id>/snapshot`, proxied through `claw-api`). Credentials and token fields are redacted.
+- **Schedule** — `INVOKE` and `x-claw.invoke` cron entries, with `claw api schedule ...` controls.
+
+All views are read-only and scoped through `claw-api` principals. Use this before log-diving — "what did the model actually see last turn" has a direct answer here.
 
 ### cllama proxy not working
 - Check proxy container is running: `claw ps -f <pod>.yml`

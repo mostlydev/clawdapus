@@ -101,6 +101,8 @@ The pod file can be specified as a positional argument or via `-f`. Defaults to 
 
 **Generated artifacts** are written to `.claw-runtime/` next to the pod file. Per-agent context lives at `.claw-runtime/context/<agent-id>/`. These are generated outputs — inspect them for debugging, but do not hand-edit them. When `claw-api` is present, Clawdapus Dash also exposes this context under its Agents view, including redacted runtime manifests and the latest live cllama context snapshot.
 
+**Dashboard URL:** When the pod declares a `clawdash` surface, `claw up` prints the dashboard URL on success (for example `[claw] dashboard:  http://localhost:8082`) so you can jump straight into the Agents / Topology / Fleet views without re-checking the compose output.
+
 `claw up` is strict by default. If an infra image is missing, it tells you to run `claw pull`. If a pod service image is not built, it tells you to run `claw build`. `claw up --fix` performs those remediation steps automatically.
 
 **Examples:**

@@ -31,7 +31,16 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.8.15 <Badge type="tip" text="Latest" /> {#v0-8-15}
+## v0.9.0 <Badge type="tip" text="Latest" /> {#v0-9-0}
+
+*2026-04-22*
+
+- **Agent context visibility in clawdash** ([#172](https://github.com/mostlydev/clawdapus/issues/172)) — the operational dashboard now surfaces two things that used to require log-diving or guessing: each agent's compiled *contract* (AGENTS.md, CLAWDAPUS.md, feed subscriptions, managed tools, memory wiring, metadata) as rendered at `claw up` time, and a *live context view* showing what was actually assembled and sent to the provider on the most recent turn (system message, tools array, injected feeds, memory recall, time block, interventions). Reached via a new `/agents` index and per-agent `/agents/<id>` detail page. The live snapshot is captured inside the cllama proxy as a side effect of normal request handling, so what you see is the exact payload the model saw — no reconstruction. Credentials and token fields are redacted at capture. Bearer scope: read-only, enforced through `claw-api` principals; no new auth surface exposed to agents.
+- **`claw up` now prints the dashboard URL** — when a pod defines a `clawdash` surface, `claw up` emits `[claw] dashboard:  http://localhost:<port>` on success so operators know where to look without re-checking compose output.
+- **Pinned cllama bumped to [v0.4.0](https://github.com/mostlydev/cllama/releases/tag/v0.4.0)** — adds the per-agent context snapshot store and two new internal endpoints (`GET /internal/context`, `GET /internal/context/<id>/snapshot`) behind the existing UI bearer. These power the live view above.
+- **Pinned infra images bumped to v0.9.0** — `clawdash`, `claw-api`, and `claw-wall` images move in lockstep with the release. The clawdash image carries the new `/agents` routes; `claw-api` carries the snapshot proxy passthrough; `claw-wall` is republished unchanged at v0.9.0 for lockstep.
+
+## v0.8.15 {#v0-8-15}
 
 *2026-04-17*
 

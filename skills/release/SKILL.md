@@ -120,7 +120,7 @@ Decision tree:
    EOF
    )"
    ```
-4. Build and push the multi-arch Docker image (see Step 9). Do this BEFORE the
+4. Build and push the multi-arch Docker image (see Step 10). Do this BEFORE the
    clawdapus release so the clawdapus image fallback (`docker pull
    ghcr.io/mostlydev/cllama:latest`) picks up the new image.
 5. Update the submodule pointer in the clawdapus repo if cllama HEAD moved past
@@ -237,6 +237,53 @@ Grep for anything that looks stale:
 grep -n '<flag-or-command>' site/guide/cli.md
 ```
 
+### Clawdapus CLI skill — `skills/clawdapus/SKILL.md`
+
+This file is the canonical CLI skill that Claude agents load when they help
+users with `claw`. It is embedded into the `claw` binary via `go:embed` (the
+mirror at `cmd/claw/skill_data/SKILL.md` is regenerated from it) and it also
+seeds the `clawdapus-cli` skill that users install into their
+`~/.claude/skills/`. Any CLI surface change that alters the user-visible
+behavior of `claw` needs to be reflected here, otherwise every agent using
+the skill will give out-of-date guidance.
+
+Update whenever the release changes:
+
+- **The CLI command list** — the top-level table of subcommands (`claw pull`,
+  `claw up`, `claw compose`, etc.). Add new commands; remove deleted ones.
+- **Flag behavior** on any covered command.
+- **Pod YAML directives** the skill references (`x-claw.cllama`,
+  `x-claw.surfaces`, feed subscription syntax, etc.).
+- **Runtime artifacts** the skill describes (`compose.generated.yml`,
+  `.claw-runtime/...`, `CLAWDAPUS.md`, `AGENTS.generated.md` layout).
+- **New first-class capabilities** the skill should teach agents about (new
+  drivers, new observability endpoints, new skill/feed mechanisms).
+
+After editing, regenerate the embedded mirror so both copies stay in sync:
+
+```bash
+go generate ./cmd/claw/...
+git diff cmd/claw/skill_data/SKILL.md   # should mirror your skills/clawdapus/SKILL.md edits
+```
+
+Commit both files together in the release-prep commit. `cmd/claw/skill_data/SKILL.md`
+is a tracked mirror — if it's left stale, `go vet` and goreleaser's prehooks
+will still pass locally but users who install the skill via the embedded
+artifact will get the old content.
+
+Grep for freshness:
+
+```bash
+# Commands or flags mentioned in the CLI reference but not in the skill
+diff <(grep -oE 'claw [a-z-]+( [a-z-]+)?' site/guide/cli.md | sort -u) \
+     <(grep -oE 'claw [a-z-]+( [a-z-]+)?' skills/clawdapus/SKILL.md | sort -u)
+```
+
+The per-user global copy at `~/.claude/skills/clawdapus-cli/SKILL.md` is
+NOT updated by the release — it's a local convenience copy that users
+re-install after the release lands. The release commit only touches the
+repo-canonical `skills/clawdapus/SKILL.md` and its embedded mirror.
+
 ### README — `README.md`
 
 Patch releases rarely need README changes. Minor/major releases often do.
@@ -271,7 +318,52 @@ grep -rn "v0\.X\.Y" site/ README.md examples/ --include='*.md' --include='*.mts'
 (Package-lock files, go.sum, and generated artifacts are noise — filter them
 out.)
 
-## Step 7: Update the nav dropdown version
+## Step 7: Bump pinned runtime infra image tags
+
+`internal/infraimages/release_manifest.go` holds the image tags that the
+released `claw` binary pulls at runtime. If you don't bump these, users install
+the new `claw`, run `claw pull` / `claw up`, and still get the **previous**
+release's clawdash/claw-api/claw-wall/cllama images — the new features in
+those images are invisible.
+
+```go
+const (
+    DefaultClawInfraTag  = "v0.X.Y"  // clawdash + claw-api + claw-wall (lockstep)
+    DefaultClawAPITag    = DefaultClawInfraTag
+    DefaultClawdashTag   = DefaultClawInfraTag
+    DefaultClawWallTag   = DefaultClawInfraTag
+    DefaultCllamaTag     = "v0.A.B"
+    DefaultHermesBaseTag = "v<upstream>"
+)
+```
+
+Decide which pins to move based on what the release actually touches:
+
+- **Release includes new code in `cmd/clawdash/`, `cmd/claw-api/`, or
+  `cmd/claw-wall/`** → bump `DefaultClawInfraTag` to the new clawdapus release
+  tag. All three images publish in lockstep from the clawdapus tag, so this is
+  a single value.
+- **Release includes new cllama code (submodule moved)** → bump
+  `DefaultCllamaTag` to the cllama release you just cut in Step 2.
+- **Release rebuilds `hermes-base`** → bump `DefaultHermesBaseTag` to the new
+  upstream Hermes tag.
+- **Pure `claw` CLI release (no infra code changes, no submodule move)** →
+  leave the pins at their existing values. The release-prep commit won't touch
+  `release_manifest.go`.
+
+Even if the image code didn't change, the corresponding published tag still
+needs to exist at the new release version for anything covered by
+`DefaultClawInfraTag`, because the release verifier in
+`scripts/check-release-infra-tags/` checks
+`ghcr.io/mostlydev/{claw-api,clawdash,claw-wall}:<release-tag>` exist. That
+prepublish happens in Step 10. The point of Step 7 is to make the released
+`claw` binary actually *use* those tags.
+
+`internal/infraimages/release_manifest_test.go` references the constants by
+name, so the test doesn't need updating. Running `go test ./internal/infraimages/...`
+after the edit still catches typos.
+
+## Step 8: Update the nav dropdown version
 
 In `site/.vitepress/config.mts`, find the version string in the nav array:
 
@@ -283,14 +375,18 @@ In `site/.vitepress/config.mts`, find the version string in the nav array:
 
 Replace it with the new version.
 
-## Step 8: Commit and push master first
+## Step 9: Commit and push master first
 
 Stage the changed files explicitly — don't use `git add -A`:
 
 ```bash
 git add site/changelog.md site/.vitepress/config.mts
+# Add runtime infra pin bumps if any were changed in Step 7
+git add internal/infraimages/release_manifest.go  # only if modified
 # Add any docs sweep changes
 git add site/guide/cli.md README.md  # only if modified
+# Add CLI skill + its embedded mirror if the CLI surface moved
+git add skills/clawdapus/SKILL.md cmd/claw/skill_data/SKILL.md  # only if modified
 # Add submodule pointer if cllama moved
 git add cllama  # only if modified
 ```
@@ -334,7 +430,7 @@ git pull --rebase origin master
 git push origin master
 ```
 
-## Step 9: Prepublish pinned image refs and verify registry visibility
+## Step 10: Prepublish pinned image refs and verify registry visibility
 
 Clawdapus release binaries now hard-fail on missing pinned infra tags. Before
 you push the release tag, make sure every required image ref exists in ghcr.io.
@@ -442,7 +538,7 @@ curl -fsS 'https://ghcr.io/token?service=ghcr.io&scope=repository:mostlydev/herm
 If GitHub created a new package as private, flip it to public in the GitHub UI
 before shipping the release.
 
-## Step 10: Tag and push the release
+## Step 11: Tag and push the release
 
 Only after `master` is pushed and the pinned refs are public and verifiably
 present should you create the release tag:
@@ -459,7 +555,7 @@ gh auth setup-git
 git push https://github.com/mostlydev/clawdapus.git refs/tags/v0.X.Y
 ```
 
-## Step 11: Verify
+## Step 12: Verify
 
 After pushing the clawdapus tag, confirm the workflows started:
 
@@ -525,3 +621,11 @@ Report the status to the user with links:
   at an untagged cllama commit, bump it to the release tag before cutting the
   clawdapus release so users running `claw up` against the published
   clawdapus binary consume a released cllama image.
+- **Release ships but new features don't appear at runtime**: Almost always
+  means Step 7 was skipped. `DefaultClawInfraTag` / `DefaultCllamaTag` in
+  `internal/infraimages/release_manifest.go` still pointed at the previous
+  release's tags, so the new `claw` binary pulled the old images. Fix by
+  cutting a patch release that bumps the pins. The image tags at the new
+  release already exist (Step 10 published them), so no republish is needed —
+  just a follow-up clawdapus release whose release-prep commit moves the
+  constants.
