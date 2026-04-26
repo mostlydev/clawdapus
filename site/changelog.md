@@ -29,9 +29,17 @@ outline: deep
 
 ## Unreleased
 
-- **Mixed tool-order retries now stay inside the model loop** ([#165](https://github.com/mostlydev/clawdapus/issues/165)) — the managed-prefix path still serializes internally, but native-first or interleaved mixed batches no longer bounce out as a `502` that the runner can surface into Discord. `cllama` now preserves the original mixed assistant/tool-use batch in hidden continuity, feeds the model synthetic rejected-tool results that explain the ordering constraint, and lets it replan on an internal follow-up turn. OpenAI-compatible and Anthropic paths both have regression coverage. A new `mixed_tool_order_internal_retry` intervention log distinguishes this path from `managed_prefix_native_suffix_serialized`.
+<!-- Nothing yet -->
 
-## v0.9.0 <Badge type="tip" text="Latest" /> {#v0-9-0}
+## v0.9.1 <Badge type="tip" text="Latest" /> {#v0-9-1}
+
+*2026-04-26*
+
+- **Mixed tool-order retries now stay inside the model loop** ([#165](https://github.com/mostlydev/clawdapus/issues/165)) — the managed-prefix path still serializes internally, but native-first or interleaved mixed batches no longer bounce out as a `502` that the runner can surface into Discord. `cllama` now preserves the original mixed assistant/tool-use batch in hidden continuity, feeds the model synthetic rejected-tool results that explain the ordering constraint, and lets it replan on an internal follow-up turn. OpenAI-compatible and Anthropic paths both have regression coverage. A new `mixed_tool_order_internal_retry` intervention log distinguishes this path from `managed_prefix_native_suffix_serialized`. Originally surfaced from the Tiverton trading-desk pod where the `502` was leaking into Discord.
+- **Pinned cllama bumped to [v0.4.1](https://github.com/mostlydev/cllama/releases/tag/v0.4.1)** — picks up the mixed tool-order retry path above.
+- **Pinned infra images republished at v0.9.1** — `clawdash`, `claw-api`, and `claw-wall` images move in lockstep with each release tag; no behavioural change in those images this round.
+
+## v0.9.0 {#v0-9-0}
 
 *2026-04-22*
 
