@@ -334,7 +334,7 @@ A fundamental constraint: when the LLM returns tool_calls, the protocol requires
 - If a response contains managed tool calls only, cllama owns that round and executes them internally.
 - If a response contains runner-native tool calls only, cllama passes the response back to the runner unchanged. If the downstream client originally requested streaming, cllama synthesizes an equivalent SSE stream so the runner still receives its expected protocol shape.
 - If a single response contains a managed prefix followed by a runner-native suffix, cllama occludes the runner-native suffix, executes the managed prefix internally, appends the managed results into the hidden transcript, and asks the model to continue from that state. If the model later emits runner-native tool calls only, cllama hands that response back to the runner and stores the usual one-shot continuity handoff so the hidden managed transcript is reinserted before the runner's follow-up tool-result request.
-- If a single response contains runner-native calls before later managed calls, or otherwise interleaves ownership, cllama fails closed with an explicit retry instruction rather than silently reordering the model's plan.
+- If a single response contains runner-native calls before later managed calls, or otherwise interleaves ownership, cllama still refuses to reorder the plan, but it keeps that batch hidden and feeds the model synthetic rejected-tool results so it can retry internally without leaking proxy errors to the runner surface.
 
 **If the response contains managed tool_calls only:**
 1. cllama validates each call against the manifest (reject unknown tools — fail closed)
@@ -350,7 +350,8 @@ A fundamental constraint: when the LLM returns tool_calls, the protocol requires
 - Serialize the round. cllama executes the managed prefix first, feeds those results back upstream, and waits for the model to re-emit any runner-native step cleanly in a later response.
 
 **If the response contains runner-native calls before later managed calls, or otherwise interleaves ownership:**
-- Fail closed with a direct proxy error instructing the agent to emit managed service tools first and runner-native tools in a later response.
+- Do not reorder the model's plan.
+- Preserve the mixed batch in hidden continuity, append synthetic rejected-tool results that explain the ordering constraint, and let the model replan on an internal follow-up turn.
 
 **If the response contains only text:**
 - Return directly (or re-stream if the runner requested streaming).
@@ -570,7 +571,7 @@ The capability-evolution wave (this ADR + ADR-021) landed together. Current stat
 - Hard error at `claw up` time when non-cllama services declare `x-claw.tools` or `x-claw.memory`
 - cllama loads `tools.json` and injects managed tools into OpenAI-compatible upstream requests
 - cllama loads `tools.json` and injects managed tools into Anthropic-format upstream requests
-- cllama preserves runner-native tools additively on the same request surface and fail-closes only on mixed ownership within one model response
+- cllama preserves runner-native tools additively on the same request surface and keeps mixed-order recovery inside the mediated model loop instead of surfacing proxy errors back to the runner
 - Bounded mediation loop with `max_rounds`, per-tool timeout, total timeout, and `max_tool_result_bytes` truncation
 - Structured tool error feedback within the mediated loop
 - Synthetic SSE re-streaming when the runner requested streaming

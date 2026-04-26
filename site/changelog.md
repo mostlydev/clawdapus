@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Mixed tool-order retries now stay inside the model loop** ([#165](https://github.com/mostlydev/clawdapus/issues/165)) — the managed-prefix path still serializes internally, but native-first or interleaved mixed batches no longer bounce out as a `502` that the runner can surface into Discord. `cllama` now preserves the original mixed assistant/tool-use batch in hidden continuity, feeds the model synthetic rejected-tool results that explain the ordering constraint, and lets it replan on an internal follow-up turn. OpenAI-compatible and Anthropic paths both have regression coverage. A new `mixed_tool_order_internal_retry` intervention log distinguishes this path from `managed_prefix_native_suffix_serialized`.
 
 ## v0.9.0 <Badge type="tip" text="Latest" /> {#v0-9-0}
 
