@@ -5,18 +5,30 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/moby/buildkit/frontend/dockerfile/parser"
 )
 
-func Emit(result *ParseResult) (string, error) {
+type RunnerProvenance struct {
+	DriverName string
+	Alias      string
+	ImageRef   string
+	BuiltRef   string
+	VersionTag string
+	ImageID    string
+	RecipeSHA  string
+}
+
+func Emit(result *ParseResult, runner *RunnerProvenance) (string, error) {
 	if result == nil || result.Config == nil {
 		return "", fmt.Errorf("emit: parse result is nil")
 	}
 
 	var b strings.Builder
-	generated := buildGeneratedLines(result.Config)
+	generated := buildGeneratedLines(result.Config, runner)
 
 	for _, node := range result.DockerNodes {
-		original := strings.TrimSuffix(node.Original, "\n")
+		original := rewriteDockerNode(strings.TrimSuffix(node.Original, "\n"), node, runner)
 		if original != "" {
 			b.WriteString(original)
 			b.WriteString("\n")
@@ -36,9 +48,27 @@ func Emit(result *ParseResult) (string, error) {
 	return b.String(), nil
 }
 
-func buildGeneratedLines(config *ClawConfig) []string {
+func rewriteDockerNode(original string, node *parser.Node, runner *RunnerProvenance) string {
+	if runner == nil || node == nil || strings.TrimSpace(runner.ImageRef) == "" || strings.TrimSpace(runner.BuiltRef) == "" {
+		return original
+	}
+	if !strings.EqualFold(strings.TrimSpace(node.Value), "from") {
+		return original
+	}
+	fields := strings.Fields(original)
+	if len(fields) < 2 {
+		return original
+	}
+	if fields[1] != runner.ImageRef {
+		return original
+	}
+	return strings.Replace(original, fields[1], runner.BuiltRef, 1)
+}
+
+func buildGeneratedLines(config *ClawConfig, runner *RunnerProvenance) []string {
 	lines := make([]string, 0)
 	lines = append(lines, buildLabelLines(config)...)
+	lines = append(lines, buildRunnerLabelLines(runner)...)
 	lines = append(lines, buildInfraLines(config)...)
 	return lines
 }
@@ -101,6 +131,27 @@ func buildLabelLines(config *ClawConfig) []string {
 
 func buildInfraLines(_ *ClawConfig) []string {
 	return nil
+}
+
+func buildRunnerLabelLines(runner *RunnerProvenance) []string {
+	if runner == nil {
+		return nil
+	}
+
+	lines := make([]string, 0, 4)
+	if runner.DriverName != "" {
+		lines = append(lines, formatLabel("claw.runner.driver", runner.DriverName))
+	}
+	if runner.BuiltRef != "" {
+		lines = append(lines, formatLabel("claw.runner.built-against", runner.BuiltRef))
+	}
+	if runner.ImageID != "" {
+		lines = append(lines, formatLabel("claw.runner.image-id", runner.ImageID))
+	}
+	if runner.RecipeSHA != "" {
+		lines = append(lines, formatLabel("claw.runner.recipe-sha", runner.RecipeSHA))
+	}
+	return lines
 }
 
 func formatLabel(key string, value string) string {

@@ -10,3 +10,7 @@ LABEL org.opencontainers.image.source="https://github.com/nullclaw/nullclaw"
 func (d *Driver) BaseImage() (string, string) {
 	return baseImageTag, baseImageDockerfile
 }
+
+func (d *Driver) RunnerAlias() string {
+	return "nullclaw"
+}

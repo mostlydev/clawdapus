@@ -52,6 +52,9 @@ services:
 	if err := os.WriteFile(podFile, []byte(podYAML), 0o644); err != nil {
 		t.Fatalf("write pod file: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM alpine:latest\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
 
 	prevExists := imageExistsLocally
 	prevFix := composeUpFix
@@ -245,6 +248,9 @@ services:
 `
 	if err := os.WriteFile(podFile, []byte(podYAML), 0o644); err != nil {
 		t.Fatalf("write pod file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM alpine:latest\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
 	}
 
 	prevExists := imageExistsLocally

@@ -38,3 +38,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "node", "/workspace/dist/index.js"]
 func (d *Driver) BaseImage() (string, string) {
 	return baseImageTag, baseImageDockerfile
 }
+
+func (d *Driver) RunnerAlias() string {
+	return "nanoclaw-orchestrator"
+}

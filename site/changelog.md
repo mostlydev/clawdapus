@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Runner base refresh is part of `claw pull`** ([#128](https://github.com/mostlydev/clawdapus/issues/128)) -- built-in local runner aliases such as `openclaw:latest`, `nanobot:latest`, and `nanoclaw-orchestrator:latest` now refresh through `claw pull` instead of being silently built by `claw build` on first use. `claw pull --no-runners` keeps the fast pinned-infra path, while `claw build` consumes an already-refreshed local runner alias, rewrites generated Dockerfiles to a versioned local runner tag, and stamps runner provenance labels so `claw up` can warn when a service image was built against an older local alias.
 
 ## v0.9.0 <Badge type="tip" text="Latest" /> {#v0-9-0}
 

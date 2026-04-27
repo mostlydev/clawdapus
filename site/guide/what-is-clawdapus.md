@@ -20,7 +20,7 @@ The `claw` CLI maps directly to what you already know:
 | `claw agent add` | _(none)_ | Add agents while preserving existing layout |
 | `Clawfile` | `Dockerfile` | Build an immutable agent image |
 | `claw-pod.yml` | `docker-compose.yml` | Run a governed agent fleet |
-| `claw pull` | `docker compose pull` | Fetch pinned infra images and pod registry images |
+| `claw pull` | `docker compose pull` + `docker build --pull --no-cache` | Fetch pinned infra, pod registry images, and built-in local runner base aliases |
 | `claw build` | `docker build` | Transpile + build OCI image, or build all pod `build:` services |
 | `claw up` | `docker compose up` | Enforce + deploy; authoritative on missing images |
 

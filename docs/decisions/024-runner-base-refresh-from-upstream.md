@@ -65,7 +65,7 @@ The alternative would be introducing a new top-level verb (`claw runners update`
 
 ### 1. Runner bases are built locally from upstream, never pinned by Clawdapus
 
-The five synthetic-tag drivers (`openclaw`, `microclaw`, `nullclaw`, `nanobot`, `picoclaw`, `nanoclaw-orchestrator`) keep their inline `BaseImage()` Dockerfiles. Clawdapus does not publish runner base images for these drivers and does not pin upstream runner versions in the binary's release manifest.
+The six synthetic-tag drivers (`openclaw`, `microclaw`, `nullclaw`, `nanobot`, `picoclaw`, `nanoclaw-orchestrator`) keep their inline `BaseImage()` Dockerfiles. Clawdapus does not publish runner base images for these drivers and does not pin upstream runner versions in the binary's release manifest.
 
 `hermes-base` continues to be pinned and published per ADR-022 §3, as the deliberate exception.
 
@@ -76,21 +76,27 @@ The five synthetic-tag drivers (`openclaw`, `microclaw`, `nullclaw`, `nanobot`, 
 | Invocation | Behavior |
 |---|---|
 | `claw pull --file <pod>` or `claw pull <pod>` (positional) | **Pod mode**: pull pinned infra + refresh runner bases needed by the pod's `build:` services |
+| `claw pull --no-runners --file <pod>` or `claw pull --no-runners <pod>` | **Pod mode without runner refresh**: pull pinned infra and registry service images only |
 | `claw pull` with `claw-pod.yml` in cwd (no args) | **Pod mode via auto-resolution** — unchanged from current behavior (`cmd/claw/image_lifecycle.go:137`) |
 | `claw pull <clawfile-path-or-dir>` | **Single-Clawfile mode**: resolve the input with the same single-Clawfile rules as `claw build <path>`, then refresh that driver's runner base |
 | `claw pull` with no args and no pod in cwd | **Bare mode**: core infra pull (unchanged) + refresh any *locally-tagged* managed runner aliases |
+| `claw pull --no-runners` with no args and no pod in cwd | **Bare mode without runner refresh**: core infra pull only |
 
 Disambiguation preserves the repo's existing authoring behavior rather than narrowing it. `--file` remains pod-only. Positional `.yml`/`.yaml` inputs stay pod mode. Any other positional input is resolved using the same single-Clawfile rules that `claw build <path>` already uses: directories resolve to `<dir>/Clawfile`, filenames starting with `Clawfile` (including flat-layout names like `Clawfile.westin` and example files like `Clawfile.nanoclaw`) are treated as Clawfiles, and other custom paths continue to work if they already pass Clawfile detection. This avoids breaking existing flat-layout projects and custom-named Clawfiles just to support runner refresh.
 
 The bare mode's "refresh locally-tagged managed aliases" is deliberately lazy: on a fresh machine with no runner aliases locally, it is a no-op for runner bases (you only refresh what you're already using). This keeps `claw pull` cheap as a sanity-check command and makes single-Clawfile authoring workflows smooth: after refreshing once with `claw pull my.Clawfile`, subsequent `claw pull` invocations from any directory keep that alias current.
 
+Driver names and local Docker aliases are related but not identical. Most map one-to-one (`openclaw` → `openclaw:latest`), but the `nanoclaw` driver maps to the `nanoclaw-orchestrator:latest` alias via `RunnerAlias()`. Operator-facing command selection follows pod/Clawfile driver selection; provenance labels record both the driver name and the local alias.
+
 For each runner driver that `claw pull` refreshes, it:
 
-1. Builds the inline `BaseImage()` Dockerfile with `docker build --pull --no-cache`. The `--pull` flag forces Docker to fetch the upstream FROM image (e.g., `node:22-slim`) fresh from Docker Hub. The `--no-cache` flag forces every `RUN` instruction to re-execute, so `curl https://openclaw.ai/install.sh | bash` actually re-runs against the current upstream installer.
+1. Builds the inline `BaseImage()` Dockerfile into a temporary local tag with `docker build --pull --no-cache`. The `--pull` flag forces Docker to fetch the upstream FROM image (e.g., `node:22-slim`) fresh from Docker Hub. The `--no-cache` flag forces every `RUN` instruction to re-execute, so `curl https://openclaw.ai/install.sh | bash` actually re-runs against the current upstream installer.
 2. Runs the driver's *version probe* inside the freshly built image to extract the upstream runner version (e.g., `openclaw 0.5.2` → `0.5.2`).
 3. Computes the image ID (`docker inspect --format '{{.Id}}'`) and the recipe SHA (sha256 of the inline Dockerfile content).
-4. Tags the result as **both** `<alias>:v<version>` and `<alias>:latest` in the local Docker daemon.
+4. Tags the temporary result as **both** `<alias>:v<version>` and `<alias>:latest` in the local Docker daemon, in that order.
 5. Prints a one-line operator-visible upgrade message: `openclaw: installed v0.5.2 (was v0.5.0)`.
+
+`<alias>:latest` is not overwritten until the build, inspect, and version-probe steps succeed. If the refresh fails halfway through, the previously usable local alias stays intact. Picoclaw is mechanically a wrapper around `FROM docker.io/sipeed/picoclaw:latest`, so its refresh is effectively a fresh upstream Docker pull through the same local-build pipeline.
 
 For drivers that do not implement the version probe, the fallback tag is `<alias>:built-YYYYMMDD-<imageid12>` — the build date plus the first 12 characters of the image ID. The image-ID suffix prevents same-day collisions between multiple refreshes.
 
@@ -114,7 +120,7 @@ The generated artifact is self-describing: `cat Dockerfile.generated` tells the 
 
 If the local runner base is missing or the version cannot be resolved, `claw build` fails closed with a remediation message that matches the caller's invocation shape:
 
-- Called from a pod context: `run: claw pull` (or `claw pull <pod-file>` if `-f` was used)
+- Called from a pod context: `run: claw pull -f <pod-file>`
 - Called as `claw build <path>`: `run: claw pull <same-path>`
 
 Both of these commands are honored by the mode matrix in §2, so the remediation always leads to a command that can fix the problem.
@@ -156,9 +162,9 @@ type RunnerVersionProber interface {
 
 Hermes implements neither interface (its base image is pinned per ADR-022). The five synthetic-tag drivers implement `RunnerBaseProvider`, with `RunnerVersionProber` opted in per-driver after the probe is verified against the driver's installed toolchain (see plan §2).
 
-### 6. Contributor-only repackaging is unchanged
+### 6. Contributor-only repackaging must include a versioned local tag
 
-Contributors hacking on `baseimage.go` can still rebuild a runner base manually with `docker build`. There is no separate dev tooling. The new mechanism is purely additive — it gives end users a refresh path through `claw pull` without taking anything away.
+Contributors hacking on `baseimage.go` can still rebuild a runner base manually with `docker build`, but `claw build` now requires a versioned sibling tag so generated Dockerfiles do not keep pointing at mutable `:latest`. A manual escape hatch therefore needs the same shape as `claw pull`: tag the rebuilt image as both `<alias>:latest` and `<alias>:<version-or-built-tag>`, or run `claw pull` after editing the recipe. An alias with only `<alias>:latest` is treated as requiring refresh.
 
 ## Consequences
 
@@ -172,10 +178,11 @@ Contributors hacking on `baseimage.go` can still rebuild a runner base manually 
 - No new publishing infrastructure, no new ghcr.io packages, no new manifest entries.
 - The four-verb operator surface is preserved (ADR-022 §2). The amendment is entirely contained in `claw pull`'s internals; no new top-level verb.
 - The single-Clawfile authoring path works end-to-end: `claw pull my.Clawfile` → `claw build my.Clawfile` → container runs.
+- Operators who need a fast infra-only refresh have an explicit escape hatch: `claw pull --no-runners`.
 
 **Negative:**
 
-- `claw pull` becomes slower for pods with `build:` services. A clean OpenClaw rebuild downloads `node:22-slim` and runs the install script — minutes, not seconds. `claw pull` prints a "this may take a few minutes" warning at the start of each refresh phase.
+- `claw pull` becomes slower for pods with `build:` services. A clean OpenClaw rebuild downloads `node:22-slim` and runs the install script — minutes, not seconds. `claw pull --no-runners` preserves the fast pinned-infra path.
 - Reproducibility *across* `claw pull` runs is limited by upstream source stability. Two operators running `claw pull` on different days may get different versions. This is the explicit cost of not pinning.
 - Runner refresh depends on upstream availability. If `openclaw.ai` is down, `claw pull` fails — but no worse than today, just more visible.
 - `clawfile.Emit` couples (loosely) to local Docker state, since it needs the provenance info for FROM rewriting and label injection. Mitigated by passing the resolved provenance as an explicit parameter — the function stays pure if called with nil provenance.
@@ -201,7 +208,7 @@ There is no publishing pipeline to set up. The migration is entirely in-tree cod
 1. Add the `RunnerBaseProvider` and `RunnerVersionProber` interfaces in `internal/driver/types.go`.
 2. Implement them in each of the six runner driver `baseimage.go` files, **verifying each probe against the driver's installed toolchain** (plan §2).
 3. Add `RefreshRunnerBase` to `internal/build/build.go`.
-4. Extend `cmd/claw/pull.go` with the three-mode dispatch (pod / Clawfile / bare).
+4. Extend `cmd/claw/pull.go` with the three-mode dispatch (pod / Clawfile / bare) and `--no-runners`.
 5. Extend `internal/clawfile/emit.go` to take a runner-provenance struct and rewrite FROM lines + inject three labels.
 6. Update `internal/build/build.go:Generate` to resolve provenance from local `docker image inspect` and pass it to emit.
 7. Extend `cmd/claw/compose_up.go` to read `claw.runner.image-id` labels and emit the soft drift hint.
@@ -212,7 +219,7 @@ The implementation plan in `docs/plans/2026-04-09-128-runner-update-from-upstrea
 
 ## Alternatives Considered
 
-1. **An explicit `claw runners update` verb.** Preserves ADR-022 §3's "pull skips build:" rule verbatim, at the cost of introducing a new top-level verb that breaks ADR-022 §2's "no new top-level verbs" promise. **Rejected** because amending §3 narrowly (with the anti-collision spirit preserved) is less operator-visible than amending §2.
+1. **An explicit `claw runners update` verb.** Preserves ADR-022 §3's "pull skips build:" rule verbatim, at the cost of introducing a new top-level verb that breaks ADR-022 §2's "no new top-level verbs" promise. **Rejected** because issue #128 is an operator expectation failure: `claw pull` sounds like the command that should make the platform bits current before `claw build`. A separate command would document that mismatch instead of fixing it.
 
 2. **Publish and pin runner base images.** Internally consistent with ADR-022. **Rejected on the trust argument** — making mostlydev the implicit packaging authority for upstream third-party harnesses is the wrong relationship.
 

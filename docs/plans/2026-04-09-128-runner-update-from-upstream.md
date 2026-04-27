@@ -1,7 +1,7 @@
 # Implementation Plan: Issue #128 — Runner Refresh from Upstream
 
 **Date:** 2026-04-09
-**Status:** Draft (alternative)
+**Status:** Draft
 **Issue:** #128
 **ADR:** `docs/decisions/024-runner-base-refresh-from-upstream.md`
 **Alternative considered:** an explicit `claw runners update` top-level verb
@@ -47,6 +47,15 @@ $ claw pull
 [claw]   curl https://openclaw.ai/install.sh ...
 [claw] openclaw: installed v0.5.2 (was v0.5.0)
 [claw]   tagged: openclaw:v0.5.2, openclaw:latest
+[claw] pull complete
+```
+
+Fast infra-only mode:
+
+```
+$ claw pull --no-runners
+[claw] pulling pinned infra (...)
+[claw] runner base refresh skipped (--no-runners)
 [claw] pull complete
 ```
 
@@ -160,23 +169,27 @@ Add a new exported function:
 // runner base. All three fields are passed to claw build later so service
 // images can be stamped with full provenance.
 type RefreshResult struct {
-    Alias       string // "openclaw"
-    Version     string // "0.5.2" (probed) or "built-20260409-abc123def456" (fallback)
+    DriverName  string // "openclaw" driver name
+    Alias       string // "openclaw" Docker alias, or "nanoclaw-orchestrator"
+    ImageRef    string // "<alias>:latest"
+    BuiltRef    string // "<alias>:v0.5.2" or "<alias>:built-..."
+    VersionTag  string // "v0.5.2" or "built-..."
+    PreviousRef string // previous versioned ref, if one was discoverable
+    PreviousTag string // previous version tag, if one was discoverable
     ImageID     string // "sha256:abc..." — strong drift fingerprint
     RecipeSHA   string // "sha256:def..." — recipe content hash
-    PreviousVer string // what was tagged before this refresh, for the upgrade message
 }
 
 // RefreshRunnerBase rebuilds the driver's base image against fresh upstream
 // sources, probes the resulting image for its upstream runner version, tags
 // the result, and returns the provenance needed by the caller.
-func RefreshRunnerBase(d driver.RunnerBaseProvider) (*RefreshResult, error)
+func RefreshRunnerBase(driverName string, d driver.RunnerBaseProvider) (*RefreshResult, error)
 ```
 
 Implementation shape:
 
-1. `alias := d.RunnerAlias(); _, dockerfile := d.BaseImage()`
-2. Record the previous version (if any) via `lookupLocalRunnerVersion(alias)`.
+1. `tag, dockerfile := d.BaseImage(); alias := d.RunnerAlias()`.
+2. Record the previous versioned ref (if any) via local Docker inspection.
 3. Compute `recipeSHA := sha256.Sum256([]byte(dockerfile))`.
 4. Generate a unique interim tag: `interim := alias + ":refreshing-" + shortRand()`.
 5. Run `docker build --pull --no-cache -t <interim> <tmpdir>`.
@@ -186,6 +199,8 @@ Implementation shape:
 9. `docker tag <interim> <versioned>` and `docker tag <interim> <alias>:latest`.
 10. `docker rmi <interim>` (best-effort; not a hard error if it fails).
 11. Return the `RefreshResult`.
+
+`<alias>:latest` is not retagged until build, inspect, and probe have all succeeded. A failed refresh should leave the previous usable alias in place.
 
 Helpers `dockerTag`, `dockerRmiQuiet`, `shortRand`, and `lookupLocalRunnerVersion` wrap shell invocations of `docker` — the file already shells out to docker (see `build.go:131`), so this is a continuation of the existing pattern.
 
@@ -217,6 +232,8 @@ var pullCmd = &cobra.Command{
     },
 }
 ```
+
+Add `--no-runners` to skip the runner-refresh phase while preserving the existing pinned-infra and registry-service pull behavior.
 
 New helper in `cmd/claw/image_lifecycle.go` (next to `resolveOptionalPodFile`):
 
@@ -312,12 +329,12 @@ func refreshRunnerBases(drivers []driver.RunnerBaseProvider) (map[string]*build.
             return nil, fmt.Errorf("refresh runner base %s: %w", alias, err)
         }
         switch {
-        case res.PreviousVer == "":
-            fmt.Printf("[claw] %s: installed v%s\n", alias, res.Version)
-        case res.PreviousVer == res.Version:
-            fmt.Printf("[claw] %s: already at v%s\n", alias, res.Version)
+        case res.PreviousRef == "":
+            fmt.Printf("[claw] %s: installed %s\n", alias, res.BuiltRef)
+        case res.PreviousRef == res.BuiltRef:
+            fmt.Printf("[claw] %s: refreshed %s\n", alias, res.BuiltRef)
         default:
-            fmt.Printf("[claw] %s: installed v%s (was v%s)\n", alias, res.Version, res.PreviousVer)
+            fmt.Printf("[claw] %s: installed %s (was %s)\n", alias, res.BuiltRef, res.PreviousRef)
         }
         results[alias] = res
     }
@@ -444,6 +461,7 @@ Service images without any `claw.runner.*` labels (built by older `claw` binarie
     - no args, `claw-pod.yml` in cwd → pod mode (auto)
     - no args, no pod in cwd → bare mode
     - both `--file` and positional → error
+    - `--no-runners` skips runner refresh while still pulling infra / registry images
   - `locallyTaggedRunnerDrivers` returns drivers whose alias tag exists in a mocked docker state.
 
 - `cmd/claw/compose_up_test.go`:
@@ -476,7 +494,7 @@ go test -tags spike -run TestSpikeRollCall ./cmd/claw/...
 ### 11. Documentation sweep
 
 - `AGENTS.md` (and the `CLAUDE.md` symlink): remove the OpenClaw refresh footgun from "Repo-Specific Gotchas." Add a note that `claw pull` refreshes runner bases for the pod's `build:` services (or for a single Clawfile) and that this can take minutes. Document the three-mode `claw pull` matrix.
-- `README.md`: extend the four-verb explanation to mention runner refresh under `claw pull`, including the single-Clawfile mode.
+- `README.md`: extend the four-verb explanation to mention runner refresh under `claw pull`, including the single-Clawfile mode and `--no-runners` escape hatch.
 - `site/guide/cli.md`: same.
 - `site/guide/quickstart.md`: confirm the quickstart still works end-to-end.
 - `cmd/claw/skill_data/SKILL.md` and `skills/clawdapus/SKILL.md`: regenerate via `go generate ./cmd/claw/...`.
@@ -485,14 +503,15 @@ go test -tags spike -run TestSpikeRollCall ./cmd/claw/...
 ## Manual smoke test
 
 1. `docker rmi openclaw:latest openclaw:v* openclaw:built-* 2>/dev/null || true`
-2. `cd examples/quickstart && claw up -d` — expect `claw build` failure with `run: claw pull` remediation.
+2. `cd examples/quickstart && claw up -d` — expect `claw build` failure with `run: claw pull -f claw-pod.yml` remediation.
 3. `claw pull` — expect openclaw rebuild with version output.
 4. `cat compose.generated.yml` and `cat <build-ctx>/Dockerfile.generated` — verify `FROM openclaw:v<version>` and three `LABEL claw.runner.*` lines.
 5. `docker image inspect openclaw:latest` — verify both `openclaw:v<version>` and `openclaw:latest` in `RepoTags`.
 6. `claw build && claw up -d` — pod starts.
 7. **Single-Clawfile mode:** `claw pull examples/trading-desk/Clawfile.nanoclaw` and `claw pull examples/quickstart` — expect runner refresh to work for both a custom-named Clawfile and a directory input, using the same resolution rules as `claw build`.
 8. **Same-version drift simulation:** `docker tag openclaw:v<version> openclaw:v<version>-spoof && docker rmi openclaw:latest && docker tag busybox openclaw:latest` → `claw up` should print the soft drift hint because image IDs differ.
-9. **Live Tiverton smoke:** on the trading pod host, run `claw pull -f claw-pod.yml`, then `claw build -f claw-pod.yml`, then `claw up -d -f claw-pod.yml`, then `claw compose exec analyst openclaw --version` to confirm the new runner version.
+9. **Fast infra-only smoke:** `claw pull --no-runners -f claw-pod.yml` should pull pinned infra and registry service images without touching local runner aliases.
+10. **Live Tiverton smoke:** on the trading pod host, run `claw pull -f claw-pod.yml`, then `claw build -f claw-pod.yml`, then `claw up -d -f claw-pod.yml`, then `claw compose exec analyst openclaw --version` to confirm the new runner version.
 
 ## Open questions to settle during implementation
 

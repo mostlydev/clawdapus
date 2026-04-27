@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/clawapi"
+	"github.com/mostlydev/clawdapus/internal/clawfile"
 	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/describe"
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -1311,7 +1313,7 @@ func TestBuildPlannedServiceImagesBuildOnlyClawfile(t *testing.T) {
 		t.Fatalf("expected one planned image, got %d", len(plans))
 	}
 	imageRef := plans[0].ImageRef
-	if err := buildPlannedServiceImages(tmpDir, plans, false); err != nil {
+	if err := buildPlannedServiceImages("claw-pod.yml", tmpDir, plans, false); err != nil {
 		t.Fatalf("buildPlannedServiceImages: %v", err)
 	}
 	if imageRef != "claw-local/research-pod-bot:latest" {
@@ -1397,7 +1399,7 @@ func TestBuildPlannedServiceImagesRebuildsClawfileBuildWhenTagExistsLocally(t *t
 	if err != nil {
 		t.Fatalf("planPodServiceImages: %v", err)
 	}
-	if err := buildPlannedServiceImages(tmpDir, plans, false); err != nil {
+	if err := buildPlannedServiceImages("claw-pod.yml", tmpDir, plans, false); err != nil {
 		t.Fatalf("buildPlannedServiceImages: %v", err)
 	}
 	imageRef := plans[0].ImageRef
@@ -1470,7 +1472,7 @@ func TestBuildPlannedServiceImagesBuildsPlainDockerfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planPodServiceImages: %v", err)
 	}
-	if err := buildPlannedServiceImages(tmpDir, plans, false); err != nil {
+	if err := buildPlannedServiceImages("claw-pod.yml", tmpDir, plans, false); err != nil {
 		t.Fatalf("buildPlannedServiceImages: %v", err)
 	}
 	imageRef := plans[0].ImageRef
@@ -1491,6 +1493,66 @@ func TestBuildPlannedServiceImagesBuildsPlainDockerfile(t *testing.T) {
 	}
 	if gotArgs["FOO"] != (buildArgValue{Value: "bar"}) {
 		t.Fatalf("expected build args to be passed through, got %v", gotArgs)
+	}
+}
+
+func TestWarnRunnerBaseDriftPrintsHint(t *testing.T) {
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevResolve := resolveLocalRunnerProvenance
+	defer func() {
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		resolveLocalRunnerProvenance = prevResolve
+	}()
+
+	imageExistsLocally = func(string) bool { return true }
+	inspectClawImage = func(string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{
+			RunnerDriver: "openclaw",
+			RunnerBuilt:  "openclaw:built-20260415-oldoldoldold",
+			RunnerImage:  "sha256:oldoldoldold1234",
+		}, nil
+	}
+	resolveLocalRunnerProvenance = func(string, driver.RunnerBaseProvider) (*clawfile.RunnerProvenance, error) {
+		return &clawfile.RunnerProvenance{
+			BuiltRef: "openclaw:built-20260415-newnewnewnew",
+			ImageID:  "sha256:newnewnewnew5678",
+		}, nil
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	prevStdout := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = prevStdout }()
+
+	warnRunnerBaseDrift("examples/quickstart/claw-pod.yml", []plannedServiceImage{
+		{
+			ServiceName: "analyst",
+			ImageRef:    "claw-local/test-analyst:latest",
+			BuildConfig: &serviceBuildConfig{Context: "."},
+		},
+	})
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close write pipe: %v", err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read warning output: %v", err)
+	}
+	out := string(data)
+	if !strings.Contains(out, "analyst: built against openclaw:built-20260415-oldoldoldold") {
+		t.Fatalf("expected drift warning, got %q", out)
+	}
+	if !strings.Contains(out, "current local alias is openclaw:built-20260415-newnewnewnew") {
+		t.Fatalf("expected current local alias in warning, got %q", out)
+	}
+	if !strings.Contains(out, "consider running: claw build -f examples/quickstart/claw-pod.yml") {
+		t.Fatalf("expected claw build hint, got %q", out)
 	}
 }
 

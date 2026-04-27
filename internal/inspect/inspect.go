@@ -32,6 +32,10 @@ type ClawInfo struct {
 	Invocations  []InspectInvocation
 	SkillEmit    string // claw.skill.emit label: path to skill file inside image
 	DescribePath string // claw.describe label: path to a structured service descriptor inside image
+	RunnerDriver string
+	RunnerBuilt  string
+	RunnerImage  string
+	RunnerRecipe string
 }
 
 func ParseLabels(labels map[string]string) *ClawInfo {
@@ -65,6 +69,14 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 		switch {
 		case key == "claw.type":
 			info.ClawType = value
+		case key == "claw.runner.driver":
+			info.RunnerDriver = value
+		case key == "claw.runner.built-against":
+			info.RunnerBuilt = value
+		case key == "claw.runner.image-id":
+			info.RunnerImage = value
+		case key == "claw.runner.recipe-sha":
+			info.RunnerRecipe = value
 		case key == "claw.agent.file":
 			info.Agent = value
 		case strings.HasPrefix(key, "claw.model."):
@@ -233,6 +245,10 @@ func LoadFromDockerfile(path string) (*ClawInfo, error) {
 
 	info := ParseLabels(labels)
 	if info.ClawType == "" &&
+		info.RunnerDriver == "" &&
+		info.RunnerBuilt == "" &&
+		info.RunnerImage == "" &&
+		info.RunnerRecipe == "" &&
 		info.SkillEmit == "" &&
 		info.DescribePath == "" &&
 		len(info.Surfaces) == 0 &&
