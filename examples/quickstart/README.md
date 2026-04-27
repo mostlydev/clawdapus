@@ -36,12 +36,12 @@ cp .env.example .env
 # Edit .env — add your OPENROUTER_API_KEY, DISCORD_BOT_TOKEN, DISCORD_BOT_ID, DISCORD_GUILD_ID
 ```
 
-## 3. Run the four verbs
+## 3. Run the operator loop
 
 ```bash
 source .env
 
-# 1. Pull pinned runtime infra + any registry-backed pod services
+# 1. Pull pinned runtime infra, registry-backed pod services, and runner bases
 claw pull
 
 # 2. Build this pod's local build: services
@@ -51,14 +51,16 @@ claw build
 claw up -d
 ```
 
-The quickstart follows the four-verb operator loop:
+The quickstart keeps the main lifecycle explicit:
 
-- `claw pull` fetches pinned runtime infra and registry-backed pod services
+- `claw pull` fetches pinned runtime infra, registry-backed pod services, and refreshes built-in local runner bases
 - `claw build` builds pod services that declare `build:`
 - `claw up` compiles the pod and launches it
 - `claw down` tears the pod back down in [step 6](#6-clean-up)
 
-`claw up` is strict by default. If something is missing, it prints the exact remediation command (`claw pull` or `claw build`). If you want a first-run shortcut, use `claw up --fix -d`.
+For this quickstart, `claw pull` refreshes the local `openclaw:latest` runner base used by the pod. Use `claw pull --no-runners` when you only want the fast pinned-infra and registry-image path.
+
+`claw up` is strict by default. If something is missing, it prints the exact remediation command (`claw pull` or `claw build`). `claw up --fix -d` can pull/build missing infra and service images, but runner refresh still happens through `claw pull`.
 
 ## 4. Verify
 

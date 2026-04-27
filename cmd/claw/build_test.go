@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mostlydev/clawdapus/internal/build"
 )
 
 func TestResolveClawfilePathRejectsMissingInput(t *testing.T) {
@@ -97,5 +100,32 @@ func TestResolveBuildContextRejectsNonDirectory(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "is not a directory") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFormatGenerateErrorUsesPullCommandForClawfile(t *testing.T) {
+	err := formatGenerateError(&build.MissingRunnerBaseError{ImageRef: "openclaw:latest"}, "", "examples/quickstart/Clawfile")
+	if err == nil {
+		t.Fatal("expected remediation error")
+	}
+	if !strings.Contains(err.Error(), "run: claw pull examples/quickstart/Clawfile") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFormatGenerateErrorUsesPullCommandForPod(t *testing.T) {
+	err := formatGenerateError(&build.MissingRunnerBaseError{ImageRef: "openclaw:latest"}, "examples/quickstart/claw-pod.yml", "examples/quickstart/Clawfile")
+	if err == nil {
+		t.Fatal("expected remediation error")
+	}
+	if !strings.Contains(err.Error(), "run: claw pull -f examples/quickstart/claw-pod.yml") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFormatGenerateErrorPassesThroughUnknownErrors(t *testing.T) {
+	original := errors.New("boom")
+	if got := formatGenerateError(original, "", ""); got != original {
+		t.Fatalf("expected original error to pass through, got %v", got)
 	}
 }

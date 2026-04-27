@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,7 +47,7 @@ var buildCmd = &cobra.Command{
 		fmt.Printf("Generating Dockerfile from %s\n", clawfilePath)
 		generatedPath, err := build.Generate(clawfilePath)
 		if err != nil {
-			return err
+			return formatGenerateError(err, "", clawfilePath)
 		}
 		fmt.Printf("Generated %s\n", generatedPath)
 
@@ -77,7 +78,7 @@ func runBuildPod(podFile string) error {
 		return nil
 	}
 
-	if err := buildPlannedServiceImages(podDir, plans, false); err != nil {
+	if err := buildPlannedServiceImages(podFile, podDir, plans, false); err != nil {
 		return err
 	}
 
@@ -131,6 +132,42 @@ func resolveBuildContext(input, clawfilePath string) (string, error) {
 	}
 
 	return resolved, nil
+}
+
+func pullCommandForPod(podFile string) string {
+	return "claw pull -f " + strings.TrimSpace(podFile)
+}
+
+func pullCommandForClawfile(clawfilePath string) string {
+	return "claw pull " + strings.TrimSpace(clawfilePath)
+}
+
+func formatGenerateError(err error, podFile, clawfilePath string) error {
+	var missing *build.MissingRunnerBaseError
+	if errors.As(err, &missing) {
+		switch {
+		case strings.TrimSpace(podFile) != "":
+			return remediationErrorf(pullCommandForPod(podFile), "%s", missing.Error())
+		case strings.TrimSpace(clawfilePath) != "":
+			return remediationErrorf(pullCommandForClawfile(clawfilePath), "%s", missing.Error())
+		default:
+			return err
+		}
+	}
+
+	var refresh *build.RunnerRefreshRequiredError
+	if errors.As(err, &refresh) {
+		switch {
+		case strings.TrimSpace(podFile) != "":
+			return remediationErrorf(pullCommandForPod(podFile), "%s", refresh.Error())
+		case strings.TrimSpace(clawfilePath) != "":
+			return remediationErrorf(pullCommandForClawfile(clawfilePath), "%s", refresh.Error())
+		default:
+			return err
+		}
+	}
+
+	return err
 }
 
 func init() {

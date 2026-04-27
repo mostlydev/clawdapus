@@ -391,7 +391,7 @@ func proxyListContains(values []string, target string) bool {
 	return false
 }
 
-func buildPlannedServiceImages(podDir string, plans []plannedServiceImage, buildMissingOnly bool) error {
+func buildPlannedServiceImages(podFile, podDir string, plans []plannedServiceImage, buildMissingOnly bool) error {
 	for _, plan := range plans {
 		if plan.BuildConfig == nil {
 			continue
@@ -400,7 +400,7 @@ func buildPlannedServiceImages(podDir string, plans []plannedServiceImage, build
 			continue
 		}
 		fmt.Printf("[claw] %s: building image %s\n", plan.ServiceName, plan.ImageRef)
-		if err := buildManagedServiceImage(podDir, plan.ImageRef, plan.BuildConfig); err != nil {
+		if err := buildManagedServiceImage(podFile, podDir, plan.ImageRef, plan.BuildConfig); err != nil {
 			return fmt.Errorf("service %q: %w", plan.ServiceName, err)
 		}
 	}

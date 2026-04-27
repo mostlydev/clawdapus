@@ -11,7 +11,7 @@ func TestEmitProducesValidDockerfile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output, err := Emit(parsed)
+	output, err := Emit(parsed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestEmitHandleLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output, err := Emit(result)
+	output, err := Emit(result, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestEmitMultipleHandleLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output, err := Emit(result)
+	output, err := Emit(result, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestEmitHandleRawDirectiveNotLeaked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output, err := Emit(result)
+	output, err := Emit(result, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,11 +143,11 @@ func TestEmitIsDeterministic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a, err := Emit(parsed)
+	a, err := Emit(parsed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := Emit(parsed)
+	b, err := Emit(parsed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ RUN echo final
 		t.Fatal(err)
 	}
 
-	output, err := Emit(parsed)
+	output, err := Emit(parsed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestEmitInvokeAsLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := Emit(parsed)
+	output, err := Emit(parsed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestEmitMultipleInvokeOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := Emit(parsed)
+	output, err := Emit(parsed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestEmitCllamaIndexedLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := Emit(parsed)
+	output, err := Emit(parsed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,5 +249,41 @@ func TestEmitCllamaIndexedLabels(t *testing.T) {
 	}
 	if strings.Contains(output, "claw.cllama.default") {
 		t.Fatalf("did not expect legacy claw.cllama.default label, got:\n%s", output)
+	}
+}
+
+func TestEmitRewritesRunnerFromAndAddsProvenanceLabels(t *testing.T) {
+	input := "FROM openclaw:latest\nCLAW_TYPE openclaw\nAGENT AGENTS.md\n"
+	parsed, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := Emit(parsed, &RunnerProvenance{
+		DriverName: "openclaw",
+		Alias:      "openclaw",
+		ImageRef:   "openclaw:latest",
+		BuiltRef:   "openclaw:built-20260415-abc123def456",
+		ImageID:    "sha256:abc123def4567890",
+		RecipeSHA:  "sha256:def456abc1237890",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.HasPrefix(output, "FROM openclaw:built-20260415-abc123def456") {
+		t.Fatalf("expected rewritten FROM, got:\n%s", output)
+	}
+	if !strings.Contains(output, `LABEL claw.runner.driver="openclaw"`) {
+		t.Fatalf("missing claw.runner.driver label:\n%s", output)
+	}
+	if !strings.Contains(output, `LABEL claw.runner.built-against="openclaw:built-20260415-abc123def456"`) {
+		t.Fatalf("missing claw.runner.built-against label:\n%s", output)
+	}
+	if !strings.Contains(output, `LABEL claw.runner.image-id="sha256:abc123def4567890"`) {
+		t.Fatalf("missing claw.runner.image-id label:\n%s", output)
+	}
+	if !strings.Contains(output, `LABEL claw.runner.recipe-sha="sha256:def456abc1237890"`) {
+		t.Fatalf("missing claw.runner.recipe-sha label:\n%s", output)
 	}
 }

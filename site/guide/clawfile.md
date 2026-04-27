@@ -259,8 +259,8 @@ claw build -t my-agent:latest --context ./build-context ./agents/my-agent
 claw build
 ```
 
-::: tip Auto-Built Base Images
-When a Clawfile references a driver base image that is missing locally, `claw build` resolves it automatically. For pod work, the intended operator loop is `claw pull` then `claw build` then `claw up`.
+::: tip Runner Base Images
+Built-in runner base aliases such as `openclaw:latest` are refreshed by `claw pull`, then consumed by `claw build`. Use `claw pull --no-runners` when you only want pinned infra and registry images. Other non-runner base-image remediation still follows its existing path.
 :::
 
 The generated `Dockerfile.generated` is a standard Dockerfile. Inspect it to see exactly what `claw build` produced -- but do not hand-edit it, as it is regenerated on every build.

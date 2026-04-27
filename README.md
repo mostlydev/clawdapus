@@ -30,10 +30,10 @@ cd clawdapus/examples/quickstart
 cp .env.example .env
 # Edit .env — add OPENROUTER_API_KEY, DISCORD_BOT_TOKEN, DISCORD_BOT_ID, DISCORD_GUILD_ID
 
-# Run the four-verb operator loop
+# Run the operator loop
 source .env
 
-# 1. pull pinned runtime infra + any registry-backed pod services
+# 1. pull pinned runtime infra, registry-backed pod services, and runner bases
 claw pull
 
 # 2. build this pod's local build: services
@@ -60,12 +60,14 @@ The cllama governance proxy dashboard runs on port **8181** — every LLM call i
 The Clawdapus Dash fleet dashboard runs on port **8082** — live service health, topology wiring, per-service drill-down, and agent context inspection. The Agents view shows each claw's compiled `AGENTS.md`/`CLAWDAPUS.md`, redacted runtime manifests, and the latest live context snapshot captured by cllama.
 
 The operator surface is four verbs:
-- `claw pull` fetches pinned runtime infra and registry-backed pod services
+- `claw pull` fetches pinned runtime infra, registry-backed pod services, and refreshes built-in local runner bases
 - `claw build` builds pod services that declare `build:`
 - `claw up` compiles the pod and launches it, staying strict by default
 - `claw down` tears the pod back down
 
-If `claw up` finds something missing, it tells you exactly which command to run next. For a first-run shortcut, use `claw up --fix -d`.
+Runner refresh happens through `claw pull`: for a pod it refreshes the runner bases used by `build:` services, and for a single Clawfile you can run `claw pull ./agents/assistant/Clawfile`. Use `claw pull --no-runners` when you want the fast pinned-infra path only.
+
+If `claw up` finds something missing, it tells you exactly which command to run next. `claw up --fix -d` can pull/build missing infra and service images, but runner refresh still happens through `claw pull`.
 
 Message `@quickstart-bot` in your Discord server. The bot responds through the proxy — it has no direct API access. The dashboard updates live.
 
@@ -104,7 +106,7 @@ claw up -d
 claw agent add researcher
 ```
 
-Generated projects use the same four-verb loop: `claw pull`, `claw build`, `claw up`, then `claw down` when you're finished.
+Generated projects use the same operator loop: `claw pull`, `claw build`, `claw up`, then `claw down` when you're finished.
 
 `claw agent add` preserves the project's existing layout by default:
 - Canonical project: adds `agents/<name>/Clawfile` + `agents/<name>/AGENTS.md`
@@ -248,7 +250,7 @@ Clawdapus extends two formats you already know:
 | `claw agent add` | _(none)_ | Add agents while preserving existing layout (`--layout auto|canonical|flat`) |
 | `Clawfile` | `Dockerfile` | Build an immutable agent image |
 | `claw-pod.yml` | `docker-compose.yml` | Run a governed agent fleet |
-| `claw pull` | `docker compose pull` | Fetch pinned infra images and pod registry images |
+| `claw pull` | `docker compose pull` + `docker build --pull --no-cache` | Fetch pinned infra, pod registry images, and built-in local runner base aliases |
 | `claw build` | `docker build` | Transpile + build OCI image, or build every `build:` service in the pod |
 | `claw up` | `docker compose up` | Enforce + deploy; authoritative on what is stale |
 

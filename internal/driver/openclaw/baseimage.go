@@ -81,3 +81,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/openclaw-entrypoint.sh"]
 func (d *Driver) BaseImage() (string, string) {
 	return baseImageTag, baseImageDockerfile
 }
+
+func (d *Driver) RunnerAlias() string {
+	return "openclaw"
+}

@@ -17,7 +17,8 @@ go build -o bin/claw ./cmd/claw    # build from source
 claw doctor                         # verify Docker, buildx, compose
 
 # Image lifecycle
-claw pull [-f <pod>.yml]            # pinned infra + pod registry images
+claw pull [-f <pod>.yml]            # pinned infra + pod registry images + runner bases
+claw pull --no-runners [-f <pod>]   # pinned infra + registry images only
 claw build -t <image> <path>        # single Clawfile -> Dockerfile.generated -> docker build
 claw build [-f <pod>.yml]           # with no path: build every pod service that has build:
 claw inspect <image>                 # show claw.* labels from built image
@@ -498,7 +499,8 @@ All views are read-only and scoped through `claw-api` principals. Use this befor
 
 ## Architecture Key Points
 
-- `claw pull` owns pinned infra freshness and pod registry-image pulls
+- `claw pull` owns pinned infra freshness, pod registry-image pulls, and built-in local runner alias freshness (`openclaw:latest`, `nanobot:latest`, etc.)
+- `claw pull --no-runners` skips runner refresh for the fast infra-only path
 - `claw build` transpiles Clawfile -> standard Dockerfile -> `docker build` -> OCI image, or builds every pod `build:` service when run without a path
 - `claw up` parses pod YAML -> driver enforcement -> `compose.generated.yml` -> `docker compose`, but stays strict about missing images unless `--fix` is set
 - **docker compose is the sole lifecycle authority**. Docker SDK is read-only.

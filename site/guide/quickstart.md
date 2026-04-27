@@ -57,12 +57,12 @@ Edit `.env` and set:
 - `DISCORD_BOT_ID` -- your Discord bot's application ID
 - `DISCORD_GUILD_ID` -- the Discord server (guild) ID
 
-## Run the Four Verbs
+## Run the Operator Loop
 
 ```bash
 source .env
 
-# 1. Pull pinned runtime infra + any registry-backed pod services
+# 1. Pull pinned runtime infra, registry-backed pod services, and runner bases
 claw pull
 
 # 2. Build this pod's local build: services
@@ -74,12 +74,12 @@ claw up -d
 
 Clawdapus keeps the operator loop explicit:
 
-- `claw pull` fetches pinned runtime infra and registry-backed pod services
+- `claw pull` fetches pinned runtime infra, registry-backed pod services, and refreshes built-in local runner bases such as `openclaw:latest`
 - `claw build` builds pod services that declare `build:`
 - `claw up` compiles the pod and launches it
 - `claw down` tears the pod back down
 
-`claw up` stays strict by default and tells you which command to run when something is missing. For onboarding, `claw up --fix -d` will do the remediation steps automatically.
+`claw up` stays strict by default and tells you which command to run when something is missing. `claw up --fix -d` can pull/build missing infra and service images, but runner refresh still happens through `claw pull`. Use `claw pull --no-runners` when you only want the fast pinned-infra and registry-image path.
 
 `claw up` resolves `${...}` placeholders inside `x-claw` metadata from your shell environment and the pod-local `.env` file, so you do not need to duplicate handle IDs or guild IDs into service `environment:` blocks.
 
@@ -120,7 +120,7 @@ claw build
 claw up -d
 ```
 
-That scaffolded project follows the same four verbs: `claw pull`, `claw build`, `claw up`, and `claw down`.
+That scaffolded project follows the same operator loop: `claw pull`, `claw build`, `claw up`, and `claw down`.
 
 Add more agents later:
 

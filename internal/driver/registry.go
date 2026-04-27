@@ -25,3 +25,14 @@ func Lookup(name string) (Driver, error) {
 	}
 	return d, nil
 }
+
+func Registered() map[string]Driver {
+	mu.RLock()
+	defer mu.RUnlock()
+
+	out := make(map[string]Driver, len(drivers))
+	for name, d := range drivers {
+		out[name] = d
+	}
+	return out
+}

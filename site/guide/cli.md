@@ -1,6 +1,6 @@
 # CLI Commands
 
-The `claw` CLI is the single entry point for building, deploying, and managing governed agent pods. The everyday operator loop is `claw pull`, `claw build`, `claw up`, `claw down`: pull pinned/runtime images, build local services, compile and launch, then tear the pod back down.
+The `claw` CLI is the single entry point for building, deploying, and managing governed agent pods. The everyday operator loop is `claw pull`, `claw build`, `claw up`, `claw down`: pull pinned/runtime images and runner bases, build local services, compile and launch, then tear the pod back down.
 
 ## Global Flags
 
@@ -15,29 +15,37 @@ The `-f` flag is a persistent flag on the root command, so lifecycle commands in
 
 ## claw pull
 
-Fetch pinned infra images and pod registry images.
+Fetch pinned infra images, pod registry images, and built-in local runner bases.
 
 ```bash
-claw pull [pod-file]
+claw pull [pod-file-or-clawfile] [--no-runners]
 ```
 
-Without a pod file, `claw pull` fetches the binary's pinned runtime infra images. With a pod file, it narrows to the runtime infra that pod actually needs and also pulls every service image that does **not** declare `build:`.
+Without a pod file, `claw pull` fetches the binary's pinned runtime infra images and refreshes managed runner aliases already tagged locally. With a pod file, it narrows to the runtime infra that pod actually needs, pulls every service image that does **not** declare `build:`, and refreshes runner bases used by `build:` services. With a Clawfile path, it refreshes the runner base required by that Clawfile.
+
+| Flag | Description |
+|------|-------------|
+| `--no-runners` | Skip local runner base refresh. Use this for a fast pinned-infra and registry-image pull. |
 
 **What it does:**
 
 1. Checks the binary's pinned infra image refs.
 2. Pulls missing infra images.
 3. If a pod is present, pulls registry-backed service images.
-4. Skips any service with `build:` because those belong to `claw build`.
+4. Refreshes built-in local runner bases with `docker build --pull --no-cache`, unless `--no-runners` is set.
+5. Leaves pod service images with `build:` to `claw build`.
 
 **Examples:**
 
 ```bash
-# Pull just the pinned infra images
-claw pull
+# Pull without refreshing runner bases
+claw pull --no-runners
 
-# Pull infra plus another pod's registry services
+# Pull infra, registry services, and runner bases for another pod
 claw pull ./examples/quickstart/claw-pod.yml
+
+# Refresh the runner required by one Clawfile
+claw pull ./agents/assistant/Clawfile
 ```
 
 ---
@@ -57,7 +65,7 @@ With a positional argument, `claw build` keeps the single-image form: transpile 
 | `-t, --tag <name>` | Tag for the built image in single-image mode. |
 | `--context <dir>` | Docker build context directory in single-image mode. Defaults to the Clawfile's parent directory. |
 
-When a driver's base image is missing locally, `claw build` resolves it automatically.
+For built-in local runner bases, `claw build` consumes an already-refreshed alias. If a required runner alias is missing or lacks provenance, it tells you to run `claw pull`. Non-runner base-image remediation still follows its existing path.
 
 **Examples:**
 
@@ -103,7 +111,7 @@ The pod file can be specified as a positional argument or via `-f`. Defaults to 
 
 **Dashboard URL:** When the pod declares a `clawdash` surface, `claw up` prints the dashboard URL on success (for example `[claw] dashboard:  http://localhost:8082`) so you can jump straight into the Agents / Topology / Fleet views without re-checking the compose output.
 
-`claw up` is strict by default. If an infra image is missing, it tells you to run `claw pull`. If a pod service image is not built, it tells you to run `claw build`. `claw up --fix` performs those remediation steps automatically.
+`claw up` is strict by default. If an infra image is missing, it tells you to run `claw pull`. If a local runner base needs refresh, the build path tells you to run `claw pull`. If a pod service image is not built, it tells you to run `claw build`. `claw up --fix` can pull/build missing infra and service images, but runner refresh still happens through `claw pull`.
 
 **Examples:**
 
@@ -603,7 +611,7 @@ Error: claw-pod.yml is newer than compose.generated.yml — run 'claw up' to reg
 
 | Command | Staleness guard | Requires `claw up` first | Notes |
 |---------|:-:|:-:|-------|
-| `claw pull` | -- | No | Pinned infra + pod registry images |
+| `claw pull` | -- | No | Pinned infra + pod registry images + runner bases |
 | `claw build` | -- | No | Single-image or pod-aware build |
 | `claw up` | -- | No | Generates `compose.generated.yml`; strict by default |
 | `claw down` | Exempt | Yes | Always allowed |

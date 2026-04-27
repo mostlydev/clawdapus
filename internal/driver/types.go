@@ -23,6 +23,19 @@ type BaseImageProvider interface {
 	BaseImage() (tag string, dockerfile string)
 }
 
+// RunnerBaseProvider is optionally implemented by drivers whose base image is
+// a synthetic local alias refreshed from upstream sources.
+type RunnerBaseProvider interface {
+	BaseImageProvider
+	RunnerAlias() string
+}
+
+// RunnerVersionProber is optionally implemented by RunnerBaseProvider drivers
+// that can report the installed upstream runner version.
+type RunnerVersionProber interface {
+	RunnerVersionProbe() []string
+}
+
 // Invocation is a scheduled agent task resolved from image labels or pod x-claw.invoke.
 type Invocation struct {
 	ID       string           `json:"id,omitempty"`

@@ -57,6 +57,7 @@ var (
 	imageExistsLocally           = build.ImageExistsLocally
 	generateClawDockerfile       = build.Generate
 	buildGeneratedImage          = build.BuildFromGenerated
+	resolveLocalRunnerProvenance = build.ResolveLocalRunnerProvenance
 	dockerBuildTaggedImage       = dockerBuildTaggedImageDefault
 	findClawdapusRepoRoot        = findRepoRoot
 	runInfraDockerCommand        = runInfraDockerCommandDefault
@@ -111,11 +112,12 @@ func runComposeUp(podFile string) (err error) {
 			}
 		}
 		if firstMissingBuildPlan(servicePlans) != nil {
-			if err := buildPlannedServiceImages(podDir, servicePlans, true); err != nil {
+			if err := buildPlannedServiceImages(podFile, podDir, servicePlans, true); err != nil {
 				return err
 			}
 		}
 	}
+	warnRunnerBaseDrift(podFile, servicePlans)
 	if err := resolveRuntimePlaceholders(podDir, p); err != nil {
 		return fmt.Errorf("resolve x-claw runtime placeholders: %w", err)
 	}
@@ -3991,7 +3993,7 @@ func parseBuildArgList(items []string) (map[string]buildArgValue, error) {
 	return out, nil
 }
 
-func buildManagedServiceImage(podDir, imageRef string, cfg *serviceBuildConfig) error {
+func buildManagedServiceImage(podFile, podDir, imageRef string, cfg *serviceBuildConfig) error {
 	contextDir := cfg.Context
 	if !filepath.IsAbs(contextDir) {
 		contextDir = filepath.Join(podDir, contextDir)
@@ -4009,7 +4011,7 @@ func buildManagedServiceImage(podDir, imageRef string, cfg *serviceBuildConfig) 
 	if isClawBuildFile(dockerfilePath) {
 		generatedPath, err := generateClawDockerfile(dockerfilePath)
 		if err != nil {
-			return fmt.Errorf("generate Dockerfile from %q: %w", dockerfilePath, err)
+			return fmt.Errorf("generate Dockerfile from %q: %w", dockerfilePath, formatGenerateError(err, podFile, dockerfilePath))
 		}
 		if err := buildGeneratedImage(generatedPath, imageRef, contextDir); err != nil {
 			return fmt.Errorf("build image %q from %q: %w", imageRef, generatedPath, err)
@@ -4218,6 +4220,66 @@ func runComposeDockerCommandDefault(args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func warnRunnerBaseDrift(podFile string, plans []plannedServiceImage) {
+	buildCommand := "claw build"
+	if strings.TrimSpace(podFile) != "" && strings.TrimSpace(podFile) != "claw-pod.yml" {
+		buildCommand = "claw build -f " + strings.TrimSpace(podFile)
+	}
+	for _, plan := range plans {
+		if plan.BuildConfig == nil || strings.TrimSpace(plan.ImageRef) == "" || !imageExistsLocally(plan.ImageRef) {
+			continue
+		}
+
+		info, err := inspectClawImage(plan.ImageRef)
+		if err != nil || info == nil || strings.TrimSpace(info.RunnerDriver) == "" || strings.TrimSpace(info.RunnerImage) == "" {
+			continue
+		}
+
+		d, err := driver.Lookup(info.RunnerDriver)
+		if err != nil {
+			continue
+		}
+		provider, ok := d.(driver.RunnerBaseProvider)
+		if !ok {
+			continue
+		}
+
+		provenance, err := resolveLocalRunnerProvenance(info.RunnerDriver, provider)
+		if err != nil || provenance == nil || strings.TrimSpace(provenance.ImageID) == "" {
+			continue
+		}
+		if provenance.ImageID == info.RunnerImage {
+			continue
+		}
+
+		builtRef := strings.TrimSpace(info.RunnerBuilt)
+		if builtRef == "" {
+			builtRef = plan.ImageRef
+		}
+		currentRef := strings.TrimSpace(provenance.BuiltRef)
+		if currentRef == "" {
+			currentRef = provenance.ImageRef
+		}
+
+		fmt.Printf("[claw] %s: built against %s (image %s), current local alias is %s (image %s); consider running: %s\n",
+			plan.ServiceName,
+			builtRef,
+			shortImageIDForDisplay(info.RunnerImage),
+			currentRef,
+			shortImageIDForDisplay(provenance.ImageID),
+			buildCommand,
+		)
+	}
+}
+
+func shortImageIDForDisplay(imageID string) string {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(imageID), "sha256:")
+	if len(trimmed) > 12 {
+		return trimmed[:12]
+	}
+	return trimmed
 }
 
 // findRepoRoot walks up from cwd looking for go.mod with the clawdapus module.
