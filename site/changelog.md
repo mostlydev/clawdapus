@@ -29,9 +29,19 @@ outline: deep
 
 ## Unreleased
 
-- **Runner base refresh is part of `claw pull`** ([#128](https://github.com/mostlydev/clawdapus/issues/128)) -- built-in local runner aliases such as `openclaw:latest`, `nanobot:latest`, and `nanoclaw-orchestrator:latest` now refresh through `claw pull` instead of being silently built by `claw build` on first use. `claw pull --no-runners` keeps the fast pinned-infra path, while `claw build` consumes an already-refreshed local runner alias, rewrites generated Dockerfiles to a versioned local runner tag, and stamps runner provenance labels so `claw up` can warn when a service image was built against an older local alias.
+<!-- Nothing yet -->
 
-## v0.9.1 <Badge type="tip" text="Latest" /> {#v0-9-1}
+## v0.10.0 <Badge type="tip" text="Latest" /> {#v0-10-0}
+
+*2026-04-26*
+
+- **Runner base refresh is part of `claw pull`** ([#128](https://github.com/mostlydev/clawdapus/issues/128)) — built-in local runner aliases (`openclaw:latest`, `nanobot:latest`, `nanoclaw-orchestrator:latest`, `microclaw:latest`, `nullclaw:latest`, `picoclaw:latest`) now refresh through `claw pull` with `docker build --pull --no-cache` against the inline `BaseImage()` recipe, instead of being silently materialized by `claw build` on first use. The four-verb operator surface stays intact. `claw pull --no-runners` preserves the fast pinned-infra-only path. Refresh is transactional: builds into a temporary tag and only retags `<alias>:latest` after build, inspect, and version probe succeed, so a failed refresh leaves the previously usable alias intact.
+- **`claw build` stamps runner provenance** — `Dockerfile.generated` now rewrites `FROM <alias>:latest` to `FROM <alias>:v<version>` and injects three labels (`claw.runner.built-against`, `claw.runner.image-id`, `claw.runner.recipe-sha`). `claw inspect` surfaces them. The image ID is the strong drift fingerprint and survives upstream version-string instability.
+- **`claw up` soft drift hint** — when a service image was built against an older local runner alias than the one currently tagged, `claw up` prints an informational hint pointing at `claw build`. It does not auto-rebuild and does not probe upstream sources; staleness against upstream is always an explicit `claw pull` action.
+- **New driver interfaces** — `RunnerBaseProvider` (with `RunnerAlias()`) and the optional `RunnerVersionProber` (with `RunnerVersionProbe() []string`) live alongside `BaseImageProvider`. Drivers without a verified probe fall back to a `built-YYYYMMDD-<imageid12>` tag whose image-ID suffix prevents same-day collisions across multiple refreshes.
+- **Pinned infra images republished at v0.10.0** — `clawdash`, `claw-api`, and `claw-wall` images move in lockstep with each release tag; no behavioural change in those images this round. Pinned cllama unchanged at [v0.4.1](https://github.com/mostlydev/cllama/releases/tag/v0.4.1).
+
+## v0.9.1 {#v0-9-1}
 
 *2026-04-26*
 

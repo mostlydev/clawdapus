@@ -43,7 +43,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/what-is-clawdapus' },
       {
-        text: 'v0.9.1',
+        text: 'v0.10.0',
         items: [
           { text: 'Changelog', link: '/changelog' },
           { text: 'Manifesto', link: '/manifesto' },
