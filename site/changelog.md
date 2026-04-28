@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.10.0 <Badge type="tip" text="Latest" /> {#v0-10-0}
+## v0.11.0 <Badge type="tip" text="Latest" /> {#v0-11-0}
+
+*2026-04-27*
+
+- **MCP sidecar services as managed tools** ([#177](https://github.com/mostlydev/clawdapus/issues/177)) — `claw.describe` v2 now accepts a top-level `mcp` block (`transport: streamable_http`, `path: /mcp`); when present, individual `tools[]` entries omit `http` and `claw up` compiles them into per-agent `tools.json` with `transport: "mcp"` execution metadata, including the un-namespaced `tool_name` for `tools/call` routing. cllama gains a Streamable HTTP MCP client that runs the `initialize` + `notifications/initialized` handshake, caches sessions per target, parses both JSON and `text/event-stream` JSON-RPC responses, and retries once on session expiry. Tool names stay namespaced (`<service>.<tool>`); audit, session-history, policy budgets, and credential-starvation boundaries are unchanged. Existing HTTP managed-tool descriptors continue to work without modification. `claw discover` (live `tools/list` snapshot into the build context) and baked `.claw-tools.json` artifact support remain follow-up work.
+- **cllama bumps to [v0.5.0](https://github.com/mostlydev/cllama/releases/tag/v0.5.0)** — pulls in the new MCP transport and dispatch switch in the proxy. Pinned runtime infra tags advance accordingly.
+
+## v0.10.0 {#v0-10-0}
 
 *2026-04-26*
 

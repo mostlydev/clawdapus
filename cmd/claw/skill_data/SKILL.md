@@ -261,7 +261,8 @@ Services declare capabilities via a `.claw-describe.json` file (embedded in the 
 }
 ```
 
-- **`tools`**: Each requires `name`, `description`, `inputSchema` (JSON Schema, `type: "object"`), and `http` (`method`, `path`, optional `body`). Duplicate tool names within a service are a hard error.
+- **`tools`**: Each requires `name`, `description`, `inputSchema` (JSON Schema, `type: "object"`), and either `http` (`method`, `path`, optional `body`) for Clawdapus-native HTTP services *or* a top-level `mcp` block on the descriptor (see below) for MCP sidecars. Duplicate tool names within a service are a hard error.
+- **`mcp`** *(v0.11.0)*: Top-level block declaring the service is an MCP sidecar — `transport: streamable_http` (default) and `path: /mcp` (default). When present, `tools[].http` becomes optional and cllama routes calls through the MCP `tools/call` endpoint instead of an HTTP path. Auth resolution, namespacing, audit, session-history, and policy budgets are unchanged from the HTTP-managed path.
 - **`memory`**: At least one of `recall` or `retain` required. All paths must start with `/`.
 - **`feeds`**: Unchanged from v1. Short-form names in `x-claw.feeds` resolve against the feed registry.
 
@@ -290,10 +291,10 @@ When a service subscribes to a memory service via `x-claw.memory`, cllama perfor
 
 ### Managed Tool Mediation (v0.5.0)
 
-When a service subscribes to tools via `x-claw.tools`, cllama performs bounded HTTP tool execution within the inference turn:
+When a service subscribes to tools via `x-claw.tools`, cllama performs bounded tool execution within the inference turn:
 
 - Tools are injected into the LLM request as available tool definitions
-- When the model calls a tool, cllama executes the HTTP request against the providing service
+- When the model calls a tool, cllama executes against the providing service. The execution path depends on the descriptor: HTTP-native services use the per-tool `http` metadata; MCP sidecars (descriptor declares a top-level `mcp` block, v0.11.0+) are reached via the Streamable HTTP `tools/call` endpoint with cached `initialize` sessions.
 - Tool results are fed back to the model for up to 8 rounds (configurable)
 - `tool_trace` entries appear in session history for auditability
 - Works with both OpenAI-compatible and Anthropic-format requests
