@@ -31,6 +31,7 @@ const (
 	defaultRestartBackoffMS = 1000
 	defaultRestartMaxMS     = 15000
 	defaultMaxBodyBytes     = 1 << 20
+	lateResponseTTL         = 5 * time.Minute
 )
 
 type config struct {
@@ -59,6 +60,11 @@ type pendingCall struct {
 	ch         chan []byte
 }
 
+type lateResponse struct {
+	reason string
+	at     time.Time
+}
+
 type initCache struct {
 	response []byte
 }
@@ -74,6 +80,7 @@ type stdioBridge struct {
 	available   bool
 	generation  int64
 	pending     map[string]pendingCall
+	late        map[string]lateResponse
 	sessions    map[string]int64
 	initialized bool
 	init        *initCache
@@ -248,6 +255,7 @@ func newStdioBridge(ctx context.Context, cfg config) *stdioBridge {
 		ctx:      childCtx,
 		cancel:   cancel,
 		pending:  make(map[string]pendingCall),
+		late:     make(map[string]lateResponse),
 		sessions: make(map[string]int64),
 	}
 }
@@ -331,6 +339,7 @@ func (b *stdioBridge) markAvailable(stdin io.WriteCloser) int64 {
 	b.stdin = stdin
 	b.available = true
 	b.pending = make(map[string]pendingCall)
+	b.late = make(map[string]lateResponse)
 	b.sessions = make(map[string]int64)
 	b.initialized = false
 	b.init = nil
@@ -344,6 +353,7 @@ func (b *stdioBridge) markUnavailable(message string) {
 		pending.ch <- rpcErrorResponse(pending.originalID, -32000, message)
 	}
 	b.pending = make(map[string]pendingCall)
+	b.late = make(map[string]lateResponse)
 	b.sessions = make(map[string]int64)
 	b.initialized = false
 	b.init = nil
@@ -374,8 +384,16 @@ func (b *stdioBridge) readStdout(generation int64, r io.Reader) {
 		if ok {
 			delete(b.pending, key)
 		}
+		late, wasLate := b.late[key]
+		if wasLate {
+			delete(b.late, key)
+		}
 		b.mu.Unlock()
 		if !ok {
+			if wasLate {
+				fmt.Fprintf(os.Stderr, "claw-mcp-stdio received late response for canceled id %s (%s)\n", key, late.reason)
+				continue
+			}
 			fmt.Fprintf(os.Stderr, "claw-mcp-stdio ignored response for unknown id %s\n", key)
 			continue
 		}
@@ -397,6 +415,7 @@ func (b *stdioBridge) failGeneration(generation int64, message string) {
 		pending.ch <- rpcErrorResponse(pending.originalID, -32000, message)
 	}
 	b.pending = make(map[string]pendingCall)
+	b.late = make(map[string]lateResponse)
 	b.available = false
 	b.stdin = nil
 	b.sessions = make(map[string]int64)
@@ -576,10 +595,10 @@ func (b *stdioBridge) forwardRequest(ctx context.Context, body []byte, originalI
 	case resp := <-ch:
 		return resp, nil
 	case <-ctx.Done():
-		b.removePending(key)
+		b.removePending(key, "request context canceled")
 		return nil, ctx.Err()
 	case <-timer.C:
-		b.removePending(key)
+		b.removePending(key, "request timeout")
 		return nil, fmt.Errorf("stdio child request timed out after %s", timeout)
 	}
 }
@@ -614,13 +633,33 @@ func (b *stdioBridge) writeToChild(body []byte, pending *pendingCall) (string, e
 	return key, nil
 }
 
-func (b *stdioBridge) removePending(key string) {
+func (b *stdioBridge) removePending(key string, reason string) {
 	if key == "" {
 		return
 	}
 	b.mu.Lock()
-	delete(b.pending, key)
+	if _, ok := b.pending[key]; ok {
+		delete(b.pending, key)
+		b.rememberLateResponseLocked(key, reason)
+	}
 	b.mu.Unlock()
+}
+
+func (b *stdioBridge) rememberLateResponseLocked(key string, reason string) {
+	if b.late == nil {
+		b.late = make(map[string]lateResponse)
+	}
+	now := time.Now()
+	for existing, late := range b.late {
+		if now.Sub(late.at) > lateResponseTTL {
+			delete(b.late, existing)
+		}
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "request canceled"
+	}
+	b.late[key] = lateResponse{reason: reason, at: now}
 }
 
 func rewriteRequestID(body []byte, id json.RawMessage) ([]byte, error) {

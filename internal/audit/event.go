@@ -26,6 +26,9 @@ type Event struct {
 	ToolName           string    `json:"tool_name,omitempty"`
 	ToolService        string    `json:"tool_service,omitempty"`
 	ToolRound          *int      `json:"tool_round,omitempty"`
+	ToolDuplicate      bool      `json:"tool_duplicate,omitempty"`
+	ToolDuplicateRound *int      `json:"tool_duplicate_of_round,omitempty"`
+	ToolDuplicateCount *int      `json:"tool_duplicate_count,omitempty"`
 	// provider_pool event fields
 	Provider      string `json:"provider,omitempty"`
 	KeyID         string `json:"key_id,omitempty"`
