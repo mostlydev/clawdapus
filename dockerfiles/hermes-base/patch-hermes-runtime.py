@@ -131,28 +131,29 @@ text = replace_once(
 )
 discord_adapter.write_text(text)
 
-# ── Tool-only mode: suppress auto-routing of bare text responses ─────────────
-# When HERMES_TOOL_ONLY_MODE is set, agents must use send_message to post
-# explicitly. The gateway session becomes private — no text response is
-# auto-delivered to the triggering channel.
+# ── Tool-only mode: prefer send_message without dropping final text ──────────
+# HERMES_TOOL_ONLY_MODE makes send_message the preferred visible-delivery path.
+# The gateway runner suppresses duplicate final text when send_message already
+# succeeded in the current turn; otherwise base delivery remains a fallback so
+# plain final answers are not silently lost.
 base_adapter = purelib / "gateway" / "platforms" / "base.py"
 text = base_adapter.read_text()
 text = replace_once(
     text,
     "                # Send the text portion\n                if text_content:\n",
-    "                # Send the text portion — skipped in tool-only mode where\n"
-    "                # agents post via send_message rather than auto-routing.\n"
-    "                if text_content and not os.getenv(\"HERMES_TOOL_ONLY_MODE\"):\n",
-    "base platform tool-only mode gate",
+    "                # Send the text portion. In HERMES_TOOL_ONLY_MODE, run.py\n"
+    "                # clears this text only when the current turn already sent\n"
+    "                # a visible message via send_message; otherwise this is the\n"
+    "                # fallback that prevents final answers from disappearing.\n"
+    "                if text_content:\n",
+    "base platform tool-only mode fallback delivery",
 )
 base_adapter.write_text(text)
 
-# ── Tool-only mode: force tool_choice=required on first turn ─────────────────
-# In HERMES_TOOL_ONLY_MODE, bare text is suppressed (above patch). But LLMs
-# default to generating text rather than calling tools. Force tool_choice=required
-# on the first LLM call (before any tool results) so the agent MUST call
-# send_message (or another tool) to communicate. After a tool executes, the
-# LLM is free to produce a final text response (which base.py will suppress).
+# ── Tool-only mode: force tool_choice=required per user turn ─────────────────
+# In HERMES_TOOL_ONLY_MODE, LLMs should start each user turn by calling a tool,
+# preferably send_message for visible communication. Force tool_choice=required
+# until the current user turn has used a tool; final text remains a fallback.
 run_agent = purelib / "run_agent.py"
 text = run_agent.read_text()
 # Continuing gateway sessions persist a system_prompt snapshot. If the managed
@@ -185,23 +186,125 @@ text = replace_once(
     '            "timeout": float(os.getenv("HERMES_API_TIMEOUT", 900.0)),\n'
     '        }\n'
     '\n'
-    '        # In tool-only mode, force tool_choice=required only on the very first\n'
-    '        # LLM call (before any tool has been called). Once an assistant message\n'
-    '        # with tool_calls appears, the agent is already in tool-use mode —\n'
-    '        # revert to auto so it can wrap up with a final text response\n'
-    '        # (which base.py will suppress before it reaches the channel).\n'
+    '        # In tool-only mode, force tool_choice=required on the first LLM call\n'
+    '        # of each user turn. Previous turns may contain tool_calls, so only\n'
+    '        # inspect messages after the latest user message.\n'
     '        if os.getenv("HERMES_TOOL_ONLY_MODE") and api_kwargs.get("tools"):\n'
-    '            _already_used_tools = any(\n'
+    '            _last_user_index = max(\n'
+    '                (\n'
+    '                    _idx\n'
+    '                    for _idx, _m in enumerate(sanitized_messages)\n'
+    '                    if isinstance(_m, dict) and _m.get("role") == "user"\n'
+    '                ),\n'
+    '                default=-1,\n'
+    '            )\n'
+    '            _already_used_tools_this_turn = any(\n'
     '                isinstance(_m, dict)\n'
     '                and _m.get("role") == "assistant"\n'
     '                and _m.get("tool_calls")\n'
-    '                for _m in sanitized_messages\n'
+    '                for _m in sanitized_messages[_last_user_index + 1 :]\n'
     '            )\n'
-    '            if not _already_used_tools:\n'
+    '            if not _already_used_tools_this_turn:\n'
     '                api_kwargs["tool_choice"] = "required"\n'
     '\n'
     '        if self.max_tokens is not None:\n'
     '            api_kwargs.update(self._max_tokens_param(self.max_tokens))',
-    "run_agent tool_choice=required for first turn in tool-only mode",
+    "run_agent tool_choice=required per turn in tool-only mode",
 )
 run_agent.write_text(text)
+
+gateway_run = purelib / "gateway" / "run.py"
+text = gateway_run.read_text()
+text = replace_once(
+    text,
+    '    async def _handle_message(self, event: MessageEvent) -> Optional[str]:\n'
+    '        """\n',
+    '    @staticmethod\n'
+    '    def _claw_tool_call_name(tool_call: dict) -> str:\n'
+    '        if not isinstance(tool_call, dict):\n'
+    '            return ""\n'
+    '        function = tool_call.get("function") or {}\n'
+    '        if isinstance(function, dict) and function.get("name"):\n'
+    '            return str(function.get("name"))\n'
+    '        return str(tool_call.get("name") or "")\n'
+    '\n'
+    '    @staticmethod\n'
+    '    def _claw_tool_call_arguments(tool_call: dict) -> dict:\n'
+    '        if not isinstance(tool_call, dict):\n'
+    '            return {}\n'
+    '        function = tool_call.get("function") or {}\n'
+    '        raw_args = function.get("arguments") if isinstance(function, dict) else None\n'
+    '        if isinstance(raw_args, dict):\n'
+    '            return raw_args\n'
+    '        if isinstance(raw_args, str) and raw_args.strip():\n'
+    '            try:\n'
+    '                parsed = json.loads(raw_args)\n'
+    '                return parsed if isinstance(parsed, dict) else {}\n'
+    '            except Exception:\n'
+    '                return {}\n'
+    '        return {}\n'
+    '\n'
+    '    @classmethod\n'
+    '    def _claw_turn_sent_message(cls, messages: list) -> bool:\n'
+    '        send_call_ids = set()\n'
+    '        saw_send_without_id = False\n'
+    '        for msg in messages or []:\n'
+    '            if not isinstance(msg, dict) or msg.get("role") != "assistant":\n'
+    '                continue\n'
+    '            for tool_call in msg.get("tool_calls") or []:\n'
+    '                if cls._claw_tool_call_name(tool_call) != "send_message":\n'
+    '                    continue\n'
+    '                args = cls._claw_tool_call_arguments(tool_call)\n'
+    '                action = str(args.get("action") or "send").strip().lower()\n'
+    '                if action != "send" or not str(args.get("message") or "").strip():\n'
+    '                    continue\n'
+    '                call_id = tool_call.get("id")\n'
+    '                if call_id:\n'
+    '                    send_call_ids.add(call_id)\n'
+    '                else:\n'
+    '                    saw_send_without_id = True\n'
+    '\n'
+    '        if not send_call_ids:\n'
+    '            return saw_send_without_id\n'
+    '\n'
+    '        saw_result = False\n'
+    '        for msg in messages or []:\n'
+    '            if not isinstance(msg, dict) or msg.get("role") != "tool":\n'
+    '                continue\n'
+    '            if msg.get("tool_call_id") not in send_call_ids:\n'
+    '                continue\n'
+    '            saw_result = True\n'
+    '            content = msg.get("content")\n'
+    '            if isinstance(content, str):\n'
+    '                try:\n'
+    '                    content = json.loads(content)\n'
+    '                except Exception:\n'
+    '                    content = {}\n'
+    '            if isinstance(content, dict) and (content.get("success") or content.get("skipped")):\n'
+    '                return True\n'
+    '        return saw_send_without_id or not saw_result\n'
+    '\n'
+    '    async def _handle_message(self, event: MessageEvent) -> Optional[str]:\n'
+    '        """\n',
+    "gateway run send_message detection helpers",
+)
+text = replace_once(
+    text,
+    '            response = agent_result.get("final_response") or ""\n'
+    '            agent_messages = agent_result.get("messages", [])\n',
+    '            response = agent_result.get("final_response") or ""\n'
+    '            agent_messages = agent_result.get("messages", [])\n'
+    '\n'
+    '            if os.getenv("HERMES_TOOL_ONLY_MODE") and response:\n'
+    '                history_len_for_delivery = agent_result.get("history_offset", len(history))\n'
+    '                turn_messages_for_delivery = (\n'
+    '                    agent_messages[history_len_for_delivery:]\n'
+    '                    if len(agent_messages) > history_len_for_delivery\n'
+    '                    else agent_messages\n'
+    '                )\n'
+    '                if self._claw_turn_sent_message(turn_messages_for_delivery):\n'
+    '                    logger.info("Suppressing duplicate final text after send_message in tool-only mode")\n'
+    '                    response = ""\n',
+    "gateway run suppress duplicate final text after send_message",
+)
+gateway_run.write_text(text)

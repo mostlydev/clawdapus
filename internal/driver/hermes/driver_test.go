@@ -176,6 +176,12 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	if got := result.Environment[hermesDefaultAgentIdentityEnv]; got != managedDefaultAgentIdentity {
 		t.Fatalf("unexpected %s: %q", hermesDefaultAgentIdentityEnv, got)
 	}
+	if got := result.Environment["HERMES_TOOL_ONLY_MODE"]; got != "1" {
+		t.Fatalf("expected HERMES_TOOL_ONLY_MODE=1, got %q", got)
+	}
+	if got := result.Environment[hermesToolProgressModeEnv]; got != "off" {
+		t.Fatalf("expected %s=off, got %q", hermesToolProgressModeEnv, got)
+	}
 	if result.Environment["MESSAGING_CWD"] != hermesWorkspaceDir {
 		t.Fatalf("unexpected MESSAGING_CWD: %q", result.Environment["MESSAGING_CWD"])
 	}
@@ -354,6 +360,32 @@ func TestMaterializeDefaultsAutoThreadOff(t *testing.T) {
 
 	if got := result.Environment["DISCORD_AUTO_THREAD"]; got != "false" {
 		t.Fatalf("expected DISCORD_AUTO_THREAD=false, got %q", got)
+	}
+}
+
+func TestMaterializeAllowsToolProgressOverride(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	rc.Environment[hermesToolProgressModeEnv] = "verbose"
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if got := result.Environment[hermesToolProgressModeEnv]; got != "verbose" {
+		t.Fatalf("expected %s override, got %q", hermesToolProgressModeEnv, got)
+	}
+
+	envData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", ".env"))
+	if err != nil {
+		t.Fatalf("read .env: %v", err)
+	}
+	if !strings.Contains(string(envData), hermesToolProgressModeEnv+"=verbose\n") {
+		t.Fatalf("expected %s override in .env, got:\n%s", hermesToolProgressModeEnv, envData)
 	}
 }
 

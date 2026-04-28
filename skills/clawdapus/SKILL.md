@@ -330,9 +330,9 @@ When a service subscribes to tools via `x-claw.tools`, cllama performs bounded t
 
 ## Communication Tools Contract
 
-All 7 runtimes enforce private thinking + explicit `send_message` delivery — agent reasoning never reaches Discord automatically.
+All 7 runtimes enforce private thinking + deliberate delivery — agent reasoning never reaches Discord automatically.
 
-- **Hermes**: `HERMES_TOOL_ONLY_MODE=1` injected when Discord handles are present; runtime patches suppress text auto-routing
+- **Hermes**: `HERMES_TOOL_ONLY_MODE=1` injected when Discord handles are present; runtime patches prefer `send_message`, suppress duplicate final text after a successful `send_message`, and fall back to final-text delivery rather than silently dropping replies
 - **OpenClaw**: enforced natively
 - **NullClaw, MicroClaw, NanoClaw, NanoBot, PicoClaw**: `discord-responder.sh` passes a `send_message` tool to the LLM; only posts to Discord when the tool is called
 

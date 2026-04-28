@@ -44,6 +44,9 @@ func TestHermesBaseImageSourceContract(t *testing.T) {
 		`shutil.copy("/tmp/minisweagent_path.py", purelib / "minisweagent_path.py")`,
 		`discord.AllowedMentions(replied_user=False)`,
 		`HERMES_TOOL_ONLY_MODE`,
+		`_claw_turn_sent_message`,
+		`Suppressing duplicate final text after send_message`,
+		`_already_used_tools_this_turn`,
 	} {
 		if !strings.Contains(patch, want) {
 			t.Fatalf("Hermes runtime patch missing %q", want)
