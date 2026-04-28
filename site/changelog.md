@@ -29,9 +29,15 @@ outline: deep
 
 ## Unreleased
 
-- **Stdio MCP wrapper for managed tools** ([#179](https://github.com/mostlydev/clawdapus/issues/179)) — adds the shared `ghcr.io/mostlydev/claw-mcp-stdio` image and `x-claw.mcp-stdio` sidecar block so npm-style stdio MCP servers can be exposed as pod-internal Streamable HTTP `/mcp` endpoints. Operators provide a deterministic v2 descriptor snapshot with `x-claw.describe-file`; `claw up` still compiles subscribing agents to `tools.json` with `execution.transport = "mcp"`, so cllama's v0.5.0 mediation, audit, session history, budgets, and credential-starvation boundaries remain unchanged.
+<!-- Nothing yet -->
 
-## v0.11.0 <Badge type="tip" text="Latest" /> {#v0-11-0}
+## v0.12.0 <Badge type="tip" text="Latest" /> {#v0-12-0}
+
+*2026-04-28*
+
+- **Stdio MCP wrapper for managed tools** ([#179](https://github.com/mostlydev/clawdapus/issues/179)) — adds the shared `ghcr.io/mostlydev/claw-mcp-stdio` image and `x-claw.mcp-stdio` sidecar block so npm-style stdio MCP servers (perplexity-mcp, filesystem, sqlite, anything stdio JSON-RPC) can be exposed as pod-internal Streamable HTTP `/mcp` endpoints without bespoke per-pod glue. The wrapper handles MCP `initialize` caching, `MCP-Session-Id` minting, JSON-RPC id multiplexing, child restart with backoff, and optional bearer auth; stdio creds (e.g. `PERPLEXITY_API_KEY`) stay in the wrapper container env, never reach agent containers. New `x-claw.describe-file` lets operators supply a deterministic v2 descriptor snapshot from the pod directory. `claw up` still compiles subscribing agents to `tools.json` with `execution.transport = "mcp"`, so cllama's v0.5.0 mediation, audit, session history, budgets, and credential-starvation boundaries remain unchanged.
+
+## v0.11.0 {#v0-11-0}
 
 *2026-04-27*
 
