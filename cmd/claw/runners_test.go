@@ -8,6 +8,7 @@ import (
 
 	"github.com/mostlydev/clawdapus/internal/build"
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
 
 func TestResolvePullTargetTreatsNonYAMLArgumentAsClawfile(t *testing.T) {
@@ -110,7 +111,7 @@ func TestRunPullPodSkipsNonRefreshableClawfileDrivers(t *testing.T) {
 	if err := os.WriteFile(openClawfilePath, []byte("FROM openclaw:latest\nCLAW_TYPE openclaw\nAGENT AGENTS.md\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(hermesClawfilePath, []byte("FROM ghcr.io/mostlydev/hermes-base:v2026.3.17\nCLAW_TYPE hermes\nAGENT AGENTS.md\n"), 0o644); err != nil {
+	if err := os.WriteFile(hermesClawfilePath, []byte("FROM "+hermes.BaseImageTag+"\nCLAW_TYPE hermes\nAGENT AGENTS.md\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	podFile := filepath.Join(dir, "claw-pod.yml")

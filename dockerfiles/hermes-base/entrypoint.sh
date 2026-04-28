@@ -8,4 +8,4 @@ if [ -f "${HERMES_HOME:-/root/.hermes}/.env" ]; then
     set +a
 fi
 
-exec hermes gateway start
+exec hermes gateway run

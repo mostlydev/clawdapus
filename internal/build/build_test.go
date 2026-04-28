@@ -187,7 +187,7 @@ MODEL primary openrouter/anthropic/claude-sonnet-4
 	}
 }
 
-func TestGenerateBuildsMatchingDriverBaseImageWhenMissing(t *testing.T) {
+func TestGenerateLeavesPublishedHermesBaseForDockerPullWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	clawfilePath := filepath.Join(dir, "Clawfile")
 
@@ -205,17 +205,11 @@ AGENT AGENTS.md
 	if generatedPath != filepath.Join(dir, "Dockerfile.generated") {
 		t.Fatalf("expected generated Dockerfile path, got %q", generatedPath)
 	}
-	if len(args) != 4 {
-		t.Fatalf("expected docker build invocation with 4 args, got %v", args)
+	if len(args) != 0 {
+		t.Fatalf("expected no auto-build for published Hermes base image, got %v", args)
 	}
-	if !reflect.DeepEqual(args[:3], []string{"build", "-t", hermes.BaseImageTag}) {
-		t.Fatalf("unexpected docker build args prefix: %v", args)
-	}
-	if baseDockerfile == "" {
-		t.Fatal("expected base image Dockerfile content to be captured")
-	}
-	if !strings.Contains(baseDockerfile, "https://github.com/NousResearch/hermes-agent.git") {
-		t.Fatal("expected captured base Dockerfile to use the Hermes upstream repository")
+	if baseDockerfile != "" {
+		t.Fatal("expected no captured base Dockerfile when Hermes base auto-build is disabled")
 	}
 }
 

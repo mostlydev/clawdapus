@@ -45,7 +45,7 @@ claw-api      ghcr.io/mostlydev/claw-api:v0.4.2
 clawdash      ghcr.io/mostlydev/clawdash:v0.4.2
 cllama        ghcr.io/mostlydev/cllama:v0.2.2
 claw-wall     ghcr.io/mostlydev/claw-wall:v0.4.2
-hermes-base   ghcr.io/mostlydev/hermes-base:v2026.3.17
+hermes-base   ghcr.io/mostlydev/hermes-base:v2026.3.17-claw.1
 ```
 
 The binary no longer uses `:latest` for any managed infra image. Cutting a `claw` release freezes the manifest at whatever infra tags are current at that moment; infra images do not have to release in lockstep with `claw`, they just have to have a stable tag the binary can target.
@@ -148,7 +148,7 @@ Current state: the four-verb lifecycle and compiled manifest are live. Remaining
 | Image | Current state | Target state | Blocker |
 |---|---|---|---|
 | `cllama` | `ghcr.io/mostlydev/cllama:latest`, multi-arch, published from submodule repo | pinned tag from cllama's own version namespace (e.g. `:v0.2.2`) | none — tag namespace already exists |
-| `hermes-base` | `ghcr.io/mostlydev/hermes-base:v2026.3.17` (dated), multi-arch | pinned build-time base image resolved by `claw build` | none |
+| `hermes-base` | `ghcr.io/mostlydev/hermes-base:v2026.3.17-claw.1` (dated + Clawdapus patch revision), multi-arch | pinned build-time base image resolved by `claw build` | none |
 | `claw-api` | publication workflow added (`.github/workflows/claw-api-image.yml`), multi-arch, published on master + tags | pinned tag per `claw` release | first versioned tag must exist before that binary is used |
 | `clawdash` | versioned tags already published (`type=ref,event=tag`) | pinned tag per `claw` release | none |
 | `claw-wall` | publication workflow added (`.github/workflows/claw-wall-image.yml`), multi-arch, published on master + tags | pinned tag per `claw` release | first versioned tag must exist before that binary is used |

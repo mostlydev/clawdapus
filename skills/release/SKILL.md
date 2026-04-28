@@ -334,7 +334,7 @@ const (
     DefaultClawWallTag   = DefaultClawInfraTag
     DefaultClawMCPStdioTag = DefaultClawInfraTag
     DefaultCllamaTag     = "v0.A.B"
-    DefaultHermesBaseTag = "v<upstream>"
+    DefaultHermesBaseTag = "v<upstream>-claw.N"
 )
 ```
 
@@ -347,7 +347,9 @@ Decide which pins to move based on what the release actually touches:
 - **Release includes new cllama code (submodule moved)** → bump
   `DefaultCllamaTag` to the cllama release you just cut in Step 2.
 - **Release rebuilds `hermes-base`** → bump `DefaultHermesBaseTag` to the new
-  upstream Hermes tag.
+  published image tag. Use an upstream-derived Clawdapus patch tag
+  (`v<upstream>-claw.N`) when rebuilding against the same Hermes upstream
+  release.
 - **Pure `claw` CLI release (no infra code changes, no submodule move)** →
   leave the pins at their existing values. The release-prep commit won't touch
   `release_manifest.go`.
@@ -514,8 +516,15 @@ Tagged per upstream Hermes version, not per clawdapus release:
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/mostlydev/hermes-base:v<upstream-tag> \
+  -t ghcr.io/mostlydev/hermes-base:v<upstream>-claw.N \
   --push dockerfiles/hermes-base/
+```
+
+Verify the built image contract before publishing or immediately after pulling
+the published tag:
+
+```bash
+go test -tags spike -run '^TestSpikeHermesBaseImageContract$' ./cmd/claw/...
 ```
 
 ### Verify refs before tagging
