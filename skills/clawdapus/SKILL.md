@@ -22,10 +22,12 @@ claw pull --no-runners [-f <pod>]   # pinned infra + registry images only
 claw build -t <image> <path>        # single Clawfile -> Dockerfile.generated -> docker build
 claw build [-f <pod>.yml]           # with no path: build every pod service that has build:
 claw inspect <image>                 # show claw.* labels from built image
+claw discover [-f <pod>.yml] [svc]   # discover stdio MCP tools into .claw-discovered/
 
 # Pod lifecycle (mirrors docker compose UX)
 claw up [-f <pod>.yml] [-d]         # strict: tells you to run claw pull/build when images are missing
 claw up --fix [-f <pod>.yml] [-d]   # pull/build missing images, then launch
+claw up --discover-tools [-d]        # refresh missing/stale stdio MCP discovery snapshots, then launch
 claw down [-f <pod>.yml]            # tear down
 claw ps [-f <pod>.yml]              # container status
 claw logs [-f <pod>.yml] [svc]      # stream logs (--follow)
@@ -220,7 +222,6 @@ services:
     expose:
       - "8080"
     x-claw:
-      describe-file: ./perplexity.claw-describe.json
       mcp-stdio:
         command: npx
         args: ["-y", "perplexity-mcp"]
@@ -233,13 +234,13 @@ services:
 - **`handles`**: Discord bot IDs, usernames, guilds. Clawdapus auto-generates native Discord `mentionPatterns`, `allowBots: true`, peer `users[]` allowlist.
 - **`surfaces`**: String form (`"channel://discord"`) = simple enable. Map form (`channel://discord: {dm: {...}}`) = routing config.
 - **`tools`**: Requires `cllama` on the consuming service. Services must publish tools via `claw.describe` descriptor v2. `allow: all` (implicit for scalar form) passes every tool; named lists are validated against the tool registry.
-- **`mcp-stdio`**: Sidecar-only block for the shared `claw-mcp-stdio` wrapper. `command` is required, `args` is a list, and credentials stay in the sidecar's regular `environment:`. Pair with `describe-file` when the descriptor is supplied by the pod instead of baked into the image.
+- **`mcp-stdio`**: Sidecar-only block for the shared `claw-mcp-stdio` wrapper. `command` is required, `args` is a list, and credentials stay in the sidecar's regular `environment:`. Run `claw discover <service>` to ask the MCP server for `tools/list` and write `.claw-discovered/<service>.claw-describe.json`; `describe-file` remains an explicit override when live discovery is unavailable.
 - **`memory`**: Requires `cllama` on the consuming service. Target service must declare `memory` in its `claw.describe` descriptor v2.
 - **Pod defaults**: `*-defaults` at pod level are inherited by all services. Declaring the field at service level replaces the default. Use `...` spread token to extend list-type defaults (surfaces, feeds, skills, tools). Memory defaults are object-form (no spread — presence of `memory:` at service level replaces entirely; `memory: null` suppresses).
 
 ## Service Self-Description (claw.describe)
 
-Services declare capabilities via a `.claw-describe.json` file (embedded in the image, discovered from Dockerfile labels, or supplied with service-level `x-claw.describe-file`). `claw up` extracts descriptors and compiles them into pod-global registries.
+Services declare capabilities via a `.claw-describe.json` file (embedded in the image, discovered from Dockerfile labels, generated under `.claw-discovered/` by `claw discover`, or supplied with service-level `x-claw.describe-file`). `claw up` extracts descriptors and compiles them into pod-global registries.
 
 ### Descriptor v2
 

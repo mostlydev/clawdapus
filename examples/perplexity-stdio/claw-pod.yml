@@ -1,4 +1,5 @@
-# Set PERPLEXITY_KEY in your shell or .env before running `claw up -d`.
+# Set PERPLEXITY_KEY in your shell or .env, then run `claw discover perplexity`
+# once before `claw up -d`.
 # The API key stays on the stdio wrapper sidecar; agent containers only see the
 # managed `perplexity.search` tool through cllama.
 
@@ -13,7 +14,6 @@ services:
     expose:
       - "8080"
     x-claw:
-      describe-file: ./perplexity.claw-describe.json
       mcp-stdio:
         command: npx
         args: ["-y", "perplexity-mcp"]

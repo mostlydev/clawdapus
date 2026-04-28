@@ -93,13 +93,14 @@ The pod file can be specified as a positional argument or via `-f`. Defaults to 
 |------|-------------|
 | `-d` | Detached mode. Required when the pod contains managed `x-claw` services. |
 | `--fix` | Pull and build missing images before starting. |
+| `--discover-tools` | Discover missing or stale stdio MCP tool snapshots before compiling. |
 | `-f, --file <path>` | Path to `claw-pod.yml`. |
 
 **What it does:**
 
 1. Parses `claw-pod.yml`, resolving `${...}` placeholders from your shell environment and any pod-local `.env` file.
 2. Inspects each service image for claw metadata labels (via `claw inspect` internally).
-3. Loads `claw.describe` descriptors from images for services that self-describe.
+3. Loads `claw.describe` descriptors from explicit overrides, `.claw-discovered/` snapshots, images, or build contexts.
 4. Runs driver-specific validation and materialization (config generation, persona resolution, contract composition).
 5. Wires cllama proxy services — generates bearer tokens, context files, and proxy config.
 6. Generates per-agent runtime artifacts: `AGENTS.generated.md`, `CLAWDAPUS.md`, `metadata.json`, runner configs.
@@ -122,6 +123,9 @@ claw up -d
 # First-run shortcut
 claw up --fix -d
 
+# Discover stdio MCP tools while compiling
+claw up --discover-tools -d
+
 # Explicit pod file
 claw up -f claw-pod.yml -d
 
@@ -130,6 +134,34 @@ claw up ./examples/quickstart/claw-pod.yml -d
 ```
 
 **Relationship with other commands:** All lifecycle commands (`ps`, `logs`, `health`, `audit`, `compose`) depend on the `compose.generated.yml` that `claw up` produces. Run `claw up` first.
+
+---
+
+## claw discover
+
+Discover tool schemas from stdio MCP sidecars and write deterministic descriptor snapshots.
+
+```bash
+claw discover [service...]
+```
+
+Without service names, `claw discover` discovers every `x-claw.mcp-stdio` service in the pod. For each service it starts the configured wrapper image as a short-lived local container, preserves the service environment and bind mounts, runs MCP `initialize` plus `tools/list`, and writes `.claw-discovered/<service>.claw-describe.json`.
+
+`claw up` consumes that snapshot during compilation. It does not perform live discovery unless `--discover-tools` is set.
+
+| Flag | Description |
+|------|-------------|
+| `--timeout <duration>` | Maximum time to wait for each discovery sidecar. Defaults to `45s`. |
+
+**Examples:**
+
+```bash
+# Discover all stdio MCP sidecars in the current pod
+claw discover
+
+# Discover one provider
+claw discover perplexity
+```
 
 ---
 

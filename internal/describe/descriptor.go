@@ -9,15 +9,16 @@ import (
 const DefaultDescriptorFile = ".claw-describe.json"
 
 type ServiceDescriptor struct {
-	Version     int                  `json:"version"`
-	Description string               `json:"description,omitempty"`
-	Feeds       []FeedDescriptor     `json:"feeds,omitempty"`
-	MCP         *MCPDescriptor       `json:"mcp,omitempty"`
-	Tools       []ToolDescriptor     `json:"tools,omitempty"`
-	Memory      *MemoryDescriptor    `json:"memory,omitempty"`
-	Endpoints   []EndpointDescriptor `json:"endpoints,omitempty"`
-	Auth        *AuthDescriptor      `json:"auth,omitempty"`
-	Skill       string               `json:"skill,omitempty"`
+	Version        int                  `json:"version"`
+	Description    string               `json:"description,omitempty"`
+	Feeds          []FeedDescriptor     `json:"feeds,omitempty"`
+	MCP            *MCPDescriptor       `json:"mcp,omitempty"`
+	Tools          []ToolDescriptor     `json:"tools,omitempty"`
+	Memory         *MemoryDescriptor    `json:"memory,omitempty"`
+	Endpoints      []EndpointDescriptor `json:"endpoints,omitempty"`
+	Auth           *AuthDescriptor      `json:"auth,omitempty"`
+	Skill          string               `json:"skill,omitempty"`
+	XClawDiscovery *DiscoveryMetadata   `json:"x-claw-discovery,omitempty"`
 }
 
 type FeedDescriptor struct {
@@ -49,6 +50,17 @@ type ToolDescriptor struct {
 type MCPDescriptor struct {
 	Transport string `json:"transport,omitempty"`
 	Path      string `json:"path,omitempty"`
+}
+
+type DiscoveryMetadata struct {
+	Command            string   `json:"command,omitempty"`
+	Args               []string `json:"args,omitempty"`
+	WrapperImage       string   `json:"wrapper_image,omitempty"`
+	WrapperImageDigest string   `json:"wrapper_image_digest,omitempty"`
+	WrapperImageID     string   `json:"wrapper_image_id,omitempty"`
+	DiscoveredAt       string   `json:"discovered_at,omitempty"`
+	MCPProtocolVersion string   `json:"mcp_protocol_version,omitempty"`
+	ToolCount          int      `json:"tool_count,omitempty"`
 }
 
 type ToolHTTP struct {
@@ -165,6 +177,14 @@ func (d *ServiceDescriptor) Validate() error {
 
 	d.Description = strings.TrimSpace(d.Description)
 	d.Skill = strings.TrimSpace(d.Skill)
+	if d.XClawDiscovery != nil {
+		d.XClawDiscovery.Command = strings.TrimSpace(d.XClawDiscovery.Command)
+		d.XClawDiscovery.WrapperImage = strings.TrimSpace(d.XClawDiscovery.WrapperImage)
+		d.XClawDiscovery.WrapperImageDigest = strings.TrimSpace(d.XClawDiscovery.WrapperImageDigest)
+		d.XClawDiscovery.WrapperImageID = strings.TrimSpace(d.XClawDiscovery.WrapperImageID)
+		d.XClawDiscovery.DiscoveredAt = strings.TrimSpace(d.XClawDiscovery.DiscoveredAt)
+		d.XClawDiscovery.MCPProtocolVersion = strings.TrimSpace(d.XClawDiscovery.MCPProtocolVersion)
+	}
 	return nil
 }
 

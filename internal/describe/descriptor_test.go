@@ -92,6 +92,13 @@ func TestParseDescriptorV2SupportsMCPToolsWithoutHTTP(t *testing.T) {
 	  "version": 2,
 	  "description": "Perplexity MCP",
 	  "mcp": {"transport": "http", "path": " /mcp "},
+	  "x-claw-discovery": {
+	    "command": " npx ",
+	    "args": ["-y", "perplexity-mcp"],
+	    "wrapper_image": " ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0 ",
+	    "mcp_protocol_version": " 2025-11-25 ",
+	    "tool_count": 1
+	  },
 	  "tools": [{
 	    "name": " search ",
 	    "description": " Search the web ",
@@ -117,6 +124,18 @@ func TestParseDescriptorV2SupportsMCPToolsWithoutHTTP(t *testing.T) {
 	}
 	if descriptor.Tools[0].Name != "search" {
 		t.Fatalf("expected trimmed tool name, got %q", descriptor.Tools[0].Name)
+	}
+	if descriptor.XClawDiscovery == nil {
+		t.Fatal("expected discovery metadata")
+	}
+	if descriptor.XClawDiscovery.Command != "npx" {
+		t.Fatalf("expected trimmed discovery command, got %q", descriptor.XClawDiscovery.Command)
+	}
+	if descriptor.XClawDiscovery.WrapperImage != "ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0" {
+		t.Fatalf("expected trimmed wrapper image, got %q", descriptor.XClawDiscovery.WrapperImage)
+	}
+	if descriptor.XClawDiscovery.MCPProtocolVersion != "2025-11-25" {
+		t.Fatalf("expected trimmed MCP protocol version, got %q", descriptor.XClawDiscovery.MCPProtocolVersion)
 	}
 }
 

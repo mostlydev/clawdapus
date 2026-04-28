@@ -594,9 +594,15 @@ The capability-evolution wave (this ADR + ADR-021) landed together. Current stat
 - `x-claw.describe-file` lets operators provide a deterministic host-side v2 descriptor snapshot for wrapper services
 - No cllama transport changes are required; compiled `tools.json` still uses `execution.transport = "mcp"`
 
+**Shipped (Phase 5c — stdio MCP discovery, 2026-04-28, issue #182):**
+- `claw discover [service...]` starts stdio MCP wrapper services ephemerally, preserves service environment and bind mounts, runs MCP `initialize` + `tools/list`, and writes `.claw-discovered/<service>.claw-describe.json`
+- `claw up` loads `.claw-discovered/` snapshots for stdio sidecars after explicit `describe-file` overrides and before image/build descriptor fallback
+- Discovery snapshots carry `x-claw-discovery` metadata so `claw up` can warn when the checked-in snapshot no longer matches the declared command, args, or wrapper image
+- `claw up --discover-tools` is an explicit convenience for refreshing missing or stale stdio snapshots without making normal `claw up` depend on live MCP discovery
+
 **Not yet shipped:**
 - Phase 2: native projection / runner-side MCP config generation
-- Phase 5 follow-up: `claw discover` (live `tools/list` snapshot into the build context) and baked `.claw-tools.json` artifact support
+- Phase 5 follow-up: baked `.claw-tools.json` artifact support for MCP-native images
 - Phase 6: `parallel_safe` annotation, dynamic filtering, native mode graduation
 
 See `docs/plans/2026-03-30-memory-plane-and-pluggable-recall.md` for the companion implementation-status document covering both ADR-020 and ADR-021.

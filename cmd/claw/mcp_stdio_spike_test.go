@@ -45,7 +45,7 @@ func TestSpikeMCPStdio(t *testing.T) {
 		t.Fatalf("mkdir echo-server: %v", err)
 	}
 	copyFile(t, filepath.Join(repoRoot, "examples", "mcp-stdio", "echo-server", "server.js"), filepath.Join(echoDir, "server.js"))
-	copyFile(t, filepath.Join(repoRoot, "examples", "mcp-stdio", "echo.claw-describe.json"), filepath.Join(workDir, "echo.claw-describe.json"))
+	copyFile(t, filepath.Join(repoRoot, "examples", "mcp-stdio", ".claw-discovered", "echo.claw-describe.json"), filepath.Join(workDir, "echo.claw-describe.json"))
 	if err := os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte("# Agent\n\nUse the echo tool.\n"), 0o644); err != nil {
 		t.Fatalf("write AGENTS.md: %v", err)
 	}

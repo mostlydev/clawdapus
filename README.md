@@ -252,6 +252,7 @@ Clawdapus extends two formats you already know:
 | `claw-pod.yml` | `docker-compose.yml` | Run a governed agent fleet |
 | `claw pull` | `docker compose pull` + `docker build --pull --no-cache` | Fetch pinned infra, pod registry images, and built-in local runner base aliases |
 | `claw build` | `docker build` | Transpile + build OCI image, or build every `build:` service in the pod |
+| `claw discover` | MCP `tools/list` | Snapshot stdio MCP sidecar tool schemas into `.claw-discovered/` |
 | `claw up` | `docker compose up` | Enforce + deploy; authoritative on what is stale |
 
 Any valid Dockerfile is a valid Clawfile. Any valid `docker-compose.yml` is a valid `claw-pod.yml`. Extended directives live in namespaces Docker already ignores. Eject from Clawdapus anytime — you still have a working OCI image and a working compose file.
@@ -411,6 +412,31 @@ services:
 cllama injects the compiled tool schemas into each upstream LLM request, intercepts `tool_call` responses, executes them against the service, and loops until the LLM returns terminal text. The runner receives only the final text — managed tool rounds are transparent.
 
 Non-cllama services that declare `x-claw.tools` or `x-claw.memory` are a hard error at `claw up` time.
+
+Stdio MCP packages can be wrapped without hand-written glue. Declare the command on a wrapper sidecar, then let MCP self-describe:
+
+```yaml
+services:
+  perplexity:
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0
+    environment:
+      PERPLEXITY_API_KEY: ${PERPLEXITY_KEY}
+    expose:
+      - "8080"
+    x-claw:
+      mcp-stdio:
+        command: npx
+        args: ["-y", "perplexity-mcp"]
+
+  analyst:
+    x-claw:
+      cllama: passthrough
+      tools:
+        - service: perplexity
+          allow: [search]
+```
+
+Run `claw discover perplexity` once to ask the MCP server for `tools/list`; it writes `.claw-discovered/perplexity.claw-describe.json`, which `claw up` then consumes deterministically. `claw up --discover-tools -d` can refresh missing or stale stdio snapshots as an explicit convenience. `x-claw.describe-file` remains available as a descriptor override when live discovery cannot run.
 
 ---
 

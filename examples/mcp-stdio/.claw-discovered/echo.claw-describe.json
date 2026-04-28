@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "description": "echo MCP stdio tools.",
+  "mcp": {
+    "transport": "streamable_http",
+    "path": "/mcp"
+  },
+  "tools": [
+    {
+      "name": "echo",
+      "description": "Echo a message back as MCP text content.",
+      "inputSchema": {
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "readOnly": true
+      }
+    }
+  ],
+  "x-claw-discovery": {
+    "command": "node",
+    "args": [
+      "/srv/echo-server/server.js"
+    ],
+    "wrapper_image": "ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0",
+    "discovered_at": "2026-04-28T00:00:00Z",
+    "mcp_protocol_version": "2025-11-25",
+    "tool_count": 1
+  }
+}
