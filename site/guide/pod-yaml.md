@@ -187,6 +187,27 @@ services:
 
 This expands into ordinal-named compose services: `crusher-0`, `crusher-1`, `crusher-2`. Each instance gets its own bearer token and cllama context when the governance proxy is enabled.
 
+## Stdio MCP Sidecars
+
+Use `x-claw.mcp-stdio` on a sidecar service to run a stdio MCP command behind the shared Streamable HTTP wrapper image:
+
+```yaml
+services:
+  search:
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0
+    environment:
+      PERPLEXITY_API_KEY: ${PERPLEXITY_KEY}
+    expose:
+      - "8080"
+    x-claw:
+      describe-file: ./perplexity.claw-describe.json
+      mcp-stdio:
+        command: npx
+        args: ["-y", "perplexity-mcp"]
+```
+
+`command` is required and `args` is a JSON-safe list; no shell interpolation is used. `describe-file` is a host path relative to the pod file and should contain a v2 descriptor with `mcp: { "transport": "streamable_http", "path": "/mcp" }` plus the baked `tools[]` snapshot.
+
 ## Generated Output
 
 `claw up` reads the pod YAML, inspects images, runs driver enforcement, generates per-agent configs, wires the cllama proxy, and calls `docker compose`. The output is `compose.generated.yml` -- a standard compose file written next to the pod file. Inspect it freely, but do not hand-edit it; it is regenerated on every `claw up`.

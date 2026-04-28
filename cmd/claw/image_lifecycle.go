@@ -299,7 +299,7 @@ func requiredPodPullInfraSpecs(podDir string, p *pod.Pod, plans []plannedService
 
 	hasManagedServices := false
 	for _, svc := range p.Services {
-		if svc != nil && svc.Claw != nil {
+		if svc.IsAgentManaged() {
 			hasManagedServices = true
 			break
 		}
@@ -314,7 +314,7 @@ func requiredPodPullInfraSpecs(podDir string, p *pod.Pod, plans []plannedService
 	needsConversationWall := false
 	for _, plan := range plans {
 		svc := p.Services[plan.ServiceName]
-		if svc == nil || svc.Claw == nil {
+		if !svc.IsAgentManaged() {
 			continue
 		}
 
@@ -348,7 +348,7 @@ func requiredPodPullInfraSpecs(podDir string, p *pod.Pod, plans []plannedService
 }
 
 func serviceUsesProxyTypeForPull(podDir string, svc *pod.Service, plan plannedServiceImage, proxyType string) (bool, error) {
-	if svc == nil || svc.Claw == nil {
+	if !svc.IsAgentManaged() {
 		return false, nil
 	}
 	if proxyListContains(svc.Claw.Cllama, proxyType) {

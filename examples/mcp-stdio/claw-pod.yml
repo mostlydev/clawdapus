@@ -1,0 +1,28 @@
+x-claw:
+  pod: mcp-stdio-example
+
+services:
+  assistant:
+    build:
+      context: .
+      dockerfile: Clawfile
+    x-claw:
+      agent: ./AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      tools:
+        - service: echo
+          allow: [echo]
+
+  echo:
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0
+    volumes:
+      - ./echo-server:/srv/echo-server:ro
+    expose:
+      - "8080"
+    x-claw:
+      describe-file: ./echo.claw-describe.json
+      mcp-stdio:
+        command: node
+        args: ["/srv/echo-server/server.js"]

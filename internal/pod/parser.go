@@ -58,21 +58,28 @@ type rawInvokeEntry struct {
 }
 
 type rawClawBlock struct {
-	Agent     string                 `yaml:"agent"`
-	Persona   string                 `yaml:"persona"`
-	Cllama    interface{}            `yaml:"cllama"`
-	Models    map[string]string      `yaml:"models"`
-	CllamaEnv map[string]string      `yaml:"cllama-env"`
-	Count     int                    `yaml:"count"`
-	Handles   map[string]interface{} `yaml:"handles"`
-	Feeds     []rawFeedEntry         `yaml:"feeds"`
-	Tools     []rawToolPolicyEntry   `yaml:"tools"`
-	Memory    *rawMemoryEntry        `yaml:"memory"`
-	Include   []rawIncludeEntry      `yaml:"include"`
-	Surfaces  []interface{}          `yaml:"surfaces"`
-	Skills    []string               `yaml:"skills"`
-	Invoke    []rawInvokeEntry       `yaml:"invoke"`
-	ClawAPI   interface{}            `yaml:"claw-api"`
+	Agent        string                 `yaml:"agent"`
+	Persona      string                 `yaml:"persona"`
+	DescribeFile string                 `yaml:"describe-file"`
+	Cllama       interface{}            `yaml:"cllama"`
+	Models       map[string]string      `yaml:"models"`
+	CllamaEnv    map[string]string      `yaml:"cllama-env"`
+	Count        int                    `yaml:"count"`
+	Handles      map[string]interface{} `yaml:"handles"`
+	Feeds        []rawFeedEntry         `yaml:"feeds"`
+	Tools        []rawToolPolicyEntry   `yaml:"tools"`
+	Memory       *rawMemoryEntry        `yaml:"memory"`
+	Include      []rawIncludeEntry      `yaml:"include"`
+	Surfaces     []interface{}          `yaml:"surfaces"`
+	Skills       []string               `yaml:"skills"`
+	Invoke       []rawInvokeEntry       `yaml:"invoke"`
+	ClawAPI      interface{}            `yaml:"claw-api"`
+	MCPStdio     *rawMCPStdioBlock      `yaml:"mcp-stdio"`
+}
+
+type rawMCPStdioBlock struct {
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args"`
 }
 
 type rawFeedEntry struct {
@@ -234,6 +241,10 @@ func Parse(r io.Reader) (*Pod, error) {
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse memory: %w", name, err)
 			}
+			mcpStdio, err := parseMCPStdio(name, svc.XClaw.MCPStdio, svc.XClaw.Agent, cllama, count)
+			if err != nil {
+				return nil, err
+			}
 			invoke := make([]InvokeEntry, 0, len(svc.XClaw.Invoke))
 			for _, rawInv := range svc.XClaw.Invoke {
 				if rawInv.Schedule == "" || rawInv.Message == "" {
@@ -256,21 +267,23 @@ func Parse(r io.Reader) (*Pod, error) {
 				return nil, fmt.Errorf("service %q: claw-api: %w", name, err)
 			}
 			service.Claw = &ClawBlock{
-				Agent:       svc.XClaw.Agent,
-				Persona:     svc.XClaw.Persona,
-				Cllama:      cllama,
-				Models:      svc.XClaw.Models,
-				CllamaEnv:   svc.XClaw.CllamaEnv,
-				Count:       count,
-				Handles:     handles,
-				Feeds:       feeds,
-				Tools:       tools,
-				Memory:      memory,
-				Include:     include,
-				Surfaces:    parsedSurfaces,
-				Skills:      skills,
-				Invoke:      invoke,
-				ClawAPIMode: clawAPIMode,
+				Agent:        svc.XClaw.Agent,
+				Persona:      svc.XClaw.Persona,
+				DescribeFile: strings.TrimSpace(svc.XClaw.DescribeFile),
+				Cllama:       cllama,
+				Models:       svc.XClaw.Models,
+				CllamaEnv:    svc.XClaw.CllamaEnv,
+				Count:        count,
+				Handles:      handles,
+				Feeds:        feeds,
+				Tools:        tools,
+				Memory:       memory,
+				Include:      include,
+				Surfaces:     parsedSurfaces,
+				Skills:       skills,
+				Invoke:       invoke,
+				ClawAPIMode:  clawAPIMode,
+				MCPStdio:     mcpStdio,
 			}
 		}
 		pod.Services[name] = service
@@ -578,6 +591,33 @@ func parseMemory(raw *rawMemoryEntry) (*MemoryEntry, error) {
 	return &MemoryEntry{
 		Service:   service,
 		TimeoutMS: timeoutMS,
+	}, nil
+}
+
+func parseMCPStdio(serviceName string, raw *rawMCPStdioBlock, agent string, cllama []string, count int) (*MCPStdioBlock, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	command := strings.TrimSpace(raw.Command)
+	if command == "" {
+		return nil, fmt.Errorf("service %q: mcp-stdio command is required", serviceName)
+	}
+	if strings.TrimSpace(agent) != "" {
+		return nil, fmt.Errorf("service %q: mcp-stdio cannot be combined with agent", serviceName)
+	}
+	if len(cllama) > 0 {
+		return nil, fmt.Errorf("service %q: mcp-stdio cannot be combined with cllama", serviceName)
+	}
+	if count > 1 {
+		return nil, fmt.Errorf("service %q: mcp-stdio does not support count > 1", serviceName)
+	}
+	args := raw.Args
+	if args == nil {
+		args = []string{}
+	}
+	return &MCPStdioBlock{
+		Command: command,
+		Args:    append([]string(nil), args...),
 	}, nil
 }
 

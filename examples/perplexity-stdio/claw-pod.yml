@@ -1,0 +1,28 @@
+# Set PERPLEXITY_KEY in your shell or .env before running `claw up -d`.
+# The API key stays on the stdio wrapper sidecar; agent containers only see the
+# managed `perplexity.search` tool through cllama.
+
+x-claw:
+  pod: perplexity-stdio-example
+
+services:
+  perplexity:
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0
+    environment:
+      PERPLEXITY_API_KEY: ${PERPLEXITY_KEY}
+    expose:
+      - "8080"
+    x-claw:
+      describe-file: ./perplexity.claw-describe.json
+      mcp-stdio:
+        command: npx
+        args: ["-y", "perplexity-mcp"]
+
+  allen:
+    image: ghcr.io/mostlydev/hermes-base:v2026.3.17
+    x-claw:
+      agent: ./AGENTS.md
+      cllama: passthrough
+      tools:
+        - service: perplexity
+          allow: [search]

@@ -588,6 +588,12 @@ The capability-evolution wave (this ADR + ADR-021) landed together. Current stat
 - Managed-tool dispatch in cllama switches by transport (`http` → existing path, `mcp` → new MCP client) inside `executeManaged{OpenAI,Anthropic}Tool`; `tool_trace`, namespacing, audit, session-history, policy budgets, and credential-starvation boundaries are unchanged
 - Existing HTTP managed tools and descriptors continue to work without modification; descriptors without `mcp:` still require `tools[].http`
 
+**Shipped (Phase 5b — stdio MCP wrapper, 2026-04-28, issue #179):**
+- `claw-mcp-stdio` wraps stdio MCP commands behind the same Streamable HTTP `/mcp` surface that cllama v0.5.0 already mediates
+- `x-claw.mcp-stdio` wires wrapper child command/args into the sidecar environment without turning the sidecar into an agent-managed runner
+- `x-claw.describe-file` lets operators provide a deterministic host-side v2 descriptor snapshot for wrapper services
+- No cllama transport changes are required; compiled `tools.json` still uses `execution.transport = "mcp"`
+
 **Not yet shipped:**
 - Phase 2: native projection / runner-side MCP config generation
 - Phase 5 follow-up: `claw discover` (live `tools/list` snapshot into the build context) and baked `.claw-tools.json` artifact support

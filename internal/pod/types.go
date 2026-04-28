@@ -29,6 +29,14 @@ type Service struct {
 	Ports       []string // container-side ports from compose ports: (host:container or plain container)
 }
 
+func (s *Service) IsMCPStdioSidecar() bool {
+	return s != nil && s.Claw != nil && s.Claw.MCPStdio != nil
+}
+
+func (s *Service) IsAgentManaged() bool {
+	return s != nil && s.Claw != nil && s.Claw.MCPStdio == nil
+}
+
 // InvokeEntry is a scheduled agent task declared in the pod x-claw.invoke block.
 type InvokeEntry struct {
 	Schedule string // 5-field cron expression
@@ -42,6 +50,7 @@ type InvokeEntry struct {
 type ClawBlock struct {
 	Agent        string
 	Persona      string
+	DescribeFile string
 	Cllama       []string
 	Models       map[string]string
 	CllamaEnv    map[string]string
@@ -56,6 +65,12 @@ type ClawBlock struct {
 	Skills       []string
 	Invoke       []InvokeEntry
 	ClawAPIMode  string // "self" when claw-api: self is declared; empty otherwise
+	MCPStdio     *MCPStdioBlock
+}
+
+type MCPStdioBlock struct {
+	Command string
+	Args    []string
 }
 
 // PodPrincipal is an explicit principal declared in the pod-level x-claw.principals list.

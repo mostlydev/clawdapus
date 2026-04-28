@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "description": "Perplexity MCP search exposed through the shared stdio wrapper.",
+  "mcp": {
+    "transport": "streamable_http",
+    "path": "/mcp"
+  },
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search the web with Perplexity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "readOnly": true
+      }
+    }
+  ]
+}

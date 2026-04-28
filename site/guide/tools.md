@@ -162,6 +162,55 @@ Tool names are namespaced as `<service>.<tool>` to prevent collisions across ser
 
 `CLAWDAPUS.md` gains a `## Tools` section listing available tool names and descriptions so the agent's behavioral contract reflects what it can call.
 
+## Wrapping Stdio MCP Servers
+
+Many MCP servers are distributed as stdio commands instead of HTTP services. Use the shared `ghcr.io/mostlydev/claw-mcp-stdio` image to expose those commands as a pod-internal Streamable HTTP MCP endpoint while keeping their credentials on the sidecar.
+
+```yaml
+services:
+  perplexity:
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0
+    environment:
+      PERPLEXITY_API_KEY: ${PERPLEXITY_KEY}
+    expose:
+      - "8080"
+    x-claw:
+      describe-file: ./perplexity.claw-describe.json
+      mcp-stdio:
+        command: npx
+        args: ["-y", "perplexity-mcp"]
+
+  analyst:
+    image: analyst:latest
+    x-claw:
+      cllama: passthrough
+      tools:
+        - service: perplexity
+          allow: [search]
+```
+
+The descriptor remains the compile-time source of truth:
+
+```json
+{
+  "version": 2,
+  "mcp": { "transport": "streamable_http", "path": "/mcp" },
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search the web with Perplexity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "query": { "type": "string" } },
+        "required": ["query"]
+      }
+    }
+  ]
+}
+```
+
+`x-claw.describe-file` points `claw up` at that host-side descriptor snapshot. `x-claw.mcp-stdio` only configures the child process; the wrapper exposes `/mcp`, handles MCP session initialization, restarts the child on exit, and logs stderr through the sidecar container logs.
+
 ## Runtime Behavior
 
 ### Tool Injection
