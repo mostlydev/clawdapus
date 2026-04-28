@@ -65,6 +65,29 @@ func TestBridgeRoutesConcurrentDuplicateClientIDs(t *testing.T) {
 	}
 }
 
+func TestBridgeLogsCanceledLateResponseSeparately(t *testing.T) {
+	bridge := newStdioBridge(testContext(t), config{})
+	bridge.mu.Lock()
+	bridge.generation = 1
+	bridge.pending["7"] = pendingCall{
+		originalID: json.RawMessage(`7`),
+		ch:         make(chan []byte, 1),
+	}
+	bridge.mu.Unlock()
+
+	bridge.removePending("7", "request context canceled")
+	logged := captureStderr(t, func() {
+		bridge.readStdout(2, strings.NewReader(`{"jsonrpc":"2.0","id":7,"result":{"ok":true}}`+"\n"))
+	})
+
+	if !strings.Contains(logged, "late response for canceled id 7") || !strings.Contains(logged, "request context canceled") {
+		t.Fatalf("expected canceled late-response log, got %q", logged)
+	}
+	if strings.Contains(logged, "unknown id") {
+		t.Fatalf("late canceled response should not be logged as unknown: %q", logged)
+	}
+}
+
 func TestBridgeRejectsUnknownSession(t *testing.T) {
 	server, cleanup := newTestWrapper(t, "")
 	defer cleanup()
@@ -231,6 +254,27 @@ func jsonPath(data []byte, path string) any {
 		}
 	}
 	return current
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() {
+		os.Stderr = old
+	}()
+	fn()
+	_ = w.Close()
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Close()
+	return string(raw)
 }
 
 func TestHelperProcess(t *testing.T) {

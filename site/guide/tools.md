@@ -240,6 +240,8 @@ When the LLM returns a response containing tool calls, cllama dispatches based o
 
 Unknown managed tool names are rejected at validation time.
 
+Within a single mediated turn, cllama also detects repeated managed tool calls with the same canonical tool name and arguments. The first call executes normally; later duplicates are skipped and returned to the model as a structured `duplicate_tool_call` tool result, with `tool_trace` metadata showing the original round and duplicate count. This keeps retry loops from repeatedly burning MCP sidecar time for the same query.
+
 **Budget limits** (configurable in pod YAML, compiled into `tools.json`):
 
 | Limit | Default |
@@ -257,7 +259,7 @@ Hidden tool rounds are preserved across turns. When the runner sends its next re
 
 ### Error Handling
 
-Tool execution errors are fed back to the LLM as structured results inside the mediated loop — the LLM decides how to communicate the failure to the runner. If cllama itself encounters a fatal error (budget exhaustion, internal failure), it returns `502` to the runner.
+Tool execution errors are fed back to the LLM as structured results inside the mediated loop — the LLM decides how to communicate the failure to the runner. Duplicate managed tool calls are treated as structured tool errors rather than sidecar executions. If cllama itself encounters a fatal error (budget exhaustion, internal failure), it returns `502` to the runner.
 
 ## Telemetry and Audit
 

@@ -149,6 +149,30 @@ func TestNormalizeSessionHistoryLineOpenAIManagedTool(t *testing.T) {
 	}
 }
 
+func TestNormalizeSessionHistoryLineManagedToolDuplicateMetadata(t *testing.T) {
+	line := `{"version":1,"id":"hist1_dup","status":"ok","ts":"2026-04-03T12:00:00Z","claw_id":"agent","path":"/v1/chat/completions","requested_model":"xai/grok","effective_provider":"xai","effective_model":"grok","status_code":200,"usage":{"total_rounds":3},"tool_trace":[{"round":2,"tool_calls":[{"name":"search.query","service":"search","status_code":409,"duplicate":true,"duplicate_of_round":1,"duplicate_count":2,"result":{"ok":false,"error":{"code":"duplicate_tool_call","message":"already ran"}}}]}]}`
+	events, err := NormalizeSessionHistoryLine([]byte(line))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 tool event, got %+v", events)
+	}
+	event := events[0]
+	if !event.ToolDuplicate {
+		t.Fatalf("expected duplicate flag, got %+v", event)
+	}
+	if event.ToolDuplicateRound == nil || *event.ToolDuplicateRound != 1 {
+		t.Fatalf("expected duplicate source round 1, got %+v", event)
+	}
+	if event.ToolDuplicateCount == nil || *event.ToolDuplicateCount != 2 {
+		t.Fatalf("expected duplicate count 2, got %+v", event)
+	}
+	if event.Error != "already ran" {
+		t.Fatalf("expected extracted duplicate error message, got %+v", event)
+	}
+}
+
 func TestNormalizeSessionHistoryLineAnthropicManagedToolFailure(t *testing.T) {
 	line := `{"version":1,"id":"hist1_def","status":"error","ts":"2026-04-03T12:05:00Z","claw_id":"nano-bot","path":"/v1/messages","requested_model":"anthropic/claude-sonnet-4","effective_provider":"anthropic","effective_model":"anthropic/claude-sonnet-4","status_code":502,"response":{"format":"json","json":{"error":{"message":"tool result rejected"}}},"usage":{"prompt_tokens":140,"completion_tokens":30,"total_rounds":2},"tool_trace":[{"round":1,"tool_calls":[{"name":"trading-api.get_market_context","service":"trading-api","latency_ms":145,"status_code":504,"result":{"ok":false,"error":"backend timeout"}}]}]}`
 	events, err := NormalizeSessionHistoryLine([]byte(line))

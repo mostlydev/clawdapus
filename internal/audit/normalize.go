@@ -140,6 +140,17 @@ func NormalizeSessionHistoryLine(line []byte) ([]Event, error) {
 				value := roundNumber
 				event.ToolRound = &value
 			}
+			if duplicate, _ := boolField(callMap, "duplicate"); duplicate {
+				event.ToolDuplicate = true
+			}
+			if duplicateRound, ok := intField(callMap, "duplicate_of_round"); ok {
+				value := duplicateRound
+				event.ToolDuplicateRound = &value
+			}
+			if duplicateCount, ok := intField(callMap, "duplicate_count"); ok {
+				value := duplicateCount
+				event.ToolDuplicateCount = &value
+			}
 			if hasTotalRounds {
 				value := totalRounds
 				event.TotalRounds = &value

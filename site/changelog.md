@@ -29,6 +29,8 @@ outline: deep
 
 ## Unreleased
 
+- Fix: managed tool mediation now skips repeated identical managed tool calls within a single turn and feeds the model a structured `duplicate_tool_call` result instead of re-executing the sidecar ([#191](https://github.com/mostlydev/clawdapus/issues/191)). Session history records duplicate metadata in `tool_trace`, cllama logs a duplicate intervention with the tool name, and the stdio MCP wrapper now distinguishes late responses after cancellation or timeout from truly unknown JSON-RPC IDs.
+
 ## v0.13.3 <Badge type="tip" text="Latest" /> {#v0-13-3}
 
 *2026-04-28*
