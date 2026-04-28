@@ -7,29 +7,16 @@ import (
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
-func TestBaseImageProvider(t *testing.T) {
+func TestBaseImageTag(t *testing.T) {
 	d := &Driver{}
 
-	var _ driver.BaseImageProvider = d
-
-	tag, dockerfile := d.BaseImage()
-
-	if tag != BaseImageTag {
-		t.Fatalf("expected tag %s, got %q", BaseImageTag, tag)
+	if _, ok := interface{}(d).(driver.BaseImageProvider); ok {
+		t.Fatal("hermes-base is a published pinned image; do not keep a second inline auto-build recipe")
 	}
-	if !strings.HasPrefix(dockerfile, "FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim") {
-		t.Fatal("Dockerfile should start from the uv Python base image")
+	if !strings.HasPrefix(BaseImageVersion, UpstreamTag+"-claw.") {
+		t.Fatalf("expected patched Hermes image tag to derive from upstream tag %q, got %q", UpstreamTag, BaseImageVersion)
 	}
-	if !strings.Contains(dockerfile, "https://github.com/NousResearch/hermes-agent.git") {
-		t.Fatal("Dockerfile should clone the correct Hermes upstream repository")
-	}
-	if !strings.Contains(dockerfile, `ARG HERMES_UPSTREAM_TAG=`+UpstreamTag) {
-		t.Fatal("Dockerfile should pin the Hermes upstream tag")
-	}
-	if !strings.Contains(dockerfile, `"/opt/hermes-agent[messaging,cron]"`) {
-		t.Fatal("Dockerfile should install Hermes with messaging and cron extras")
-	}
-	if !strings.Contains(dockerfile, `CMD ["gateway", "start"]`) {
-		t.Fatal("Dockerfile should start the Hermes gateway")
+	if BaseImageTag != "ghcr.io/mostlydev/hermes-base:"+BaseImageVersion {
+		t.Fatalf("unexpected Hermes base image tag: %s", BaseImageTag)
 	}
 }

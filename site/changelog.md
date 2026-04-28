@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- Fix: Hermes base image now pins to `ghcr.io/mostlydev/hermes-base:v2026.3.17-claw.1`, applies the Clawdapus runtime patches from `dockerfiles/hermes-base/`, and foregrounds the gateway with `hermes gateway run` instead of the systemd-backed `gateway start` path ([#186](https://github.com/mostlydev/clawdapus/issues/186)). Release verification now includes a spike that builds the image and imports `tools.terminal_tool` inside the container, covering the missing `minisweagent_path` failure from the Tiverton rollout.
 
 ## v0.13.1 <Badge type="tip" text="Latest" /> {#v0-13-1}
 

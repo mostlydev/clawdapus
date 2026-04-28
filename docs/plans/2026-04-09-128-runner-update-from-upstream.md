@@ -24,7 +24,7 @@ This is a single focused implementation session **after** a per-driver probe ver
 - `internal/driver/nanobot/baseimage.go` — synthetic tag `nanobot:latest`
 - `internal/driver/picoclaw/baseimage.go:3` — synthetic tag `picoclaw:latest`, base is `docker.io/sipeed/picoclaw:latest`
 - `internal/driver/nanoclaw/baseimage.go:3` — synthetic tag `nanoclaw-orchestrator:latest`; recipe installs `ca-certificates git python3 make g++` in builder and `ca-certificates git procps tini` in runtime (**note: no jq**)
-- `internal/driver/hermes/baseimage.go:5` — already pinned to `ghcr.io/mostlydev/hermes-base:v2026.3.17` (out of scope)
+- `internal/driver/hermes/baseimage.go:5` — already pinned to `ghcr.io/mostlydev/hermes-base:v2026.3.17-claw.1` (out of scope)
 - `internal/build/build.go:57-84` — `ensureBaseImage` only auto-builds when missing locally; never refreshes
 - `internal/build/build.go:131` — `BuildFromDockerfileContent` runs plain `docker build`, no `--pull --no-cache`
 - `internal/clawfile/emit.go:10` — `Emit(result *ParseResult) (string, error)` is pure-Go, copies FROM lines verbatim

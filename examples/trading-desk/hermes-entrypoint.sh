@@ -24,4 +24,4 @@ send_greeting() {
 }
 
 send_greeting
-exec hermes gateway start
+exec hermes gateway run

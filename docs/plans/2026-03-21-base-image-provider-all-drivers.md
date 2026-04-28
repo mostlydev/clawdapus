@@ -40,7 +40,7 @@ That keeps the images real, but avoids rebuilding tooling that upstream already 
 - Tag: `hermes:latest`
 - Base: `ghcr.io/astral-sh/uv:python3.11-bookworm-slim`
 - Install: clone `https://github.com/NousResearch/hermes-agent` and `uv pip install --system "/opt/hermes-agent[messaging,cron]"`
-- Entrypoint: `hermes gateway start`
+- Entrypoint: `hermes gateway run`
 - Extras: `bash`, `ca-certificates`, `curl`, `git`, `jq`, `procps`, `tini`
 - Notes: use the real Hermes repo and install the packaged CLI entrypoint instead of a stub shell script
 
