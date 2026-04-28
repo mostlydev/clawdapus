@@ -51,7 +51,7 @@ OpenClaw state uses its canonical home directory inside the container: `~/.openc
 
 ### hermes
 
-The Hermes driver writes a `SOUL.md` identity file during materialization to override the default Hermes runner identity. When a persona is configured, the persona's SOUL.md takes priority.
+The Hermes driver emits `HERMES_DEFAULT_AGENT_IDENTITY` so the Hermes runner starts its system prompt with a Clawdapus-managed identity instead of the upstream generic `You are Hermes Agent` block. It also writes a service-specific `SOUL.md`; when a persona is configured, the persona's SOUL.md takes priority.
 
 Container env vars from compose `environment:` are not available in Hermes agent tool execution. Only vars listed in `allowedEnvPassthroughKeys()` reach the tool runtime via the `.env` file. New env vars that agents need must be added to this allowlist.
 

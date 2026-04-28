@@ -40,7 +40,7 @@ services:
         args: ["-y", "perplexity-mcp"]
 
   allen:
-    image: ghcr.io/mostlydev/hermes-base:v2026.3.17-claw.1
+    image: ghcr.io/mostlydev/hermes-base:v2026.3.17-claw.2
     x-claw:
       agent: allen
       cllama: [openai]
