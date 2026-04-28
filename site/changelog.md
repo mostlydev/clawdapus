@@ -29,10 +29,14 @@ outline: deep
 
 ## Unreleased
 
+## v0.13.2 <Badge type="tip" text="Latest" /> {#v0-13-2}
+
+*2026-04-28*
+
 - Fix: Hermes agents now replace the upstream `You are Hermes Agent` default identity with a Clawdapus-managed identity while retaining Hermes memory, session search, and skill guidance ([#187](https://github.com/mostlydev/clawdapus/issues/187)). The Hermes base patch honors `HERMES_DEFAULT_AGENT_IDENTITY`, the driver emits the managed value, and stale stored session prompts are refreshed when the identity policy changes.
 - Fix: Hermes base image now pins to `ghcr.io/mostlydev/hermes-base:v2026.3.17-claw.2`, applies the Clawdapus runtime patches from `dockerfiles/hermes-base/`, and foregrounds the gateway with `hermes gateway run` instead of the systemd-backed `gateway start` path ([#186](https://github.com/mostlydev/clawdapus/issues/186)). Release verification now includes a spike that builds the image and imports `tools.terminal_tool` inside the container, covering the missing `minisweagent_path` failure from the Tiverton rollout.
 
-## v0.13.1 <Badge type="tip" text="Latest" /> {#v0-13-1}
+## v0.13.1 {#v0-13-1}
 
 *2026-04-28*
 
