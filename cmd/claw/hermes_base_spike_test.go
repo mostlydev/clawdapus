@@ -31,6 +31,7 @@ func TestSpikeHermesBaseImageContract(t *testing.T) {
 	script := `grep -q 'exec hermes gateway run' /usr/local/bin/hermes-entrypoint
 python - <<'PY'
 import importlib.util
+import inspect
 import os
 
 os.environ["HERMES_DEFAULT_AGENT_IDENTITY"] = "Clawdapus identity probe"
@@ -45,6 +46,7 @@ assert "session_search" in SESSION_SEARCH_GUIDANCE
 assert "skill_manage" in SKILLS_GUIDANCE
 
 from run_agent import AIAgent
+import run_agent
 agent = AIAgent(
     base_url="http://127.0.0.1:9/v1",
     api_key="test",
@@ -58,6 +60,57 @@ agent = AIAgent(
 prompt = agent._build_system_prompt()
 assert prompt.startswith("Clawdapus identity probe"), prompt[:200]
 assert not prompt.startswith("You are Hermes Agent"), prompt[:200]
+
+source = inspect.getsource(run_agent.AIAgent)
+assert "_already_used_tools_this_turn" in source
+assert "sanitized_messages[_last_user_index + 1 :]" in source
+
+from gateway.run import GatewayRunner
+assert GatewayRunner._claw_turn_sent_message([
+    {
+        "role": "assistant",
+        "tool_calls": [
+            {
+                "id": "call_send",
+                "function": {
+                    "name": "send_message",
+                    "arguments": '{"target":"discord:123","message":"visible"}',
+                },
+            }
+        ],
+    },
+    {"role": "tool", "tool_call_id": "call_send", "content": '{"success": true}'},
+])
+assert not GatewayRunner._claw_turn_sent_message([
+    {
+        "role": "assistant",
+        "tool_calls": [
+            {
+                "id": "call_list",
+                "function": {
+                    "name": "send_message",
+                    "arguments": '{"action":"list"}',
+                },
+            }
+        ],
+    },
+    {"role": "tool", "tool_call_id": "call_list", "content": '{"targets": []}'},
+])
+assert not GatewayRunner._claw_turn_sent_message([
+    {
+        "role": "assistant",
+        "tool_calls": [
+            {
+                "id": "call_failed",
+                "function": {
+                    "name": "send_message",
+                    "arguments": '{"target":"discord:123","message":"visible"}',
+                },
+            }
+        ],
+    },
+    {"role": "tool", "tool_call_id": "call_failed", "content": '{"error": "send failed"}'},
+])
 print("ok")
 PY`
 	cmd := exec.Command("docker", "run", "--rm", tag, "sh", "-lc", script)

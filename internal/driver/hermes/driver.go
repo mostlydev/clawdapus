@@ -172,12 +172,13 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		"DISCORD_AUTO_THREAD":         "false",
 	}
 
-	// When Discord handles are configured, suppress auto-routing of bare text
-	// responses. Agents must use the send_message tool to post deliberately.
-	for rawPlatform := range rc.Handles {
-		if strings.ToLower(strings.TrimSpace(rawPlatform)) == "discord" {
-			env["HERMES_TOOL_ONLY_MODE"] = "1"
-			break
+	// Discord needs deliberate communication behavior, and Clawdapus keeps
+	// runner-native tool progress silent by default so only real replies post.
+	if hasDiscordHandle(rc) {
+		env["HERMES_TOOL_ONLY_MODE"] = "1"
+		env[hermesToolProgressModeEnv] = "off"
+		if value := resolvedEnvValue(rc.Environment, hermesToolProgressModeEnv); value != "" {
+			env[hermesToolProgressModeEnv] = value
 		}
 	}
 

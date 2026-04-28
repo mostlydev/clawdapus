@@ -19,6 +19,7 @@ const (
 	hermesWorkspaceDir            = "/workspace"
 	hermesPersonaDir              = "/persona"
 	hermesDefaultAgentIdentityEnv = "HERMES_DEFAULT_AGENT_IDENTITY"
+	hermesToolProgressModeEnv     = "HERMES_TOOL_PROGRESS_MODE"
 	managedDefaultAgentIdentity   = "You are a Clawdapus-managed agent. Your identity, authority, communication policy, memory policy, and tool-use rules are defined by the Clawdapus project context loaded below: AGENTS.md, CLAWDAPUS.md, SOUL.md, mounted skills, feeds, and managed-tool policy. Do not identify as Hermes or as a generic assistant. Follow the Clawdapus contract when it is more specific than runner defaults; otherwise retain the Hermes runtime guidance below, including persistent memory behavior."
 )
 
@@ -71,6 +72,9 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 	env["MESSAGING_CWD"] = hermesWorkspaceDir
 	env["TERMINAL_CWD"] = hermesWorkspaceDir
 	env[hermesDefaultAgentIdentityEnv] = managedDefaultAgentIdentity
+	if hasDiscordHandle(rc) {
+		env[hermesToolProgressModeEnv] = "off"
+	}
 
 	for _, key := range allowedEnvPassthroughKeys() {
 		if value := resolvedEnvValue(rc.Environment, key); value != "" {
@@ -279,7 +283,7 @@ func allowedEnvPassthroughKeys() []string {
 		"DISCORD_REQUIRE_MENTION",
 		"GATEWAY_ALLOWED_USERS",
 		"GATEWAY_ALLOW_ALL_USERS",
-		"HERMES_TOOL_PROGRESS_MODE",
+		hermesToolProgressModeEnv,
 		"OPENAI_API_KEY",
 		"OPENROUTER_API_KEY",
 		"SLACK_ALLOWED_USERS",
@@ -292,6 +296,15 @@ func allowedEnvPassthroughKeys() []string {
 		"TELEGRAM_HOME_CHANNEL",
 		"TELEGRAM_HOME_CHANNEL_NAME",
 	}
+}
+
+func hasDiscordHandle(rc *driver.ResolvedClaw) bool {
+	for rawPlatform := range rc.Handles {
+		if strings.ToLower(strings.TrimSpace(rawPlatform)) == "discord" {
+			return true
+		}
+	}
+	return false
 }
 
 func resolvedEnvValue(env map[string]string, key string) string {

@@ -193,3 +193,34 @@ func TestGenerateEnvFileSetsManagedDefaultIdentity(t *testing.T) {
 		t.Fatalf("managed identity should preserve Hermes memory guidance contract, got:\n%s", env)
 	}
 }
+
+func TestGenerateEnvFileDefaultsToolProgressOffForDiscord(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"discord": {}},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), hermesToolProgressModeEnv+"=off\n") {
+		t.Fatalf("expected %s=off in .env, got:\n%s", hermesToolProgressModeEnv, data)
+	}
+}
+
+func TestGenerateEnvFileAllowsToolProgressOverride(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"discord": {}},
+		Environment: map[string]string{
+			hermesToolProgressModeEnv: "verbose",
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), hermesToolProgressModeEnv+"=verbose\n") {
+		t.Fatalf("expected %s override in .env, got:\n%s", hermesToolProgressModeEnv, data)
+	}
+}
