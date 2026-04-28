@@ -3096,6 +3096,67 @@ func TestBuildToolManifestEntriesNamescopesAndProjectsAuth(t *testing.T) {
 	}
 }
 
+func TestBuildToolManifestEntriesProjectsMCPTools(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Environment: map[string]string{
+					"PERPLEXITY_MCP_TOKEN": "${PERPLEXITY_MCP_TOKEN}",
+				},
+				Claw: &pod.ClawBlock{},
+			},
+			"perplexity-mcp": {
+				Expose: []string{"8080"},
+			},
+		},
+	}
+
+	tools, err := buildToolManifestEntries(
+		p,
+		map[string]*describe.ServiceDescriptor{
+			"perplexity-mcp": {
+				Version: 2,
+				MCP:     &describe.MCPDescriptor{Transport: "streamable_http", Path: "/mcp"},
+				Auth: &describe.AuthDescriptor{
+					Type: "bearer",
+					Env:  "PERPLEXITY_MCP_TOKEN",
+				},
+			},
+		},
+		map[string]string{
+			"PERPLEXITY_MCP_TOKEN": "mcp-token",
+		},
+		"analyst",
+		[]describe.ToolSpec{{
+			Name:        "search",
+			Service:     "perplexity-mcp",
+			Description: "Search the web",
+			InputSchema: map[string]interface{}{"type": "object"},
+			MCP:         &describe.MCPDescriptor{Transport: "streamable_http", Path: "/mcp"},
+		}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("buildToolManifestEntries: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool entry, got %+v", tools)
+	}
+	if tools[0].Name != "perplexity-mcp.search" {
+		t.Fatalf("expected namespaced tool name, got %+v", tools[0])
+	}
+	execution := tools[0].Execution
+	if execution.Transport != "mcp" || execution.Service != "perplexity-mcp" || execution.BaseURL != "http://perplexity-mcp:8080" {
+		t.Fatalf("unexpected MCP execution identity: %+v", execution)
+	}
+	if execution.Path != "/mcp" || execution.ToolName != "search" || execution.Method != "" {
+		t.Fatalf("unexpected MCP execution shape: %+v", execution)
+	}
+	if execution.Auth == nil || execution.Auth.Token != "mcp-token" {
+		t.Fatalf("expected projected MCP auth token, got %+v", execution.Auth)
+	}
+}
+
 func TestBuildMemoryManifestEntryUsesProjectedServiceAuth(t *testing.T) {
 	p := &pod.Pod{
 		Services: map[string]*pod.Service{

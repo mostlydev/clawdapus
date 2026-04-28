@@ -1333,9 +1333,6 @@ func buildToolManifestEntries(p *pod.Pod, descriptors map[string]*describe.Servi
 
 	entries := make([]cllama.ToolManifestEntry, 0, len(tools))
 	for _, tool := range tools {
-		if tool.HTTP == nil {
-			return nil, fmt.Errorf("tool %q from %q has no HTTP execution metadata", tool.Name, tool.Service)
-		}
 		baseURL, err := resolveServiceBaseURL(p, tool.Service)
 		if err != nil {
 			return nil, fmt.Errorf("tool %q: %w", tool.Name, err)
@@ -1344,12 +1341,10 @@ func buildToolManifestEntries(p *pod.Pod, descriptors map[string]*describe.Servi
 		if err != nil {
 			return nil, fmt.Errorf("tool %q: %w", tool.Name, err)
 		}
-		entries = append(entries, cllama.ToolManifestEntry{
-			Name:        tool.Service + "." + tool.Name,
-			Description: tool.Description,
-			InputSchema: tool.InputSchema,
-			Annotations: tool.Annotations,
-			Execution: cllama.ToolExecution{
+		var execution cllama.ToolExecution
+		switch {
+		case tool.HTTP != nil:
+			execution = cllama.ToolExecution{
 				Transport: "http",
 				Service:   tool.Service,
 				BaseURL:   baseURL,
@@ -1357,7 +1352,25 @@ func buildToolManifestEntries(p *pod.Pod, descriptors map[string]*describe.Servi
 				Path:      tool.HTTP.Path,
 				BodyKey:   tool.HTTP.BodyKey,
 				Auth:      auth,
-			},
+			}
+		case tool.MCP != nil:
+			execution = cllama.ToolExecution{
+				Transport: "mcp",
+				Service:   tool.Service,
+				BaseURL:   baseURL,
+				Path:      tool.MCP.Path,
+				ToolName:  tool.Name,
+				Auth:      auth,
+			}
+		default:
+			return nil, fmt.Errorf("tool %q from %q has no HTTP or MCP execution metadata", tool.Name, tool.Service)
+		}
+		entries = append(entries, cllama.ToolManifestEntry{
+			Name:        tool.Service + "." + tool.Name,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
+			Annotations: tool.Annotations,
+			Execution:   execution,
 		})
 	}
 	return entries, nil

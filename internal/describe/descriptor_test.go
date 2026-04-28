@@ -87,6 +87,39 @@ func TestParseDescriptorV2SupportsToolsAndMemory(t *testing.T) {
 	}
 }
 
+func TestParseDescriptorV2SupportsMCPToolsWithoutHTTP(t *testing.T) {
+	data := []byte(`{
+	  "version": 2,
+	  "description": "Perplexity MCP",
+	  "mcp": {"transport": "http", "path": " /mcp "},
+	  "tools": [{
+	    "name": " search ",
+	    "description": " Search the web ",
+	    "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}
+	  }]
+	}`)
+
+	descriptor, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if descriptor.MCP == nil {
+		t.Fatal("expected mcp descriptor")
+	}
+	if descriptor.MCP.Transport != "streamable_http" {
+		t.Fatalf("expected normalized transport, got %q", descriptor.MCP.Transport)
+	}
+	if descriptor.MCP.Path != "/mcp" {
+		t.Fatalf("expected normalized path, got %q", descriptor.MCP.Path)
+	}
+	if descriptor.Tools[0].HTTP != nil {
+		t.Fatalf("expected MCP tool to omit http metadata, got %+v", descriptor.Tools[0].HTTP)
+	}
+	if descriptor.Tools[0].Name != "search" {
+		t.Fatalf("expected trimmed tool name, got %q", descriptor.Tools[0].Name)
+	}
+}
+
 func TestParseDescriptorRejectsVersionOneToolsAndMemory(t *testing.T) {
 	tests := []struct {
 		name string
@@ -99,6 +132,10 @@ func TestParseDescriptorRejectsVersionOneToolsAndMemory(t *testing.T) {
 		{
 			name: "memory",
 			data: `{"version":1,"memory":{"recall":{"path":"/recall"}}}`,
+		},
+		{
+			name: "mcp",
+			data: `{"version":1,"mcp":{"path":"/mcp"}}`,
 		},
 	}
 
@@ -131,6 +168,18 @@ func TestParseDescriptorRejectsInvalidV2CapabilityShape(t *testing.T) {
 		{
 			name: "missing tool http",
 			data: `{"version":2,"tools":[{"name":"lookup","description":"Lookup","inputSchema":{"type":"object"}}]}`,
+		},
+		{
+			name: "mcp and http both present",
+			data: `{"version":2,"mcp":{"path":"/mcp"},"tools":[{"name":"lookup","description":"Lookup","inputSchema":{"type":"object"},"http":{"method":"post","path":"/lookup"}}]}`,
+		},
+		{
+			name: "unsupported mcp transport",
+			data: `{"version":2,"mcp":{"transport":"stdio","path":"/mcp"},"tools":[{"name":"lookup","description":"Lookup","inputSchema":{"type":"object"}}]}`,
+		},
+		{
+			name: "invalid mcp path",
+			data: `{"version":2,"mcp":{"path":"mcp"},"tools":[{"name":"lookup","description":"Lookup","inputSchema":{"type":"object"}}]}`,
 		},
 		{
 			name: "body key on get",

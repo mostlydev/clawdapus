@@ -32,6 +32,31 @@ func TestBuildToolRegistryGroupsToolsByService(t *testing.T) {
 	}
 }
 
+func TestBuildToolRegistryCarriesMCPDescriptor(t *testing.T) {
+	registry, err := BuildToolRegistry(map[string]*ServiceDescriptor{
+		"perplexity-mcp": {
+			Version: 2,
+			MCP:     &MCPDescriptor{Transport: "streamable_http", Path: "/mcp"},
+			Tools: []ToolDescriptor{
+				{Name: "search", Description: "Search", InputSchema: map[string]interface{}{"type": "object"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildToolRegistry: %v", err)
+	}
+	specs := registry["perplexity-mcp"]
+	if len(specs) != 1 {
+		t.Fatalf("expected 1 MCP tool, got %+v", specs)
+	}
+	if specs[0].HTTP != nil {
+		t.Fatalf("expected no HTTP metadata, got %+v", specs[0].HTTP)
+	}
+	if specs[0].MCP == nil || specs[0].MCP.Path != "/mcp" {
+		t.Fatalf("expected MCP metadata, got %+v", specs[0].MCP)
+	}
+}
+
 func TestBuildToolRegistryRejectsDuplicateNamesWithinService(t *testing.T) {
 	_, err := BuildToolRegistry(map[string]*ServiceDescriptor{
 		"trading-api": {

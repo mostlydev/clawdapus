@@ -17,6 +17,7 @@ type ToolSpec struct {
 	Description string
 	InputSchema map[string]interface{}
 	HTTP        *ToolHTTP
+	MCP         *MCPDescriptor
 	Annotations map[string]interface{}
 }
 
@@ -62,12 +63,18 @@ func BuildToolRegistry(descriptors map[string]*ServiceDescriptor) (ToolRegistry,
 				return nil, fmt.Errorf("tool name %q is declared multiple times by %q", tool.Name, serviceName)
 			}
 			seen[tool.Name] = struct{}{}
+			var mcp *MCPDescriptor
+			if descriptor.MCP != nil && tool.HTTP == nil {
+				copied := *descriptor.MCP
+				mcp = &copied
+			}
 			spec := ToolSpec{
 				Name:        tool.Name,
 				Service:     serviceName,
 				Description: tool.Description,
 				InputSchema: tool.InputSchema,
 				HTTP:        tool.HTTP,
+				MCP:         mcp,
 				Annotations: tool.Annotations,
 			}
 			specs = append(specs, spec)

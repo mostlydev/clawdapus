@@ -12,6 +12,7 @@ type ServiceDescriptor struct {
 	Version     int                  `json:"version"`
 	Description string               `json:"description,omitempty"`
 	Feeds       []FeedDescriptor     `json:"feeds,omitempty"`
+	MCP         *MCPDescriptor       `json:"mcp,omitempty"`
 	Tools       []ToolDescriptor     `json:"tools,omitempty"`
 	Memory      *MemoryDescriptor    `json:"memory,omitempty"`
 	Endpoints   []EndpointDescriptor `json:"endpoints,omitempty"`
@@ -43,6 +44,11 @@ type ToolDescriptor struct {
 	InputSchema map[string]interface{} `json:"inputSchema"`
 	HTTP        *ToolHTTP              `json:"http,omitempty"`
 	Annotations map[string]interface{} `json:"annotations,omitempty"`
+}
+
+type MCPDescriptor struct {
+	Transport string `json:"transport,omitempty"`
+	Path      string `json:"path,omitempty"`
 }
 
 type ToolHTTP struct {
@@ -127,13 +133,19 @@ func (d *ServiceDescriptor) Validate() error {
 		if len(d.Tools) > 0 {
 			return fmt.Errorf("descriptor version 1 does not support tools")
 		}
+		if d.MCP != nil {
+			return fmt.Errorf("descriptor version 1 does not support mcp")
+		}
 		if d.Memory != nil {
 			return fmt.Errorf("descriptor version 1 does not support memory")
 		}
 	}
 
 	if d.Version >= 2 {
-		if err := validateTools(d.Tools); err != nil {
+		if err := validateMCP(d.MCP); err != nil {
+			return err
+		}
+		if err := validateTools(d.Tools, d.MCP); err != nil {
 			return err
 		}
 		if err := validateMemory(d.Memory); err != nil {
@@ -156,7 +168,28 @@ func (d *ServiceDescriptor) Validate() error {
 	return nil
 }
 
-func validateTools(tools []ToolDescriptor) error {
+func validateMCP(mcp *MCPDescriptor) error {
+	if mcp == nil {
+		return nil
+	}
+	transport := strings.ToLower(strings.TrimSpace(mcp.Transport))
+	switch transport {
+	case "", "http", "streamable_http", "streamable-http":
+		mcp.Transport = "streamable_http"
+	default:
+		return fmt.Errorf("mcp.transport %q is unsupported", mcp.Transport)
+	}
+	mcp.Path = strings.TrimSpace(mcp.Path)
+	if mcp.Path == "" {
+		mcp.Path = "/mcp"
+	}
+	if !strings.HasPrefix(mcp.Path, "/") {
+		return fmt.Errorf("mcp.path %q must start with '/'", mcp.Path)
+	}
+	return nil
+}
+
+func validateTools(tools []ToolDescriptor, mcp *MCPDescriptor) error {
 	seenTools := make(map[string]struct{}, len(tools))
 	for i := range tools {
 		tool := &tools[i]
@@ -182,7 +215,13 @@ func validateTools(tools []ToolDescriptor) error {
 		if strings.ToLower(strings.TrimSpace(schemaType)) != "object" {
 			return fmt.Errorf("tools[%d]: inputSchema.type must be \"object\"", i)
 		}
+		if mcp != nil && tool.HTTP != nil {
+			return fmt.Errorf("tools[%d]: http must not be set when descriptor mcp is set", i)
+		}
 		if tool.HTTP == nil {
+			if mcp != nil {
+				continue
+			}
 			return fmt.Errorf("tools[%d]: http is required", i)
 		}
 		tool.HTTP.Method = strings.ToUpper(strings.TrimSpace(tool.HTTP.Method))
