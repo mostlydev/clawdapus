@@ -175,7 +175,6 @@ services:
     expose:
       - "8080"
     x-claw:
-      describe-file: ./perplexity.claw-describe.json
       mcp-stdio:
         command: npx
         args: ["-y", "perplexity-mcp"]
@@ -189,7 +188,15 @@ services:
           allow: [search]
 ```
 
-The descriptor remains the compile-time source of truth:
+Run discovery once after the sidecar command and credentials are configured:
+
+```bash
+claw discover perplexity
+```
+
+`claw discover` starts the wrapper in a short-lived local container, performs MCP `initialize` and `tools/list`, then writes `.claw-discovered/perplexity.claw-describe.json`. That snapshot is the compile-time source of truth for `claw up`, so deploys remain deterministic and do not depend on live MCP discovery.
+
+The generated descriptor uses the same v2 shape as hand-authored MCP descriptors:
 
 ```json
 {
@@ -209,7 +216,7 @@ The descriptor remains the compile-time source of truth:
 }
 ```
 
-`x-claw.describe-file` points `claw up` at that host-side descriptor snapshot. `x-claw.mcp-stdio` only configures the child process; the wrapper exposes `/mcp`, handles MCP session initialization, restarts the child on exit, and logs stderr through the sidecar container logs.
+`x-claw.mcp-stdio` only configures the child process; the wrapper exposes `/mcp`, handles MCP session initialization, restarts the child on exit, and logs stderr through the sidecar container logs. If live discovery is unavailable, `x-claw.describe-file` is still supported as an explicit descriptor override.
 
 ## Runtime Behavior
 

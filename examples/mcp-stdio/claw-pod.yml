@@ -22,7 +22,6 @@ services:
     expose:
       - "8080"
     x-claw:
-      describe-file: ./echo.claw-describe.json
       mcp-stdio:
         command: node
         args: ["/srv/echo-server/server.js"]

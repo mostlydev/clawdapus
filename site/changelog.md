@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **MCP stdio self-discovery** ([#182](https://github.com/mostlydev/clawdapus/issues/182)) — `claw discover [service...]` now starts stdio MCP wrapper sidecars ephemerally, performs MCP `initialize` + `tools/list`, and writes deterministic `.claw-discovered/<service>.claw-describe.json` snapshots. `claw up` consumes those snapshots before falling back to image/build descriptors, warns when a snapshot no longer matches the declared stdio command or wrapper image, and offers `--discover-tools` as an explicit convenience for missing or stale snapshots. `x-claw.describe-file` remains supported as an override, but stdio MCP packages no longer require hand-authored descriptor glue for the happy path.
 
 ## v0.12.0 <Badge type="tip" text="Latest" /> {#v0-12-0}
 

@@ -352,6 +352,35 @@ func TestResolveRuntimePlaceholdersSupportsLowercaseNamesAndDefaults(t *testing.
 	}
 }
 
+func TestResolveRuntimePlaceholdersExpandsMCPStdioCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("MCP_CMD=node\nMCP_SCRIPT=/srv/server.js\n"), 0o644); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"echo": {
+				Claw: &pod.ClawBlock{MCPStdio: &pod.MCPStdioBlock{
+					Command: "${MCP_CMD}",
+					Args:    []string{"${MCP_SCRIPT}"},
+				}},
+			},
+		},
+	}
+
+	if err := resolveRuntimePlaceholders(tmpDir, p); err != nil {
+		t.Fatalf("resolveRuntimePlaceholders: %v", err)
+	}
+	if got := p.Services["echo"].Claw.MCPStdio.Command; got != "node" {
+		t.Fatalf("expected expanded command, got %q", got)
+	}
+	if got := p.Services["echo"].Claw.MCPStdio.Args[0]; got != "/srv/server.js" {
+		t.Fatalf("expected expanded args, got %q", got)
+	}
+}
+
 func TestResolveRuntimePlaceholdersProvidesRepoRootByDefault(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -395,6 +424,72 @@ func TestResolveRuntimePlaceholdersRejectsUnresolvedPlaceholders(t *testing.T) {
 		t.Fatal("expected unresolved placeholder to fail")
 	}
 	if !strings.Contains(err.Error(), `unresolved x-claw placeholder "${missing_agent}"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveServiceMetadataLoadsDiscoveredSnapshot(t *testing.T) {
+	tmpDir := t.TempDir()
+	descriptor := &describe.ServiceDescriptor{
+		Version:     2,
+		Description: "Echo",
+		MCP:         &describe.MCPDescriptor{Transport: "streamable_http", Path: "/mcp"},
+		Tools: []describe.ToolDescriptor{{
+			Name:        "echo",
+			Description: "Echo text.",
+			InputSchema: map[string]interface{}{"type": "object"},
+		}},
+		XClawDiscovery: &describe.DiscoveryMetadata{
+			Command:      "node",
+			Args:         []string{"/srv/server.js"},
+			WrapperImage: "wrapper:v1",
+		},
+	}
+	if err := writeDescriptorSnapshot(discoveredSnapshotPath(tmpDir, "echo"), descriptor); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+	p := &pod.Pod{Services: map[string]*pod.Service{
+		"echo": {
+			Image: "wrapper:v1",
+			Claw:  &pod.ClawBlock{MCPStdio: &pod.MCPStdioBlock{Command: "node", Args: []string{"/srv/server.js"}}},
+		},
+	}}
+
+	_, _, got, err := resolveServiceMetadata(tmpDir, p, "echo", p.Services["echo"], map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err != nil {
+		t.Fatalf("resolveServiceMetadata: %v", err)
+	}
+	if got == nil || len(got.Tools) != 1 || got.Tools[0].Name != "echo" {
+		t.Fatalf("unexpected descriptor: %+v", got)
+	}
+}
+
+func TestResolveServiceMetadataRequiresSnapshotForMCPStdio(t *testing.T) {
+	prevImageExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadImage := loadDescriptorFromImage
+	imageExistsLocally = func(string) bool { return true }
+	inspectClawImage = func(string) (*inspect.ClawInfo, error) { return nil, nil }
+	loadDescriptorFromImage = func(string, string) (*describe.ServiceDescriptor, error) { return nil, os.ErrNotExist }
+	defer func() {
+		imageExistsLocally = prevImageExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadImage
+	}()
+
+	tmpDir := t.TempDir()
+	p := &pod.Pod{Services: map[string]*pod.Service{
+		"echo": {
+			Image: "wrapper:v1",
+			Claw:  &pod.ClawBlock{MCPStdio: &pod.MCPStdioBlock{Command: "node", Args: []string{"/srv/server.js"}}},
+		},
+	}}
+
+	_, _, _, err := resolveServiceMetadata(tmpDir, p, "echo", p.Services["echo"], map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err == nil {
+		t.Fatal("expected missing snapshot error")
+	}
+	if !strings.Contains(err.Error(), "run 'claw discover echo'") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

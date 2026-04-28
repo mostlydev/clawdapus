@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -34,6 +35,7 @@ import (
 
 var composeUpDetach bool
 var composeUpFix bool
+var composeUpDiscoverTools bool
 
 var runtimePlaceholderPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
@@ -121,6 +123,11 @@ func runComposeUp(podFile string) (err error) {
 	warnRunnerBaseDrift(podFile, servicePlans)
 	if err := resolveRuntimePlaceholders(podDir, p); err != nil {
 		return fmt.Errorf("resolve x-claw runtime placeholders: %w", err)
+	}
+	if composeUpDiscoverTools && podHasMCPStdioServices(p) {
+		if _, err := discoverMCPStdioServices(context.Background(), podDir, p, nil, discoverSelectionMissingOrStale); err != nil {
+			return fmt.Errorf("discover stdio MCP tools: %w", err)
+		}
 	}
 	runtimeDir := filepath.Join(podDir, ".claw-runtime")
 	memoryRoot, err := ensurePersistentCllamaDir(podDir, ".claw-memory")
@@ -1063,6 +1070,12 @@ func resolveRuntimePlaceholders(podDir string, p *pod.Pod) error {
 		}
 		for key, value := range svc.Claw.CllamaEnv {
 			svc.Claw.CllamaEnv[key] = expand(value)
+		}
+		if svc.Claw.MCPStdio != nil {
+			svc.Claw.MCPStdio.Command = expand(svc.Claw.MCPStdio.Command)
+			for i, value := range svc.Claw.MCPStdio.Args {
+				svc.Claw.MCPStdio.Args[i] = expand(value)
+			}
 		}
 		for i, value := range svc.Claw.Skills {
 			svc.Claw.Skills[i] = expand(value)
@@ -3389,6 +3402,19 @@ func resolveServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 		return strings.TrimSpace(svc.Image), infos[serviceName], descriptor, nil
 	}
 
+	if descriptorPath := discoveredDescribeFile(podDir, serviceName, svc); descriptorPath != "" {
+		descriptor, err := loadDescriptorFromFile(descriptorPath)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("load discovered descriptor %q: %w", descriptorPath, err)
+		}
+		warnDiscoveryDrift(serviceName, descriptor, svc)
+		if svc != nil && strings.TrimSpace(svc.Image) != "" {
+			imageRefs[serviceName] = strings.TrimSpace(svc.Image)
+		}
+		descriptors[serviceName] = descriptor
+		return strings.TrimSpace(svc.Image), infos[serviceName], descriptor, nil
+	}
+
 	imageRef, info, err := inspectServiceMetadata(podDir, p, serviceName, svc, imageRefs, infos)
 	if err != nil {
 		return "", nil, nil, err
@@ -3422,6 +3448,9 @@ func resolveServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 	}
 
 	descriptors[serviceName] = descriptor
+	if descriptor == nil && svc != nil && svc.IsMCPStdioSidecar() {
+		return "", nil, nil, fmt.Errorf("stdio MCP sidecar has no descriptor snapshot; run 'claw discover %s' or set x-claw.describe-file", serviceName)
+	}
 	return imageRef, info, descriptor, nil
 }
 
@@ -3437,6 +3466,17 @@ func explicitDescribeFile(podDir string, svc *pod.Service) string {
 		return filepath.Clean(path)
 	}
 	return filepath.Clean(filepath.Join(podDir, path))
+}
+
+func discoveredDescribeFile(podDir, serviceName string, svc *pod.Service) string {
+	if svc == nil || !svc.IsMCPStdioSidecar() {
+		return ""
+	}
+	path := discoveredSnapshotPath(podDir, serviceName)
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	return ""
 }
 
 func resolvedImageDescriptorPath(info *inspect.ClawInfo) (string, bool) {
@@ -4346,5 +4386,6 @@ func findRepoRoot() (string, bool) {
 func init() {
 	composeUpCmd.Flags().BoolVarP(&composeUpDetach, "detach", "d", false, "Run in background")
 	composeUpCmd.Flags().BoolVar(&composeUpFix, "fix", false, "Pull/build missing images before starting the pod")
+	composeUpCmd.Flags().BoolVar(&composeUpDiscoverTools, "discover-tools", false, "Discover missing or stale stdio MCP tool snapshots before compiling")
 	rootCmd.AddCommand(composeUpCmd)
 }
