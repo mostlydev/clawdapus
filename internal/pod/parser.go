@@ -221,7 +221,11 @@ func Parse(r io.Reader) (*Pod, error) {
 			if skills == nil {
 				skills = make([]string, 0)
 			}
-			handles, err := parseHandles(mergeHandleDefaults(raw.XClaw.HandlesDefaults, svc.XClaw.Handles))
+			rawHandles := svc.XClaw.Handles
+			if svc.XClaw.MCPStdio == nil {
+				rawHandles = mergeHandleDefaults(raw.XClaw.HandlesDefaults, svc.XClaw.Handles)
+			}
+			handles, err := parseHandles(rawHandles)
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse handles: %w", name, err)
 			}
@@ -714,12 +718,19 @@ func expandPodDefaults(root map[string]interface{}) error {
 			}
 		}
 
-		if err := applyRawPodDefaults(rawBlock, defaults); err != nil {
-			return fmt.Errorf("service %q: %w", name, err)
+		if !rawBlockHasMCPStdio(rawBlock) {
+			if err := applyRawPodDefaults(rawBlock, defaults); err != nil {
+				return fmt.Errorf("service %q: %w", name, err)
+			}
 		}
 	}
 
 	return nil
+}
+
+func rawBlockHasMCPStdio(raw map[string]interface{}) bool {
+	_, ok := raw["mcp-stdio"]
+	return ok
 }
 
 type podDefaults struct {
