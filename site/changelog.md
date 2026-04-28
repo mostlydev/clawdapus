@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.13.0 <Badge type="tip" text="Latest" /> {#v0-13-0}
+## v0.13.1 <Badge type="tip" text="Latest" /> {#v0-13-1}
+
+*2026-04-28*
+
+- Fix: stdio MCP sidecars no longer inherit pod-level agent or `handles-defaults` blocks ([#185](https://github.com/mostlydev/clawdapus/pull/185), closes [#184](https://github.com/mostlydev/clawdapus/issues/184)). A pod that mixes Discord-bound agents with an `x-claw.mcp-stdio` sidecar parses cleanly without forcing the sidecar to opt out of every default the agents share.
+
+## v0.13.0 {#v0-13-0}
 
 *2026-04-28*
 
