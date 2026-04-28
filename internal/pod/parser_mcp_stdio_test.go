@@ -40,6 +40,75 @@ services:
 	}
 }
 
+func TestParseMCPStdioDoesNotInheritPodAgentDefaults(t *testing.T) {
+	p, err := Parse(strings.NewReader(`
+x-claw:
+  handles-defaults:
+    discord:
+      guilds:
+        - id: "guild-1"
+          name: "Trading Floor"
+  cllama-defaults:
+    proxy: [passthrough]
+    env:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+  surfaces-defaults:
+    - "service://trading-api"
+  feeds-defaults:
+    - market-context
+  tools-defaults:
+    - trading-api
+  skills-defaults:
+    - ./skills/shared.md
+
+services:
+  perplexity:
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0
+    x-claw:
+      mcp-stdio:
+        command: npx
+        args: ["-y", "perplexity-mcp"]
+  agent:
+    image: agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+      handles:
+        discord:
+          id: "agent-id"
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	sidecar := p.Services["perplexity"]
+	if sidecar == nil || sidecar.Claw == nil || sidecar.Claw.MCPStdio == nil {
+		t.Fatalf("expected mcp-stdio sidecar, got %+v", sidecar)
+	}
+	if len(sidecar.Claw.Cllama) != 0 {
+		t.Fatalf("mcp-stdio sidecar inherited cllama defaults: %v", sidecar.Claw.Cllama)
+	}
+	if len(sidecar.Claw.CllamaEnv) != 0 {
+		t.Fatalf("mcp-stdio sidecar inherited cllama env: %v", sidecar.Claw.CllamaEnv)
+	}
+	if len(sidecar.Claw.Handles) != 0 {
+		t.Fatalf("mcp-stdio sidecar inherited handles defaults: %+v", sidecar.Claw.Handles)
+	}
+	if len(sidecar.Claw.Surfaces) != 0 || len(sidecar.Claw.Feeds) != 0 || len(sidecar.Claw.Tools) != 0 || len(sidecar.Claw.Skills) != 0 {
+		t.Fatalf("mcp-stdio sidecar inherited agent defaults: surfaces=%v feeds=%v tools=%v skills=%v", sidecar.Claw.Surfaces, sidecar.Claw.Feeds, sidecar.Claw.Tools, sidecar.Claw.Skills)
+	}
+
+	agent := p.Services["agent"]
+	if agent == nil || agent.Claw == nil {
+		t.Fatal("expected agent service")
+	}
+	if len(agent.Claw.Cllama) != 1 || agent.Claw.Cllama[0] != "passthrough" {
+		t.Fatalf("agent did not inherit cllama defaults: %v", agent.Claw.Cllama)
+	}
+	if agent.Claw.Handles["discord"] == nil || len(agent.Claw.Handles["discord"].Guilds) != 1 {
+		t.Fatalf("agent did not inherit handle topology: %+v", agent.Claw.Handles)
+	}
+}
+
 func TestParseMCPStdioValidation(t *testing.T) {
 	tests := []struct {
 		name string
