@@ -581,9 +581,16 @@ The capability-evolution wave (this ADR + ADR-021) landed together. Current stat
 - Session history `tool_trace`, `status`, and `usage.total_rounds` extensions
 - `claw audit` merges session-history `tool_call` events with proxy log events
 
+**Shipped (Phase 5 — MCP sidecar transport, 2026-04-27, issue #177):**
+- `claw.describe` v2 accepts a top-level `mcp` block (`transport: streamable_http`, `path: /mcp`); when present, `tools[].http` becomes optional
+- `claw up` compiles allowed MCP tools into per-agent `tools.json` with `transport: "mcp"` execution metadata, including the un-namespaced `tool_name` and reusing existing per-agent service-auth resolution
+- cllama gains a Streamable HTTP MCP client (`internal/mcp`) that runs the `initialize` + `notifications/initialized` handshake, caches sessions per target, parses both JSON and `text/event-stream` JSON-RPC responses, and retries once on session-expired (HTTP 400/404)
+- Managed-tool dispatch in cllama switches by transport (`http` → existing path, `mcp` → new MCP client) inside `executeManaged{OpenAI,Anthropic}Tool`; `tool_trace`, namespacing, audit, session-history, policy budgets, and credential-starvation boundaries are unchanged
+- Existing HTTP managed tools and descriptors continue to work without modification; descriptors without `mcp:` still require `tools[].http`
+
 **Not yet shipped:**
 - Phase 2: native projection / runner-side MCP config generation
-- Phase 5: MCP client in cllama, baked `.claw-tools.json` support, `claw discover`
+- Phase 5 follow-up: `claw discover` (live `tools/list` snapshot into the build context) and baked `.claw-tools.json` artifact support
 - Phase 6: `parallel_safe` annotation, dynamic filtering, native mode graduation
 
 See `docs/plans/2026-03-30-memory-plane-and-pluggable-recall.md` for the companion implementation-status document covering both ADR-020 and ADR-021.

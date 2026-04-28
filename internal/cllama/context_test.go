@@ -188,3 +188,47 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 		t.Fatalf("unexpected service-auth payload: %v", auth)
 	}
 }
+
+func TestGenerateContextDirWritesMCPToolExecution(t *testing.T) {
+	dir := t.TempDir()
+	agents := []AgentContextInput{{
+		AgentID:     "octopus",
+		AgentsMD:    "# Contract",
+		ClawdapusMD: "# Infra",
+		Metadata:    map[string]interface{}{"service": "octopus"},
+		Tools: []ToolManifestEntry{{
+			Name:        "perplexity-mcp.search",
+			Description: "Search the web",
+			InputSchema: map[string]interface{}{"type": "object"},
+			Execution: ToolExecution{
+				Transport: "mcp",
+				Service:   "perplexity-mcp",
+				BaseURL:   "http://perplexity-mcp:8080",
+				Path:      "/mcp",
+				ToolName:  "search",
+				Auth:      &AuthEntry{Type: "bearer", Token: "service-token"},
+			},
+		}},
+	}}
+
+	if err := GenerateContextDir(dir, agents); err != nil {
+		t.Fatal(err)
+	}
+
+	toolsRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "tools.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var toolsManifest map[string]interface{}
+	if err := json.Unmarshal(toolsRaw, &toolsManifest); err != nil {
+		t.Fatal(err)
+	}
+	tools := toolsManifest["tools"].([]interface{})
+	execution := tools[0].(map[string]interface{})["execution"].(map[string]interface{})
+	if execution["transport"] != "mcp" || execution["path"] != "/mcp" || execution["tool_name"] != "search" {
+		t.Fatalf("unexpected MCP tool execution payload: %v", execution)
+	}
+	if _, exists := execution["method"]; exists {
+		t.Fatalf("MCP execution should not emit HTTP method: %v", execution)
+	}
+}

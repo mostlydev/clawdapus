@@ -51,8 +51,9 @@ type ToolExecution struct {
 	Transport string     `json:"transport"`
 	Service   string     `json:"service"`
 	BaseURL   string     `json:"base_url"`
-	Method    string     `json:"method"`
+	Method    string     `json:"method,omitempty"`
 	Path      string     `json:"path"`
+	ToolName  string     `json:"tool_name,omitempty"`
 	BodyKey   string     `json:"body_key,omitempty"`
 	Auth      *AuthEntry `json:"auth,omitempty"`
 }
