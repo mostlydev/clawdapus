@@ -62,6 +62,7 @@ var (
 	findClawdapusRepoRoot        = findRepoRoot
 	runInfraDockerCommand        = runInfraDockerCommandDefault
 	runComposeDockerCommand      = runComposeDockerCommandDefault
+	loadDescriptorFromFile       = describe.LoadFromFile
 	loadDescriptorFromImage      = describe.LoadFromImage
 	loadDescriptorFromBuildCtx   = describe.LoadFromBuildContext
 	resolveBuildContextFile      = describe.ResolveBuildContextFile
@@ -188,13 +189,13 @@ func runComposeUp(podFile string) (err error) {
 	// This is a cheap pass over the already-parsed pod YAML — no image inspection needed.
 	podHandles := make(map[string]map[string]*driver.HandleInfo) // service → platform → HandleInfo
 	for name, svc := range p.Services {
-		if svc.Claw != nil && len(svc.Claw.Handles) > 0 {
+		if svc.IsAgentManaged() && len(svc.Claw.Handles) > 0 {
 			podHandles[name] = svc.Claw.Handles
 		}
 	}
 
 	for name, svc := range p.Services {
-		if svc.Claw == nil {
+		if !svc.IsAgentManaged() {
 			continue
 		}
 
@@ -3376,6 +3377,18 @@ func resolveServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 		return "", nil, descriptor, nil
 	}
 
+	if descriptorPath := explicitDescribeFile(podDir, svc); descriptorPath != "" {
+		descriptor, err := loadDescriptorFromFile(descriptorPath)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("load descriptor from describe-file: %w", err)
+		}
+		if svc != nil && strings.TrimSpace(svc.Image) != "" {
+			imageRefs[serviceName] = strings.TrimSpace(svc.Image)
+		}
+		descriptors[serviceName] = descriptor
+		return strings.TrimSpace(svc.Image), infos[serviceName], descriptor, nil
+	}
+
 	imageRef, info, err := inspectServiceMetadata(podDir, p, serviceName, svc, imageRefs, infos)
 	if err != nil {
 		return "", nil, nil, err
@@ -3410,6 +3423,20 @@ func resolveServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 
 	descriptors[serviceName] = descriptor
 	return imageRef, info, descriptor, nil
+}
+
+func explicitDescribeFile(podDir string, svc *pod.Service) string {
+	if svc == nil || svc.Claw == nil {
+		return ""
+	}
+	path := strings.TrimSpace(svc.Claw.DescribeFile)
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(filepath.Join(podDir, path))
 }
 
 func resolvedImageDescriptorPath(info *inspect.ClawInfo) (string, bool) {

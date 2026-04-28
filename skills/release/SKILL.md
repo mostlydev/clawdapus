@@ -328,10 +328,11 @@ those images are invisible.
 
 ```go
 const (
-    DefaultClawInfraTag  = "v0.X.Y"  // clawdash + claw-api + claw-wall (lockstep)
+    DefaultClawInfraTag  = "v0.X.Y"  // clawdash + claw-api + claw-wall + claw-mcp-stdio (lockstep)
     DefaultClawAPITag    = DefaultClawInfraTag
     DefaultClawdashTag   = DefaultClawInfraTag
     DefaultClawWallTag   = DefaultClawInfraTag
+    DefaultClawMCPStdioTag = DefaultClawInfraTag
     DefaultCllamaTag     = "v0.A.B"
     DefaultHermesBaseTag = "v<upstream>"
 )
@@ -339,9 +340,9 @@ const (
 
 Decide which pins to move based on what the release actually touches:
 
-- **Release includes new code in `cmd/clawdash/`, `cmd/claw-api/`, or
-  `cmd/claw-wall/`** → bump `DefaultClawInfraTag` to the new clawdapus release
-  tag. All three images publish in lockstep from the clawdapus tag, so this is
+- **Release includes new code in `cmd/clawdash/`, `cmd/claw-api/`,
+  `cmd/claw-wall/`, or `cmd/claw-mcp-stdio/`** → bump `DefaultClawInfraTag` to the new clawdapus release
+  tag. These images publish in lockstep from the clawdapus tag, so this is
   a single value.
 - **Release includes new cllama code (submodule moved)** → bump
   `DefaultCllamaTag` to the cllama release you just cut in Step 2.
@@ -355,7 +356,7 @@ Even if the image code didn't change, the corresponding published tag still
 needs to exist at the new release version for anything covered by
 `DefaultClawInfraTag`, because the release verifier in
 `scripts/check-release-infra-tags/` checks
-`ghcr.io/mostlydev/{claw-api,clawdash,claw-wall}:<release-tag>` exist. That
+`ghcr.io/mostlydev/{claw-api,clawdash,claw-wall,claw-mcp-stdio}:<release-tag>` exist. That
 prepublish happens in Step 10. The point of Step 7 is to make the released
 `claw` binary actually *use* those tags.
 
@@ -439,11 +440,12 @@ The release workflow checks these refs before goreleaser runs:
 - `ghcr.io/mostlydev/claw-api:v0.X.Y`
 - `ghcr.io/mostlydev/clawdash:v0.X.Y`
 - `ghcr.io/mostlydev/claw-wall:v0.X.Y`
+- `ghcr.io/mostlydev/claw-mcp-stdio:v0.X.Y`
 - whatever fixed refs are currently pinned in
   `internal/infraimages/release_manifest.go` (today: `cllama` and
   `hermes-base`)
 
-The tag-triggered image workflows for `claw-api`, `clawdash`, and `claw-wall`
+The tag-triggered image workflows for `claw-api`, `clawdash`, `claw-wall`, and `claw-mcp-stdio`
 run too late to satisfy that verifier. If the versioned refs do not already
 exist, publish them manually before creating the release tag.
 
@@ -494,6 +496,17 @@ docker buildx build \
   -f dockerfiles/claw-api/Dockerfile .
 ```
 
+### claw-mcp-stdio
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/mostlydev/claw-mcp-stdio:latest \
+  -t ghcr.io/mostlydev/claw-mcp-stdio:v0.X.Y \
+  --push \
+  -f dockerfiles/claw-mcp-stdio/Dockerfile .
+```
+
 ### hermes-base
 
 Tagged per upstream Hermes version, not per clawdapus release:
@@ -523,6 +536,7 @@ Check package visibility explicitly for anything newly pushed:
 gh api /users/mostlydev/packages/container/claw-api
 gh api /users/mostlydev/packages/container/clawdash
 gh api /users/mostlydev/packages/container/claw-wall
+gh api /users/mostlydev/packages/container/claw-mcp-stdio
 gh api /users/mostlydev/packages/container/hermes-base
 ```
 
@@ -575,8 +589,8 @@ Then check the GitHub release object and assets:
 gh release view v0.X.Y
 ```
 
-Also make sure the tag-triggered `claw-api Image`, `clawdash Image`, and
-`claw-wall Image` workflows finished green. They are confirmation that the CI
+Also make sure the tag-triggered `claw-api Image`, `clawdash Image`,
+`claw-wall Image`, and `claw-mcp-stdio Image` workflows finished green. They are confirmation that the CI
 publishing path still works, but they are not the thing the release job
 depended on.
 

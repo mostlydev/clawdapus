@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Stdio MCP wrapper for managed tools** ([#179](https://github.com/mostlydev/clawdapus/issues/179)) — adds the shared `ghcr.io/mostlydev/claw-mcp-stdio` image and `x-claw.mcp-stdio` sidecar block so npm-style stdio MCP servers can be exposed as pod-internal Streamable HTTP `/mcp` endpoints. Operators provide a deterministic v2 descriptor snapshot with `x-claw.describe-file`; `claw up` still compiles subscribing agents to `tools.json` with `execution.transport = "mcp"`, so cllama's v0.5.0 mediation, audit, session history, budgets, and credential-starvation boundaries remain unchanged.
 
 ## v0.11.0 <Badge type="tip" text="Latest" /> {#v0-11-0}
 

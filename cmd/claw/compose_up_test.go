@@ -2024,6 +2024,51 @@ LABEL maintainer=ops@example.com
 	}
 }
 
+func TestResolveServiceMetadataUsesExplicitDescribeFile(t *testing.T) {
+	podDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(podDir, "perplexity.claw-describe.json"), []byte(`{
+  "version": 2,
+  "description": "Perplexity MCP",
+  "mcp": { "transport": "streamable_http", "path": "/mcp" },
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search the web",
+      "inputSchema": { "type": "object" }
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatalf("write descriptor: %v", err)
+	}
+
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"perplexity": {
+				Image: "ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0",
+				Claw: &pod.ClawBlock{
+					DescribeFile: "./perplexity.claw-describe.json",
+					MCPStdio:     &pod.MCPStdioBlock{Command: "npx", Args: []string{"-y", "perplexity-mcp"}},
+				},
+			},
+		},
+	}
+
+	_, _, descriptor, err := resolveServiceMetadata(podDir, p, "perplexity", p.Services["perplexity"], map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err != nil {
+		t.Fatalf("resolve metadata: %v", err)
+	}
+	if descriptor == nil || descriptor.MCP == nil {
+		t.Fatalf("expected MCP descriptor, got %+v", descriptor)
+	}
+	registry, err := describe.BuildToolRegistry(map[string]*describe.ServiceDescriptor{"perplexity": descriptor})
+	if err != nil {
+		t.Fatalf("BuildToolRegistry: %v", err)
+	}
+	if got := registry["perplexity"][0].MCP.Path; got != "/mcp" {
+		t.Fatalf("MCP path = %q, want /mcp", got)
+	}
+}
+
 func TestResolveServiceMetadataUsesDefaultImageDescriptorPathWhenLabelMissing(t *testing.T) {
 	prevExists := imageExistsLocally
 	prevInspect := inspectClawImage

@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "description": "Echo MCP stdio server wrapped by claw-mcp-stdio.",
+  "mcp": {
+    "transport": "streamable_http",
+    "path": "/mcp"
+  },
+  "tools": [
+    {
+      "name": "echo",
+      "description": "Echo a message back as text content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "annotations": {
+        "readOnly": true
+      }
+    }
+  ]
+}

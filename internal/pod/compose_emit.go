@@ -86,7 +86,11 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		explicitResult := result != nil
 		if result == nil {
 			// Fail-closed defaults apply only to Claw-managed services.
-			if isClaw {
+			if svc.IsMCPStdioSidecar() {
+				result = &driver.MaterializeResult{
+					Restart: "on-failure",
+				}
+			} else if isClaw {
 				result = &driver.MaterializeResult{
 					ReadOnly: true,
 					Restart:  "on-failure",
@@ -249,6 +253,18 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				}
 				serviceEnv[key] = value
 			}
+			if svc.IsMCPStdioSidecar() {
+				mcpEnv, err := mcpStdioEnv(svc.Claw.MCPStdio)
+				if err != nil {
+					return "", fmt.Errorf("service %q: mcp-stdio environment: %w", serviceName, err)
+				}
+				for key, value := range mcpEnv {
+					if _, exists := baseEnv[key]; exists {
+						continue
+					}
+					serviceEnv[key] = value
+				}
+			}
 
 			// Environment: preserved compose env (lowest) < handle envs < service env fallback < driver env (highest).
 			env, err := mergedEnvironment(serviceOut["environment"], handleEnvs, serviceEnv, result.Environment)
@@ -266,7 +282,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				serviceOut["environment"] = env
 			}
 
-			if isClaw || explicitResult {
+			if explicitResult || (isClaw && !svc.IsMCPStdioSidecar()) {
 				serviceOut["read_only"] = result.ReadOnly
 			}
 			if result.Restart != "" {
@@ -502,6 +518,20 @@ func sortedServiceNames(services map[string]*Service) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func mcpStdioEnv(block *MCPStdioBlock) (map[string]string, error) {
+	if block == nil {
+		return nil, nil
+	}
+	args, err := json.Marshal(block.Args)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"CLAW_MCP_STDIO_COMMAND": block.Command,
+		"CLAW_MCP_STDIO_ARGS":    string(args),
+	}, nil
 }
 
 // computeHandleEnvs collects handles from all claw services and builds the

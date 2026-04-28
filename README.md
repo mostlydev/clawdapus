@@ -374,7 +374,7 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Identity resolution:** Single proxy serves an entire pod. Bearer tokens resolve which agent is calling.
 - **Cost accounting:** Extracts token usage from every response, multiplies by pricing table, tracks per agent/provider/model.
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
-- **Managed tool mediation:** Services declare callable tools via `claw.describe` (MCP-shaped schemas). `claw up` compiles per-agent `tools.json`. cllama injects tools into LLM requests, intercepts `tool_call` responses, executes them against the service, and loops until terminal text — transparent to the runner. Both OpenAI-compatible and Anthropic formats are supported.
+- **Managed tool mediation:** Services declare callable tools via `claw.describe` (MCP-shaped schemas). `claw up` compiles per-agent `tools.json`. cllama injects tools into LLM requests, intercepts `tool_call` responses, executes them against the service, and loops until terminal text — transparent to the runner. HTTP services, Streamable HTTP MCP sidecars, and stdio MCP servers wrapped by `claw-mcp-stdio` are supported.
 - **Ambient memory plane:** Services declare `recall`, `retain`, and `forget` endpoints via `claw.describe`. `claw up` compiles per-agent `memory.json`. cllama calls `/recall` before each inference turn and `/retain` after each successful response (async, non-blocking). Memory intelligence stays in swappable external services — the proxy owns orchestration only.
 - **Operator dashboard:** Real-time web UI at host port 8181 by default (container `:8081`) — agent activity, provider status, cost breakdown.
 
