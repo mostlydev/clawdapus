@@ -15,9 +15,11 @@ import (
 )
 
 const (
-	hermesHomeDir      = "/root/.hermes"
-	hermesWorkspaceDir = "/workspace"
-	hermesPersonaDir   = "/persona"
+	hermesHomeDir                 = "/root/.hermes"
+	hermesWorkspaceDir            = "/workspace"
+	hermesPersonaDir              = "/persona"
+	hermesDefaultAgentIdentityEnv = "HERMES_DEFAULT_AGENT_IDENTITY"
+	managedDefaultAgentIdentity   = "You are a Clawdapus-managed agent. Your identity, authority, communication policy, memory policy, and tool-use rules are defined by the Clawdapus project context loaded below: AGENTS.md, CLAWDAPUS.md, SOUL.md, mounted skills, feeds, and managed-tool policy. Do not identify as Hermes or as a generic assistant. Follow the Clawdapus contract when it is more specific than runner defaults; otherwise retain the Hermes runtime guidance below, including persistent memory behavior."
 )
 
 var supportedPlatforms = []string{"discord", "slack", "telegram"}
@@ -68,6 +70,7 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 	env["HERMES_HOME"] = hermesHomeDir
 	env["MESSAGING_CWD"] = hermesWorkspaceDir
 	env["TERMINAL_CWD"] = hermesWorkspaceDir
+	env[hermesDefaultAgentIdentityEnv] = managedDefaultAgentIdentity
 
 	for _, key := range allowedEnvPassthroughKeys() {
 		if value := resolvedEnvValue(rc.Environment, key); value != "" {

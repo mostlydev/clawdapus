@@ -18,6 +18,37 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 shutil.copy("/tmp/minisweagent_path.py", purelib / "minisweagent_path.py")
 
+# Replace only the first identity layer. Hermes memory/session/skill guidance
+# remains upstream and is still injected when the matching tools are present.
+prompt_builder = purelib / "agent" / "prompt_builder.py"
+text = prompt_builder.read_text()
+text = replace_once(
+    text,
+    '''DEFAULT_AGENT_IDENTITY = (
+    "You are Hermes Agent, an intelligent AI assistant created by Nous Research. "
+    "You are helpful, knowledgeable, and direct. You assist users with a wide "
+    "range of tasks including answering questions, writing and editing code, "
+    "analyzing information, creative work, and executing actions via your tools. "
+    "You communicate clearly, admit uncertainty when appropriate, and prioritize "
+    "being genuinely useful over being verbose unless otherwise directed below. "
+    "Be targeted and efficient in your exploration and investigations."
+)''',
+    '''DEFAULT_AGENT_IDENTITY = (
+    os.getenv("HERMES_DEFAULT_AGENT_IDENTITY", "").strip()
+    or (
+        "You are Hermes Agent, an intelligent AI assistant created by Nous Research. "
+        "You are helpful, knowledgeable, and direct. You assist users with a wide "
+        "range of tasks including answering questions, writing and editing code, "
+        "analyzing information, creative work, and executing actions via your tools. "
+        "You communicate clearly, admit uncertainty when appropriate, and prioritize "
+        "being genuinely useful over being verbose unless otherwise directed below. "
+        "Be targeted and efficient in your exploration and investigations."
+    )
+)''',
+    "prompt_builder default identity env override",
+)
+prompt_builder.write_text(text)
+
 discord_adapter = purelib / "gateway" / "platforms" / "discord.py"
 text = discord_adapter.read_text()
 text = replace_once(
@@ -124,6 +155,18 @@ base_adapter.write_text(text)
 # LLM is free to produce a final text response (which base.py will suppress).
 run_agent = purelib / "run_agent.py"
 text = run_agent.read_text()
+# Continuing gateway sessions persist a system_prompt snapshot. If the managed
+# identity changes, rebuild the prompt instead of reusing a stale Hermes identity.
+text = replace_once(
+    text,
+    '                        stored_prompt = session_row.get("system_prompt") or None\n',
+    '                        stored_prompt = session_row.get("system_prompt") or None\n'
+    '                        default_identity = os.getenv("HERMES_DEFAULT_AGENT_IDENTITY", "").strip()\n'
+    '                        if stored_prompt and default_identity and not stored_prompt.startswith(default_identity):\n'
+    '                            logger.info("Refreshing stored system prompt because HERMES_DEFAULT_AGENT_IDENTITY changed")\n'
+    '                            stored_prompt = None\n',
+    "run_agent stored prompt identity invalidation",
+)
 text = replace_once(
     text,
     '        api_kwargs = {\n'

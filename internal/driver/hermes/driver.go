@@ -161,14 +161,15 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 
 	env := map[string]string{
-		"CLAW_MANAGED":            "true",
-		shared.PortableMemoryEnv:  shared.PortableMemoryDir,
-		"HOME":                    "/root",
-		"HERMES_HOME":             hermesHomeDir,
-		"MESSAGING_CWD":           hermesWorkspaceDir,
-		"TERMINAL_CWD":            hermesWorkspaceDir,
-		"DISCORD_REQUIRE_MENTION": "true",
-		"DISCORD_AUTO_THREAD":     "false",
+		"CLAW_MANAGED":                "true",
+		shared.PortableMemoryEnv:      shared.PortableMemoryDir,
+		"HOME":                        "/root",
+		"HERMES_HOME":                 hermesHomeDir,
+		hermesDefaultAgentIdentityEnv: managedDefaultAgentIdentity,
+		"MESSAGING_CWD":               hermesWorkspaceDir,
+		"TERMINAL_CWD":                hermesWorkspaceDir,
+		"DISCORD_REQUIRE_MENTION":     "true",
+		"DISCORD_AUTO_THREAD":         "false",
 	}
 
 	// When Discord handles are configured, suppress auto-routing of bare text

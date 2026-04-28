@@ -173,6 +173,9 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	if result.Environment["HERMES_HOME"] != hermesHomeDir {
 		t.Fatalf("unexpected HERMES_HOME: %q", result.Environment["HERMES_HOME"])
 	}
+	if got := result.Environment[hermesDefaultAgentIdentityEnv]; got != managedDefaultAgentIdentity {
+		t.Fatalf("unexpected %s: %q", hermesDefaultAgentIdentityEnv, got)
+	}
 	if result.Environment["MESSAGING_CWD"] != hermesWorkspaceDir {
 		t.Fatalf("unexpected MESSAGING_CWD: %q", result.Environment["MESSAGING_CWD"])
 	}

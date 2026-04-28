@@ -1,6 +1,7 @@
 package hermes
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -168,5 +169,27 @@ func TestGenerateConfigIncludesCllamaRouting(t *testing.T) {
 	}
 	if got := model["provider"]; got != "custom" {
 		t.Fatalf("expected custom provider, got %#v", got)
+	}
+}
+
+func TestGenerateEnvFileSetsManagedDefaultIdentity(t *testing.T) {
+	rc := &driver.ResolvedClaw{}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	if !strings.Contains(env, hermesDefaultAgentIdentityEnv+"=") {
+		t.Fatalf("expected %s in .env, got:\n%s", hermesDefaultAgentIdentityEnv, env)
+	}
+	if !strings.Contains(env, "Clawdapus-managed agent") {
+		t.Fatalf("expected managed identity in .env, got:\n%s", env)
+	}
+	if strings.Contains(env, "You are Hermes Agent") || strings.Contains(env, "Nous Research") {
+		t.Fatalf("managed identity should not retain upstream Hermes identity, got:\n%s", env)
+	}
+	if !strings.Contains(env, "persistent memory behavior") {
+		t.Fatalf("managed identity should preserve Hermes memory guidance contract, got:\n%s", env)
 	}
 }

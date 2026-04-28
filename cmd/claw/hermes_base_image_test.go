@@ -38,6 +38,9 @@ func TestHermesBaseImageSourceContract(t *testing.T) {
 		t.Fatalf("Hermes base entrypoint must foreground the gateway with `gateway run`:\n%s", entrypoint)
 	}
 	for _, want := range []string{
+		`HERMES_DEFAULT_AGENT_IDENTITY`,
+		`DEFAULT_AGENT_IDENTITY = (`,
+		`not stored_prompt.startswith(default_identity)`,
 		`shutil.copy("/tmp/minisweagent_path.py", purelib / "minisweagent_path.py")`,
 		`discord.AllowedMentions(replied_user=False)`,
 		`HERMES_TOOL_ONLY_MODE`,
