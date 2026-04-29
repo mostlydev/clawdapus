@@ -20,7 +20,7 @@ A single proxy instance serves the entire pod. Bearer tokens resolve which agent
 
 Isolation is achieved by strictly separating secrets:
 
-- **The proxy holds the real API keys.** Provider credentials (OpenRouter, Anthropic, OpenAI, Gemini/Google) are configured in the pod-level `cllama-defaults.env` block and never enter agent containers.
+- **The proxy holds the real API keys.** Provider credentials (OpenRouter, Anthropic, OpenAI, Gemini/Google, Vercel AI Gateway, xAI) are configured in the pod-level `cllama-defaults.env` block and never enter agent containers.
 - **Agents get unique bearer tokens.** Each agent (and each ordinal of a scaled agent) receives a unique token generated during `claw up`.
 - **No credentials, no bypass.** Because agents lack the credentials to call providers directly, all successful inference *must* pass through the proxy -- even if a malicious prompt tricks the agent into ignoring its configured base URL.
 
@@ -190,7 +190,7 @@ The cllama container receives its configuration through environment variables in
 | `CLAW_CONTEXT_ROOT` | Path to the shared context mount root (defaults to `/claw/context`). |
 | `CLAW_SESSION_HISTORY_DIR` | Path to the read-write session history mount (defaults to `/claw/session-history`). When set, also seeds the default `CLAW_CONTEXT_LEDGER_DIR`. |
 | `CLAW_CONTEXT_LEDGER_DIR` | Path where per-agent channel cursors are persisted (defaults to `$CLAW_SESSION_HISTORY_DIR/context-ledger`). When unset, cursors fall back to in-memory and every restart re-bootstraps with a 24h tail. |
-| `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, etc. |
+| `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `AI_GATEWAY_API_KEY`, etc. |
 
 ### Where Provider Keys Go
 
@@ -278,6 +278,30 @@ services:
 
 If both `GEMINI_API_KEY` and `GOOGLE_API_KEY` are present, cllama prefers
 `GEMINI_API_KEY` as the active seed key.
+
+### Vercel AI Gateway Routing
+
+Vercel AI Gateway works through its OpenAI-compatible endpoint. Use the
+`vercel/<provider>/<model>` provider prefix and seed the gateway key through
+`x-claw.cllama-env`.
+
+```yaml
+services:
+  analyst:
+    x-claw:
+      agent: analyst
+      cllama: passthrough
+      models:
+        primary: vercel/anthropic/claude-sonnet-4.6
+      cllama-env:
+        AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY}
+        # optional override for proxies or alternate endpoints
+        AI_GATEWAY_BASE_URL: ${AI_GATEWAY_BASE_URL}
+```
+
+The OpenAI-compatible `/v1/chat/completions` path forwards
+`anthropic/claude-sonnet-4.6` to Vercel as the upstream model. The Anthropic
+`/v1/messages` path remains native Anthropic-only.
 
 ### Count Expansion with cllama
 
