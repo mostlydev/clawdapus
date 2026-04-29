@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.14.0 <Badge type="tip" text="Latest" /> {#v0-14-0}
+## v0.14.1 <Badge type="tip" text="Latest" /> {#v0-14-1}
+
+*2026-04-29*
+
+- Fix: Hermes Discord agents now hide the upstream `text_to_speech` tool from the model-visible toolset by default ([#208](https://github.com/mostlydev/clawdapus/issues/208)). The Hermes base patch honors `CLAWDAPUS_DISABLED_TOOLS`, and the Hermes driver emits `CLAWDAPUS_DISABLED_TOOLS=text_to_speech` for any service with a Discord handle unless the pod opts back in with `x-claw.hermes.allow-tools: [text_to_speech]`. Telegram-only Hermes agents are unchanged. Hermes base advances to `ghcr.io/mostlydev/hermes-base:v2026.3.17-claw.4`. The previous behavior let the model pick `text_to_speech` for short Discord replies and upload an audio attachment instead of text.
+- Fix: `claw history export` and the cllama session-history reader now stream JSONL through `bufio.Reader` instead of `bufio.Scanner` ([#207](https://github.com/mostlydev/clawdapus/issues/207)). Live history files with multi-MB `request_effective` payloads (observed at >1GB on tiverton-house's `tiverton` and `weston` agents) no longer trip the default 64KB token limit with `bufio.Scanner: token too long`. cllama bumped to [v0.6.1](https://github.com/mostlydev/cllama/releases/tag/v0.6.1).
+
+## v0.14.0 {#v0-14-0}
 
 *2026-04-29*
 

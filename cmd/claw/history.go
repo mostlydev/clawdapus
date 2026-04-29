@@ -110,36 +110,41 @@ func exportHistoryFile(w io.Writer, historyPath string, after *time.Time, limit 
 		}
 	}
 
-	scanner := bufio.NewScanner(f)
+	reader := bufio.NewReader(f)
 	emitted := 0
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
+	for emitted < limit {
+		raw, err := reader.ReadBytes('\n')
+		if len(raw) > 0 {
+			line := bytes.TrimSpace(raw)
+			if len(line) > 0 {
+				lineWithID, meta, perr := ensureHistoryEntryID(line)
+				if perr != nil {
+					return perr
+				}
+				skip := false
+				if after != nil {
+					ts, perr := time.Parse(time.RFC3339, strings.TrimSpace(meta.TS))
+					if perr != nil {
+						return fmt.Errorf("parse history timestamp %q: %w", meta.TS, perr)
+					}
+					if !ts.After(*after) {
+						skip = true
+					}
+				}
+				if !skip {
+					if _, werr := fmt.Fprintln(w, string(lineWithID)); werr != nil {
+						return werr
+					}
+					emitted++
+				}
+			}
 		}
-		lineWithID, meta, err := ensureHistoryEntryID(line)
 		if err != nil {
+			if err == io.EOF {
+				break
+			}
 			return err
 		}
-		if after != nil {
-			ts, err := time.Parse(time.RFC3339, strings.TrimSpace(meta.TS))
-			if err != nil {
-				return fmt.Errorf("parse history timestamp %q: %w", meta.TS, err)
-			}
-			if !ts.After(*after) {
-				continue
-			}
-		}
-		if _, err := fmt.Fprintln(w, string(lineWithID)); err != nil {
-			return err
-		}
-		emitted++
-		if emitted >= limit {
-			break
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return err
 	}
 	return nil
 }

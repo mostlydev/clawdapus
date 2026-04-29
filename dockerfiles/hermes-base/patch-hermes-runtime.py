@@ -150,6 +150,54 @@ text = replace_once(
 )
 base_adapter.write_text(text)
 
+# ── Core tool suppression: hide disabled runtime tools from model manifests ──
+# Hermes exposes text_to_speech in its Discord core toolset when edge_tts is
+# importable. Clawdapus keeps the tool registered but strips it from platform
+# toolsets when CLAWDAPUS_DISABLED_TOOLS names it.
+toolsets_py = purelib / "toolsets.py"
+text = toolsets_py.read_text()
+text = replace_once(
+    text,
+    "_HERMES_CORE_TOOLS = [",
+    """import os as _claw_os
+
+_CLAW_DISABLED_TOOLS = {
+    t.strip()
+    for t in _claw_os.getenv("CLAWDAPUS_DISABLED_TOOLS", "").split(",")
+    if t.strip()
+}
+
+
+def _claw_filter_tools(tools):
+    if not _CLAW_DISABLED_TOOLS:
+        return tools
+    return [t for t in tools if t not in _CLAW_DISABLED_TOOLS]
+
+
+_HERMES_CORE_TOOLS = [""",
+    "_HERMES_CORE_TOOLS env-driven disable filter prelude",
+)
+text = replace_once(
+    text,
+    "    \"ha_list_entities\", \"ha_get_state\", \"ha_list_services\", \"ha_call_service\",\n]\n",
+    "    \"ha_list_entities\", \"ha_get_state\", \"ha_list_services\", \"ha_call_service\",\n]\n_HERMES_CORE_TOOLS = _claw_filter_tools(_HERMES_CORE_TOOLS)\n",
+    "_HERMES_CORE_TOOLS env-driven disable filter application",
+)
+text = replace_once(
+    text,
+    "TOOLSETS = {",
+    "TOOLSETS = {  # filtered post-build via _claw_filter_tools below",
+    "TOOLSETS comment marker",
+)
+text += (
+    "\n# Apply env-driven tool filter to every named bundle's explicit tools[]\n"
+    "# (does not touch includes; nested toolset resolution still works).\n"
+    "for _ts_name, _ts_def in list(TOOLSETS.items()):\n"
+    "    if isinstance(_ts_def, dict) and \"tools\" in _ts_def and isinstance(_ts_def[\"tools\"], list):\n"
+    "        _ts_def[\"tools\"] = _claw_filter_tools(_ts_def[\"tools\"])\n"
+)
+toolsets_py.write_text(text)
+
 # ── Tool-only mode: force tool_choice=required per user turn ─────────────────
 # In HERMES_TOOL_ONLY_MODE, LLMs should start each user turn by calling a tool,
 # preferably send_message for visible communication. Force tool_choice=required

@@ -277,3 +277,82 @@ func TestGenerateEnvFileAllowsToolProgressOverride(t *testing.T) {
 		t.Fatalf("expected %s override in .env, got:\n%s", hermesToolProgressModeEnv, data)
 	}
 }
+
+func TestGenerateEnvFileDisablesTTSForDiscordByDefault(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"discord": {}},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), clawdapusDisabledToolsEnv+"="+hermesTextToSpeechTool+"\n") {
+		t.Fatalf("expected %s=%s in .env, got:\n%s", clawdapusDisabledToolsEnv, hermesTextToSpeechTool, data)
+	}
+}
+
+func TestGenerateEnvFileAllowsTTSOptInForDiscord(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"discord": {}},
+		Hermes: &driver.HermesConfig{
+			AllowTools: []string{hermesTextToSpeechTool},
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if strings.Contains(string(data), clawdapusDisabledToolsEnv+"=") {
+		t.Fatalf("expected no %s when text_to_speech is allowed, got:\n%s", clawdapusDisabledToolsEnv, data)
+	}
+}
+
+func TestGenerateEnvFileKeepsTTSDisabledForUnrelatedAllowTool(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"discord": {}},
+		Hermes: &driver.HermesConfig{
+			AllowTools: []string{"other_tool"},
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), clawdapusDisabledToolsEnv+"="+hermesTextToSpeechTool+"\n") {
+		t.Fatalf("expected %s=%s in .env, got:\n%s", clawdapusDisabledToolsEnv, hermesTextToSpeechTool, data)
+	}
+}
+
+func TestGenerateEnvFileDoesNotDisableTTSForTelegramOnly(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"telegram": {}},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if strings.Contains(string(data), clawdapusDisabledToolsEnv+"=") {
+		t.Fatalf("expected no %s for Telegram-only Hermes agent, got:\n%s", clawdapusDisabledToolsEnv, data)
+	}
+}
+
+func TestGenerateEnvFileDisablesTTSForMultiPlatformWithDiscord(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{
+			"telegram": {},
+			"discord":  {},
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), clawdapusDisabledToolsEnv+"="+hermesTextToSpeechTool+"\n") {
+		t.Fatalf("expected %s=%s in .env, got:\n%s", clawdapusDisabledToolsEnv, hermesTextToSpeechTool, data)
+	}
+}

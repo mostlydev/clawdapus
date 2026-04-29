@@ -20,6 +20,8 @@ const (
 	hermesPersonaDir              = "/persona"
 	hermesDefaultAgentIdentityEnv = "HERMES_DEFAULT_AGENT_IDENTITY"
 	hermesToolProgressModeEnv     = "HERMES_TOOL_PROGRESS_MODE"
+	clawdapusDisabledToolsEnv     = "CLAWDAPUS_DISABLED_TOOLS"
+	hermesTextToSpeechTool        = "text_to_speech"
 	managedDefaultAgentIdentity   = "You are a Clawdapus-managed agent. Your identity, authority, communication policy, memory policy, and tool-use rules are defined by the Clawdapus project context loaded below: AGENTS.md, CLAWDAPUS.md, SOUL.md, mounted skills, feeds, and managed-tool policy. Do not identify as Hermes or as a generic assistant. Follow the Clawdapus contract when it is more specific than runner defaults; otherwise retain the Hermes runtime guidance below, including persistent memory behavior."
 )
 
@@ -74,6 +76,9 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 	env[hermesDefaultAgentIdentityEnv] = managedDefaultAgentIdentity
 	if hasDiscordHandle(rc) {
 		env[hermesToolProgressModeEnv] = "off"
+	}
+	if disabled := resolveDisabledHermesTools(rc); len(disabled) > 0 {
+		env[clawdapusDisabledToolsEnv] = strings.Join(disabled, ",")
 	}
 
 	for _, key := range allowedEnvPassthroughKeys() {
@@ -310,12 +315,43 @@ func allowedEnvPassthroughKeys() []string {
 }
 
 func hasDiscordHandle(rc *driver.ResolvedClaw) bool {
+	if rc == nil {
+		return false
+	}
 	for rawPlatform := range rc.Handles {
 		if strings.ToLower(strings.TrimSpace(rawPlatform)) == "discord" {
 			return true
 		}
 	}
 	return false
+}
+
+func resolveDisabledHermesTools(rc *driver.ResolvedClaw) []string {
+	if !hasDiscordHandle(rc) {
+		return nil
+	}
+
+	disabled := []string{hermesTextToSpeechTool}
+	if rc == nil || rc.Hermes == nil || len(rc.Hermes.AllowTools) == 0 {
+		return disabled
+	}
+
+	allowSet := make(map[string]struct{}, len(rc.Hermes.AllowTools))
+	for _, tool := range rc.Hermes.AllowTools {
+		tool = strings.TrimSpace(tool)
+		if tool != "" {
+			allowSet[tool] = struct{}{}
+		}
+	}
+
+	out := make([]string, 0, len(disabled))
+	for _, tool := range disabled {
+		if _, allowed := allowSet[tool]; allowed {
+			continue
+		}
+		out = append(out, tool)
+	}
+	return out
 }
 
 func resolvedEnvValue(rc *driver.ResolvedClaw, key string) (string, error) {

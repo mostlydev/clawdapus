@@ -206,6 +206,9 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	if got := result.Environment[hermesToolProgressModeEnv]; got != "off" {
 		t.Fatalf("expected %s=off, got %q", hermesToolProgressModeEnv, got)
 	}
+	if got := result.Environment[clawdapusDisabledToolsEnv]; got != hermesTextToSpeechTool {
+		t.Fatalf("expected %s=%s, got %q", clawdapusDisabledToolsEnv, hermesTextToSpeechTool, got)
+	}
 	if result.Environment["MESSAGING_CWD"] != hermesWorkspaceDir {
 		t.Fatalf("unexpected MESSAGING_CWD: %q", result.Environment["MESSAGING_CWD"])
 	}
@@ -410,6 +413,32 @@ func TestMaterializeAllowsToolProgressOverride(t *testing.T) {
 	}
 	if !strings.Contains(string(envData), hermesToolProgressModeEnv+"=verbose\n") {
 		t.Fatalf("expected %s override in .env, got:\n%s", hermesToolProgressModeEnv, envData)
+	}
+}
+
+func TestMaterializeHonorsHermesAllowToolsOptIn(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	rc.Hermes = &driver.HermesConfig{AllowTools: []string{hermesTextToSpeechTool}}
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if _, ok := result.Environment[clawdapusDisabledToolsEnv]; ok {
+		t.Fatalf("expected no %s in container env, got %q", clawdapusDisabledToolsEnv, result.Environment[clawdapusDisabledToolsEnv])
+	}
+
+	envData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", ".env"))
+	if err != nil {
+		t.Fatalf("read .env: %v", err)
+	}
+	if strings.Contains(string(envData), clawdapusDisabledToolsEnv+"=") {
+		t.Fatalf("expected no %s in .env, got:\n%s", clawdapusDisabledToolsEnv, envData)
 	}
 }
 

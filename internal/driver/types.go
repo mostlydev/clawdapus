@@ -89,6 +89,11 @@ type ResolvedClaw struct {
 	Timezone        string            // resolved service timezone from TZ env (falls back to UTC)
 	Cllama          []string          // ordered cllama proxy types (e.g., ["passthrough"])
 	CllamaToken     string            // per-agent bearer token injected when cllama is active
+	Hermes          *HermesConfig     // Hermes-specific pod config
+}
+
+type HermesConfig struct {
+	AllowTools []string
 }
 
 // HandleInfo is the full contact card for an agent on a platform.

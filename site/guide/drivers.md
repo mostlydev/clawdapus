@@ -55,6 +55,8 @@ The Hermes driver emits `HERMES_DEFAULT_AGENT_IDENTITY` so the Hermes runner sta
 
 Container env vars from compose `environment:` are not available in Hermes agent tool execution. Only vars listed in `allowedEnvPassthroughKeys()` reach the tool runtime via the `.env` file. New env vars that agents need must be added to this allowlist.
 
+For Discord handles, the Hermes driver disables the upstream `text_to_speech` tool by default so agents reply in text instead of model-selected voice attachments. A service can opt back in with `x-claw.hermes.allow-tools: [text_to_speech]`.
+
 ### nanoclaw
 
 Claude Agent SDK-based driver. Does not currently support HANDLE, INVOKE, or structured health probes.

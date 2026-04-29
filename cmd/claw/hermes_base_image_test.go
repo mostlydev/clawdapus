@@ -47,6 +47,9 @@ func TestHermesBaseImageSourceContract(t *testing.T) {
 		`_claw_turn_sent_message`,
 		`Suppressing duplicate final text after send_message`,
 		`_already_used_tools_this_turn`,
+		`CLAWDAPUS_DISABLED_TOOLS`,
+		`_claw_filter_tools`,
+		`_HERMES_CORE_TOOLS = _claw_filter_tools(_HERMES_CORE_TOOLS)`,
 	} {
 		if !strings.Contains(patch, want) {
 			t.Fatalf("Hermes runtime patch missing %q", want)

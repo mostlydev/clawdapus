@@ -346,6 +346,7 @@ func runComposeUp(podFile string) (err error) {
 			Surfaces:      surfaces,
 			Skills:        skills,
 			Cllama:        resolveCllama(info.Cllama, svc.Claw.Cllama),
+			Hermes:        cloneHermesConfig(svc.Claw.Hermes),
 		}
 		if resolvedPersona != nil {
 			rc.PersonaHostPath = resolvedPersona.HostPath
@@ -3685,6 +3686,15 @@ func cloneResolvedFeeds(feeds []pod.FeedEntry) []driver.ResolvedFeed {
 		})
 	}
 	return out
+}
+
+func cloneHermesConfig(cfg *driver.HermesConfig) *driver.HermesConfig {
+	if cfg == nil {
+		return nil
+	}
+	return &driver.HermesConfig{
+		AllowTools: append([]string(nil), cfg.AllowTools...),
+	}
 }
 
 func resolveDescriptorSkill(serviceName, podDir, runtimeDir, imageRef string, svc *pod.Service, descriptor *describe.ServiceDescriptor) (*driver.ResolvedSkill, error) {

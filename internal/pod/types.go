@@ -68,6 +68,7 @@ type ClawBlock struct {
 	Context      *ContextConfig
 	ClawAPIMode  string // "self" when claw-api: self is declared; empty otherwise
 	MCPStdio     *MCPStdioBlock
+	Hermes       *driver.HermesConfig
 }
 
 type MCPStdioBlock struct {

@@ -78,6 +78,7 @@ type rawClawBlock struct {
 	Context      *rawContextConfig      `yaml:"context"`
 	ClawAPI      interface{}            `yaml:"claw-api"`
 	MCPStdio     *rawMCPStdioBlock      `yaml:"mcp-stdio"`
+	Hermes       *rawHermesConfig       `yaml:"hermes"`
 }
 
 type rawContextConfig struct {
@@ -95,6 +96,10 @@ type rawChannelContextConfig struct {
 type rawMCPStdioBlock struct {
 	Command string   `yaml:"command"`
 	Args    []string `yaml:"args"`
+}
+
+type rawHermesConfig struct {
+	AllowTools []string `yaml:"allow-tools"`
 }
 
 type rawFeedEntry struct {
@@ -273,6 +278,10 @@ func Parse(r io.Reader) (*Pod, error) {
 			if err != nil {
 				return nil, err
 			}
+			hermesConfig, err := parseHermesConfig(svc.XClaw.Hermes)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: hermes: %w", name, err)
+			}
 			invoke := make([]InvokeEntry, 0, len(svc.XClaw.Invoke))
 			for _, rawInv := range svc.XClaw.Invoke {
 				if rawInv.Schedule == "" || rawInv.Message == "" {
@@ -313,6 +322,7 @@ func Parse(r io.Reader) (*Pod, error) {
 				Context:      contextConfig,
 				ClawAPIMode:  clawAPIMode,
 				MCPStdio:     mcpStdio,
+				Hermes:       hermesConfig,
 			}
 		}
 		pod.Services[name] = service
@@ -707,6 +717,25 @@ func parseMCPStdio(serviceName string, raw *rawMCPStdioBlock, agent string, clla
 		Command: command,
 		Args:    append([]string(nil), args...),
 	}, nil
+}
+
+func parseHermesConfig(raw *rawHermesConfig) (*driver.HermesConfig, error) {
+	if raw == nil || len(raw.AllowTools) == 0 {
+		return nil, nil
+	}
+
+	allowTools := make([]string, 0, len(raw.AllowTools))
+	for i, tool := range raw.AllowTools {
+		tool = strings.TrimSpace(tool)
+		if tool == "" {
+			return nil, fmt.Errorf("allow-tools[%d] must not be empty", i)
+		}
+		allowTools = append(allowTools, tool)
+	}
+	if len(allowTools) == 0 {
+		return nil, nil
+	}
+	return &driver.HermesConfig{AllowTools: allowTools}, nil
 }
 
 func (r *rawFeedEntry) UnmarshalYAML(node *yaml.Node) error {

@@ -73,6 +73,23 @@ func TestExportHistoryFileAppliesAfterAndLimit(t *testing.T) {
 	}
 }
 
+func TestExportHistoryFileHandlesLineLargerThanScannerDefault(t *testing.T) {
+	dir := t.TempDir()
+	historyPath := filepath.Join(dir, "history.jsonl")
+	bigPayload := strings.Repeat("x", 200_000)
+	content := `{"ts":"2026-03-31T12:00:00Z","claw_id":"agent-big","response":{"format":"json","json":{"big":"` + bigPayload + `"}}}` + "\n"
+	if err := os.WriteFile(historyPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := exportHistoryFile(&out, historyPath, nil, 1); err != nil {
+		t.Fatalf("exportHistoryFile on >64KB line: %v", err)
+	}
+	if !strings.Contains(out.String(), `"agent-big"`) {
+		t.Fatalf("expected exported entry to be present, got %d bytes", out.Len())
+	}
+}
+
 func TestHistoryReadStartOffsetUsesCheckpointIndex(t *testing.T) {
 	dir := t.TempDir()
 	historyPath := filepath.Join(dir, "history.jsonl")

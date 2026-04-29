@@ -3,13 +3,13 @@ package infraimages
 import "fmt"
 
 const (
-	DefaultClawInfraTag    = "v0.14.0"
+	DefaultClawInfraTag    = "v0.14.1"
 	DefaultClawAPITag      = DefaultClawInfraTag
 	DefaultClawdashTag     = DefaultClawInfraTag
 	DefaultClawWallTag     = DefaultClawInfraTag
 	DefaultClawMCPStdioTag = DefaultClawInfraTag
-	DefaultCllamaTag       = "v0.6.0"
-	DefaultHermesBaseTag   = "v2026.3.17-claw.3"
+	DefaultCllamaTag       = "v0.6.1"
+	DefaultHermesBaseTag   = "v2026.3.17-claw.4"
 )
 
 func ReleaseRefs(releaseTag string) []string {

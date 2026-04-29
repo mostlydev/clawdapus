@@ -35,8 +35,15 @@ import inspect
 import os
 
 os.environ["HERMES_DEFAULT_AGENT_IDENTITY"] = "Clawdapus identity probe"
+os.environ["CLAWDAPUS_DISABLED_TOOLS"] = "text_to_speech"
 assert importlib.util.find_spec("minisweagent_path") is not None
 import tools.terminal_tool
+
+from toolsets import _HERMES_CORE_TOOLS, TOOLSETS
+assert "text_to_speech" not in _HERMES_CORE_TOOLS
+for _name, _toolset in TOOLSETS.items():
+    if isinstance(_toolset, dict) and isinstance(_toolset.get("tools"), list):
+        assert "text_to_speech" not in _toolset["tools"], _name
 
 from agent.prompt_builder import DEFAULT_AGENT_IDENTITY, MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE
 assert DEFAULT_AGENT_IDENTITY == "Clawdapus identity probe"
