@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- Fix: `claw-wall` channel context now defaults to a non-consuming recent tail (`mode=tail`) instead of draining the oldest unread backlog for Discord invocation context ([#201](https://github.com/mostlydev/clawdapus/issues/201)). Generated feeds use a 24h window with dual caps (`limit=40`, `max_chars=8192`) and explicit coverage metadata, while legacy cursor paging remains available as `mode=delta`. Pods can tune the tail with `x-claw.context.channel`.
 
 ## v0.13.6 <Badge type="tip" text="Latest" /> {#v0-13-6}
 

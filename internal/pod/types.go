@@ -14,6 +14,7 @@ type Pod struct {
 	Compose               map[string]interface{} // preserved top-level compose keys except x-claw and services
 	ClawAPI               *ClawAPIConfig
 	Clawdash              *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
+	Context               *ContextConfig
 	Principals            []PodPrincipal
 	AlertWebhooks         []string // pod-scoped Discord webhook URLs for pool-transition alerts
 	AlertMentions         []string // pod-scoped @-mention targets for alerts (e.g. "@wojtek", "@infra")
@@ -64,6 +65,7 @@ type ClawBlock struct {
 	Surfaces     []driver.ResolvedSurface
 	Skills       []string
 	Invoke       []InvokeEntry
+	Context      *ContextConfig
 	ClawAPIMode  string // "self" when claw-api: self is declared; empty otherwise
 	MCPStdio     *MCPStdioBlock
 }
@@ -101,6 +103,17 @@ type ToolPolicyEntry struct {
 type MemoryEntry struct {
 	Service   string
 	TimeoutMS int
+}
+
+type ContextConfig struct {
+	Channel *ChannelContextConfig
+}
+
+type ChannelContextConfig struct {
+	Since    string
+	Limit    int
+	MaxChars int
+	Buffer   int
 }
 
 type IncludeEntry struct {

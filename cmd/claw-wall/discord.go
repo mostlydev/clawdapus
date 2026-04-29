@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const maxDiscordFetchLimit = 100
+
 type tokenPair struct {
 	ChannelID string
 	Token     string
@@ -101,6 +103,9 @@ func newDiscordPoller(client *http.Client, store *conversationStore, targets []t
 	}
 	if fetchLimit < 1 {
 		fetchLimit = 50
+	}
+	if fetchLimit > maxDiscordFetchLimit {
+		fetchLimit = maxDiscordFetchLimit
 	}
 	return &discordPoller{
 		client:       client,

@@ -13,6 +13,8 @@ import (
 const (
 	defaultResponseLimit  = 20
 	backgroundContextSize = 10
+	defaultTailLimit      = 40
+	defaultTailMaxChars   = 8 * 1024
 )
 
 type wallMessage struct {
@@ -33,6 +35,25 @@ type conversationStore struct {
 	mu       sync.Mutex
 	channels map[string]*channelBuffer
 	cursors  map[string]map[string]string
+}
+
+type tailRequest struct {
+	ChannelIDs []string
+	Since      time.Duration
+	Limit      int
+	MaxChars   int
+	Now        time.Time
+}
+
+type tailResult struct {
+	ChannelIDs   []string
+	Messages     []wallMessage
+	Available    int
+	Omitted      int
+	CapReason    string
+	WindowStart  time.Time
+	BufferOldest time.Time
+	BufferNewest time.Time
 }
 
 func newConversationStore(limit int) *conversationStore {
@@ -160,6 +181,105 @@ func (s *conversationStore) consume(consumer string, channelIDs []string, limit 
 	return out
 }
 
+func (s *conversationStore) tail(req tailRequest) tailResult {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = defaultTailLimit
+	}
+	if limit > s.limit {
+		limit = s.limit
+	}
+	maxChars := req.MaxChars
+	if maxChars < 0 {
+		maxChars = 0
+	}
+	now := req.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	var windowStart time.Time
+	if req.Since > 0 {
+		windowStart = now.Add(-req.Since)
+	}
+
+	channelIDs := normalizeChannelIDs(req.ChannelIDs)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	candidates := make([]wallMessage, 0)
+	for _, channelID := range channelIDs {
+		state := s.channels[channelID]
+		if state == nil {
+			continue
+		}
+		for _, msg := range state.messages {
+			if req.Since > 0 && !msg.Timestamp.IsZero() && msg.Timestamp.Before(windowStart) {
+				continue
+			}
+			candidates = append(candidates, msg)
+		}
+	}
+
+	sortWallMessages(candidates)
+	selectedReversed := make([]wallMessage, 0, min(limit, len(candidates)))
+	usedChars := 0
+	capReason := ""
+	for i := len(candidates) - 1; i >= 0; i-- {
+		if len(selectedReversed) >= limit {
+			capReason = "limit"
+			break
+		}
+		lineLen := len(formatWallMessage(candidates[i]))
+		if len(selectedReversed) > 0 {
+			lineLen++
+		}
+		if maxChars > 0 && usedChars+lineLen > maxChars && len(selectedReversed) > 0 {
+			capReason = "max_chars"
+			break
+		}
+		selectedReversed = append(selectedReversed, candidates[i])
+		usedChars += lineLen
+	}
+
+	messages := make([]wallMessage, 0, len(selectedReversed))
+	for i := len(selectedReversed) - 1; i >= 0; i-- {
+		messages = append(messages, selectedReversed[i])
+	}
+
+	if len(messages) < len(candidates) && capReason == "" {
+		capReason = "limit"
+	}
+
+	result := tailResult{
+		ChannelIDs:  channelIDs,
+		Messages:    messages,
+		Available:   len(candidates),
+		Omitted:     len(candidates) - len(messages),
+		CapReason:   capReason,
+		WindowStart: windowStart,
+	}
+	for _, channelID := range channelIDs {
+		state := s.channels[channelID]
+		if state == nil {
+			continue
+		}
+		for _, msg := range state.messages {
+			if msg.Timestamp.IsZero() {
+				continue
+			}
+			if result.BufferOldest.IsZero() || msg.Timestamp.Before(result.BufferOldest) {
+				result.BufferOldest = msg.Timestamp
+			}
+			if result.BufferNewest.IsZero() || msg.Timestamp.After(result.BufferNewest) {
+				result.BufferNewest = msg.Timestamp
+			}
+		}
+	}
+
+	return result
+}
+
 func newHandler(store *conversationStore) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -167,9 +287,12 @@ func newHandler(store *conversationStore) http.Handler {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.HandleFunc("/channel-context", func(w http.ResponseWriter, r *http.Request) {
-		consumer := strings.TrimSpace(r.URL.Query().Get("consumer"))
-		if consumer == "" {
-			http.Error(w, "consumer is required", http.StatusBadRequest)
+		mode := strings.TrimSpace(r.URL.Query().Get("mode"))
+		if mode == "" {
+			mode = "tail"
+		}
+		if mode != "tail" && mode != "delta" {
+			http.Error(w, "mode must be tail or delta", http.StatusBadRequest)
 			return
 		}
 
@@ -180,7 +303,11 @@ func newHandler(store *conversationStore) http.Handler {
 		}
 		channelIDs := strings.Split(rawChannels, ",")
 
-		limit := defaultResponseLimit
+		defaultLimit := defaultTailLimit
+		if mode == "delta" {
+			defaultLimit = defaultResponseLimit
+		}
+		limit := defaultLimit
 		if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
 			parsed, err := strconv.Atoi(rawLimit)
 			if err != nil || parsed < 1 {
@@ -190,13 +317,45 @@ func newHandler(store *conversationStore) http.Handler {
 			limit = parsed
 		}
 
-		messages := store.consume(consumer, channelIDs, limit)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		if len(messages) == 0 {
-			w.WriteHeader(http.StatusOK)
+		if mode == "delta" {
+			consumer := strings.TrimSpace(r.URL.Query().Get("consumer"))
+			if consumer == "" {
+				http.Error(w, "consumer is required", http.StatusBadRequest)
+				return
+			}
+			messages := store.consume(consumer, channelIDs, limit)
+			if len(messages) == 0 {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			_, _ = w.Write([]byte(formatWallMessages(messages)))
 			return
 		}
-		_, _ = w.Write([]byte(formatWallMessages(messages)))
+
+		since, err := parseDurationQuery(r.URL.Query().Get("since"), r.URL.Query().Get("window"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		maxChars := defaultTailMaxChars
+		if rawMaxChars := strings.TrimSpace(r.URL.Query().Get("max_chars")); rawMaxChars != "" {
+			parsed, err := strconv.Atoi(rawMaxChars)
+			if err != nil || parsed < 1 {
+				http.Error(w, "max_chars must be a positive integer", http.StatusBadRequest)
+				return
+			}
+			maxChars = parsed
+		}
+
+		result := store.tail(tailRequest{
+			ChannelIDs: channelIDs,
+			Since:      since,
+			Limit:      limit,
+			MaxChars:   maxChars,
+			Now:        time.Now(),
+		})
+		_, _ = w.Write([]byte(formatTailContext(result, since)))
 	})
 	return mux
 }
@@ -207,9 +366,87 @@ func formatWallMessages(messages []wallMessage) string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		fmt.Fprintf(&b, "[%s] %s: %s", formatWallTimestamp(msg.Timestamp), msg.Author, msg.Content)
+		b.WriteString(formatWallMessage(msg))
 	}
 	return b.String()
+}
+
+func formatWallMessage(msg wallMessage) string {
+	return fmt.Sprintf("[%s] %s: %s", formatWallTimestamp(msg.Timestamp), msg.Author, msg.Content)
+}
+
+func formatTailContext(result tailResult, since time.Duration) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[channel-context] mode=tail since=%s channels=%s messages=%d available=%d omitted=%d",
+		formatDurationForHeader(since), strings.Join(result.ChannelIDs, ","), len(result.Messages), result.Available, result.Omitted)
+	if result.CapReason != "" {
+		fmt.Fprintf(&b, " cap=%s", result.CapReason)
+	}
+	fmt.Fprintf(&b, " range=%s buffer_range=%s",
+		formatTimeRange(messageRange(result.Messages)),
+		formatTimeRange(result.BufferOldest, result.BufferNewest))
+	b.WriteString("\n")
+	if result.Omitted > 0 {
+		fmt.Fprintf(&b, "[omitted %d older retained messages due to %s; newest retained messages follow]\n",
+			result.Omitted, result.CapReason)
+	}
+	if len(result.Messages) > 0 {
+		b.WriteByte('\n')
+		b.WriteString(formatWallMessages(result.Messages))
+	}
+	return b.String()
+}
+
+func parseDurationQuery(rawSince, rawWindow string) (time.Duration, error) {
+	raw := strings.TrimSpace(rawSince)
+	if raw == "" {
+		raw = strings.TrimSpace(rawWindow)
+	}
+	if raw == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("since must be a non-negative duration")
+	}
+	return d, nil
+}
+
+func formatDurationForHeader(d time.Duration) string {
+	if d <= 0 {
+		return "all"
+	}
+	return d.String()
+}
+
+func messageRange(messages []wallMessage) (time.Time, time.Time) {
+	var oldest, newest time.Time
+	for _, msg := range messages {
+		if msg.Timestamp.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || msg.Timestamp.Before(oldest) {
+			oldest = msg.Timestamp
+		}
+		if newest.IsZero() || msg.Timestamp.After(newest) {
+			newest = msg.Timestamp
+		}
+	}
+	return oldest, newest
+}
+
+func formatTimeRange(start, end time.Time) string {
+	if start.IsZero() || end.IsZero() {
+		return "empty"
+	}
+	return formatHeaderTimestamp(start) + ".." + formatHeaderTimestamp(end)
+}
+
+func formatHeaderTimestamp(ts time.Time) string {
+	if ts.IsZero() {
+		return "unknown-time"
+	}
+	return ts.UTC().Format("2006-01-02T15:04Z")
 }
 
 func formatWallTimestamp(ts time.Time) string {
