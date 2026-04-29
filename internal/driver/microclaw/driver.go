@@ -50,15 +50,31 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	for platform := range rc.Handles {
 		switch platform {
 		case "discord":
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN") == "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "DISCORD_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("microclaw driver: DISCORD_BOT_TOKEN: %w", err)
+			}
+			if token == "" {
 				return fmt.Errorf("microclaw driver: HANDLE discord requires DISCORD_BOT_TOKEN in service environment")
 			}
 		case "telegram":
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN") == "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "TELEGRAM_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("microclaw driver: TELEGRAM_BOT_TOKEN: %w", err)
+			}
+			if token == "" {
 				return fmt.Errorf("microclaw driver: HANDLE telegram requires TELEGRAM_BOT_TOKEN in service environment")
 			}
 		case "slack":
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN") == "" || shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN") == "" {
+			botToken, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("microclaw driver: SLACK_BOT_TOKEN: %w", err)
+			}
+			appToken, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_APP_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("microclaw driver: SLACK_APP_TOKEN: %w", err)
+			}
+			if botToken == "" || appToken == "" {
 				return fmt.Errorf("microclaw driver: HANDLE slack requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN in service environment")
 			}
 		default:
@@ -69,7 +85,11 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	if len(rc.Cllama) == 0 {
 		llmProvider := shared.NormalizeProvider(provider)
 		if !shared.ProviderAllowsEmptyAPIKey(llmProvider) {
-			if key := shared.ResolveProviderAPIKey(llmProvider, rc.Environment); key == "" {
+			key, err := shared.ResolveProviderAPIKeyWithRuntimeEnv(llmProvider, rc.Environment, rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("microclaw driver: provider %q API key: %w", llmProvider, err)
+			}
+			if key == "" {
 				expected := strings.Join(shared.ExpectedProviderKeys(llmProvider), ", ")
 				return fmt.Errorf("microclaw driver: no API key found for provider %q (checked: %s)", llmProvider, expected)
 			}
@@ -292,7 +312,10 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 		llmProvider := shared.NormalizeProvider(provider)
 		cfg["llm_provider"] = llmProvider
 		cfg["model"] = modelID
-		apiKey := shared.ResolveProviderAPIKey(llmProvider, rc.Environment)
+		apiKey, err := shared.ResolveProviderAPIKeyWithRuntimeEnv(llmProvider, rc.Environment, rc.RuntimeEnv)
+		if err != nil {
+			return nil, fmt.Errorf("config generation: provider %q api_key: %w", llmProvider, err)
+		}
 		if apiKey != "" {
 			cfg["api_key"] = apiKey
 		} else {
@@ -311,7 +334,11 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 		switch platform {
 		case "discord":
 			discord := map[string]interface{}{"enabled": true, "mention_only": true}
-			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN"); token != "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "DISCORD_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: DISCORD_BOT_TOKEN: %w", err)
+			}
+			if token != "" {
 				discord["bot_token"] = token
 			}
 			if h != nil && strings.TrimSpace(h.Username) != "" {
@@ -323,7 +350,11 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 			channels["discord"] = discord
 		case "telegram":
 			telegram := map[string]interface{}{"enabled": true}
-			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN"); token != "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "TELEGRAM_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE telegram: TELEGRAM_BOT_TOKEN: %w", err)
+			}
+			if token != "" {
 				telegram["bot_token"] = token
 			}
 			if h != nil && strings.TrimSpace(h.Username) != "" {
@@ -335,10 +366,18 @@ func generateConfig(rc *driver.ResolvedClaw) (map[string]interface{}, error) {
 			channels["telegram"] = telegram
 		case "slack":
 			slack := map[string]interface{}{"enabled": true}
-			if bot := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN"); bot != "" {
+			bot, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: SLACK_BOT_TOKEN: %w", err)
+			}
+			if bot != "" {
 				slack["bot_token"] = bot
 			}
-			if app := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN"); app != "" {
+			app, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_APP_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: SLACK_APP_TOKEN: %w", err)
+			}
+			if app != "" {
 				slack["app_token"] = app
 			}
 			if allowed := slackAllowedChannels(h); len(allowed) > 0 {

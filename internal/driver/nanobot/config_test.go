@@ -122,6 +122,34 @@ func TestGenerateConfigHandleMappings(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigUsesRuntimeEnvForComposeReferences(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {Guilds: []driver.GuildInfo{{ID: "123"}}},
+		},
+		Environment: map[string]string{
+			"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}",
+			"DISCORD_BOT_TOKEN":  "${DISCORD_BOT_TOKEN}",
+		},
+		RuntimeEnv: map[string]string{
+			"OPENROUTER_API_KEY": "runtime-or-key",
+			"DISCORD_BOT_TOKEN":  "runtime-discord-token",
+		},
+	}
+
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := getPath(data, "providers.openrouter.api_key"); v != "runtime-or-key" {
+		t.Fatalf("unexpected providers.openrouter.api_key: %v", v)
+	}
+	if v, _ := getPath(data, "channels.discord.token"); v != "runtime-discord-token" {
+		t.Fatalf("unexpected channels.discord.token: %v", v)
+	}
+}
+
 func TestGenerateConfigConfigureOverride(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models: map[string]string{"primary": "anthropic/claude-sonnet-4"},

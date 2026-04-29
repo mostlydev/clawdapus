@@ -124,6 +124,10 @@ func runComposeUp(podFile string) (err error) {
 	if err := resolveRuntimePlaceholders(podDir, p); err != nil {
 		return fmt.Errorf("resolve x-claw runtime placeholders: %w", err)
 	}
+	runtimeEnv, err := loadRuntimeEnv(podDir)
+	if err != nil {
+		return err
+	}
 	if composeUpDiscoverTools && podHasMCPStdioServices(p) {
 		if _, err := discoverMCPStdioServices(context.Background(), podDir, p, nil, discoverSelectionMissingOrStale); err != nil {
 			return fmt.Errorf("discover stdio MCP tools: %w", err)
@@ -335,6 +339,7 @@ func runComposeUp(podFile string) (err error) {
 			Privileges:    info.Privileges,
 			Count:         svc.Claw.Count,
 			Environment:   svc.Environment,
+			RuntimeEnv:    runtimeEnv,
 			Surfaces:      surfaces,
 			Skills:        skills,
 			Cllama:        resolveCllama(info.Cllama, svc.Claw.Cllama),
@@ -430,10 +435,6 @@ func runComposeUp(podFile string) (err error) {
 	}
 
 	clawAPIAuth, err := prepareClawAPIRuntime(runtimeDir, p, resolvedClaws)
-	if err != nil {
-		return err
-	}
-	runtimeEnv, err := loadRuntimeEnv(podDir)
 	if err != nil {
 		return err
 	}

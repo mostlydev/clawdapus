@@ -77,7 +77,11 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 	}
 
 	for _, key := range allowedEnvPassthroughKeys() {
-		if value := resolvedEnvValue(rc.Environment, key); value != "" {
+		value, err := resolvedEnvValue(rc, key)
+		if err != nil {
+			return nil, err
+		}
+		if value != "" {
 			env[key] = value
 		}
 	}
@@ -223,12 +227,19 @@ func resolveModelConfig(rc *driver.ResolvedClaw) (*modelConfig, error) {
 		}, nil
 	}
 
-	if baseURL := resolvedEnvValue(rc.Environment, "OPENAI_BASE_URL"); baseURL != "" {
+	baseURL, err := resolvedEnvValue(rc, "OPENAI_BASE_URL")
+	if err != nil {
+		return nil, err
+	}
+	if baseURL != "" {
 		defaultModel := modelRef
 		if provider == "openai" {
 			defaultModel = modelID
 		}
-		apiKey := resolvedEnvValue(rc.Environment, "OPENAI_API_KEY")
+		apiKey, err := resolvedEnvValue(rc, "OPENAI_API_KEY")
+		if err != nil {
+			return nil, err
+		}
 		return &modelConfig{
 			DefaultModel: defaultModel,
 			Provider:     "custom",
@@ -307,23 +318,12 @@ func hasDiscordHandle(rc *driver.ResolvedClaw) bool {
 	return false
 }
 
-func resolvedEnvValue(env map[string]string, key string) string {
-	raw := strings.TrimSpace(env[key])
-	if raw == "" {
-		return ""
+func resolvedEnvValue(rc *driver.ResolvedClaw, key string) (string, error) {
+	value, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, key, rc.RuntimeEnv)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", key, err)
 	}
-	// For single ${VAR} tokens, delegate to the shared resolver.
-	if resolved := shared.ResolveEnvToken(raw); resolved != "" && resolved != raw {
-		return resolved
-	}
-	// Expand all ${VAR} references in compound strings (e.g. "${A},${B}").
-	if strings.Contains(raw, "${") {
-		expanded := os.Expand(raw, os.Getenv)
-		if expanded != raw {
-			return expanded
-		}
-	}
-	return raw
+	return value, nil
 }
 
 func dotenvValue(value string) string {

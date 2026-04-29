@@ -46,15 +46,27 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	for platform := range rc.Handles {
 		switch strings.ToLower(platform) {
 		case "discord":
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN") == "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "DISCORD_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("nanobot driver: DISCORD_BOT_TOKEN: %w", err)
+			}
+			if token == "" {
 				return fmt.Errorf("nanobot driver: HANDLE discord requires DISCORD_BOT_TOKEN in service environment")
 			}
 		case "telegram":
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN") == "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "TELEGRAM_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("nanobot driver: TELEGRAM_BOT_TOKEN: %w", err)
+			}
+			if token == "" {
 				return fmt.Errorf("nanobot driver: HANDLE telegram requires TELEGRAM_BOT_TOKEN in service environment")
 			}
 		case "slack":
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN") == "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("nanobot driver: SLACK_BOT_TOKEN: %w", err)
+			}
+			if token == "" {
 				return fmt.Errorf("nanobot driver: HANDLE slack requires SLACK_BOT_TOKEN in service environment")
 			}
 		default:
@@ -65,7 +77,11 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	if len(rc.Cllama) == 0 {
 		llmProvider := shared.NormalizeProvider(provider)
 		if !shared.ProviderAllowsEmptyAPIKey(llmProvider) {
-			if key := shared.ResolveProviderAPIKey(llmProvider, rc.Environment); key == "" {
+			key, err := shared.ResolveProviderAPIKeyWithRuntimeEnv(llmProvider, rc.Environment, rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("nanobot driver: provider %q API key: %w", llmProvider, err)
+			}
+			if key == "" {
 				expected := strings.Join(shared.ExpectedProviderKeys(llmProvider), ", ")
 				return fmt.Errorf("nanobot driver: no API key found for provider %q (checked: %s)", llmProvider, expected)
 			}

@@ -2,6 +2,7 @@ package shared
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -84,5 +85,66 @@ func TestResolveEnvToken(t *testing.T) {
 		if got := ResolveEnvToken(tt.raw); got != tt.want {
 			t.Fatalf("ResolveEnvToken(%q) = %q, want %q", tt.raw, got, tt.want)
 		}
+	}
+}
+
+func TestResolveEnvTokenWithRuntimeEnv(t *testing.T) {
+	runtimeEnv := map[string]string{
+		"TOKEN_A": "runtime-a",
+		"TOKEN_B": "runtime-b",
+		"EMPTY":   "",
+	}
+
+	tests := []struct {
+		raw  string
+		want string
+	}{
+		{raw: "literal", want: "literal"},
+		{raw: "$TOKEN_A", want: "runtime-a"},
+		{raw: "${TOKEN_B}", want: "runtime-b"},
+		{raw: "${TOKEN_A},${TOKEN_B}", want: "runtime-a,runtime-b"},
+		{raw: "${MISSING:-fallback}", want: "fallback"},
+		{raw: "${EMPTY:-fallback}", want: "fallback"},
+		{raw: "${EMPTY-fallback}", want: ""},
+		{raw: "${TOKEN_A:+alt}", want: "alt"},
+	}
+
+	for _, tt := range tests {
+		got, err := ResolveEnvTokenWithRuntimeEnv(tt.raw, runtimeEnv)
+		if err != nil {
+			t.Fatalf("ResolveEnvTokenWithRuntimeEnv(%q) returned error: %v", tt.raw, err)
+		}
+		if got != tt.want {
+			t.Fatalf("ResolveEnvTokenWithRuntimeEnv(%q) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
+func TestResolveEnvTokenWithRuntimeEnvRejectsMissingVars(t *testing.T) {
+	_, err := ResolveEnvTokenWithRuntimeEnv("${TOKEN_A},${MISSING}", map[string]string{"TOKEN_A": "runtime-a"})
+	if err == nil {
+		t.Fatal("expected unresolved variable error")
+	}
+	if !strings.Contains(err.Error(), "MISSING") {
+		t.Fatalf("expected missing variable in error, got: %v", err)
+	}
+}
+
+func TestResolveProviderAPIKeyWithRuntimeEnv(t *testing.T) {
+	env := map[string]string{
+		"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}",
+		"OPENAI_API_KEY":     "${OPENAI_API_KEY}",
+	}
+	runtimeEnv := map[string]string{
+		"OPENROUTER_API_KEY": "runtime-openrouter-key",
+		"OPENAI_API_KEY":     "runtime-openai-key",
+	}
+
+	got, err := ResolveProviderAPIKeyWithRuntimeEnv("openrouter", env, runtimeEnv)
+	if err != nil {
+		t.Fatalf("ResolveProviderAPIKeyWithRuntimeEnv returned error: %v", err)
+	}
+	if got != "runtime-openrouter-key" {
+		t.Fatalf("ResolveProviderAPIKeyWithRuntimeEnv(openrouter) = %q", got)
 	}
 }
