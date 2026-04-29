@@ -76,7 +76,11 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			if err := shared.SetPath(config, "channels.discord.accounts.main.mention_only", true); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 			}
-			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN"); token != "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "DISCORD_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE discord: DISCORD_BOT_TOKEN: %w", err)
+			}
+			if token != "" {
 				if err := shared.SetPath(config, "channels.discord.accounts.main.token", token); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE discord: %w", err)
 				}
@@ -94,18 +98,29 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 				}
 			}
 		case "telegram":
-			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN"); token != "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "TELEGRAM_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE telegram: TELEGRAM_BOT_TOKEN: %w", err)
+			}
+			if token != "" {
 				if err := shared.SetPath(config, "channels.telegram.accounts.main.bot_token", token); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
 				}
 			}
 		case "slack":
-			if token := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN"); token != "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: SLACK_BOT_TOKEN: %w", err)
+			}
+			if token != "" {
 				if err := shared.SetPath(config, "channels.slack.accounts.main.bot_token", token); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 				}
 			}
-			appToken := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN")
+			appToken, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_APP_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: SLACK_APP_TOKEN: %w", err)
+			}
 			if appToken != "" {
 				if err := shared.SetPath(config, "channels.slack.accounts.main.app_token", appToken); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
@@ -114,7 +129,10 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 				}
 			}
-			signingSecret := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_SIGNING_SECRET")
+			signingSecret, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_SIGNING_SECRET", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: SLACK_SIGNING_SECRET: %w", err)
+			}
 			if signingSecret != "" {
 				if err := shared.SetPath(config, "channels.slack.accounts.main.signing_secret", signingSecret); err != nil {
 					return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)

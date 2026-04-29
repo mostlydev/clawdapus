@@ -85,6 +85,7 @@ type ResolvedClaw struct {
 	Invocations     []Invocation      // scheduled agent tasks from image labels + pod x-claw.invoke
 	Count           int               // from pod x-claw (default 1)
 	Environment     map[string]string // from pod environment block
+	RuntimeEnv      map[string]string // compose interpolation context: pod .env plus process env
 	Timezone        string            // resolved service timezone from TZ env (falls back to UTC)
 	Cllama          []string          // ordered cllama proxy types (e.g., ["passthrough"])
 	CllamaToken     string            // per-agent bearer token injected when cllama is active

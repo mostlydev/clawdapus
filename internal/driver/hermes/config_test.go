@@ -79,25 +79,78 @@ func TestGenerateConfigAnthropicModelUsesBareModelName(t *testing.T) {
 }
 
 func TestResolvedEnvValueExpandsCompoundVars(t *testing.T) {
-	// Set env vars for the test
+	rc := &driver.ResolvedClaw{
+		Environment: map[string]string{
+			"SINGLE":   "${TEST_ID_A}",
+			"COMPOUND": "${TEST_ID_A},${TEST_ID_B},${TEST_ID_C}",
+			"LITERAL":  "plain-value",
+		},
+		RuntimeEnv: map[string]string{
+			"TEST_ID_A": "111",
+			"TEST_ID_B": "222",
+			"TEST_ID_C": "333",
+		},
+	}
+
+	if got, err := resolvedEnvValue(rc, "SINGLE"); err != nil || got != "111" {
+		t.Fatalf("single var: expected 111, got %q (err=%v)", got, err)
+	}
+	if got, err := resolvedEnvValue(rc, "COMPOUND"); err != nil || got != "111,222,333" {
+		t.Fatalf("compound var: expected 111,222,333, got %q (err=%v)", got, err)
+	}
+	if got, err := resolvedEnvValue(rc, "LITERAL"); err != nil || got != "plain-value" {
+		t.Fatalf("literal: expected plain-value, got %q (err=%v)", got, err)
+	}
+}
+
+func TestGenerateEnvFileUsesRuntimeEnvForComposeReferences(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Environment: map[string]string{
+			"DISCORD_ALLOWED_USERS": "${OPERATOR_DISCORD_ID},${WESTON_DISCORD_ID}",
+		},
+		RuntimeEnv: map[string]string{
+			"OPERATOR_DISCORD_ID": "167037070349434880",
+			"WESTON_DISCORD_ID":   "1464508146579148851",
+		},
+	}
+
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+	env := string(data)
+	if !strings.Contains(env, "DISCORD_ALLOWED_USERS=167037070349434880,1464508146579148851\n") {
+		t.Fatalf("expected resolved Discord allowlist in .env, got:\n%s", env)
+	}
+}
+
+func TestGenerateEnvFileRejectsUnresolvedComposeReferences(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Environment: map[string]string{
+			"DISCORD_ALLOWED_USERS": "${OPERATOR_DISCORD_ID},${MISSING_DISCORD_ID}",
+		},
+		RuntimeEnv: map[string]string{
+			"OPERATOR_DISCORD_ID": "167037070349434880",
+		},
+	}
+
+	_, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err == nil {
+		t.Fatal("expected unresolved Compose reference error")
+	}
+	if !strings.Contains(err.Error(), "MISSING_DISCORD_ID") {
+		t.Fatalf("expected missing variable in error, got: %v", err)
+	}
+}
+
+func TestResolvedEnvValueFallsBackToProcessEnv(t *testing.T) {
 	t.Setenv("TEST_ID_A", "111")
-	t.Setenv("TEST_ID_B", "222")
-	t.Setenv("TEST_ID_C", "333")
-
-	env := map[string]string{
-		"SINGLE":   "${TEST_ID_A}",
-		"COMPOUND": "${TEST_ID_A},${TEST_ID_B},${TEST_ID_C}",
-		"LITERAL":  "plain-value",
+	rc := &driver.ResolvedClaw{
+		Environment: map[string]string{"SINGLE": "${TEST_ID_A}"},
 	}
 
-	if got := resolvedEnvValue(env, "SINGLE"); got != "111" {
+	if got, err := resolvedEnvValue(rc, "SINGLE"); err != nil || got != "111" {
 		t.Fatalf("single var: expected 111, got %q", got)
-	}
-	if got := resolvedEnvValue(env, "COMPOUND"); got != "111,222,333" {
-		t.Fatalf("compound var: expected 111,222,333, got %q", got)
-	}
-	if got := resolvedEnvValue(env, "LITERAL"); got != "plain-value" {
-		t.Fatalf("literal: expected plain-value, got %q", got)
 	}
 }
 

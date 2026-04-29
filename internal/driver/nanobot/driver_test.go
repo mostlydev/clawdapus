@@ -64,6 +64,24 @@ func TestValidateDiscordHandleRequiresToken(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsRuntimeEnvComposeReferences(t *testing.T) {
+	rc, _ := newTestRC(t)
+	rc.Models = map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"}
+	rc.Handles = map[string]*driver.HandleInfo{"discord": {ID: "123"}}
+	rc.Environment = map[string]string{
+		"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}",
+		"DISCORD_BOT_TOKEN":  "${DISCORD_BOT_TOKEN}",
+	}
+	rc.RuntimeEnv = map[string]string{
+		"OPENROUTER_API_KEY": "runtime-or-key",
+		"DISCORD_BOT_TOKEN":  "runtime-discord-token",
+	}
+
+	if err := (&Driver{}).Validate(rc); err != nil {
+		t.Fatalf("Validate should accept Compose references resolved from RuntimeEnv: %v", err)
+	}
+}
+
 func TestValidateRejectsInvalidConfigureCommand(t *testing.T) {
 	rc, _ := newTestRC(t)
 	rc.Environment["ANTHROPIC_API_KEY"] = "anthropic-key"

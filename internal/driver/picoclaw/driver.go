@@ -61,7 +61,11 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 		if tokenVar == "" {
 			return fmt.Errorf("picoclaw driver: unsupported token mapping for HANDLE %q", rawPlatform)
 		}
-		if shared.ResolveEnvTokenFromMap(rc.Environment, tokenVar) == "" {
+		token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, tokenVar, rc.RuntimeEnv)
+		if err != nil {
+			return fmt.Errorf("picoclaw driver: %s: %w", tokenVar, err)
+		}
+		if token == "" {
 			return fmt.Errorf("picoclaw driver: HANDLE %s requires %s in service environment", platform, tokenVar)
 		}
 	}
@@ -73,7 +77,11 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	if len(rc.Cllama) == 0 {
 		llmProvider := shared.NormalizeProvider(provider)
 		if !shared.ProviderAllowsEmptyAPIKey(llmProvider) {
-			if key := shared.ResolveProviderAPIKey(llmProvider, rc.Environment); key == "" {
+			key, err := shared.ResolveProviderAPIKeyWithRuntimeEnv(llmProvider, rc.Environment, rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("picoclaw driver: provider %q API key: %w", llmProvider, err)
+			}
+			if key == "" {
 				expected := strings.Join(shared.ExpectedProviderKeys(llmProvider), ", ")
 				return fmt.Errorf("picoclaw driver: no API key found for provider %q (checked: %s)", llmProvider, expected)
 			}

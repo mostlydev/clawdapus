@@ -101,7 +101,11 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 
 		tokenVar := shared.PlatformTokenVar(platform)
 		if tokenVar != "" {
-			if token := shared.ResolveEnvTokenFromMap(rc.Environment, tokenVar); token != "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, tokenVar, rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE %s: %s: %w", platform, tokenVar, err)
+			}
+			if token != "" {
 				channel["token"] = token
 				channel["bot_token"] = token
 			}
@@ -121,10 +125,18 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 				}
 			}
 		case "slack":
-			if appToken := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN"); appToken != "" {
+			appToken, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_APP_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: SLACK_APP_TOKEN: %w", err)
+			}
+			if appToken != "" {
 				channel["app_token"] = appToken
 			}
-			if signingSecret := shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_SIGNING_SECRET"); signingSecret != "" {
+			signingSecret, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_SIGNING_SECRET", rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("config generation: HANDLE slack: SLACK_SIGNING_SECRET: %w", err)
+			}
+			if signingSecret != "" {
 				channel["signing_secret"] = signingSecret
 			}
 		}
@@ -183,7 +195,11 @@ func buildModelList(rc *driver.ResolvedClaw) ([]map[string]interface{}, error) {
 			entry["api_key"] = rc.CllamaToken
 		} else {
 			llmProvider := shared.NormalizeProvider(provider)
-			if apiKey := shared.ResolveProviderAPIKey(llmProvider, rc.Environment); apiKey != "" {
+			apiKey, err := shared.ResolveProviderAPIKeyWithRuntimeEnv(llmProvider, rc.Environment, rc.RuntimeEnv)
+			if err != nil {
+				return nil, fmt.Errorf("MODEL %s provider %q api_key: %w", slot, llmProvider, err)
+			}
+			if apiKey != "" {
 				entry["api_key"] = apiKey
 			}
 		}

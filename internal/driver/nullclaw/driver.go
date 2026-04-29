@@ -36,15 +36,27 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 	for platform := range rc.Handles {
 		switch strings.ToLower(platform) {
 		case "discord":
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN") == "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "DISCORD_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("nullclaw driver: DISCORD_BOT_TOKEN: %w", err)
+			}
+			if token == "" {
 				return fmt.Errorf("nullclaw driver: HANDLE discord requires DISCORD_BOT_TOKEN in service environment")
 			}
 		case "telegram":
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN") == "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "TELEGRAM_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("nullclaw driver: TELEGRAM_BOT_TOKEN: %w", err)
+			}
+			if token == "" {
 				return fmt.Errorf("nullclaw driver: HANDLE telegram requires TELEGRAM_BOT_TOKEN in service environment")
 			}
 		case "slack":
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN") == "" {
+			token, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, "SLACK_BOT_TOKEN", rc.RuntimeEnv)
+			if err != nil {
+				return fmt.Errorf("nullclaw driver: SLACK_BOT_TOKEN: %w", err)
+			}
+			if token == "" {
 				return fmt.Errorf("nullclaw driver: HANDLE slack requires SLACK_BOT_TOKEN in service environment")
 			}
 		default:
