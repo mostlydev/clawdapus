@@ -29,7 +29,13 @@ outline: deep
 
 ## Unreleased
 
-## v0.13.4 <Badge type="tip" text="Latest" /> {#v0-13-4}
+## v0.13.5 <Badge type="tip" text="Latest" /> {#v0-13-5}
+
+*2026-04-28*
+
+- Fix: Hermes handle validation now accepts Compose-style `${VAR}` env references for `DISCORD_BOT_TOKEN`, `TELEGRAM_BOT_TOKEN`, and `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN` ([#194](https://github.com/mostlydev/clawdapus/issues/194)). Preflight previously resolved the reference against the `claw` process env and rejected pods that supplied secrets via the pod `.env` file unless operators sourced it manually before `claw up`. The check now confirms the key is declared with a non-blank value and leaves resolution to Docker Compose. Missing keys and blank values are still rejected.
+
+## v0.13.4 {#v0-13-4}
 
 *2026-04-28*
 
