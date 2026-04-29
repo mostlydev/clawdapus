@@ -43,7 +43,10 @@ const (
 	conversationWallServiceName  = "claw-wall"
 	conversationWallFeedName     = "channel-context"
 	conversationWallFeedTTL      = 30
-	conversationWallFeedLimit    = 20
+	conversationWallFeedSince    = "24h"
+	conversationWallFeedLimit    = 40
+	conversationWallFeedMaxChars = 8 * 1024
+	conversationWallBufferLimit  = 500
 	conversationWallPollInterval = "30"
 	conversationWallInternalPort = "8080"
 	conversationWallDockerfile   = "dockerfiles/claw-wall/Dockerfile"
@@ -1670,13 +1673,15 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 		if svc == nil || svc.Claw == nil {
 			continue
 		}
-		svc.Claw.Feeds = appendConversationWallFeed(svc.Claw.Feeds, channelIDs)
+		settings := conversationWallChannelContext(p, svc)
+		svc.Claw.Feeds = appendConversationWallFeed(svc.Claw.Feeds, channelIDs, settings)
 	}
 
 	p.Services[conversationWallServiceName] = &pod.Service{
 		Image: resolveConversationWallImageRef(),
 		Environment: map[string]string{
 			"CLAW_WALL_TOKENS":        formatConversationWallTokenPairs(tokenPairs),
+			"CLAW_WALL_LIMIT":         strconv.Itoa(conversationWallBufferForPod(p, triggerServices)),
 			"CLAW_WALL_POLL_INTERVAL": envOrDefault("CLAW_WALL_POLL_INTERVAL", conversationWallPollInterval),
 		},
 		Expose: []string{conversationWallInternalPort},
@@ -1729,8 +1734,70 @@ func sortedConversationWallServiceNames(services map[string]*pod.Service) []stri
 	return names
 }
 
-func appendConversationWallFeed(feeds []pod.FeedEntry, channelIDs []string) []pod.FeedEntry {
-	path := fmt.Sprintf("/channel-context?consumer={claw_id}&channels=%s&limit=%d", strings.Join(channelIDs, ","), conversationWallFeedLimit)
+type conversationWallContextSettings struct {
+	Since    string
+	Limit    int
+	MaxChars int
+	Buffer   int
+}
+
+func conversationWallChannelContext(p *pod.Pod, svc *pod.Service) conversationWallContextSettings {
+	settings := conversationWallContextSettings{
+		Since:    conversationWallFeedSince,
+		Limit:    conversationWallFeedLimit,
+		MaxChars: conversationWallFeedMaxChars,
+		Buffer:   conversationWallBufferLimit,
+	}
+	if p != nil && p.Context != nil {
+		settings = applyConversationWallChannelContext(settings, p.Context.Channel)
+	}
+	if svc != nil && svc.Claw != nil && svc.Claw.Context != nil {
+		settings = applyConversationWallChannelContext(settings, svc.Claw.Context.Channel)
+	}
+	return settings
+}
+
+func applyConversationWallChannelContext(settings conversationWallContextSettings, cfg *pod.ChannelContextConfig) conversationWallContextSettings {
+	if cfg == nil {
+		return settings
+	}
+	if strings.TrimSpace(cfg.Since) != "" {
+		settings.Since = strings.TrimSpace(cfg.Since)
+	}
+	if cfg.Limit > 0 {
+		settings.Limit = cfg.Limit
+	}
+	if cfg.MaxChars > 0 {
+		settings.MaxChars = cfg.MaxChars
+	}
+	if cfg.Buffer > 0 {
+		settings.Buffer = cfg.Buffer
+	}
+	return settings
+}
+
+func conversationWallBufferForPod(p *pod.Pod, triggerServices map[string][]string) int {
+	buffer := conversationWallBufferLimit
+	for name := range triggerServices {
+		svc := p.Services[name]
+		if svc == nil {
+			continue
+		}
+		if candidate := conversationWallChannelContext(p, svc).Buffer; candidate > buffer {
+			buffer = candidate
+		}
+	}
+	return buffer
+}
+
+func appendConversationWallFeed(feeds []pod.FeedEntry, channelIDs []string, settings conversationWallContextSettings) []pod.FeedEntry {
+	path := fmt.Sprintf(
+		"/channel-context?consumer={claw_id}&channels=%s&mode=tail&since=%s&limit=%d&max_chars=%d",
+		strings.Join(channelIDs, ","),
+		settings.Since,
+		settings.Limit,
+		settings.MaxChars,
+	)
 	for _, feed := range feeds {
 		if feed.Name == conversationWallFeedName && feed.Source == conversationWallServiceName && feed.Path == path {
 			return feeds

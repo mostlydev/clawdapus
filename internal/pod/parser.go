@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -26,6 +27,7 @@ type rawPodClaw struct {
 	Master                string                 `yaml:"master"`
 	SequentialConformance bool                   `yaml:"sequential-conformance"`
 	HandlesDefaults       map[string]interface{} `yaml:"handles-defaults"`
+	Context               *rawContextConfig      `yaml:"context"`
 	Principals            []rawPrincipalEntry    `yaml:"principals"`
 	AlertWebhooks         []string               `yaml:"alert-webhooks"`
 	AlertMentions         []string               `yaml:"alert-mentions"`
@@ -73,8 +75,21 @@ type rawClawBlock struct {
 	Surfaces     []interface{}          `yaml:"surfaces"`
 	Skills       []string               `yaml:"skills"`
 	Invoke       []rawInvokeEntry       `yaml:"invoke"`
+	Context      *rawContextConfig      `yaml:"context"`
 	ClawAPI      interface{}            `yaml:"claw-api"`
 	MCPStdio     *rawMCPStdioBlock      `yaml:"mcp-stdio"`
+}
+
+type rawContextConfig struct {
+	Channel *rawChannelContextConfig `yaml:"channel"`
+}
+
+type rawChannelContextConfig struct {
+	Since              string `yaml:"since"`
+	Limit              int    `yaml:"limit"`
+	MaxCharsHyphen     int    `yaml:"max-chars"`
+	MaxCharsUnderscore int    `yaml:"max_chars"`
+	Buffer             int    `yaml:"buffer"`
 }
 
 type rawMCPStdioBlock struct {
@@ -146,6 +161,11 @@ func Parse(r io.Reader) (*Pod, error) {
 		AlertWebhooks:         raw.XClaw.AlertWebhooks,
 		AlertMentions:         raw.XClaw.AlertMentions,
 	}
+	contextConfig, err := parseContextConfig(raw.XClaw.Context)
+	if err != nil {
+		return nil, fmt.Errorf("x-claw.context: %w", err)
+	}
+	pod.Context = contextConfig
 
 	rawServices, err := mapStringAny(root["services"])
 	if err != nil {
@@ -245,6 +265,10 @@ func Parse(r io.Reader) (*Pod, error) {
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse memory: %w", name, err)
 			}
+			contextConfig, err := parseContextConfig(svc.XClaw.Context)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: context: %w", name, err)
+			}
 			mcpStdio, err := parseMCPStdio(name, svc.XClaw.MCPStdio, svc.XClaw.Agent, cllama, count)
 			if err != nil {
 				return nil, err
@@ -286,6 +310,7 @@ func Parse(r io.Reader) (*Pod, error) {
 				Surfaces:     parsedSurfaces,
 				Skills:       skills,
 				Invoke:       invoke,
+				Context:      contextConfig,
 				ClawAPIMode:  clawAPIMode,
 				MCPStdio:     mcpStdio,
 			}
@@ -596,6 +621,65 @@ func parseMemory(raw *rawMemoryEntry) (*MemoryEntry, error) {
 		Service:   service,
 		TimeoutMS: timeoutMS,
 	}, nil
+}
+
+func parseContextConfig(raw *rawContextConfig) (*ContextConfig, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	channel, err := parseChannelContextConfig(raw.Channel)
+	if err != nil {
+		return nil, fmt.Errorf("channel: %w", err)
+	}
+	if channel == nil {
+		return &ContextConfig{}, nil
+	}
+	return &ContextConfig{Channel: channel}, nil
+}
+
+func parseChannelContextConfig(raw *rawChannelContextConfig) (*ChannelContextConfig, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	since := strings.TrimSpace(raw.Since)
+	if since != "" {
+		d, err := time.ParseDuration(since)
+		if err != nil || d < 0 {
+			return nil, fmt.Errorf("since must be a non-negative duration")
+		}
+	}
+	if raw.Limit < 0 {
+		return nil, fmt.Errorf("limit must be >= 0")
+	}
+	if raw.Buffer < 0 {
+		return nil, fmt.Errorf("buffer must be >= 0")
+	}
+	maxChars, err := selectChannelContextMaxChars(raw.MaxCharsHyphen, raw.MaxCharsUnderscore)
+	if err != nil {
+		return nil, err
+	}
+	if maxChars < 0 {
+		return nil, fmt.Errorf("max-chars must be >= 0")
+	}
+
+	return &ChannelContextConfig{
+		Since:    since,
+		Limit:    raw.Limit,
+		MaxChars: maxChars,
+		Buffer:   raw.Buffer,
+	}, nil
+}
+
+func selectChannelContextMaxChars(hyphen, underscore int) (int, error) {
+	if hyphen != 0 && underscore != 0 && hyphen != underscore {
+		return 0, fmt.Errorf("max-chars and max_chars cannot both be set to different values")
+	}
+	if hyphen != 0 {
+		return hyphen, nil
+	}
+	return underscore, nil
 }
 
 func parseMCPStdio(serviceName string, raw *rawMCPStdioBlock, agent string, cllama []string, count int) (*MCPStdioBlock, error) {

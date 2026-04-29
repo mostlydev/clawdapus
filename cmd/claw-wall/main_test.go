@@ -28,7 +28,7 @@ func TestParseTokenPairsDeduplicates(t *testing.T) {
 	}
 }
 
-func TestConversationStoreConsumeAdvancesCursorWithoutSkipping(t *testing.T) {
+func TestConversationStoreConsumeDeltaAdvancesCursorWithoutSkipping(t *testing.T) {
 	store := newConversationStore(50)
 	store.merge("chan-1", []wallMessage{
 		{ID: "100", Author: "alice", Content: "first", Timestamp: time.Unix(100, 0)},
@@ -54,7 +54,86 @@ func TestConversationStoreConsumeAdvancesCursorWithoutSkipping(t *testing.T) {
 	}
 }
 
-func TestChannelContextHandlerReturnsBackgroundContextOnQuietTurn(t *testing.T) {
+func TestConversationStoreTailReturnsLatestIdempotent(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "first", Timestamp: time.Unix(100, 0)},
+		{ID: "101", Author: "bob", Content: "second", Timestamp: time.Unix(101, 0)},
+		{ID: "102", Author: "carol", Content: "third", Timestamp: time.Unix(102, 0)},
+	})
+
+	req := tailRequest{ChannelIDs: []string{"chan-1"}, Limit: 2, Now: time.Unix(200, 0)}
+	first := store.tail(req)
+	second := store.tail(req)
+	for label, got := range map[string]tailResult{"first": first, "second": second} {
+		if len(got.Messages) != 2 || got.Messages[0].ID != "101" || got.Messages[1].ID != "102" {
+			t.Fatalf("%s tail = %+v", label, got.Messages)
+		}
+		if got.Available != 3 || got.Omitted != 1 || got.CapReason != "limit" {
+			t.Fatalf("%s metadata = %+v", label, got)
+		}
+	}
+}
+
+func TestConversationStoreTailFiltersBySinceWindow(t *testing.T) {
+	store := newConversationStore(50)
+	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "old", Timestamp: now.Add(-48 * time.Hour)},
+		{ID: "101", Author: "bob", Content: "recent", Timestamp: now.Add(-2 * time.Hour)},
+	})
+
+	got := store.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Since: 24 * time.Hour, Limit: 10, Now: now})
+	if len(got.Messages) != 1 || got.Messages[0].ID != "101" {
+		t.Fatalf("expected only recent message, got %+v", got.Messages)
+	}
+	if got.Available != 1 || !got.WindowStart.Equal(now.Add(-24*time.Hour)) {
+		t.Fatalf("unexpected tail metadata: %+v", got)
+	}
+}
+
+func TestConversationStoreTailRespectsMaxCharsWithoutDroppingNewest(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "older", Timestamp: time.Unix(100, 0)},
+		{ID: "101", Author: "bob", Content: strings.Repeat("x", 200), Timestamp: time.Unix(101, 0)},
+		{ID: "102", Author: "carol", Content: "newest", Timestamp: time.Unix(102, 0)},
+	})
+
+	got := store.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Limit: 10, MaxChars: 80, Now: time.Unix(200, 0)})
+	if len(got.Messages) != 1 || got.Messages[0].ID != "102" {
+		t.Fatalf("expected newest message to survive max_chars cap, got %+v", got.Messages)
+	}
+	if got.Omitted != 2 || got.CapReason != "max_chars" {
+		t.Fatalf("unexpected max_chars metadata: %+v", got)
+	}
+
+	giantNewest := newConversationStore(50)
+	giantNewest.merge("chan-1", []wallMessage{
+		{ID: "200", Author: "alice", Content: "older", Timestamp: time.Unix(200, 0)},
+		{ID: "201", Author: "bob", Content: strings.Repeat("y", 200), Timestamp: time.Unix(201, 0)},
+	})
+	got = giantNewest.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Limit: 10, MaxChars: 80, Now: time.Unix(300, 0)})
+	if len(got.Messages) != 1 || got.Messages[0].ID != "201" {
+		t.Fatalf("expected giant newest message to be included, got %+v", got.Messages)
+	}
+}
+
+func TestConversationStoreTailDoesNotMutateDeltaCursor(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "first", Timestamp: time.Unix(100, 0)},
+		{ID: "101", Author: "bob", Content: "second", Timestamp: time.Unix(101, 0)},
+	})
+
+	_ = store.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Limit: 1, Now: time.Unix(200, 0)})
+	firstDelta := store.consume("trader-0", []string{"chan-1"}, 1)
+	if len(firstDelta) != 1 || firstDelta[0].ID != "100" {
+		t.Fatalf("tail moved delta cursor; first delta = %+v", firstDelta)
+	}
+}
+
+func TestChannelContextHandlerTailModeIsDefault(t *testing.T) {
 	store := newConversationStore(50)
 	store.merge("chan-1", []wallMessage{
 		{
@@ -81,6 +160,9 @@ func TestChannelContextHandlerReturnsBackgroundContextOnQuietTurn(t *testing.T) 
 	if firstResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", firstResp.StatusCode)
 	}
+	if !strings.Contains(string(firstBody), "[channel-context] mode=tail") {
+		t.Fatalf("expected tail coverage header, got %q", string(firstBody))
+	}
 	if !strings.Contains(string(firstBody), "latest signals") {
 		t.Fatalf("expected channel context body, got %q", string(firstBody))
 	}
@@ -97,9 +179,49 @@ func TestChannelContextHandlerReturnsBackgroundContextOnQuietTurn(t *testing.T) 
 	if secondResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", secondResp.StatusCode)
 	}
-	// Quiet turn: no new delta, but background context returns the last message again.
-	if !strings.Contains(string(secondBody), "latest signals") {
-		t.Fatalf("expected background context on quiet turn, got %q", string(secondBody))
+	if string(firstBody) != string(secondBody) {
+		t.Fatalf("expected stable tail response across repeated fetches\nfirst: %q\nsecond: %q", string(firstBody), string(secondBody))
+	}
+}
+
+func TestChannelContextHandlerDeltaModePreservesCursorPaging(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "first", Timestamp: time.Unix(100, 0)},
+		{ID: "101", Author: "bob", Content: "second", Timestamp: time.Unix(101, 0)},
+		{ID: "102", Author: "carol", Content: "third", Timestamp: time.Unix(102, 0)},
+	})
+
+	server := httptest.NewServer(newHandler(store))
+	defer server.Close()
+
+	firstResp, err := http.Get(server.URL + "/channel-context?mode=delta&consumer=trader-0&channels=chan-1&limit=2")
+	if err != nil {
+		t.Fatalf("first GET: %v", err)
+	}
+	defer firstResp.Body.Close()
+	firstBody, err := io.ReadAll(firstResp.Body)
+	if err != nil {
+		t.Fatalf("read first response: %v", err)
+	}
+	if strings.Contains(string(firstBody), "[channel-context]") {
+		t.Fatalf("delta response should not include tail header: %q", string(firstBody))
+	}
+	if !strings.Contains(string(firstBody), "first") || !strings.Contains(string(firstBody), "second") || strings.Contains(string(firstBody), "third") {
+		t.Fatalf("unexpected first delta body: %q", string(firstBody))
+	}
+
+	secondResp, err := http.Get(server.URL + "/channel-context?mode=delta&consumer=trader-0&channels=chan-1&limit=2")
+	if err != nil {
+		t.Fatalf("second GET: %v", err)
+	}
+	defer secondResp.Body.Close()
+	secondBody, err := io.ReadAll(secondResp.Body)
+	if err != nil {
+		t.Fatalf("read second response: %v", err)
+	}
+	if !strings.Contains(string(secondBody), "third") || strings.Contains(string(secondBody), "first") {
+		t.Fatalf("unexpected second delta body: %q", string(secondBody))
 	}
 }
 
@@ -116,6 +238,9 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	if cfg.PollInterval != 30*time.Second {
 		t.Fatalf("expected 30s poll interval, got %s", cfg.PollInterval)
 	}
+	if cfg.BufferLimit != 500 {
+		t.Fatalf("expected default buffer limit 500, got %d", cfg.BufferLimit)
+	}
 }
 
 func TestLoadConfigUsesPollIntervalOverride(t *testing.T) {
@@ -130,6 +255,13 @@ func TestLoadConfigUsesPollIntervalOverride(t *testing.T) {
 	}
 	if cfg.PollInterval != 42*time.Second {
 		t.Fatalf("expected 42s poll interval, got %s", cfg.PollInterval)
+	}
+}
+
+func TestDiscordPollerClampsFetchLimitToDiscordMaximum(t *testing.T) {
+	poller := newDiscordPoller(nil, newConversationStore(500), []tokenPair{{ChannelID: "chan-1", Token: "token-a"}}, 500)
+	if poller.fetchLimit != maxDiscordFetchLimit {
+		t.Fatalf("expected fetch limit %d, got %d", maxDiscordFetchLimit, poller.fetchLimit)
 	}
 }
 

@@ -89,7 +89,7 @@ func run(args []string) error {
 }
 
 func loadConfig() (config, error) {
-	bufferLimit, err := envInt("CLAW_WALL_LIMIT", 50)
+	bufferLimit, err := envInt("CLAW_WALL_LIMIT", 500)
 	if err != nil {
 		return config{}, err
 	}

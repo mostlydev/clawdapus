@@ -3020,7 +3020,7 @@ func TestBuildFeedManifestUsesOrdinalClawID(t *testing.T) {
 						{
 							Name:   conversationWallFeedName,
 							Source: conversationWallServiceName,
-							Path:   "/channel-context?consumer={claw_id}&channels=chan-a,chan-b&limit=20",
+							Path:   "/channel-context?consumer={claw_id}&channels=chan-a,chan-b&mode=tail&since=24h&limit=40&max_chars=8192",
 							TTL:    conversationWallFeedTTL,
 						},
 					},
@@ -3036,10 +3036,10 @@ func TestBuildFeedManifestUsesOrdinalClawID(t *testing.T) {
 	if len(feeds) != 1 {
 		t.Fatalf("expected one feed, got %d", len(feeds))
 	}
-	if feeds[0].Path != "/channel-context?consumer=trader-1&channels=chan-a,chan-b&limit=20" {
+	if feeds[0].Path != "/channel-context?consumer=trader-1&channels=chan-a,chan-b&mode=tail&since=24h&limit=40&max_chars=8192" {
 		t.Fatalf("expected ordinal claw_id substitution, got %q", feeds[0].Path)
 	}
-	if feeds[0].URL != "http://claw-wall:8080/channel-context?consumer=trader-1&channels=chan-a,chan-b&limit=20" {
+	if feeds[0].URL != "http://claw-wall:8080/channel-context?consumer=trader-1&channels=chan-a,chan-b&mode=tail&since=24h&limit=40&max_chars=8192" {
 		t.Fatalf("expected ordinal wall URL, got %q", feeds[0].URL)
 	}
 }
@@ -3537,6 +3537,9 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	if wall.Environment["CLAW_WALL_POLL_INTERVAL"] != conversationWallPollInterval {
 		t.Fatalf("unexpected CLAW_WALL_POLL_INTERVAL: %q", wall.Environment["CLAW_WALL_POLL_INTERVAL"])
 	}
+	if wall.Environment["CLAW_WALL_LIMIT"] != "500" {
+		t.Fatalf("unexpected CLAW_WALL_LIMIT: %q", wall.Environment["CLAW_WALL_LIMIT"])
+	}
 
 	traderFeeds := p.Services["trader"].Claw.Feeds
 	if len(traderFeeds) != 1 {
@@ -3545,11 +3548,67 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	if traderFeeds[0].Source != conversationWallServiceName {
 		t.Fatalf("expected claw-wall feed source, got %+v", traderFeeds[0])
 	}
-	if traderFeeds[0].Path != "/channel-context?consumer={claw_id}&channels=chan-1,chan-2&limit=20" {
+	if traderFeeds[0].Path != "/channel-context?consumer={claw_id}&channels=chan-1,chan-2&mode=tail&since=24h&limit=40&max_chars=8192" {
 		t.Fatalf("unexpected wall feed path: %q", traderFeeds[0].Path)
 	}
 	if len(p.Services["observer"].Claw.Feeds) != 0 {
 		t.Fatalf("expected no wall feed for non-cllama service, got %+v", p.Services["observer"].Claw.Feeds)
+	}
+}
+
+func TestInjectConversationWallHonorsChannelContextConfig(t *testing.T) {
+	p := &pod.Pod{
+		Name: "desk",
+		Context: &pod.ContextConfig{
+			Channel: &pod.ChannelContextConfig{
+				Since:    "6h",
+				Limit:    25,
+				MaxChars: 4096,
+				Buffer:   300,
+			},
+		},
+		Services: map[string]*pod.Service{
+			"trader": testConversationWallService("${TRADER_DISCORD_BOT_TOKEN}", "chan-1"),
+			"scout":  testConversationWallService("${SCOUT_DISCORD_BOT_TOKEN}", "chan-1"),
+		},
+	}
+	p.Services["scout"].Claw.Context = &pod.ContextConfig{
+		Channel: &pod.ChannelContextConfig{
+			Since:    "30m",
+			Limit:    8,
+			MaxChars: 1024,
+			Buffer:   700,
+		},
+	}
+
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"trader": {ServiceName: "trader", Cllama: []string{"passthrough"}},
+		"scout":  {ServiceName: "scout", Cllama: []string{"passthrough"}},
+	}
+
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		t.Fatalf("injectConversationWall: %v", err)
+	}
+
+	traderFeeds := p.Services["trader"].Claw.Feeds
+	if len(traderFeeds) != 1 {
+		t.Fatalf("expected trader feed, got %+v", traderFeeds)
+	}
+	if traderFeeds[0].Path != "/channel-context?consumer={claw_id}&channels=chan-1&mode=tail&since=6h&limit=25&max_chars=4096" {
+		t.Fatalf("unexpected trader feed path: %q", traderFeeds[0].Path)
+	}
+
+	scoutFeeds := p.Services["scout"].Claw.Feeds
+	if len(scoutFeeds) != 1 {
+		t.Fatalf("expected scout feed, got %+v", scoutFeeds)
+	}
+	if scoutFeeds[0].Path != "/channel-context?consumer={claw_id}&channels=chan-1&mode=tail&since=30m&limit=8&max_chars=1024" {
+		t.Fatalf("unexpected scout feed path: %q", scoutFeeds[0].Path)
+	}
+
+	wall := p.Services[conversationWallServiceName]
+	if wall.Environment["CLAW_WALL_LIMIT"] != "700" {
+		t.Fatalf("expected wall buffer to use max service buffer, got %q", wall.Environment["CLAW_WALL_LIMIT"])
 	}
 }
 
