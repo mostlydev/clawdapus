@@ -14,6 +14,8 @@ import (
 const (
 	picoclawHomeDir      = "/home/picoclaw/.picoclaw"
 	picoclawWorkspaceDir = "/home/picoclaw/.picoclaw/workspace"
+	picoclawGatewayHost  = "localhost"
+	picoclawGatewayPort  = 18790
 )
 
 var supportedPlatforms = []string{
@@ -60,6 +62,12 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
 	if err := shared.SetPath(config, "agents.defaults.workspace", picoclawWorkspaceDir); err != nil {
+		return nil, fmt.Errorf("config generation: %w", err)
+	}
+	if err := shared.SetPath(config, "gateway.host", picoclawGatewayHost); err != nil {
+		return nil, fmt.Errorf("config generation: %w", err)
+	}
+	if err := shared.SetPath(config, "gateway.port", picoclawGatewayPort); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
 

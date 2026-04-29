@@ -132,6 +132,42 @@ func TestGenerateConfigCllamaRewrite(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigEmitsGatewayBlock(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "anthropic/claude-sonnet-4"},
+	}
+
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if v, _ := getPath(data, "gateway.host"); v != picoclawGatewayHost {
+		t.Fatalf("unexpected gateway.host: %v", v)
+	}
+	if v, _ := getPath(data, "gateway.port"); v != float64(picoclawGatewayPort) {
+		t.Fatalf("unexpected gateway.port: %v", v)
+	}
+}
+
+func TestGenerateConfigGatewayOverridableViaConfigure(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "anthropic/claude-sonnet-4"},
+		Configures: []string{
+			"picoclaw config set gateway.port 19000",
+		},
+	}
+
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if v, _ := getPath(data, "gateway.port"); v != float64(19000) {
+		t.Fatalf("expected gateway.port override from CONFIGURE, got %v", v)
+	}
+}
+
 func TestGenerateConfigHandleMappings(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Models: map[string]string{"primary": "anthropic/claude-sonnet-4"},
