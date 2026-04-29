@@ -29,13 +29,18 @@ outline: deep
 
 ## Unreleased
 
-## v0.13.3 <Badge type="tip" text="Latest" /> {#v0-13-3}
+## v0.13.4 <Badge type="tip" text="Latest" /> {#v0-13-4}
+
+*2026-04-28*
+
+- Fix: managed tool mediation now skips repeated identical managed tool calls within a single turn and feeds the model a structured `duplicate_tool_call` result instead of re-executing the sidecar ([#191](https://github.com/mostlydev/clawdapus/issues/191)). Session history records duplicate metadata in `tool_trace`, cllama logs a duplicate intervention with the tool name, and the stdio MCP wrapper now distinguishes late responses after cancellation or timeout from truly unknown JSON-RPC IDs.
+- **Pinned cllama bumped to [v0.5.1](https://github.com/mostlydev/cllama/releases/tag/v0.5.1)** — picks up the duplicate managed tool call skip path above. Without this bump, a `claw` binary at v0.13.3 would still pull `cllama:v0.5.0` and miss the fix.
+
+## v0.13.3 {#v0-13-3}
 
 *2026-04-28*
 
 - Fix: Hermes Discord agents in `HERMES_TOOL_ONLY_MODE=1` no longer silently drop plain final answers after native tool use ([#190](https://github.com/mostlydev/clawdapus/issues/190)). The Hermes runtime patch now applies `tool_choice=required` per user turn, treats `send_message` as the preferred visible delivery path, suppresses duplicate final text only after a successful `send_message`, and otherwise lets final text fall back to the triggering channel. The Hermes driver also defaults `HERMES_TOOL_PROGRESS_MODE=off` for Discord handles while preserving explicit operator overrides.
-- Fix: managed tool mediation now skips repeated identical managed tool calls within a single turn and feeds the model a structured `duplicate_tool_call` result instead of re-executing the sidecar ([#191](https://github.com/mostlydev/clawdapus/issues/191)). Session history records duplicate metadata in `tool_trace`, cllama logs a duplicate intervention with the tool name, and the stdio MCP wrapper now distinguishes late responses after cancellation or timeout from truly unknown JSON-RPC IDs.
-- **Pinned cllama bumped to [v0.5.1](https://github.com/mostlydev/cllama/releases/tag/v0.5.1)** — picks up the duplicate managed tool call skip path above.
 - Release: Hermes base image advances to `ghcr.io/mostlydev/hermes-base:v2026.3.17-claw.3`.
 
 ## v0.13.2 {#v0-13-2}
