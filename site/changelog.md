@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.14.1 <Badge type="tip" text="Latest" /> {#v0-14-1}
+## v0.14.2 <Badge type="tip" text="Latest" /> {#v0-14-2}
+
+*2026-04-29*
+
+- Fix: `picoclaw` driver now writes `gateway.host=localhost` and `gateway.port=18790` into the generated `config.json` ([#137](https://github.com/mostlydev/clawdapus/issues/137)). Upstream picoclaw `preCheckConfig` rejects `Gateway.Port <= 0`, and the binary's `DefaultConfig()` only fills defaults when the entire config file is missing or empty — a partially-populated file with no `gateway` block let the field fall to the Go zero value and crashed the gateway with `invalid gateway port: 0`. Operator overrides via `CONFIGURE picoclaw config set gateway.port <n>` still win because CONFIGURE is applied last. The rollcall fixture's `Dockerfile.picoclaw-base` now pins the upstream clone to `--branch v0.2.7` so the spike test stops drifting on upstream HEAD.
+
+## v0.14.1 {#v0-14-1}
 
 *2026-04-29*
 
