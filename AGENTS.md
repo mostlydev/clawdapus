@@ -45,6 +45,26 @@ Resolves #137
 
 Branch names like `issue-137-*` are a human convention — GitHub does **not** infer the linkage from them. If the PR body omits a closing keyword, the issue stays Open and the card stays in Ready after merge, requiring manual cleanup. Always include `Closes #<n>` (one per covered issue) when opening a PR.
 
+## Release Discipline
+
+Releases are tag-driven and cut by the maintainer using the `clawdapus-release` skill, not by feature PRs. Agents working on a fix or feature must keep release artifacts out of their PR. Touching them looks harmless but breaks the release pipeline because they ride a coordinated lockstep across image builds, the `cllama` submodule, GitHub releases, and the published site.
+
+**Do not in a feature PR:**
+
+- **Bump pins in `internal/infraimages/release_manifest.go`** (`DefaultClawInfraTag`, `DefaultCllamaTag`, `DefaultHermesBaseTag`). These constants must move together with a real release. If you change them in a feature PR, the next clawdapus release verifier (`scripts/check-release-infra-tags`) will fail because the corresponding `:vX.Y.Z` images do not exist yet, or — worse — the release will tag and ship with pins pointing at images that contain code different from the source tree at the tag commit.
+- **Add a new version section in `site/changelog.md` with the `<Badge type="tip" text="Latest" />`.** That badge moves only when a real GitHub release exists for that tag. Site deploy fires on every push to master, so adding the badge in a feature PR makes `clawdapus.dev/changelog` claim a release exists when it doesn't. Use the `## Unreleased` section instead.
+- **Bump the nav dropdown version in `site/.vitepress/config.mts`.** Same reason: site deploys immediately on master push, so the dropdown becomes a public lie.
+- **Move the `cllama` submodule pointer past the most recent cllama tag.** If your fix needs new cllama code, cut a cllama release first (`v0.X.Y` tag in the submodule + GitHub release + multi-arch image push to ghcr.io), then bump the submodule pointer to the released commit. A submodule pointer past the latest cllama tag means the next clawdapus release will pin `cllama:vX.Y.Z` (a real image) but the source tree references commits that did not ship in that image — i.e. the runtime fix you wrote is invisible to users.
+- **Build or push `hermes-base` or any infra image without coordinating** with the maintainer. There is no auto-publish workflow for `hermes-base`; bumping `DefaultHermesBaseTag` requires a manual `docker buildx build --push` from `dockerfiles/hermes-base/`. If the constant points at an unpublished tag, the release verifier fails.
+- **Anonymize or rewrite identifying details in historical changelog entries** (e.g. "Tiverton" → "downstream"). Old entries are part of the project's incident record. Edit only the entry you are adding; leave history alone unless the maintainer explicitly asks for a rewrite.
+
+**Be aware of what merging to master actually does:**
+
+- The image workflows (`claw-api-image.yml`, `clawdash-image.yml`, `claw-wall-image.yml`, `claw-mcp-stdio-image.yml`) trigger on every master push and publish `:latest` and `:<sha>` image tags. They do **not** publish `:vX.Y.Z` — that only happens when the maintainer pushes a `v*` git tag, which is the release boundary.
+- `deploy-site.yml` triggers on every master push touching `site/**`. Whatever the changelog and nav say at the time of merge is what `clawdapus.dev` will show. There is no "release-only" gate on the site.
+
+**If a release-related artifact genuinely needs to change in a fix PR**, leave a note in the PR body explaining what the maintainer must do to ship the fix (e.g. "Submodule pointer moves past v0.5.0; cllama v0.5.1 release required before next clawdapus release"). Do not silently bake the requirement into the diff — a future agent reading the PR cannot tell that an out-of-band step is missing.
+
 ## Compilation Principles
 
 `claw up` is a compiler. These principles govern the pipeline and must not be violated by new features:
