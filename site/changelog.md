@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.14.2 <Badge type="tip" text="Latest" /> {#v0-14-2}
+## v0.14.3 <Badge type="tip" text="Latest" /> {#v0-14-3}
+
+*2026-04-29*
+
+- **Vercel AI Gateway as a cllama provider** — `vercel` is now a first-class entry in cllama's provider registry ([#210](https://github.com/mostlydev/clawdapus/issues/210)). Set `AI_GATEWAY_API_KEY` in `x-claw.cllama-env` (with optional `_1`/`_2` backup keys and `AI_GATEWAY_BASE_URL` override) and reference models as `vercel/<provider>/<model>`, e.g. `vercel/anthropic/claude-sonnet-4.6`. The OpenAI-compatible `/v1/chat/completions` path forwards `<provider>/<model>` verbatim — exactly what Vercel expects. Phase 1 covers OpenAI-format only; the Anthropic-compatible `/v1/messages` path via Vercel is a separate follow-up. cllama bumped to [v0.6.2](https://github.com/mostlydev/cllama/releases/tag/v0.6.2).
+
+## v0.14.2 {#v0-14-2}
 
 *2026-04-29*
 
