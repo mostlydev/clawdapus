@@ -626,7 +626,7 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 | Phase 4.9 — Peer handles, mention safety, healthcheck passthrough | Done |
 | Phase 4.10 — Capability evolution wave: compiled tools + memory plane | Done (ADRs 020–021) |
 | Phase 4.6 — Unified worker architecture (config, provision, diagnostic) | Design |
-| Phase 5 — Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012–015) |
+| Phase 5 -- Fleet Governance: Master Claw, telemetry, context feeds | Done (ADRs 012-015) |
 | Phase 6 — Recipe promotion + worker mode | Planned |
 
 ---

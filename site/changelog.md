@@ -24,12 +24,20 @@ outline: deep
 | Phase 4.9 -- Peer handles, mention safety, healthcheck passthrough | Done |
 | Phase 4.10 -- Capability evolution wave: compiled tools + memory plane | Done (ADRs 020-021) |
 | Phase 4.6 -- Unified worker architecture (config, provision, diagnostic) | Design |
-| Phase 5 -- Fleet governance: Master Claw, telemetry, context feeds | Design (ADRs 012-015) |
+| Phase 5 -- Fleet Governance: Master Claw, telemetry, context feeds | Done (ADRs 012-015) |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
 
 ## Unreleased
 
-## v0.13.5 <Badge type="tip" text="Latest" /> {#v0-13-5}
+<!-- Nothing yet -->
+
+## v0.13.6 <Badge type="tip" text="Latest" /> {#v0-13-6}
+
+*2026-04-29*
+
+- Fix: driver materialization now resolves Compose-style `${VAR}` env references against the same context Compose itself uses — pod `.env` values plus process env overrides — instead of `os.Getenv` only ([#197](https://github.com/mostlydev/clawdapus/issues/197)). The previous behavior silently collapsed compound references like `${OPERATOR_DISCORD_ID},${WESTON_DISCORD_ID}` to `,` in generated runner config (e.g. Hermes `/root/.hermes/.env`) when operators relied on the pod `.env` file rather than sourcing it into the shell before `claw up`. Hermes, Nanobot, NullClaw, MicroClaw, and PicoClaw paths that bake handle tokens, allowlists, and direct-provider API keys are all covered. Unresolvable references now fail fast with the missing variable name instead of writing blanks.
+
+## v0.13.5 {#v0-13-5}
 
 *2026-04-28*
 
