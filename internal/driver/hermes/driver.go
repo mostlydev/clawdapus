@@ -38,18 +38,18 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 		switch platform := strings.ToLower(strings.TrimSpace(rawPlatform)); platform {
 		case "discord":
 			supported++
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "DISCORD_BOT_TOKEN") == "" {
+			if !hasServiceEnvValue(rc.Environment, "DISCORD_BOT_TOKEN") {
 				return fmt.Errorf("hermes driver: HANDLE discord requires DISCORD_BOT_TOKEN in service environment")
 			}
 		case "telegram":
 			supported++
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "TELEGRAM_BOT_TOKEN") == "" {
+			if !hasServiceEnvValue(rc.Environment, "TELEGRAM_BOT_TOKEN") {
 				return fmt.Errorf("hermes driver: HANDLE telegram requires TELEGRAM_BOT_TOKEN in service environment")
 			}
 		case "slack":
 			supported++
-			if shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_BOT_TOKEN") == "" ||
-				shared.ResolveEnvTokenFromMap(rc.Environment, "SLACK_APP_TOKEN") == "" {
+			if !hasServiceEnvValue(rc.Environment, "SLACK_BOT_TOKEN") ||
+				!hasServiceEnvValue(rc.Environment, "SLACK_APP_TOKEN") {
 				return fmt.Errorf("hermes driver: HANDLE slack requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN in service environment")
 			}
 		default:
@@ -80,6 +80,14 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 		return fmt.Errorf("hermes driver: invalid MODEL primary %q (expected provider/model)", modelRef)
 	}
 	return nil
+}
+
+func hasServiceEnvValue(env map[string]string, key string) bool {
+	raw, ok := env[key]
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(raw) != ""
 }
 
 func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpts) (*driver.MaterializeResult, error) {
