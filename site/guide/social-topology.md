@@ -145,6 +145,20 @@ x-claw:
 
 This declares that the agent's Discord channel surface only accepts messages from known handles and the `trading-api` service. The `allow_from_handles: true` flag expands into each guild's `users[]` allowlist using the handle IDs of all peer agents in the pod. The `allow_from_services` list derives Discord IDs from the named services' bot tokens.
 
+## Channel Context Feed (`claw-wall`)
+
+When a cllama-enabled service has Discord channels in its handle config, `claw up` automatically injects the `claw-wall` sidecar and a `channel-context` feed for that service. The feed delivers the recent channel transcript so the agent sees the conversation immediately preceding any mention — without it, an invocation can land in the prompt while the messages that triggered it are missing from the agent's context.
+
+The wall polls Discord every 30s, keeps a per-channel ring buffer (default 500 messages), and serves the latest tail on each fetch. By default the tail covers the last 24 hours, capped at 40 messages or 8KB whichever fires first, sorted oldest-to-newest like a chat log. A coverage header line declares what was actually returned so silent gaps are visible:
+
+```
+[channel-context] mode=tail since=24h channels=1464509330... messages=23 available=23 omitted=0 range=2026-04-29T03:14Z..2026-04-29T05:42Z buffer_range=2026-04-28T17:02Z..2026-04-29T05:42Z
+```
+
+Tune the window per pod or service with `x-claw.context.channel: { since, limit, max-chars, buffer }` (see [Pod YAML · Channel Context Tuning](/guide/pod-yaml#channel-context-tuning)). Each consuming agent only sees channels it has surface authorization for.
+
+The legacy cursor/mailbox semantics from earlier releases remain callable as `mode=delta`, but generated feeds use `mode=tail`. Channel-derived auto-injection is suppressed for sidecars (`mcp-stdio`) and any service without a cllama proxy.
+
 ## OpenClaw Discord Routing Compatibility
 
 The OpenClaw driver maps supported `channel://discord` routing controls directly into generated config and rejects unsupported ones early at compile time, rather than letting the container reject them at boot.

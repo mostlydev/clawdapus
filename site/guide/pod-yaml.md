@@ -53,6 +53,7 @@ The top-level `x-claw` block declares shared configuration that all services inh
 | `surfaces-defaults` | Surfaces available to all services (volumes, services, channels) |
 | `feeds-defaults` | Context feeds subscribed by all services |
 | `handles-defaults` | Shared chat topology (guild IDs, channel IDs) inherited by all services |
+| `context` | Tunes auto-injected runtime context feeds (currently the `channel-context` tail served by `claw-wall`) |
 
 ::: warning Provider Keys Are Pod-Level
 Provider API keys for cllama-managed services belong in `x-claw.cllama-defaults.env`, not in individual service `environment:` blocks. Use YAML anchors if you need keys at the service level too.
@@ -207,6 +208,25 @@ services:
 ```
 
 `command` is required and `args` is a JSON-safe list; no shell interpolation is used. `describe-file` is a host path relative to the pod file and should contain a v2 descriptor with `mcp: { "transport": "streamable_http", "path": "/mcp" }` plus the baked `tools[]` snapshot.
+
+## Channel Context Tuning
+
+When any cllama-enabled service has Discord channels in its handles, `claw up` auto-injects the `claw-wall` sidecar and a `channel-context` feed for each consuming agent. The feed serves the recent room transcript so a mentioned agent sees the conversation that prompted it (see [Social Topology · Channel Context Feed](/guide/social-topology#channel-context-feed-claw-wall)). Tune the generated tail with `x-claw.context.channel`:
+
+```yaml
+x-claw:
+  pod: trading-desk
+  context:
+    channel:
+      since: 24h         # window covered by the tail (default 24h)
+      limit: 40          # max messages returned (default 40)
+      max-chars: 8192    # byte cap on rendered body (default 8192)
+      buffer: 500        # ring-buffer size of the wall sidecar (default 500)
+```
+
+Service-level `x-claw.context.channel` overrides pod-level values for that service. `buffer` is shared across the pod, so when services disagree the largest value wins. `since` accepts any Go duration (`30m`, `2h15m`, `24h`). Set `max_chars` if you prefer the underscore alias; mixing the two with conflicting values is a parse error.
+
+The wall serves `mode=tail` (non-consuming, latest-N walk) by default. The legacy cursor/mailbox path remains callable as `mode=delta` for any consumer that genuinely wants oldest-unread paging — generated feeds do not use it.
 
 ## Generated Output
 
