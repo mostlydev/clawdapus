@@ -157,7 +157,21 @@ The wall polls Discord every 30s, keeps a per-channel ring buffer (default 500 m
 
 Tune the window per pod or service with `x-claw.context.channel: { since, limit, max-chars, buffer }` (see [Pod YAML · Channel Context Tuning](/guide/pod-yaml#channel-context-tuning)). Each consuming agent only sees channels it has surface authorization for.
 
-The legacy cursor/mailbox semantics from earlier releases remain callable as `mode=delta`, but generated feeds use `mode=tail`. Channel-derived auto-injection is suppressed for sidecars (`mcp-stdio`) and any service without a cllama proxy.
+### Cursored Append-Only Deltas
+
+Starting in v0.14.0, cllama drives the feed as a delta-since-watermark instead of re-pasting the full recent tail on every turn. The proxy keeps a per-agent vector cursor (one entry per visible channel) and rewrites the `channel-context` feed URL to add an `after=channel_id:message_id,...` query string before sending it to `claw-wall`:
+
+```
+GET /channel-context?consumer={claw_id}&channels=A,B&mode=tail&since=24h&limit=40&max_chars=8192&after=A:1464900000,B:1464900001
+```
+
+Channels named in `after=` but missing from `channels=` are a 400. Channels in `channels=` but absent from `after=` get the bootstrap tail (the v0.13.7 behavior). Both cursored and bootstrap channels can compose in a single request -- `since=` bounds bootstrap reach, `after=` bounds cursored reach.
+
+The cursor advances only after a successful 2xx response is recorded by the proxy's session-history writer. Streaming truncation, 5xx upstream errors, and 4xx rejections all leave the cursor untouched, so a failed turn replays the same delta cleanly on the next mention. When `claw-wall` caps a delta response (dual-cap on `limit` or `max_chars`), cllama appends a `coverage_partial=true omitted_after_cursor=N newest_returned=...` annotation so the partial coverage stays visible in the prompt rather than silently swallowing a gap.
+
+Cursors persist on disk under `$CLAW_CONTEXT_LEDGER_DIR/<agent-id>/cursor.json` (defaults to `$CLAW_SESSION_HISTORY_DIR/context-ledger`). When session history is disabled, cursors live in-memory only and every cold start re-bootstraps with a 24h tail. See [cllama · Channel Context Cursors](/guide/cllama#channel-context-cursors) for the proxy-side model.
+
+The legacy cursor/mailbox semantics from earlier releases remain callable as `mode=delta`, but generated feeds use `mode=tail` with `after=` cursors. Channel-derived auto-injection is suppressed for sidecars (`mcp-stdio`) and any service without a cllama proxy.
 
 ## OpenClaw Discord Routing Compatibility
 

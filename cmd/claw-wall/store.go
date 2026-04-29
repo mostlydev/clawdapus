@@ -40,6 +40,7 @@ type conversationStore struct {
 type tailRequest struct {
 	ChannelIDs []string
 	Since      time.Duration
+	After      map[string]string
 	Limit      int
 	MaxChars   int
 	Now        time.Time
@@ -54,6 +55,8 @@ type tailResult struct {
 	WindowStart  time.Time
 	BufferOldest time.Time
 	BufferNewest time.Time
+	Cursor       map[string]string
+	After        map[string]string
 }
 
 func newConversationStore(limit int) *conversationStore {
@@ -214,7 +217,11 @@ func (s *conversationStore) tail(req tailRequest) tailResult {
 			continue
 		}
 		for _, msg := range state.messages {
-			if req.Since > 0 && !msg.Timestamp.IsZero() && msg.Timestamp.Before(windowStart) {
+			if afterID := strings.TrimSpace(req.After[channelID]); afterID != "" {
+				if compareSnowflakes(msg.ID, afterID) <= 0 {
+					continue
+				}
+			} else if req.Since > 0 && !msg.Timestamp.IsZero() && msg.Timestamp.Before(windowStart) {
 				continue
 			}
 			candidates = append(candidates, msg)
@@ -258,6 +265,18 @@ func (s *conversationStore) tail(req tailRequest) tailResult {
 		Omitted:     len(candidates) - len(messages),
 		CapReason:   capReason,
 		WindowStart: windowStart,
+		After:       cloneStringMap(req.After),
+	}
+	for _, msg := range messages {
+		if msg.ChannelID == "" || msg.ID == "" {
+			continue
+		}
+		if result.Cursor == nil {
+			result.Cursor = make(map[string]string)
+		}
+		if compareSnowflakes(msg.ID, result.Cursor[msg.ChannelID]) > 0 {
+			result.Cursor[msg.ChannelID] = msg.ID
+		}
 	}
 	for _, channelID := range channelIDs {
 		state := s.channels[channelID]
@@ -348,9 +367,16 @@ func newHandler(store *conversationStore) http.Handler {
 			maxChars = parsed
 		}
 
+		after, err := parseAfterQuery(r.URL.Query().Get("after"), channelIDs)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
 		result := store.tail(tailRequest{
 			ChannelIDs: channelIDs,
 			Since:      since,
+			After:      after,
 			Limit:      limit,
 			MaxChars:   maxChars,
 			Now:        time.Now(),
@@ -382,6 +408,12 @@ func formatTailContext(result tailResult, since time.Duration) string {
 	if result.CapReason != "" {
 		fmt.Fprintf(&b, " cap=%s", result.CapReason)
 	}
+	if len(result.After) > 0 {
+		fmt.Fprintf(&b, " after=%s", formatCursorMap(result.After))
+	}
+	if len(result.Cursor) > 0 {
+		fmt.Fprintf(&b, " cursor=%s", formatCursorMap(result.Cursor))
+	}
 	fmt.Fprintf(&b, " range=%s buffer_range=%s",
 		formatTimeRange(messageRange(result.Messages)),
 		formatTimeRange(result.BufferOldest, result.BufferNewest))
@@ -412,11 +444,72 @@ func parseDurationQuery(rawSince, rawWindow string) (time.Duration, error) {
 	return d, nil
 }
 
+func parseAfterQuery(raw string, channelIDs []string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	allowed := make(map[string]struct{})
+	for _, channelID := range normalizeChannelIDs(channelIDs) {
+		allowed[channelID] = struct{}{}
+	}
+	out := make(map[string]string)
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		channelID, messageID, ok := strings.Cut(part, ":")
+		channelID = strings.TrimSpace(channelID)
+		messageID = strings.TrimSpace(messageID)
+		if !ok || channelID == "" || messageID == "" {
+			return nil, fmt.Errorf("after must be comma-separated channel_id:message_id pairs")
+		}
+		if _, ok := allowed[channelID]; !ok {
+			return nil, fmt.Errorf("after references channel %q not present in channels", channelID)
+		}
+		out[channelID] = messageID
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
 func formatDurationForHeader(d time.Duration) string {
 	if d <= 0 {
 		return "all"
 	}
 	return d.String()
+}
+
+func formatCursorMap(cursors map[string]string) string {
+	if len(cursors) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(cursors))
+	for channelID, messageID := range cursors {
+		if strings.TrimSpace(channelID) != "" && strings.TrimSpace(messageID) != "" {
+			keys = append(keys, channelID)
+		}
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, channelID := range keys {
+		parts = append(parts, channelID+":"+cursors[channelID])
+	}
+	return strings.Join(parts, ",")
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func messageRange(messages []wallMessage) (time.Time, time.Time) {

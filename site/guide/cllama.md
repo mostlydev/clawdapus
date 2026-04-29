@@ -98,6 +98,17 @@ Before the LLM sees the prompt, the proxy can evaluate and modify the outbound r
 - **Prompt decoration (pre-prompting)** -- The proxy may modify the outbound `messages` array to inject operator-defined rules, priorities, or warnings. This decoration happens transparently -- the agent has no visibility into what was added.
 - **Policy blocking** -- If the outbound prompt violates a loaded policy module or `enforce` rule, the proxy may short-circuit the request entirely and return an error or a mock response. The agent never reaches the provider.
 - **Forced model routing and rate limiting** -- Even if the agent requests a specific model (e.g., `gpt-4o`), the proxy may seamlessly rewrite the `model` field to use a different, operator-approved model (e.g., `claude-3-haiku`). The agent never knows its model was downgraded. Combined with rate limiting via `429 Too Many Requests` responses, this enforces strict compute budgets across the fleet.
+- **Late runtime context assembly** -- Volatile context (subscribed feeds, memory recall, the current time line, and live Discord channel deltas) is appended as a *late* runtime-context message rather than concatenated onto the first system prompt. OpenAI-compatible requests receive a later `system` message inserted immediately before the invoking user message; Anthropic requests receive a trailing `user` content block. The stable system contract and the existing first non-system message stay byte-stable across turns, which preserves prompt-cache identity on cache-supported providers and keeps OpenRouter sticky routing pinned to a stable conversation.
+
+::: tip Stable Contract, Volatile Tail
+Feed headers no longer carry the volatile `refreshed <ts>` line in model-visible text -- unchanged feed content with a TTL refresh now produces byte-identical bytes. The `STALE` tag still appears when a feed fetch failed and the rendered text is from the last good fetch.
+:::
+
+### Channel Context Cursors
+
+Live Discord channel context is fetched as a delta-since-watermark instead of a full tail every turn. The proxy keeps a per-agent vector cursor (one entry per visible channel) and rewrites the `channel-context` feed URL with `after=<channel_id>:<message_id>` watermarks before sending it to `claw-wall`. The cursor is committed only after a successful 2xx response is recorded by the session-history writer, so streaming truncation, 5xx upstream errors, and 4xx rejections all leave the cursor untouched and the same delta replays on the next mention. When `claw-wall` caps a delta response, cllama appends a `coverage_partial=true omitted_after_cursor=N newest_returned=...` annotation so partial coverage is visible rather than silently swallowed; the cursor still advances to the newest returned message. See [Social Topology · Channel Context Feed](/guide/social-topology#channel-context-feed-claw-wall) for the wire shape.
+
+The cursor ledger lives at `$CLAW_CONTEXT_LEDGER_DIR/<agent-id>/cursor.json`. The default path is `$CLAW_SESSION_HISTORY_DIR/context-ledger` (i.e. inside the existing read-write session-history mount). When session history is disabled, cursors fall back to in-memory only and every cold start re-bootstraps with a 24h tail.
 
 ### Provider Execution
 
@@ -177,6 +188,8 @@ The cllama container receives its configuration through environment variables in
 |---|---|
 | `CLAW_POD` | The name of the pod (e.g., `crypto-ops`). |
 | `CLAW_CONTEXT_ROOT` | Path to the shared context mount root (defaults to `/claw/context`). |
+| `CLAW_SESSION_HISTORY_DIR` | Path to the read-write session history mount (defaults to `/claw/session-history`). When set, also seeds the default `CLAW_CONTEXT_LEDGER_DIR`. |
+| `CLAW_CONTEXT_LEDGER_DIR` | Path where per-agent channel cursors are persisted (defaults to `$CLAW_SESSION_HISTORY_DIR/context-ledger`). When unset, cursors fall back to in-memory and every restart re-bootstraps with a 24h tail. |
 | `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, etc. |
 
 ### Where Provider Keys Go
@@ -314,10 +327,18 @@ Every request through the proxy produces a structured JSON log entry on stdout. 
 | `tokens_out` | Output token count. |
 | `cost_usd` | Estimated cost for the request/response pair. |
 | `latency_ms` | Request duration in milliseconds. |
+| `static_system_hash` | sha256 of the stable system contract (`messages[0]` for OpenAI / top-level `system` for Anthropic). Should be byte-stable across turns when nothing about the agent's contract changed. |
+| `first_system_hash` | sha256 of the first system message in the assembled payload. v1 mirrors `static_system_hash`; reserved for future Anthropic `cache_control` differentiation. |
+| `first_non_system_hash` | sha256 of the first non-system message. Stable on multi-turn runners; expected to drift on single-turn Discord runners and surfaces that drift via this field. |
+| `dynamic_context_hash` | sha256 of the late runtime-context block (memory + feeds + time + channel deltas). Changes per turn when new context arrives. |
+| `tools_hash` | sha256 of the canonicalized `tools[]` payload. |
+| `cached_tokens` | Provider-reported `usage.prompt_tokens_details.cached_tokens` when present. |
+| `cache_write_tokens` | Provider-reported `usage.prompt_tokens_details.cache_write_tokens` when present. |
 
 Event-specific fields may also be present depending on `type`:
-- `status_code`, `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd` — request/response/error events
-- `feed_name`, `feed_url` — feed fetch events
+- `status_code`, `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd`, `cached_tokens`, `cache_write_tokens` — request/response/error events
+- `static_system_hash`, `first_system_hash`, `first_non_system_hash`, `dynamic_context_hash`, `tools_hash` — request events (prompt assembly fingerprint)
+- `feed_name`, `feed_url`, `fetched_at`, `cached` — feed fetch events
 - `provider`, `key_id`, `action`, `reason`, `cooldown_until` — provider pool events
 - `memory_service`, `memory_op`, `memory_status`, `memory_blocks`, `memory_bytes`, `memory_removed` — memory telemetry events
 

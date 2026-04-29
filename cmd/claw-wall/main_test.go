@@ -133,6 +133,55 @@ func TestConversationStoreTailDoesNotMutateDeltaCursor(t *testing.T) {
 	}
 }
 
+func TestConversationStoreTailAfterCursor(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "first", Timestamp: time.Unix(100, 0)},
+		{ID: "101", Author: "bob", Content: "second", Timestamp: time.Unix(101, 0)},
+		{ID: "102", Author: "carol", Content: "third", Timestamp: time.Unix(102, 0)},
+	})
+
+	got := store.tail(tailRequest{
+		ChannelIDs: []string{"chan-1"},
+		After:      map[string]string{"chan-1": "100"},
+		Limit:      10,
+		Now:        time.Unix(200, 0),
+	})
+	if len(got.Messages) != 2 || got.Messages[0].ID != "101" || got.Messages[1].ID != "102" {
+		t.Fatalf("expected messages after cursor, got %+v", got.Messages)
+	}
+	if got.Cursor["chan-1"] != "102" {
+		t.Fatalf("expected returned cursor chan-1:102, got %+v", got.Cursor)
+	}
+}
+
+func TestConversationStoreTailAfterAndSinceCompose(t *testing.T) {
+	store := newConversationStore(50)
+	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	store.merge("cursor-chan", []wallMessage{
+		{ID: "100", Author: "alice", Content: "cursor old", Timestamp: now.Add(-48 * time.Hour)},
+		{ID: "101", Author: "alice", Content: "cursor delta", Timestamp: now.Add(-47 * time.Hour)},
+	})
+	store.merge("bootstrap-chan", []wallMessage{
+		{ID: "200", Author: "bob", Content: "bootstrap old", Timestamp: now.Add(-48 * time.Hour)},
+		{ID: "201", Author: "bob", Content: "bootstrap recent", Timestamp: now.Add(-2 * time.Hour)},
+	})
+
+	got := store.tail(tailRequest{
+		ChannelIDs: []string{"cursor-chan", "bootstrap-chan"},
+		Since:      24 * time.Hour,
+		After:      map[string]string{"cursor-chan": "100"},
+		Limit:      10,
+		Now:        now,
+	})
+	if len(got.Messages) != 2 || got.Messages[0].ID != "101" || got.Messages[1].ID != "201" {
+		t.Fatalf("expected after-bound cursor channel plus since-bound bootstrap channel, got %+v", got.Messages)
+	}
+	if got.Cursor["cursor-chan"] != "101" || got.Cursor["bootstrap-chan"] != "201" {
+		t.Fatalf("unexpected returned cursor map: %+v", got.Cursor)
+	}
+}
+
 func TestChannelContextHandlerTailModeIsDefault(t *testing.T) {
 	store := newConversationStore(50)
 	store.merge("chan-1", []wallMessage{
@@ -222,6 +271,52 @@ func TestChannelContextHandlerDeltaModePreservesCursorPaging(t *testing.T) {
 	}
 	if !strings.Contains(string(secondBody), "third") || strings.Contains(string(secondBody), "first") {
 		t.Fatalf("unexpected second delta body: %q", string(secondBody))
+	}
+}
+
+func TestChannelContextHandlerTailAfterCursor(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "first", Timestamp: time.Unix(100, 0)},
+		{ID: "101", Author: "bob", Content: "second", Timestamp: time.Unix(101, 0)},
+	})
+
+	server := httptest.NewServer(newHandler(store))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/channel-context?channels=chan-1&mode=tail&after=chan-1:100&limit=10")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
+	}
+	text := string(body)
+	if strings.Contains(text, "first") || !strings.Contains(text, "second") {
+		t.Fatalf("unexpected after response: %q", text)
+	}
+	if !strings.Contains(text, "after=chan-1:100") || !strings.Contains(text, "cursor=chan-1:101") {
+		t.Fatalf("expected after and returned cursor in header, got %q", text)
+	}
+}
+
+func TestChannelContextHandlerRejectsAfterForUnknownChannel(t *testing.T) {
+	server := httptest.NewServer(newHandler(newConversationStore(50)))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/channel-context?channels=chan-1&mode=tail&after=chan-2:100")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, string(body))
 	}
 }
 

@@ -31,7 +31,19 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.13.7 <Badge type="tip" text="Latest" /> {#v0-13-7}
+## v0.14.0 <Badge type="tip" text="Latest" /> {#v0-14-0}
+
+*2026-04-29*
+
+- **Cursored append-only Discord context** — live channel context now arrives as a delta-since-watermark instead of re-pasting the recent tail on every turn ([#204](https://github.com/mostlydev/clawdapus/issues/204)). `claw-wall` accepts `after=channel_id:message_id` cursors on `/channel-context?mode=tail`, returns the newest cursor in the coverage header, and keeps the existing 24h bootstrap tail for cold starts. cllama stores per-agent channel cursors under `$CLAW_CONTEXT_LEDGER_DIR` (defaults to `$CLAW_SESSION_HISTORY_DIR/context-ledger`) and commits them only after a successful 2xx record path — streaming truncation, 5xx, and 4xx leave the cursor untouched so failed turns replay the same delta cleanly.
+- **Layered prompt assembly** — feeds, memory recall, and the current time line no longer mutate the first system message. OpenAI-compatible requests get a later `system` message inserted immediately before the invoking user; Anthropic requests get a trailing `user` content block. The stable system contract and the existing first non-system message stay byte-stable across turns, restoring prompt-cache identity on cache-supported providers (Anthropic, OpenAI, Moonshot/Kimi, DeepSeek, Gemini) and preserving OpenRouter sticky routing.
+- **Stable feed headers** — `--- BEGIN FEED: name (from src, refreshed TS) ---` no longer carries the refresh timestamp in model-visible text. Unchanged feed content + TTL refresh now produces byte-identical bytes. The `STALE` tag still appears when relevant.
+- **Coverage on cap pressure** — when claw-wall caps a delta response, cllama appends a `coverage_partial=true omitted_after_cursor=N newest_returned=...` annotation so partial coverage stays visible instead of silently swallowing a gap. The cursor still advances to the newest returned message.
+- **Prompt and cache telemetry** — each request log now includes `static_system_hash`, `first_system_hash`, `first_non_system_hash`, `dynamic_context_hash`, and `tools_hash`. Provider cache counters (`cached_tokens`, `cache_write_tokens`) flow through from upstream usage when present so cache reads/writes are auditable instead of inferred.
+- **cllama** bumped to v0.6.0 ([release notes](https://github.com/mostlydev/cllama/releases/tag/v0.6.0)). `feeds.InjectOpenAI` / `feeds.InjectAnthropic` remain in the codebase as legacy helpers but are no longer called from the request hot path; `feeds.AppendLateContext` / `feeds.AppendAnthropicLateContext` are the new append paths.
+- Split-out follow-ups filed: dispatchWithRetry fallback policy on transport timeout / 5xx ([#205](https://github.com/mostlydev/clawdapus/issues/205)), tool manifest bloat ([#206](https://github.com/mostlydev/clawdapus/issues/206)), session-history `bufio.Scanner: token too long` ([#207](https://github.com/mostlydev/clawdapus/issues/207)).
+
+## v0.13.7 {#v0-13-7}
 
 *2026-04-29*
 
