@@ -70,6 +70,30 @@ func TestValidateRequiresSupportedHandle(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsComposeEnvTokenReference(t *testing.T) {
+	t.Setenv("ALLEN_BOT_TOKEN", "")
+
+	rc, _ := newTestRC(t)
+	rc.Environment["DISCORD_BOT_TOKEN"] = "${ALLEN_BOT_TOKEN}"
+
+	if err := (&Driver{}).Validate(rc); err != nil {
+		t.Fatalf("Validate should accept Compose env token references: %v", err)
+	}
+}
+
+func TestValidateRejectsBlankHandleToken(t *testing.T) {
+	rc, _ := newTestRC(t)
+	rc.Environment["DISCORD_BOT_TOKEN"] = "  "
+
+	err := (&Driver{}).Validate(rc)
+	if err == nil {
+		t.Fatal("expected blank DISCORD_BOT_TOKEN validation error")
+	}
+	if !strings.Contains(err.Error(), "DISCORD_BOT_TOKEN") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateSlackRequiresAppToken(t *testing.T) {
 	rc, _ := newTestRC(t)
 	rc.Handles = map[string]*driver.HandleInfo{"slack": {}}
