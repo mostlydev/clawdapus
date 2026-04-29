@@ -29,9 +29,15 @@ outline: deep
 
 ## Unreleased
 
-- Fix: `claw-wall` channel context now defaults to a non-consuming recent tail (`mode=tail`) instead of draining the oldest unread backlog for Discord invocation context ([#201](https://github.com/mostlydev/clawdapus/issues/201)). Generated feeds use a 24h window with dual caps (`limit=40`, `max_chars=8192`) and explicit coverage metadata, while legacy cursor paging remains available as `mode=delta`. Pods can tune the tail with `x-claw.context.channel`.
+<!-- Nothing yet -->
 
-## v0.13.6 <Badge type="tip" text="Latest" /> {#v0-13-6}
+## v0.13.7 <Badge type="tip" text="Latest" /> {#v0-13-7}
+
+*2026-04-29*
+
+- Fix: `claw-wall` channel context now defaults to a non-consuming recent tail (`mode=tail`) instead of draining the oldest unread backlog for Discord invocation context ([#201](https://github.com/mostlydev/clawdapus/issues/201)). Generated feeds use a 24h window with dual caps (`limit=40`, `max_chars=8192`) and emit a stable one-line coverage header so silent gaps stay visible. Legacy cursor paging is still available as `mode=delta`. Pods can tune the tail with `x-claw.context.channel: { since, limit, max-chars, buffer }`; `buffer` flows into the auto-injected wall sidecar's `CLAW_WALL_LIMIT` (default bumped 50 → 500), and Discord poll fetch is clamped to the API maximum of 100. The previous behaviour silently served older backlog to mentioned agents, so the prompt could include a `channel-context` block while still missing the messages that triggered the mention.
+
+## v0.13.6 {#v0-13-6}
 
 *2026-04-29*
 
