@@ -286,7 +286,6 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 					if len(svc.Claw.Cllama) > 0 {
 						env["CLAW_SELF_HISTORY_URL"] = fmt.Sprintf("http://%s:8080/history", cllama.ProxyServiceName(svc.Claw.Cllama[0]))
 						env["CLAW_SELF_HISTORY_TOKEN"] = selectedToken
-						env["CLAW_AGENT_ID"] = serviceName
 					}
 				}
 			}

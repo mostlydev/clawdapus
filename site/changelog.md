@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Self-history no longer needs an agent-ID placeholder** — `CLAWDAPUS.md` now points cllama-enabled agents at `GET http://cllama:8080/history`, relying on cllama v0.6.3 to infer identity from the pre-wired bearer. `CLAW_AGENT_ID` is no longer projected for self-history; `CLAW_SELF_HISTORY_URL` and `CLAW_SELF_HISTORY_TOKEN` remain for shell-capable runners. Closes #218.
 
 ## v0.14.5 <Badge type="tip" text="Latest" /> {#v0-14-5}
 
