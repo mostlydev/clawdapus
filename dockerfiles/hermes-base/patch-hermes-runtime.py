@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Apply small compatibility fixes to the pinned Hermes install."""
+"""Apply small compatibility fixes to the pinned Hermes install.
+
+Each patch goes through ``replace_once`` so the docker build fails loud when
+upstream drift moves a target string. When a patch becomes obsolete because
+upstream merged the equivalent fix, delete the patch instead of reshaping it
+to match — every line we don't carry is technical debt we don't pay back.
+"""
 
 from __future__ import annotations
 
@@ -49,89 +55,26 @@ text = replace_once(
 )
 prompt_builder.write_text(text)
 
+# Discord intents: voice_states stays True upstream; we never use it and it
+# requires elevated bot privileges. members is conditional upstream now and
+# resolves to False for our pods (numeric DISCORD_ALLOWED_USERS, no roles),
+# so the previous unconditional False patch is obsolete and dropped.
 discord_adapter = purelib / "gateway" / "platforms" / "discord.py"
 text = discord_adapter.read_text()
-text = replace_once(
-    text,
-    "            intents.members = True\n",
-    "            intents.members = False\n",
-    "discord members intent",
-)
 text = replace_once(
     text,
     "            intents.voice_states = True\n",
     "            intents.voice_states = False\n",
     "discord voice intent",
 )
-text = replace_once(
-    text,
-    # The blank line between _resolve_allowed_usernames and # Sync slash commands
-    # has 16 spaces of trailing whitespace in the upstream source.
-    "                # Resolve any usernames in the allowed list to numeric IDs\n"
-    "                await adapter_self._resolve_allowed_usernames()\n"
-    "                \n"
-    "                # Sync slash commands with Discord\n"
-    "                try:\n"
-    "                    synced = await adapter_self._client.tree.sync()\n"
-    "                    logger.info(\"[%s] Synced %d slash command(s)\", adapter_self.name, len(synced))\n"
-    "                except Exception as e:  # pragma: no cover - defensive logging\n"
-    "                    logger.warning(\"[%s] Slash command sync failed: %s\", adapter_self.name, e, exc_info=True)\n"
-    "                adapter_self._ready_event.set()\n",
-    """                # Mark the gateway ready before best-effort post-connect work.
-                adapter_self._ready_event.set()
-
-                async def finalize_startup():
-                    client = adapter_self._client
-                    if client is None:
-                        return
-
-                    # Resolve any usernames in the allowed list to numeric IDs.
-                    await adapter_self._resolve_allowed_usernames()
-
-                    # Slash-command sync can be slow on larger guilds; keep it best-effort.
-                    try:
-                        synced = await asyncio.wait_for(client.tree.sync(), timeout=20)
-                        logger.info("[%s] Synced %d slash command(s)", adapter_self.name, len(synced))
-                    except Exception as e:  # pragma: no cover - defensive logging
-                        logger.warning("[%s] Slash command sync failed: %s", adapter_self.name, e, exc_info=True)
-
-                asyncio.create_task(finalize_startup())
-""",
-    "discord ready handler",
-)
-# ── Disable reply-mentions so agent replies do not ping the original author ──
-# Discord's default is replied_user=True, which triggers mention loops in
-# multi-agent pods. We inject allowed_mentions on every channel.send that
-# carries a reference.
-text = replace_once(
-    text,
-    """                    msg = await channel.send(
-                        content=chunk,
-                        reference=chunk_reference,
-                    )""",
-    """                    msg = await channel.send(
-                        content=chunk,
-                        reference=chunk_reference,
-                        allowed_mentions=discord.AllowedMentions(replied_user=False),
-                    )""",
-    "discord reply mention (primary send)",
-)
-text = replace_once(
-    text,
-    """                        msg = await channel.send(
-                            content=chunk,
-                            reference=None,
-                        )""",
-    """                        msg = await channel.send(
-                            content=chunk,
-                            reference=None,
-                            allowed_mentions=discord.AllowedMentions(replied_user=False),
-                        )""",
-    "discord reply mention (fallback send)",
-)
 discord_adapter.write_text(text)
 
-# ── Tool-only mode: prefer send_message without dropping final text ──────────
+# Reply-mention auto-pings (replied_user=True default in `_build_allowed_mentions`)
+# are now controlled by the env var DISCORD_ALLOW_MENTION_REPLIED_USER. The
+# Hermes driver sets it to "false" by default for any Discord-enabled service,
+# so the old per-channel.send patches are obsolete and dropped.
+
+# Tool-only mode: prefer send_message without dropping final text.
 # HERMES_TOOL_ONLY_MODE makes send_message the preferred visible-delivery path.
 # The gateway runner suppresses duplicate final text when send_message already
 # succeeded in the current turn; otherwise base delivery remains a fallback so
@@ -150,7 +93,7 @@ text = replace_once(
 )
 base_adapter.write_text(text)
 
-# ── Core tool suppression: hide disabled runtime tools from model manifests ──
+# Core tool suppression: hide disabled runtime tools from model manifests.
 # Hermes exposes text_to_speech in its Discord core toolset when edge_tts is
 # importable. Clawdapus keeps the tool registered but strips it from platform
 # toolsets when CLAWDAPUS_DISABLED_TOOLS names it.
@@ -198,12 +141,9 @@ text += (
 )
 toolsets_py.write_text(text)
 
-# ── Tool-only mode: force tool_choice=required per user turn ─────────────────
-# In HERMES_TOOL_ONLY_MODE, LLMs should start each user turn by calling a tool,
-# preferably send_message for visible communication. Force tool_choice=required
-# until the current user turn has used a tool; final text remains a fallback.
 run_agent = purelib / "run_agent.py"
 text = run_agent.read_text()
+
 # Continuing gateway sessions persist a system_prompt snapshot. If the managed
 # identity changes, rebuild the prompt instead of reusing a stale Hermes identity.
 text = replace_once(
@@ -216,48 +156,80 @@ text = replace_once(
     '                            stored_prompt = None\n',
     "run_agent stored prompt identity invalidation",
 )
+
+# Tool-only mode: force tool_choice=required per user turn.
+# Upstream now builds api_kwargs through a transport (`_ct.build_kwargs(...)`)
+# inside `_build_api_kwargs`. We capture the returned kwargs and inject
+# `tool_choice="required"` at the start of each user turn so the model must
+# call a tool (preferably send_message) before falling back to plain text.
 text = replace_once(
     text,
-    '        api_kwargs = {\n'
-    '            "model": self.model,\n'
-    '            "messages": sanitized_messages,\n'
-    '            "tools": self.tools if self.tools else None,\n'
-    '            "timeout": float(os.getenv("HERMES_API_TIMEOUT", 900.0)),\n'
-    '        }\n'
-    '\n'
-    '        if self.max_tokens is not None:\n'
-    '            api_kwargs.update(self._max_tokens_param(self.max_tokens))',
-    '        api_kwargs = {\n'
-    '            "model": self.model,\n'
-    '            "messages": sanitized_messages,\n'
-    '            "tools": self.tools if self.tools else None,\n'
-    '            "timeout": float(os.getenv("HERMES_API_TIMEOUT", 900.0)),\n'
-    '        }\n'
-    '\n'
-    '        # In tool-only mode, force tool_choice=required on the first LLM call\n'
-    '        # of each user turn. Previous turns may contain tool_calls, so only\n'
-    '        # inspect messages after the latest user message.\n'
-    '        if os.getenv("HERMES_TOOL_ONLY_MODE") and api_kwargs.get("tools"):\n'
-    '            _last_user_index = max(\n'
-    '                (\n'
-    '                    _idx\n'
-    '                    for _idx, _m in enumerate(sanitized_messages)\n'
-    '                    if isinstance(_m, dict) and _m.get("role") == "user"\n'
-    '                ),\n'
-    '                default=-1,\n'
-    '            )\n'
-    '            _already_used_tools_this_turn = any(\n'
-    '                isinstance(_m, dict)\n'
-    '                and _m.get("role") == "assistant"\n'
-    '                and _m.get("tool_calls")\n'
-    '                for _m in sanitized_messages[_last_user_index + 1 :]\n'
-    '            )\n'
-    '            if not _already_used_tools_this_turn:\n'
-    '                api_kwargs["tool_choice"] = "required"\n'
-    '\n'
-    '        if self.max_tokens is not None:\n'
-    '            api_kwargs.update(self._max_tokens_param(self.max_tokens))',
+    "        return _ct.build_kwargs(\n"
+    "            model=self.model,\n"
+    "            messages=api_messages,\n"
+    "            tools=self.tools,\n"
+    "            timeout=self._resolved_api_call_timeout(),\n",
+    "        _claw_kwargs = _ct.build_kwargs(\n"
+    "            model=self.model,\n"
+    "            messages=api_messages,\n"
+    "            tools=self.tools,\n"
+    "            timeout=self._resolved_api_call_timeout(),\n",
+    "run_agent _build_api_kwargs capture for tool-only mode",
+)
+text = replace_once(
+    text,
+    "            anthropic_max_output=_ant_max,\n"
+    "        )\n"
+    "\n"
+    "    def _supports_reasoning_extra_body(self) -> bool:\n",
+    "            anthropic_max_output=_ant_max,\n"
+    "        )\n"
+    "        # In tool-only mode, force tool_choice=required on the first LLM\n"
+    "        # call of each user turn. Inspect only messages after the latest\n"
+    "        # user message so prior turns' tool_calls do not satisfy this turn.\n"
+    "        if os.getenv(\"HERMES_TOOL_ONLY_MODE\") and _claw_kwargs.get(\"tools\"):\n"
+    "            _last_user_index = max(\n"
+    "                (\n"
+    "                    _idx\n"
+    "                    for _idx, _m in enumerate(api_messages)\n"
+    "                    if isinstance(_m, dict) and _m.get(\"role\") == \"user\"\n"
+    "                ),\n"
+    "                default=-1,\n"
+    "            )\n"
+    "            _already_used_tools_this_turn = any(\n"
+    "                isinstance(_m, dict)\n"
+    "                and _m.get(\"role\") == \"assistant\"\n"
+    "                and _m.get(\"tool_calls\")\n"
+    "                for _m in api_messages[_last_user_index + 1 :]\n"
+    "            )\n"
+    "            if not _already_used_tools_this_turn:\n"
+    "                _claw_kwargs[\"tool_choice\"] = \"required\"\n"
+    "        return _claw_kwargs\n"
+    "\n"
+    "    def _supports_reasoning_extra_body(self) -> bool:\n",
     "run_agent tool_choice=required per turn in tool-only mode",
+)
+
+# Silent-final opt-in: when HERMES_ALLOW_SILENT_FINAL=1, treat empty-after-think
+# final responses as a successful no-op turn instead of retrying. Reasoning
+# models in mention_only channels can legitimately decide to stay silent.
+text = replace_once(
+    text,
+    '                    if not self._has_content_after_think_block(final_response):\n',
+    '                    if not self._has_content_after_think_block(final_response):\n'
+    '                        if os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1":\n'
+    '                            logger.debug("Silent final enabled; treating empty-after-think response as completed no-op")\n'
+    '                            self._empty_content_retries = 0\n'
+    '                            self._cleanup_task_resources(effective_task_id)\n'
+    '                            self._persist_session(messages, conversation_history)\n'
+    '                            return {\n'
+    '                                "final_response": None,\n'
+    '                                "messages": messages,\n'
+    '                                "api_calls": api_call_count,\n'
+    '                                "completed": True,\n'
+    '                                "partial": False,\n'
+    '                            }\n',
+    "run_agent silent final opt-in",
 )
 run_agent.write_text(text)
 
@@ -336,11 +308,14 @@ text = replace_once(
     '        """\n',
     "gateway run send_message detection helpers",
 )
+
+# Suppress duplicate final text after send_message in tool-only mode.
+# Anchor on the agent_messages assignment which is now a few lines below the
+# `response = ...` line (upstream inserted the "(empty)" sentinel handler in
+# between).
 text = replace_once(
     text,
-    '            response = agent_result.get("final_response") or ""\n'
     '            agent_messages = agent_result.get("messages", [])\n',
-    '            response = agent_result.get("final_response") or ""\n'
     '            agent_messages = agent_result.get("messages", [])\n'
     '\n'
     '            if os.getenv("HERMES_TOOL_ONLY_MODE") and response:\n'

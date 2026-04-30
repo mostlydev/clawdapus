@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.14.3 <Badge type="tip" text="Latest" /> {#v0-14-3}
+## v0.14.4 <Badge type="tip" text="Latest" /> {#v0-14-4}
+
+*2026-04-29*
+
+- **Hermes silent-final opt-in** — Hermes services can opt into silent-final handling with `x-claw.hermes.allow-silent: true` ([#212](https://github.com/mostlydev/clawdapus/issues/212)). When enabled, a reasoning-model response containing only `<think>` blocks completes as a no-op instead of retrying and posting a Discord warning. Behavior is opt-in and Hermes-only; cllama remains a passthrough.
+- **Hermes-base upstream bump v2026.3.17 → v2026.4.23** — rebased the compatibility patch ledger against current upstream Hermes. Dropped four patches that upstream merged equivalents for (members intent, on_ready/slash-command sync, both reply-mention `channel.send` patches), rewrote two against new code shapes (`tool_choice=required` against the new transport-based `_build_api_kwargs`, suppress-duplicate-final around the new `(empty)` sentinel handler), and replaced the per-`channel.send` reply-mention patches with a driver-level `DISCORD_ALLOW_MENTION_REPLIED_USER=false` default that leverages upstream's new env knob. Patch count: 13 → 11. Image bumped to `ghcr.io/mostlydev/hermes-base:v2026.4.23-claw.1`.
+
+## v0.14.3 {#v0-14-3}
 
 *2026-04-29*
 

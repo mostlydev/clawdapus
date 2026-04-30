@@ -99,7 +99,8 @@ type rawMCPStdioBlock struct {
 }
 
 type rawHermesConfig struct {
-	AllowTools []string `yaml:"allow-tools"`
+	AllowTools  []string `yaml:"allow-tools"`
+	AllowSilent bool     `yaml:"allow-silent"`
 }
 
 type rawFeedEntry struct {
@@ -720,7 +721,7 @@ func parseMCPStdio(serviceName string, raw *rawMCPStdioBlock, agent string, clla
 }
 
 func parseHermesConfig(raw *rawHermesConfig) (*driver.HermesConfig, error) {
-	if raw == nil || len(raw.AllowTools) == 0 {
+	if raw == nil || (len(raw.AllowTools) == 0 && !raw.AllowSilent) {
 		return nil, nil
 	}
 
@@ -732,10 +733,13 @@ func parseHermesConfig(raw *rawHermesConfig) (*driver.HermesConfig, error) {
 		}
 		allowTools = append(allowTools, tool)
 	}
-	if len(allowTools) == 0 {
+	if len(allowTools) == 0 && !raw.AllowSilent {
 		return nil, nil
 	}
-	return &driver.HermesConfig{AllowTools: allowTools}, nil
+	return &driver.HermesConfig{
+		AllowTools:  allowTools,
+		AllowSilent: raw.AllowSilent,
+	}, nil
 }
 
 func (r *rawFeedEntry) UnmarshalYAML(node *yaml.Node) error {

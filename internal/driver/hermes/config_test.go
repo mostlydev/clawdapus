@@ -278,6 +278,20 @@ func TestGenerateEnvFileAllowsToolProgressOverride(t *testing.T) {
 	}
 }
 
+func TestGenerateEnvFileSetsAllowSilentEnv(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Hermes: &driver.HermesConfig{AllowSilent: true},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), hermesAllowSilentFinalEnv+"=1\n") {
+		t.Fatalf("expected %s=1 in .env, got:\n%s", hermesAllowSilentFinalEnv, data)
+	}
+}
+
 func TestGenerateEnvFileDisablesTTSForDiscordByDefault(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Handles: map[string]*driver.HandleInfo{"discord": {}},

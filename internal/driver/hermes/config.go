@@ -19,7 +19,9 @@ const (
 	hermesWorkspaceDir            = "/workspace"
 	hermesPersonaDir              = "/persona"
 	hermesDefaultAgentIdentityEnv = "HERMES_DEFAULT_AGENT_IDENTITY"
+	hermesAllowSilentFinalEnv     = "HERMES_ALLOW_SILENT_FINAL"
 	hermesToolProgressModeEnv     = "HERMES_TOOL_PROGRESS_MODE"
+	hermesDiscordReplyMentionEnv  = "DISCORD_ALLOW_MENTION_REPLIED_USER"
 	clawdapusDisabledToolsEnv     = "CLAWDAPUS_DISABLED_TOOLS"
 	hermesTextToSpeechTool        = "text_to_speech"
 	managedDefaultAgentIdentity   = "You are a Clawdapus-managed agent. Your identity, authority, communication policy, memory policy, and tool-use rules are defined by the Clawdapus project context loaded below: AGENTS.md, CLAWDAPUS.md, SOUL.md, mounted skills, feeds, and managed-tool policy. Do not identify as Hermes or as a generic assistant. Follow the Clawdapus contract when it is more specific than runner defaults; otherwise retain the Hermes runtime guidance below, including persistent memory behavior."
@@ -76,6 +78,13 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 	env[hermesDefaultAgentIdentityEnv] = managedDefaultAgentIdentity
 	if hasDiscordHandle(rc) {
 		env[hermesToolProgressModeEnv] = "off"
+		// Hermes upstream defaults reply-mention pings to True
+		// (DISCORD_ALLOW_MENTION_REPLIED_USER), which produces mention loops in
+		// multi-agent pods even with DISCORD_REQUIRE_MENTION=true. Force false
+		// by default; operators can re-enable per service via x-claw env.
+		if _, set := env[hermesDiscordReplyMentionEnv]; !set {
+			env[hermesDiscordReplyMentionEnv] = "false"
+		}
 	}
 	if disabled := resolveDisabledHermesTools(rc); len(disabled) > 0 {
 		env[clawdapusDisabledToolsEnv] = strings.Join(disabled, ",")
@@ -89,6 +98,9 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 		if value != "" {
 			env[key] = value
 		}
+	}
+	if rc != nil && rc.Hermes != nil && rc.Hermes.AllowSilent {
+		env[hermesAllowSilentFinalEnv] = "1"
 	}
 
 	keys := make([]string, 0, len(env))
@@ -291,6 +303,7 @@ func allowedEnvPassthroughKeys() []string {
 		"CLAW_API_URL",
 		"DISCORD_ALLOW_BOTS",
 		"DISCORD_ALLOWED_USERS",
+		hermesDiscordReplyMentionEnv,
 		"DISCORD_AUTO_THREAD",
 		"DISCORD_BOT_TOKEN",
 		"DISCORD_FREE_RESPONSE_CHANNELS",
@@ -299,6 +312,7 @@ func allowedEnvPassthroughKeys() []string {
 		"DISCORD_REQUIRE_MENTION",
 		"GATEWAY_ALLOWED_USERS",
 		"GATEWAY_ALLOW_ALL_USERS",
+		hermesAllowSilentFinalEnv,
 		hermesToolProgressModeEnv,
 		"OPENAI_API_KEY",
 		"OPENROUTER_API_KEY",

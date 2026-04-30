@@ -442,6 +442,32 @@ func TestMaterializeHonorsHermesAllowToolsOptIn(t *testing.T) {
 	}
 }
 
+func TestMaterializeWritesAllowSilentEnv(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	rc.Hermes = &driver.HermesConfig{AllowSilent: true}
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if got := result.Environment[hermesAllowSilentFinalEnv]; got != "1" {
+		t.Fatalf("expected %s=1 in container env, got %q", hermesAllowSilentFinalEnv, got)
+	}
+
+	envData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", ".env"))
+	if err != nil {
+		t.Fatalf("read .env: %v", err)
+	}
+	if !strings.Contains(string(envData), hermesAllowSilentFinalEnv+"=1\n") {
+		t.Fatalf("expected %s=1 in .env, got:\n%s", hermesAllowSilentFinalEnv, envData)
+	}
+}
+
 func newTestRC(t *testing.T) (*driver.ResolvedClaw, string) {
 	t.Helper()
 	tmp := t.TempDir()

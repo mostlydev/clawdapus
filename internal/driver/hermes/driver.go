@@ -196,6 +196,9 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			env[hermesToolProgressModeEnv] = value
 		}
 	}
+	if rc.Hermes != nil && rc.Hermes.AllowSilent {
+		env[hermesAllowSilentFinalEnv] = "1"
+	}
 
 	if modelCfg.BaseURL != "" {
 		env["OPENAI_BASE_URL"] = modelCfg.BaseURL

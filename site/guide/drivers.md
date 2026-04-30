@@ -57,6 +57,11 @@ Container env vars from compose `environment:` are not available in Hermes agent
 
 For Discord handles, the Hermes driver disables the upstream `text_to_speech` tool by default so agents reply in text instead of model-selected voice attachments. A service can opt back in with `x-claw.hermes.allow-tools: [text_to_speech]`.
 
+Hermes services can also opt into silent-final handling for reasoning models
+with `x-claw.hermes.allow-silent: true`. When enabled, a response containing
+only `<think>` blocks completes as a no-op instead of surfacing a retry
+exhaustion warning to Discord.
+
 ### nanoclaw
 
 Claude Agent SDK-based driver. Does not currently support HANDLE, INVOKE, or structured health probes.
