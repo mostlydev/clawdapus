@@ -55,8 +55,8 @@ Your inference is routed through a governance proxy for logging and policy enfor
 
 You can read your own retained turns through the cllama proxy. Self-scoped: returns only your own history, not pod-wide or cross-agent.
 
-- **Endpoint:** `$CLAW_SELF_HISTORY_URL/$CLAW_AGENT_ID`
-- **Auth:** pre-wired (`CLAW_SELF_HISTORY_TOKEN` carries your bearer)
+- **Endpoint:** `GET http://cllama:8080/history/<your-agent-id>`
+- **Auth:** pre-wired by Clawdapus
 - **Pagination:** optional `?after=<RFC3339>` and `?limit=<N>`
 - **Response:** newline-delimited JSON (`application/x-ndjson`), one retained entry per line in chronological order
 
@@ -64,7 +64,7 @@ Use this when an operator asks you to explain past behavior or when reasoning ov
 ```
 
 The text deliberately:
-- references env vars only, never raw values;
+- shows a concrete route shape without embedding raw bearer values;
 - mentions the ndjson response shape so the agent doesn't try to parse a JSON array;
 - names the pagination params explicitly because that's what the underlying handler accepts (`parseAfterParam`, `parseHistoryLimit`);
 - treats authentication as pre-wired rather than teaching the model token-management ceremony;

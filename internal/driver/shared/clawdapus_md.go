@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
@@ -125,8 +126,9 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 
 		b.WriteString("## Self-history introspection\n\n")
 		b.WriteString("You can read your own retained turns through the cllama proxy. Self-scoped: returns only your own history, not pod-wide or cross-agent.\n\n")
-		b.WriteString("- **Endpoint:** `$CLAW_SELF_HISTORY_URL/$CLAW_AGENT_ID`\n")
-		b.WriteString("- **Auth:** pre-wired (`CLAW_SELF_HISTORY_TOKEN` carries your bearer)\n")
+		firstProxy := cllama.ProxyServiceName(rc.Cllama[0])
+		b.WriteString(fmt.Sprintf("- **Endpoint:** `GET http://%s:8080/history/<your-agent-id>`\n", firstProxy))
+		b.WriteString("- **Auth:** pre-wired by Clawdapus\n")
 		b.WriteString("- **Pagination:** optional `?after=<RFC3339>` and `?limit=<N>`\n")
 		b.WriteString("- **Response:** newline-delimited JSON (`application/x-ndjson`), one retained entry per line in chronological order\n\n")
 		b.WriteString("Use this when an operator asks you to explain past behavior or when reasoning over your own session. Don't poll.\n\n")
