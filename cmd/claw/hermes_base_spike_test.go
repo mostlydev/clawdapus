@@ -70,7 +70,7 @@ assert not prompt.startswith("You are Hermes Agent"), prompt[:200]
 
 source = inspect.getsource(run_agent.AIAgent)
 assert "_already_used_tools_this_turn" in source
-assert "sanitized_messages[_last_user_index + 1 :]" in source
+assert "api_messages[_last_user_index + 1 :]" in source
 assert "HERMES_ALLOW_SILENT_FINAL" in source
 assert "Silent final enabled; treating empty-after-think response as completed no-op" in source
 assert '"completed": True' in source
