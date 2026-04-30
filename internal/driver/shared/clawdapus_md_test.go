@@ -117,11 +117,39 @@ func TestClawdapusMDIncludesProxySection(t *testing.T) {
 	}
 }
 
+func TestClawdapusMDIncludesSelfHistorySectionForCllama(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "tiverton",
+		ClawType:    "openclaw",
+		Cllama:      []string{"passthrough"},
+	}
+	md := GenerateClawdapusMD(rc, "test-pod")
+	for _, want := range []string{
+		"## Self-history introspection",
+		"CLAW_SELF_HISTORY_URL",
+		"CLAW_SELF_HISTORY_TOKEN",
+		"CLAW_AGENT_ID",
+		"curl -H \"Authorization: Bearer $CLAW_SELF_HISTORY_TOKEN\"",
+		"application/x-ndjson",
+		"only your own history",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("expected self-history section to contain %q", want)
+		}
+	}
+}
+
 func TestClawdapusMDNoProxyWhenNoCllama(t *testing.T) {
 	rc := &driver.ResolvedClaw{ServiceName: "tiverton", ClawType: "openclaw"}
 	md := GenerateClawdapusMD(rc, "test-pod")
 	if strings.Contains(md, "## LLM Proxy") {
 		t.Error("should not include proxy section")
+	}
+	if strings.Contains(md, "## Self-history introspection") {
+		t.Error("should not include self-history section")
+	}
+	if strings.Contains(md, "CLAW_SELF_HISTORY_URL") || strings.Contains(md, "CLAW_SELF_HISTORY_TOKEN") || strings.Contains(md, "CLAW_AGENT_ID") {
+		t.Error("should not mention self-history env vars")
 	}
 }
 

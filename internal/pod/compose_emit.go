@@ -272,10 +272,22 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				return "", fmt.Errorf("service %q: environment: %w", serviceName, err)
 			}
 			if isClaw && svc.Claw != nil && len(svc.Claw.CllamaTokens) > 0 {
+				selectedToken := ""
 				if tok, ok := svc.Claw.CllamaTokens[serviceName]; ok && strings.TrimSpace(tok) != "" {
-					env["CLLAMA_TOKEN"] = tok
+					selectedToken = tok
 				} else if tok, ok := svc.Claw.CllamaTokens[name]; ok && strings.TrimSpace(tok) != "" {
-					env["CLLAMA_TOKEN"] = tok
+					selectedToken = tok
+				}
+				if selectedToken != "" {
+					if env == nil {
+						env = make(map[string]interface{})
+					}
+					env["CLLAMA_TOKEN"] = selectedToken
+					if len(svc.Claw.Cllama) > 0 {
+						env["CLAW_SELF_HISTORY_URL"] = fmt.Sprintf("http://%s:8080/history", cllama.ProxyServiceName(svc.Claw.Cllama[0]))
+						env["CLAW_SELF_HISTORY_TOKEN"] = selectedToken
+						env["CLAW_AGENT_ID"] = serviceName
+					}
 				}
 			}
 			if len(env) > 0 {

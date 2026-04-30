@@ -1022,7 +1022,8 @@ func TestEmitComposeCllamaTokenPerOrdinalOverride(t *testing.T) {
 			"bot": {
 				Image: "bot:latest",
 				Claw: &ClawBlock{
-					Count: 2,
+					Count:  2,
+					Cllama: []string{"passthrough"},
 					CllamaTokens: map[string]string{
 						"bot-0": "bot-0:token",
 						"bot-1": "bot-1:token",
@@ -1053,6 +1054,94 @@ func TestEmitComposeCllamaTokenPerOrdinalOverride(t *testing.T) {
 	}
 	if !strings.Contains(out, "CLLAMA_TOKEN: bot-1:token") {
 		t.Error("expected bot-1 token override")
+	}
+	if !strings.Contains(out, "CLAW_SELF_HISTORY_URL: http://cllama:8080/history") {
+		t.Error("expected self-history URL for cllama services")
+	}
+	if !strings.Contains(out, "CLAW_SELF_HISTORY_TOKEN: bot-0:token") {
+		t.Error("expected bot-0 self-history token")
+	}
+	if !strings.Contains(out, "CLAW_SELF_HISTORY_TOKEN: bot-1:token") {
+		t.Error("expected bot-1 self-history token")
+	}
+	if !strings.Contains(out, "CLAW_AGENT_ID: bot-0") {
+		t.Error("expected bot-0 agent id")
+	}
+	if !strings.Contains(out, "CLAW_AGENT_ID: bot-1") {
+		t.Error("expected bot-1 agent id")
+	}
+}
+
+func TestEmitComposeSelfHistoryEnvForSingleCllamaService(t *testing.T) {
+	p := &Pod{
+		Name: "token-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "bot:latest",
+				Claw: &ClawBlock{
+					Cllama: []string{"passthrough"},
+					CllamaTokens: map[string]string{
+						"bot": "bot:token",
+					},
+				},
+			},
+		},
+	}
+	results := map[string]*driver.MaterializeResult{
+		"bot": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+		},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"CLLAMA_TOKEN: bot:token",
+		"CLAW_SELF_HISTORY_URL: http://cllama:8080/history",
+		"CLAW_SELF_HISTORY_TOKEN: bot:token",
+		"CLAW_AGENT_ID: bot",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected compose output to contain %q", want)
+		}
+	}
+}
+
+func TestEmitComposeSelfHistoryEnvAbsentWithoutCllama(t *testing.T) {
+	p := &Pod{
+		Name: "token-pod",
+		Services: map[string]*Service{
+			"bot": {
+				Image: "bot:latest",
+				Claw: &ClawBlock{
+					CllamaTokens: map[string]string{
+						"bot": "bot:token",
+					},
+				},
+			},
+		},
+	}
+	results := map[string]*driver.MaterializeResult{
+		"bot": {
+			ReadOnly: true,
+			Restart:  "on-failure",
+		},
+	}
+
+	out, err := EmitCompose(p, results)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "CLLAMA_TOKEN: bot:token") {
+		t.Error("expected existing CLLAMA_TOKEN behavior to remain")
+	}
+	for _, unexpected := range []string{"CLAW_SELF_HISTORY_URL", "CLAW_SELF_HISTORY_TOKEN", "CLAW_AGENT_ID"} {
+		if strings.Contains(out, unexpected) {
+			t.Errorf("did not expect %s without cllama enabled", unexpected)
+		}
 	}
 }
 
