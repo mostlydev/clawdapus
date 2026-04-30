@@ -31,7 +31,15 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.14.4 <Badge type="tip" text="Latest" /> {#v0-14-4}
+## v0.14.5 <Badge type="tip" text="Latest" /> {#v0-14-5}
+
+*2026-04-30*
+
+- **Self-history introspection in `CLAWDAPUS.md`** — every cllama-enabled agent now sees a `## Self-history introspection` section pointing at `GET http://cllama:8080/history/<your-agent-id>` with auth described as pre-wired by Clawdapus. Agents can read their own retained turns without operator-side hand-holding. Closes #213.
+- **New compile-time env vars for cllama-enabled services** — `CLAW_SELF_HISTORY_URL`, `CLAW_SELF_HISTORY_TOKEN`, and `CLAW_AGENT_ID` are now projected per cllama-enabled service (per-ordinal for `count > 1`), available to shell-capable runners. Distinct from the memory-replay `CLAW_HISTORY_URL`/`CLAW_HISTORY_TOKEN` env vars (which target peer-service histories) so a service that is both an agent and a memory consumer never has one env name overloaded with two roles.
+- **LLM Proxy section trimmed** — generated `CLAWDAPUS.md` now states the LLM Proxy as a one-line governance directive rather than exposing endpoint, mode, and chain details that the model never acts on. The harness handles wire routing.
+
+## v0.14.4 {#v0-14-4}
 
 *2026-04-29*
 
