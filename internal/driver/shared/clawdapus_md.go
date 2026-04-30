@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
@@ -122,30 +121,15 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 
 	if len(rc.Cllama) > 0 {
 		b.WriteString("## LLM Proxy\n\n")
-		b.WriteString("Your LLM requests are routed through a governance proxy.\n\n")
-		firstProxy := cllama.ProxyServiceName(rc.Cllama[0])
-		b.WriteString(fmt.Sprintf("- **Endpoint:** `http://%s:8080/v1`\n", firstProxy))
-		b.WriteString("- **Auth:** Bearer token (pre-configured)\n")
-		if len(rc.Cllama) == 1 {
-			b.WriteString(fmt.Sprintf("- **Mode:** %s\n", rc.Cllama[0]))
-		} else {
-			b.WriteString(fmt.Sprintf("- **Chain:** %s\n", strings.Join(rc.Cllama, " -> ")))
-		}
-		b.WriteString("\nAll inference requests pass through this proxy for logging and policy enforcement.\n")
-		b.WriteString("You do not need to configure this - model settings are pre-wired.\n\n")
+		b.WriteString("Your inference is routed through a governance proxy for logging and policy enforcement. Model and endpoint wiring is managed by the harness - leave it alone.\n\n")
 
 		b.WriteString("## Self-history introspection\n\n")
-		b.WriteString("You can read your own retained turns through the cllama proxy. This is a self-scoped read: it returns only your own history, not pod-wide or cross-agent history.\n\n")
-		b.WriteString("- **Endpoint env:** `CLAW_SELF_HISTORY_URL` (base URL, e.g. `http://cllama:8080/history`)\n")
-		b.WriteString("- **Auth env:** `CLAW_SELF_HISTORY_TOKEN` (your own bearer; same scope as your LLM calls)\n")
-		b.WriteString("- **Identity env:** `CLAW_AGENT_ID` (your own agent ID)\n")
-		b.WriteString("- **Pagination:** optional `?after=<RFC3339>` and `?limit=<N>` query parameters\n")
+		b.WriteString("You can read your own retained turns through the cllama proxy. Self-scoped: returns only your own history, not pod-wide or cross-agent.\n\n")
+		b.WriteString("- **Endpoint:** `$CLAW_SELF_HISTORY_URL/$CLAW_AGENT_ID`\n")
+		b.WriteString("- **Auth:** pre-wired (`CLAW_SELF_HISTORY_TOKEN` carries your bearer)\n")
+		b.WriteString("- **Pagination:** optional `?after=<RFC3339>` and `?limit=<N>`\n")
 		b.WriteString("- **Response:** newline-delimited JSON (`application/x-ndjson`), one retained entry per line in chronological order\n\n")
-		b.WriteString("Example:\n\n")
-		b.WriteString("```bash\n")
-		b.WriteString("curl -H \"Authorization: Bearer $CLAW_SELF_HISTORY_TOKEN\" \"$CLAW_SELF_HISTORY_URL/$CLAW_AGENT_ID?limit=20\"\n")
-		b.WriteString("```\n\n")
-		b.WriteString("Use this when an operator asks you to explain past behavior, when introspecting before a long task, or when reasoning over your own session. Do not poll on a hot path.\n\n")
+		b.WriteString("Use this when an operator asks you to explain past behavior or when reasoning over your own session. Don't poll.\n\n")
 	}
 
 	// Handles

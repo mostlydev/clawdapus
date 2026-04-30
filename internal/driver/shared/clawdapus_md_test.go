@@ -112,8 +112,14 @@ func TestClawdapusMDIncludesProxySection(t *testing.T) {
 	if !strings.Contains(md, "## LLM Proxy") {
 		t.Error("expected LLM Proxy section")
 	}
-	if !strings.Contains(md, "cllama:8080") {
-		t.Error("expected proxy endpoint with type name")
+	if !strings.Contains(md, "governance proxy for logging and policy enforcement") {
+		t.Error("expected governance proxy summary")
+	}
+	if !strings.Contains(md, "Model and endpoint wiring is managed by the harness") {
+		t.Error("expected harness-managed wiring guidance")
+	}
+	if strings.Contains(md, "**Endpoint:** `http://cllama:8080/v1`") {
+		t.Error("LLM Proxy section should not expose the harness endpoint")
 	}
 }
 
@@ -129,13 +135,17 @@ func TestClawdapusMDIncludesSelfHistorySectionForCllama(t *testing.T) {
 		"CLAW_SELF_HISTORY_URL",
 		"CLAW_SELF_HISTORY_TOKEN",
 		"CLAW_AGENT_ID",
-		"curl -H \"Authorization: Bearer $CLAW_SELF_HISTORY_TOKEN\"",
+		"$CLAW_SELF_HISTORY_URL/$CLAW_AGENT_ID",
+		"pre-wired",
 		"application/x-ndjson",
 		"only your own history",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("expected self-history section to contain %q", want)
 		}
+	}
+	if strings.Contains(md, "curl -H") {
+		t.Error("self-history section should not include a curl block")
 	}
 }
 

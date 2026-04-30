@@ -42,34 +42,33 @@ Naming rationale:
 - Keeping the self-history names distinct means a service that is *both* a cllama agent *and* a memory-replay consumer doesn't have one env name overloaded with two semantically different roles.
 - `CLAW_AGENT_ID` is new but lightweight — it's the only way to write a copy-pasteable curl one-liner, and any future per-agent introspection will want this anyway.
 
-### 2. CLAWDAPUS.md "Self-history introspection" section
+### 2. CLAWDAPUS.md "LLM Proxy" and "Self-history introspection" sections
 
-Emit only when `len(rc.Cllama) > 0`. Place immediately after the existing "LLM Proxy" section in `internal/driver/shared/clawdapus_md.go`. Suggested copy:
+Emit only when `len(rc.Cllama) > 0`. Keep the LLM proxy section general because the model does not call its own inference endpoint — the harness does. Place the explicit self-history retrieval surface immediately after it in `internal/driver/shared/clawdapus_md.go`. Suggested copy:
 
 ```markdown
+## LLM Proxy
+
+Your inference is routed through a governance proxy for logging and policy enforcement. Model and endpoint wiring is managed by the harness - leave it alone.
+
 ## Self-history introspection
 
-You can read your own retained turns through the cllama proxy. This is a self-scoped read — it returns only your own history, not pod-wide or cross-agent.
+You can read your own retained turns through the cllama proxy. Self-scoped: returns only your own history, not pod-wide or cross-agent.
 
-- **Endpoint env:** `CLAW_SELF_HISTORY_URL` (base URL, e.g. `http://cllama:8080/history`)
-- **Auth env:** `CLAW_SELF_HISTORY_TOKEN` (your own bearer; same scope as your LLM calls)
-- **Identity env:** `CLAW_AGENT_ID` (your own agent ID)
-- **Pagination:** optional `?after=<RFC3339>` and `?limit=<N>` query parameters.
-- **Response:** newline-delimited JSON (`application/x-ndjson`); one retained entry per line in chronological order.
+- **Endpoint:** `$CLAW_SELF_HISTORY_URL/$CLAW_AGENT_ID`
+- **Auth:** pre-wired (`CLAW_SELF_HISTORY_TOKEN` carries your bearer)
+- **Pagination:** optional `?after=<RFC3339>` and `?limit=<N>`
+- **Response:** newline-delimited JSON (`application/x-ndjson`), one retained entry per line in chronological order
 
-Example:
-
-    curl -H "Authorization: Bearer $CLAW_SELF_HISTORY_TOKEN" \
-      "$CLAW_SELF_HISTORY_URL/$CLAW_AGENT_ID?limit=20"
-
-Use this when an operator asks you to explain past behavior, when introspecting before a long task, or when reasoning over your own session. Do not poll on a hot path — this is a discovery surface, not a hot loop.
+Use this when an operator asks you to explain past behavior or when reasoning over your own session. Don't poll.
 ```
 
 The text deliberately:
 - references env vars only, never raw values;
 - mentions the ndjson response shape so the agent doesn't try to parse a JSON array;
 - names the pagination params explicitly because that's what the underlying handler accepts (`parseAfterParam`, `parseHistoryLimit`);
-- adds a one-line norm against polling, since this surface will be tempting once it's discoverable.
+- treats authentication as pre-wired rather than teaching the model token-management ceremony;
+- adds a short norm against polling, since this surface will be tempting once it's discoverable.
 
 ### 3. No spec/wire changes to cllama itself
 
