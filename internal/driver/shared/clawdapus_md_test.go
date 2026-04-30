@@ -132,7 +132,7 @@ func TestClawdapusMDIncludesSelfHistorySectionForCllama(t *testing.T) {
 	md := GenerateClawdapusMD(rc, "test-pod")
 	for _, want := range []string{
 		"## Self-history introspection",
-		"GET http://cllama:8080/history/<your-agent-id>",
+		"GET http://cllama:8080/history",
 		"pre-wired by Clawdapus",
 		"application/x-ndjson",
 		"only your own history",
@@ -143,6 +143,9 @@ func TestClawdapusMDIncludesSelfHistorySectionForCllama(t *testing.T) {
 	}
 	if strings.Contains(md, "curl -H") {
 		t.Error("self-history section should not include a curl block")
+	}
+	if strings.Contains(md, "<your-agent-id>") {
+		t.Error("self-history section should not require an agent-id placeholder")
 	}
 	if strings.Contains(md, "CLAW_SELF_HISTORY_TOKEN") || strings.Contains(md, "CLAW_AGENT_ID") {
 		t.Error("self-history section should not expose auth or identity env vars")

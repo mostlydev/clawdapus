@@ -127,7 +127,7 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		b.WriteString("## Self-history introspection\n\n")
 		b.WriteString("You can read your own retained turns through the cllama proxy. Self-scoped: returns only your own history, not pod-wide or cross-agent.\n\n")
 		firstProxy := cllama.ProxyServiceName(rc.Cllama[0])
-		b.WriteString(fmt.Sprintf("- **Endpoint:** `GET http://%s:8080/history/<your-agent-id>`\n", firstProxy))
+		b.WriteString(fmt.Sprintf("- **Endpoint:** `GET http://%s:8080/history`\n", firstProxy))
 		b.WriteString("- **Auth:** pre-wired by Clawdapus\n")
 		b.WriteString("- **Pagination:** optional `?after=<RFC3339>` and `?limit=<N>`\n")
 		b.WriteString("- **Response:** newline-delimited JSON (`application/x-ndjson`), one retained entry per line in chronological order\n\n")

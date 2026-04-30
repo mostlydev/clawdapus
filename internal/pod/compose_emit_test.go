@@ -1064,11 +1064,8 @@ func TestEmitComposeCllamaTokenPerOrdinalOverride(t *testing.T) {
 	if !strings.Contains(out, "CLAW_SELF_HISTORY_TOKEN: bot-1:token") {
 		t.Error("expected bot-1 self-history token")
 	}
-	if !strings.Contains(out, "CLAW_AGENT_ID: bot-0") {
-		t.Error("expected bot-0 agent id")
-	}
-	if !strings.Contains(out, "CLAW_AGENT_ID: bot-1") {
-		t.Error("expected bot-1 agent id")
+	if strings.Contains(out, "CLAW_AGENT_ID") {
+		t.Error("did not expect CLAW_AGENT_ID after self-history identity inference")
 	}
 }
 
@@ -1102,11 +1099,13 @@ func TestEmitComposeSelfHistoryEnvForSingleCllamaService(t *testing.T) {
 		"CLLAMA_TOKEN: bot:token",
 		"CLAW_SELF_HISTORY_URL: http://cllama:8080/history",
 		"CLAW_SELF_HISTORY_TOKEN: bot:token",
-		"CLAW_AGENT_ID: bot",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected compose output to contain %q", want)
 		}
+	}
+	if strings.Contains(out, "CLAW_AGENT_ID") {
+		t.Error("did not expect CLAW_AGENT_ID after self-history identity inference")
 	}
 }
 
