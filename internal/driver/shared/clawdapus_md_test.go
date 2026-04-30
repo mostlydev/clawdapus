@@ -112,8 +112,40 @@ func TestClawdapusMDIncludesProxySection(t *testing.T) {
 	if !strings.Contains(md, "## LLM Proxy") {
 		t.Error("expected LLM Proxy section")
 	}
-	if !strings.Contains(md, "cllama:8080") {
-		t.Error("expected proxy endpoint with type name")
+	if !strings.Contains(md, "governance proxy for logging and policy enforcement") {
+		t.Error("expected governance proxy summary")
+	}
+	if !strings.Contains(md, "Model and endpoint wiring is managed by the harness") {
+		t.Error("expected harness-managed wiring guidance")
+	}
+	if strings.Contains(md, "**Endpoint:** `http://cllama:8080/v1`") {
+		t.Error("LLM Proxy section should not expose the harness endpoint")
+	}
+}
+
+func TestClawdapusMDIncludesSelfHistorySectionForCllama(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "tiverton",
+		ClawType:    "openclaw",
+		Cllama:      []string{"passthrough"},
+	}
+	md := GenerateClawdapusMD(rc, "test-pod")
+	for _, want := range []string{
+		"## Self-history introspection",
+		"GET http://cllama:8080/history/<your-agent-id>",
+		"pre-wired by Clawdapus",
+		"application/x-ndjson",
+		"only your own history",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("expected self-history section to contain %q", want)
+		}
+	}
+	if strings.Contains(md, "curl -H") {
+		t.Error("self-history section should not include a curl block")
+	}
+	if strings.Contains(md, "CLAW_SELF_HISTORY_TOKEN") || strings.Contains(md, "CLAW_AGENT_ID") {
+		t.Error("self-history section should not expose auth or identity env vars")
 	}
 }
 
@@ -122,6 +154,12 @@ func TestClawdapusMDNoProxyWhenNoCllama(t *testing.T) {
 	md := GenerateClawdapusMD(rc, "test-pod")
 	if strings.Contains(md, "## LLM Proxy") {
 		t.Error("should not include proxy section")
+	}
+	if strings.Contains(md, "## Self-history introspection") {
+		t.Error("should not include self-history section")
+	}
+	if strings.Contains(md, "CLAW_SELF_HISTORY_URL") || strings.Contains(md, "CLAW_SELF_HISTORY_TOKEN") || strings.Contains(md, "CLAW_AGENT_ID") {
+		t.Error("should not mention self-history env vars")
 	}
 }
 

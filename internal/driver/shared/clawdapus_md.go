@@ -122,17 +122,16 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 
 	if len(rc.Cllama) > 0 {
 		b.WriteString("## LLM Proxy\n\n")
-		b.WriteString("Your LLM requests are routed through a governance proxy.\n\n")
+		b.WriteString("Your inference is routed through a governance proxy for logging and policy enforcement. Model and endpoint wiring is managed by the harness - leave it alone.\n\n")
+
+		b.WriteString("## Self-history introspection\n\n")
+		b.WriteString("You can read your own retained turns through the cllama proxy. Self-scoped: returns only your own history, not pod-wide or cross-agent.\n\n")
 		firstProxy := cllama.ProxyServiceName(rc.Cllama[0])
-		b.WriteString(fmt.Sprintf("- **Endpoint:** `http://%s:8080/v1`\n", firstProxy))
-		b.WriteString("- **Auth:** Bearer token (pre-configured)\n")
-		if len(rc.Cllama) == 1 {
-			b.WriteString(fmt.Sprintf("- **Mode:** %s\n", rc.Cllama[0]))
-		} else {
-			b.WriteString(fmt.Sprintf("- **Chain:** %s\n", strings.Join(rc.Cllama, " -> ")))
-		}
-		b.WriteString("\nAll inference requests pass through this proxy for logging and policy enforcement.\n")
-		b.WriteString("You do not need to configure this - model settings are pre-wired.\n\n")
+		b.WriteString(fmt.Sprintf("- **Endpoint:** `GET http://%s:8080/history/<your-agent-id>`\n", firstProxy))
+		b.WriteString("- **Auth:** pre-wired by Clawdapus\n")
+		b.WriteString("- **Pagination:** optional `?after=<RFC3339>` and `?limit=<N>`\n")
+		b.WriteString("- **Response:** newline-delimited JSON (`application/x-ndjson`), one retained entry per line in chronological order\n\n")
+		b.WriteString("Use this when an operator asks you to explain past behavior or when reasoning over your own session. Don't poll.\n\n")
 	}
 
 	// Handles
