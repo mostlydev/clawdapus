@@ -93,7 +93,8 @@ type ResolvedClaw struct {
 }
 
 type HermesConfig struct {
-	AllowTools []string
+	AllowTools  []string
+	AllowSilent bool
 }
 
 // HandleInfo is the full contact card for an agent on a platform.

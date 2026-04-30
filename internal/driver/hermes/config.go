@@ -19,6 +19,7 @@ const (
 	hermesWorkspaceDir            = "/workspace"
 	hermesPersonaDir              = "/persona"
 	hermesDefaultAgentIdentityEnv = "HERMES_DEFAULT_AGENT_IDENTITY"
+	hermesAllowSilentFinalEnv     = "HERMES_ALLOW_SILENT_FINAL"
 	hermesToolProgressModeEnv     = "HERMES_TOOL_PROGRESS_MODE"
 	clawdapusDisabledToolsEnv     = "CLAWDAPUS_DISABLED_TOOLS"
 	hermesTextToSpeechTool        = "text_to_speech"
@@ -89,6 +90,9 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 		if value != "" {
 			env[key] = value
 		}
+	}
+	if rc != nil && rc.Hermes != nil && rc.Hermes.AllowSilent {
+		env[hermesAllowSilentFinalEnv] = "1"
 	}
 
 	keys := make([]string, 0, len(env))
@@ -299,6 +303,7 @@ func allowedEnvPassthroughKeys() []string {
 		"DISCORD_REQUIRE_MENTION",
 		"GATEWAY_ALLOWED_USERS",
 		"GATEWAY_ALLOW_ALL_USERS",
+		hermesAllowSilentFinalEnv,
 		hermesToolProgressModeEnv,
 		"OPENAI_API_KEY",
 		"OPENROUTER_API_KEY",

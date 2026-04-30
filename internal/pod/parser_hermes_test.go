@@ -30,6 +30,29 @@ services:
 	}
 }
 
+func TestParseHermesAllowSilent(t *testing.T) {
+	p, err := Parse(strings.NewReader(`
+services:
+  gerrard:
+    image: ghcr.io/example/gerrard:latest
+    x-claw:
+      agent: ./AGENTS.md
+      hermes:
+        allow-silent: true
+`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	hermes := p.Services["gerrard"].Claw.Hermes
+	if hermes == nil {
+		t.Fatal("expected Hermes config")
+	}
+	if !hermes.AllowSilent {
+		t.Fatal("expected Hermes allow-silent to parse true")
+	}
+}
+
 func TestParseHermesConfigMissingOrEmpty(t *testing.T) {
 	p, err := Parse(strings.NewReader(`
 services:

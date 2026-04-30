@@ -50,6 +50,8 @@ func TestHermesBaseImageSourceContract(t *testing.T) {
 		`CLAWDAPUS_DISABLED_TOOLS`,
 		`_claw_filter_tools`,
 		`_HERMES_CORE_TOOLS = _claw_filter_tools(_HERMES_CORE_TOOLS)`,
+		`HERMES_ALLOW_SILENT_FINAL`,
+		`Silent final enabled; treating empty-after-think response as completed no-op`,
 	} {
 		if !strings.Contains(patch, want) {
 			t.Fatalf("Hermes runtime patch missing %q", want)

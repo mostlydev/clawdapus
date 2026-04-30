@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- Fix: Hermes services can opt into silent-final handling with `x-claw.hermes.allow-silent: true` ([#212](https://github.com/mostlydev/clawdapus/issues/212)). When enabled, a reasoning-model response containing only `<think>` blocks completes as a no-op instead of retrying and posting a Discord warning. The behavior is opt-in and Hermes-only; cllama remains a passthrough.
 
 ## v0.14.3 <Badge type="tip" text="Latest" /> {#v0-14-3}
 

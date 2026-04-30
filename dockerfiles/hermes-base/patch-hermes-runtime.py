@@ -259,6 +259,24 @@ text = replace_once(
     '            api_kwargs.update(self._max_tokens_param(self.max_tokens))',
     "run_agent tool_choice=required per turn in tool-only mode",
 )
+text = replace_once(
+    text,
+    '                    if not self._has_content_after_think_block(final_response):\n',
+    '                    if not self._has_content_after_think_block(final_response):\n'
+    '                        if os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1":\n'
+    '                            logger.debug("Silent final enabled; treating empty-after-think response as completed no-op")\n'
+    '                            self._empty_content_retries = 0\n'
+    '                            self._cleanup_task_resources(effective_task_id)\n'
+    '                            self._persist_session(messages, conversation_history)\n'
+    '                            return {\n'
+    '                                "final_response": None,\n'
+    '                                "messages": messages,\n'
+    '                                "api_calls": api_call_count,\n'
+    '                                "completed": True,\n'
+    '                                "partial": False,\n'
+    '                            }\n',
+    "run_agent silent final opt-in",
+)
 run_agent.write_text(text)
 
 gateway_run = purelib / "gateway" / "run.py"
