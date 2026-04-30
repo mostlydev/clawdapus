@@ -42,7 +42,6 @@ func TestHermesBaseImageSourceContract(t *testing.T) {
 		`DEFAULT_AGENT_IDENTITY = (`,
 		`not stored_prompt.startswith(default_identity)`,
 		`shutil.copy("/tmp/minisweagent_path.py", purelib / "minisweagent_path.py")`,
-		`discord.AllowedMentions(replied_user=False)`,
 		`HERMES_TOOL_ONLY_MODE`,
 		`_claw_turn_sent_message`,
 		`Suppressing duplicate final text after send_message`,
@@ -52,6 +51,7 @@ func TestHermesBaseImageSourceContract(t *testing.T) {
 		`_HERMES_CORE_TOOLS = _claw_filter_tools(_HERMES_CORE_TOOLS)`,
 		`HERMES_ALLOW_SILENT_FINAL`,
 		`Silent final enabled; treating empty-after-think response as completed no-op`,
+		`intents.voice_states = False`,
 	} {
 		if !strings.Contains(patch, want) {
 			t.Fatalf("Hermes runtime patch missing %q", want)
