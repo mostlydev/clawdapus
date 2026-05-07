@@ -29,6 +29,7 @@ func TestSpikeHermesBaseImageContract(t *testing.T) {
 	assertDockerInspectJSON(t, tag, "Config.Cmd", `["hermes-entrypoint"]`)
 
 	script := `grep -q 'exec hermes gateway run' /usr/local/bin/hermes-entrypoint
+grep -q 'CLLAMA_CONSUMER_SESSION_EPOCH' /usr/local/bin/hermes-entrypoint
 python - <<'PY'
 import importlib.util
 import inspect
@@ -36,6 +37,7 @@ import os
 
 os.environ["HERMES_DEFAULT_AGENT_IDENTITY"] = "Clawdapus identity probe"
 os.environ["CLAWDAPUS_DISABLED_TOOLS"] = "text_to_speech"
+os.environ["CLLAMA_CONSUMER_SESSION_EPOCH"] = "epoch-contract"
 assert importlib.util.find_spec("minisweagent_path") is not None
 import tools.terminal_tool
 
@@ -74,6 +76,21 @@ assert "api_messages[_last_user_index + 1 :]" in source
 assert "HERMES_ALLOW_SILENT_FINAL" in source
 assert "Silent final enabled; treating empty-after-think response as completed no-op" in source
 assert '"completed": True' in source
+assert "X-Claw-Consumer-Session-Epoch" in source
+assert "CLLAMA_CONSUMER_SESSION_EPOCH" in source
+
+epoch_agent = AIAgent(
+    base_url="http://cllama:8080/v1",
+    api_key="test",
+    model="test/model",
+    enabled_toolsets=[],
+    disabled_toolsets=["all"],
+    quiet_mode=True,
+    skip_context_files=True,
+    skip_memory=True,
+)
+headers = {str(k).lower(): v for k, v in dict(getattr(epoch_agent.client, "default_headers", {}) or {}).items()}
+assert headers.get("x-claw-consumer-session-epoch") == "epoch-contract", headers
 
 from gateway.run import GatewayRunner
 assert GatewayRunner._claw_turn_sent_message([

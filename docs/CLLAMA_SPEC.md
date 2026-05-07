@@ -63,6 +63,8 @@ When an agent makes a request to the proxy, it MUST include a unique **Bearer To
 
 `Authorization: Bearer <agent-id>:<secure-secret>`
 
+Agents SHOULD also include `X-Claw-Consumer-Session-Epoch` when the runner can provide a process-stable restart identifier. The value is opaque to `cllama`; it must stay stable for the lifetime of the consumer process and change when that process restarts. `cllama` uses this optional header to decide whether channel-context cursors represent the current consumer session or a previous one. Missing or blank values preserve legacy cursor behavior.
+
 The proxy SHOULD execute the following pipeline:
 
 ### A. Pre-Flight (Ingress & Identity)
