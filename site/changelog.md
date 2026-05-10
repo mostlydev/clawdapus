@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.14.7 <Badge type="tip" text="Latest" /> {#v0-14-7}
+## v0.14.8 <Badge type="tip" text="Latest" /> {#v0-14-8}
+
+*2026-05-09*
+
+- **`claw up --fix` refreshes runtime-emitted descriptors** — when a tool allowlist points at a build-backed provider whose `.claw-describe.json` is emitted at runtime (Rails-style boot-time introspection), `claw up --fix -d` now rebuilds the provider, brings it up through the existing `compose.generated.yml`, snapshots the runtime descriptor into `.claw-discovered/`, and retries capability resolution before final apply. Strict `claw up -d` stays strict but its error message now points operators directly at `claw up --fix -d` instead of the manual `docker compose build → up → cp → up` incantation. First deploys without an existing `compose.generated.yml` still fail loudly. Closes [#224](https://github.com/mostlydev/clawdapus/issues/224).
+- **`claw compose build` no longer blocks on stale generated compose** — building a single service image only needs the existing `services.<name>.build` block, so `claw compose build <svc>` now downgrades the staleness guard to a warning that reminds you to run `claw up` afterward to apply pod-level changes. Other `claw compose` subcommands (`ps`, `logs`, `up`, etc.) keep the strict guard. The carve-out applies to the literal `build` subcommand only — `claw compose --progress=plain build foo` still trips the strict guard. Refs [#222](https://github.com/mostlydev/clawdapus/issues/222).
+
+## v0.14.7 {#v0-14-7}
 
 *2026-05-09*
 
