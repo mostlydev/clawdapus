@@ -8,4 +8,8 @@ if [ -f "${HERMES_HOME:-/root/.hermes}/.env" ]; then
     set +a
 fi
 
+if [ -z "${CLLAMA_CONSUMER_SESSION_EPOCH:-}" ]; then
+    export CLLAMA_CONSUMER_SESSION_EPOCH="$(cat /proc/sys/kernel/random/uuid)"
+fi
+
 exec hermes gateway run

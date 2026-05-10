@@ -38,6 +38,14 @@ func TestHermesBaseImageSourceContract(t *testing.T) {
 		t.Fatalf("Hermes base entrypoint must foreground the gateway with `gateway run`:\n%s", entrypoint)
 	}
 	for _, want := range []string{
+		`CLLAMA_CONSUMER_SESSION_EPOCH`,
+		`/proc/sys/kernel/random/uuid`,
+	} {
+		if !strings.Contains(entrypoint, want) {
+			t.Fatalf("Hermes base entrypoint missing %q", want)
+		}
+	}
+	for _, want := range []string{
 		`HERMES_DEFAULT_AGENT_IDENTITY`,
 		`DEFAULT_AGENT_IDENTITY = (`,
 		`not stored_prompt.startswith(default_identity)`,
@@ -52,6 +60,9 @@ func TestHermesBaseImageSourceContract(t *testing.T) {
 		`HERMES_ALLOW_SILENT_FINAL`,
 		`Silent final enabled; treating empty-after-think response as completed no-op`,
 		`intents.voice_states = False`,
+		`CLLAMA_CONSUMER_SESSION_EPOCH`,
+		`X-Claw-Consumer-Session-Epoch`,
+		`_claw_base_host == \"cllama\"`,
 	} {
 		if !strings.Contains(patch, want) {
 			t.Fatalf("Hermes runtime patch missing %q", want)

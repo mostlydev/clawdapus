@@ -31,7 +31,13 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.14.6 <Badge type="tip" text="Latest" /> {#v0-14-6}
+## v0.14.7 <Badge type="tip" text="Latest" /> {#v0-14-7}
+
+*2026-05-09*
+
+- **Channel context bootstraps on consumer restart** — cllama now stores an optional consumer session epoch alongside per-agent `channel-context` cursors and suppresses `after=` for the first successful fetch after a runner restart. Hermes-base generates `CLLAMA_CONSUMER_SESSION_EPOCH` at container boot and attaches `X-Claw-Consumer-Session-Epoch` only on in-pod cllama OpenAI-compatible requests; cllama keeps that header internal and does not forward it to upstream providers. This release pins cllama [v0.6.4](https://github.com/mostlydev/cllama/releases/tag/v0.6.4) and `ghcr.io/mostlydev/hermes-base:v2026.4.23-claw.2`. Closes [#220](https://github.com/mostlydev/clawdapus/issues/220).
+
+## v0.14.6 {#v0-14-6}
 
 *2026-04-30*
 
