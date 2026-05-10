@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +106,32 @@ func TestResolveComposeGeneratedPathStaleWithPodFile(t *testing.T) {
 	}
 }
 
+func TestResolveComposeGeneratedPathAllowStaleWarnsWithPodFile(t *testing.T) {
+	dir := t.TempDir()
+	podDir := filepath.Join(dir, "examples", "openclaw")
+	os.MkdirAll(podDir, 0755)
+
+	os.WriteFile(filepath.Join(podDir, "compose.generated.yml"), []byte("services: {}"), 0644)
+	time.Sleep(50 * time.Millisecond)
+	os.WriteFile(filepath.Join(podDir, "claw-pod.yml"), []byte("services: {}"), 0644)
+
+	composePodFile = filepath.Join(podDir, "claw-pod.yml")
+	defer func() { composePodFile = "" }()
+
+	var warnings bytes.Buffer
+	path, err := resolveComposeGeneratedPathAllowStale(&warnings)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := filepath.Join(podDir, "compose.generated.yml")
+	if path != expected {
+		t.Errorf("expected %q, got %q", expected, path)
+	}
+	if got := warnings.String(); !strings.Contains(got, "warning") || !strings.Contains(got, "Run 'claw up' afterward") {
+		t.Fatalf("expected stale warning, got %q", got)
+	}
+}
+
 func TestResolveComposeGeneratedPathStaleDefaultDir(t *testing.T) {
 	orig, _ := os.Getwd()
 	dir := t.TempDir()
@@ -124,6 +151,30 @@ func TestResolveComposeGeneratedPathStaleDefaultDir(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "claw up") {
 		t.Errorf("expected error to mention 'claw up', got: %s", err.Error())
+	}
+}
+
+func TestResolveComposeGeneratedPathAllowStaleWarnsDefaultDir(t *testing.T) {
+	orig, _ := os.Getwd()
+	dir := t.TempDir()
+	os.Chdir(dir)
+	defer os.Chdir(orig)
+
+	os.WriteFile(filepath.Join(dir, "compose.generated.yml"), []byte("services: {}"), 0644)
+	time.Sleep(50 * time.Millisecond)
+	os.WriteFile(filepath.Join(dir, "claw-pod.yml"), []byte("services: {}"), 0644)
+
+	composePodFile = ""
+	var warnings bytes.Buffer
+	path, err := resolveComposeGeneratedPathAllowStale(&warnings)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasSuffix(path, string(filepath.Separator)+"compose.generated.yml") {
+		t.Errorf("expected absolute compose.generated.yml path, got %q", path)
+	}
+	if got := warnings.String(); !strings.Contains(got, "warning") || !strings.Contains(got, "Run 'claw up' afterward") {
+		t.Fatalf("expected stale warning, got %q", got)
 	}
 }
 
@@ -148,6 +199,22 @@ func TestResolveComposeGeneratedPathFreshNotStale(t *testing.T) {
 	expected := filepath.Join(podDir, "compose.generated.yml")
 	if path != expected {
 		t.Errorf("expected %q, got %q", expected, path)
+	}
+}
+
+func TestComposePassthroughAllowsStaleGeneratedOnlyForBuild(t *testing.T) {
+	if !composePassthroughAllowsStaleGenerated([]string{"build", "trading-api"}) {
+		t.Fatal("expected compose build to allow stale generated compose with a warning")
+	}
+	for _, args := range [][]string{
+		nil,
+		{"ps"},
+		{"logs", "trading-api"},
+		{"up", "-d"},
+	} {
+		if composePassthroughAllowsStaleGenerated(args) {
+			t.Fatalf("did not expect %v to allow stale generated compose", args)
+		}
 	}
 }
 

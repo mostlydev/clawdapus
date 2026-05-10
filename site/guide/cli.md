@@ -635,7 +635,10 @@ Error: claw-pod.yml is newer than compose.generated.yml — run 'claw up' to reg
 
 **Resolution:** Run `claw up` to regenerate `compose.generated.yml` from the updated pod definition.
 
-**Exemptions:** `claw down` skips the staleness check. You can always tear down a pod regardless of whether the definition has changed -- you should never be blocked from stopping containers.
+**Exemptions:**
+
+- `claw down` skips the staleness check. You can always tear down a pod regardless of whether the definition has changed -- you should never be blocked from stopping containers.
+- `claw compose build` downgrades the staleness check to a warning. Building a service image does not depend on the generated compose matching the pod file -- it only needs the existing `services.<name>.build` block. The warning reminds you to run `claw up` afterward to apply any pod-level changes. This carve-out applies only to the literal `build` subcommand; `claw compose --progress=plain build foo` (with global docker compose flags before the subcommand) still trips the strict guard. If you need that shape, invoke `docker compose -f compose.generated.yml ...` directly.
 
 ---
 
@@ -651,7 +654,7 @@ Error: claw-pod.yml is newer than compose.generated.yml — run 'claw up' to reg
 | `claw logs` | Yes | Yes | |
 | `claw health` | Yes | Yes | |
 | `claw audit` | Yes | Yes | Reads pod manifest from `.claw-runtime/` |
-| `claw compose` | Yes | Yes | Passthrough to `docker compose` |
+| `claw compose` | Yes¹ | Yes | Passthrough to `docker compose` (¹ `claw compose build` warns instead of erroring; see [Staleness Guard](#staleness-guard)) |
 | `claw inspect` | -- | No | Reads image labels directly |
 | `claw doctor` | -- | No | System prerequisite check |
 | `claw init` | -- | No | Project scaffolding |
