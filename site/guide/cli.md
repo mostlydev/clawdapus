@@ -92,7 +92,7 @@ The pod file can be specified as a positional argument or via `-f`. Defaults to 
 | Flag | Description |
 |------|-------------|
 | `-d` | Detached mode. Required when the pod contains managed `x-claw` services. |
-| `--fix` | Pull and build missing images before starting. |
+| `--fix` | Pull/build missing images and refresh stale runtime-emitted descriptors before starting. |
 | `--discover-tools` | Discover missing or stale stdio MCP tool snapshots before compiling. |
 | `-f, --file <path>` | Path to `claw-pod.yml`. |
 
@@ -112,7 +112,7 @@ The pod file can be specified as a positional argument or via `-f`. Defaults to 
 
 **Dashboard URL:** When the pod declares a `clawdash` surface, `claw up` prints the dashboard URL on success (for example `[claw] dashboard:  http://localhost:8082`) so you can jump straight into the Agents / Topology / Fleet views without re-checking the compose output.
 
-`claw up` is strict by default. If an infra image is missing, it tells you to run `claw pull`. If a local runner base needs refresh, the build path tells you to run `claw pull`. If a pod service image is not built, it tells you to run `claw build`. `claw up --fix` can pull/build missing infra and service images, but runner refresh still happens through `claw pull`.
+`claw up` is strict by default. If an infra image is missing, it tells you to run `claw pull`. If a local runner base needs refresh, the build path tells you to run `claw pull`. If a pod service image is not built, it tells you to run `claw build`. If a build-backed service descriptor is stale and an allowlist references a new tool, it tells you to run `claw up --fix -d`. `claw up --fix` can pull/build missing infra and service images and refresh runtime-emitted descriptor snapshots, but runner refresh still happens through `claw pull`.
 
 **Examples:**
 
