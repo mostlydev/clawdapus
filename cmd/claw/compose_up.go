@@ -67,11 +67,18 @@ var (
 	findClawdapusRepoRoot        = findRepoRoot
 	runInfraDockerCommand        = runInfraDockerCommandDefault
 	runComposeDockerCommand      = runComposeDockerCommandDefault
+	runRuntimeDescriptorCommand  = runRuntimeDescriptorCommandDefault
+	refreshRuntimeDescriptor     = refreshRuntimeDescriptorDefault
 	loadDescriptorFromFile       = describe.LoadFromFile
 	loadDescriptorFromImage      = describe.LoadFromImage
 	loadDescriptorFromBuildCtx   = describe.LoadFromBuildContext
 	resolveBuildContextFile      = describe.ResolveBuildContextFile
 	loadDockerfileMetadata       = inspect.LoadFromDockerfile
+)
+
+var (
+	runtimeDescriptorRefreshTimeout      = 45 * time.Second
+	runtimeDescriptorRefreshPollInterval = time.Second
 )
 
 var composeUpCmd = &cobra.Command{
@@ -405,28 +412,12 @@ func runComposeUp(podFile string) (err error) {
 		return err
 	}
 
-	if err := collectServiceDescriptors(podDir, p, serviceImageRefs, serviceInfos, serviceDescriptors); err != nil {
-		return err
-	}
-	feedRegistry, err := describe.BuildFeedRegistry(serviceDescriptors)
-	if err != nil {
-		return fmt.Errorf("build feed registry: %w", err)
-	}
-	toolRegistry, err := describe.BuildToolRegistry(serviceDescriptors)
-	if err != nil {
-		return fmt.Errorf("build tool registry: %w", err)
-	}
-	if err := resolveFeedSubscriptions(p, feedRegistry); err != nil {
-		return err
-	}
-	resolvedTools, err := resolveToolSubscriptions(p, toolRegistry)
+	capabilities, err := resolvePodCapabilities(podFile, podDir, p, serviceImageRefs, serviceInfos, serviceDescriptors)
 	if err != nil {
 		return err
 	}
-	resolvedMemory, err := resolveMemorySubscriptions(p, serviceDescriptors)
-	if err != nil {
-		return err
-	}
+	resolvedTools := capabilities.Tools
+	resolvedMemory := capabilities.Memory
 	if err := attachCapabilityProvidersToInternalNetwork(p, resolvedTools, resolvedMemory); err != nil {
 		return err
 	}
@@ -1214,6 +1205,114 @@ type resolvedMemorySubscription struct {
 	Config  *pod.MemoryEntry
 }
 
+type resolvedPodCapabilities struct {
+	Tools  map[string][]describe.ToolSpec
+	Memory map[string]*resolvedMemorySubscription
+}
+
+func resolvePodCapabilities(podFile, podDir string, p *pod.Pod, imageRefs map[string]string, infos map[string]*inspect.ClawInfo, descriptors map[string]*describe.ServiceDescriptor) (*resolvedPodCapabilities, error) {
+	refreshed := make(map[string]struct{})
+	for {
+		capabilities, err := resolvePodCapabilitiesOnce(podDir, p, imageRefs, infos, descriptors)
+		if err == nil {
+			return capabilities, nil
+		}
+
+		serviceName, canRefresh := runtimeDescriptorRefreshCandidate(err, p)
+		if !canRefresh {
+			return nil, err
+		}
+		if !composeUpFix {
+			return nil, remediationErrorf(upFixCommand(podFile), "%s", err)
+		}
+		if _, already := refreshed[serviceName]; already {
+			return nil, err
+		}
+		if err := refreshRuntimeDescriptor(podFile, podDir, p, serviceName, imageRefs, infos, descriptors); err != nil {
+			return nil, err
+		}
+		refreshed[serviceName] = struct{}{}
+	}
+}
+
+func resolvePodCapabilitiesOnce(podDir string, p *pod.Pod, imageRefs map[string]string, infos map[string]*inspect.ClawInfo, descriptors map[string]*describe.ServiceDescriptor) (*resolvedPodCapabilities, error) {
+	if err := collectServiceDescriptors(podDir, p, imageRefs, infos, descriptors); err != nil {
+		return nil, err
+	}
+	feedRegistry, err := describe.BuildFeedRegistry(descriptors)
+	if err != nil {
+		return nil, fmt.Errorf("build feed registry: %w", err)
+	}
+	toolRegistry, err := describe.BuildToolRegistry(descriptors)
+	if err != nil {
+		return nil, fmt.Errorf("build tool registry: %w", err)
+	}
+	if err := resolveFeedSubscriptions(p, feedRegistry); err != nil {
+		return nil, err
+	}
+	resolvedTools, err := resolveToolSubscriptions(p, toolRegistry)
+	if err != nil {
+		return nil, err
+	}
+	resolvedMemory, err := resolveMemorySubscriptions(p, descriptors)
+	if err != nil {
+		return nil, err
+	}
+	return &resolvedPodCapabilities{
+		Tools:  resolvedTools,
+		Memory: resolvedMemory,
+	}, nil
+}
+
+type toolResolutionError struct {
+	ConsumerService string
+	PolicyIndex     int
+	ToolService     string
+	ToolName        string
+}
+
+func (e *toolResolutionError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.ToolName == "" {
+		return fmt.Sprintf("service %q: tool policy %d references unknown tool service %q", e.ConsumerService, e.PolicyIndex, e.ToolService)
+	}
+	return fmt.Sprintf("service %q: tool policy for %q references unknown tool %q", e.ConsumerService, e.ToolService, e.ToolName)
+}
+
+func runtimeDescriptorRefreshCandidate(err error, p *pod.Pod) (string, bool) {
+	var toolErr *toolResolutionError
+	if !errors.As(err, &toolErr) || toolErr == nil {
+		return "", false
+	}
+	serviceName := strings.TrimSpace(toolErr.ToolService)
+	if serviceName == "" || p == nil {
+		return "", false
+	}
+	svc := p.Services[serviceName]
+	if !serviceHasBuildConfig(svc) {
+		return "", false
+	}
+	return serviceName, true
+}
+
+func serviceHasBuildConfig(svc *pod.Service) bool {
+	if svc == nil {
+		return false
+	}
+	cfg, err := parseServiceBuildConfig(svc.Compose["build"])
+	return err == nil && cfg != nil
+}
+
+func upFixCommand(podFile string) string {
+	podFile = strings.TrimSpace(podFile)
+	if podFile == "" || podFile == "claw-pod.yml" {
+		return "claw up --fix -d"
+	}
+	return "claw up --fix -d " + podFile
+}
+
 func resolveToolSubscriptions(p *pod.Pod, registry describe.ToolRegistry) (map[string][]describe.ToolSpec, error) {
 	if p == nil {
 		return nil, nil
@@ -1230,7 +1329,11 @@ func resolveToolSubscriptions(p *pod.Pod, registry describe.ToolRegistry) (map[s
 		for i, policy := range svc.Claw.Tools {
 			specs, ok := registry[policy.Service]
 			if !ok {
-				return nil, fmt.Errorf("service %q: tool policy %d references unknown tool service %q", serviceName, i, policy.Service)
+				return nil, &toolResolutionError{
+					ConsumerService: serviceName,
+					PolicyIndex:     i,
+					ToolService:     policy.Service,
+				}
 			}
 			byName := make(map[string]describe.ToolSpec, len(specs))
 			for _, spec := range specs {
@@ -1252,7 +1355,12 @@ func resolveToolSubscriptions(p *pod.Pod, registry describe.ToolRegistry) (map[s
 			for _, toolName := range policy.Allow {
 				spec, ok := byName[toolName]
 				if !ok {
-					return nil, fmt.Errorf("service %q: tool policy for %q references unknown tool %q", serviceName, policy.Service, toolName)
+					return nil, &toolResolutionError{
+						ConsumerService: serviceName,
+						PolicyIndex:     i,
+						ToolService:     policy.Service,
+						ToolName:        toolName,
+					}
 				}
 				key := spec.Service + "." + spec.Name
 				if _, exists := seen[key]; exists {
@@ -3476,12 +3584,18 @@ func resolveServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("load discovered descriptor %q: %w", descriptorPath, err)
 		}
-		warnDiscoveryDrift(serviceName, descriptor, svc)
-		if svc != nil && strings.TrimSpace(svc.Image) != "" {
-			imageRefs[serviceName] = strings.TrimSpace(svc.Image)
+		if svc != nil && svc.IsMCPStdioSidecar() {
+			warnDiscoveryDrift(serviceName, descriptor, svc)
+		} else if !runtimeDescriptorSnapshotUsable(descriptor, svc) {
+			descriptor = nil
 		}
-		descriptors[serviceName] = descriptor
-		return strings.TrimSpace(svc.Image), infos[serviceName], descriptor, nil
+		if descriptor != nil {
+			if svc != nil && strings.TrimSpace(svc.Image) != "" {
+				imageRefs[serviceName] = strings.TrimSpace(svc.Image)
+			}
+			descriptors[serviceName] = descriptor
+			return strings.TrimSpace(svc.Image), infos[serviceName], descriptor, nil
+		}
 	}
 
 	imageRef, info, err := inspectServiceMetadata(podDir, p, serviceName, svc, imageRefs, infos)
@@ -3538,7 +3652,7 @@ func explicitDescribeFile(podDir string, svc *pod.Service) string {
 }
 
 func discoveredDescribeFile(podDir, serviceName string, svc *pod.Service) string {
-	if svc == nil || !svc.IsMCPStdioSidecar() {
+	if svc == nil || (!svc.IsMCPStdioSidecar() && !serviceHasBuildConfig(svc)) {
 		return ""
 	}
 	path := discoveredSnapshotPath(podDir, serviceName)
@@ -3546,6 +3660,150 @@ func discoveredDescribeFile(podDir, serviceName string, svc *pod.Service) string
 		return path
 	}
 	return ""
+}
+
+func runtimeDescriptorSnapshotUsable(descriptor *describe.ServiceDescriptor, svc *pod.Service) bool {
+	if descriptor == nil || svc == nil {
+		return false
+	}
+	meta := descriptor.XClawDiscovery
+	if meta == nil || strings.TrimSpace(meta.Command) != "runtime-descriptor" {
+		return false
+	}
+	imageRef := strings.TrimSpace(svc.Image)
+	if meta.WrapperImage != "" && imageRef != "" && meta.WrapperImage != imageRef {
+		return false
+	}
+	if meta.WrapperImageID != "" && imageRef != "" {
+		currentID, _ := discoveryImageIdentity(context.Background(), imageRef)
+		if currentID != "" && currentID != meta.WrapperImageID {
+			return false
+		}
+	}
+	return true
+}
+
+func refreshRuntimeDescriptorDefault(podFile, podDir string, p *pod.Pod, serviceName string, imageRefs map[string]string, infos map[string]*inspect.ClawInfo, descriptors map[string]*describe.ServiceDescriptor) error {
+	if p == nil {
+		return fmt.Errorf("refresh runtime descriptor: pod is required")
+	}
+	svc := p.Services[serviceName]
+	if svc == nil {
+		return fmt.Errorf("refresh runtime descriptor: service %q not found", serviceName)
+	}
+	cfg, err := parseServiceBuildConfig(svc.Compose["build"])
+	if err != nil {
+		return fmt.Errorf("service %q: parse build: %w", serviceName, err)
+	}
+	if cfg == nil {
+		return fmt.Errorf("service %q: runtime descriptor refresh requires a build-backed service", serviceName)
+	}
+
+	imageRef := strings.TrimSpace(svc.Image)
+	if imageRef == "" {
+		imageRef = managedServiceImageRef(p.Name, serviceName)
+		assignServiceImageRef(svc, imageRef)
+	}
+
+	fmt.Printf("[claw] %s: refreshing runtime descriptor via --fix\n", serviceName)
+	if err := buildManagedServiceImage(podFile, podDir, imageRef, cfg); err != nil {
+		return fmt.Errorf("service %q: build before descriptor refresh: %w", serviceName, err)
+	}
+
+	delete(imageRefs, serviceName)
+	delete(infos, serviceName)
+	imageRef, info, err := inspectServiceMetadata(podDir, p, serviceName, svc, imageRefs, infos)
+	if err != nil {
+		return fmt.Errorf("service %q: inspect descriptor metadata after build: %w", serviceName, err)
+	}
+	descriptorPath, _ := resolvedImageDescriptorPath(info)
+
+	composePath := filepath.Join(podDir, "compose.generated.yml")
+	if _, err := os.Stat(composePath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("service %q: cannot refresh runtime descriptor because compose.generated.yml is missing; run an initial deploy with a baked descriptor or set x-claw.describe-file", serviceName)
+		}
+		return fmt.Errorf("service %q: stat compose.generated.yml: %w", serviceName, err)
+	}
+
+	if out, err := runRuntimeDescriptorCommand("compose", "-f", composePath, "up", "-d", "--force-recreate", serviceName); err != nil {
+		return fmt.Errorf("service %q: start provider for descriptor refresh: %w%s", serviceName, err, commandOutputSuffix(out))
+	}
+
+	descriptor, err := copyRuntimeDescriptorSnapshot(composePath, serviceName, descriptorPath, imageRef)
+	if err != nil {
+		return err
+	}
+	descriptors[serviceName] = descriptor
+	fmt.Printf("[claw] %s: refreshed descriptor snapshot %s\n", serviceName, discoveredSnapshotPath(podDir, serviceName))
+	return nil
+}
+
+func copyRuntimeDescriptorSnapshot(composePath, serviceName, descriptorPath, imageRef string) (*describe.ServiceDescriptor, error) {
+	podDir := filepath.Dir(composePath)
+	snapshotPath := discoveredSnapshotPath(podDir, serviceName)
+	tmp, err := os.CreateTemp("", "claw-runtime-descriptor-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("service %q: create descriptor refresh temp file: %w", serviceName, err)
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, fmt.Errorf("service %q: close descriptor refresh temp file: %w", serviceName, err)
+	}
+	defer os.Remove(tmpPath)
+
+	deadline := time.Now().Add(runtimeDescriptorRefreshTimeout)
+	var lastErr error
+	for {
+		_ = os.Remove(tmpPath)
+		source := fmt.Sprintf("%s:%s", serviceName, descriptorPath)
+		if out, err := runRuntimeDescriptorCommand("compose", "-f", composePath, "cp", source, tmpPath); err != nil {
+			lastErr = fmt.Errorf("docker compose cp: %w%s", err, commandOutputSuffix(out))
+		} else if descriptor, err := loadDescriptorFromFile(tmpPath); err != nil {
+			lastErr = err
+		} else {
+			imageID, digest := discoveryImageIdentity(context.Background(), imageRef)
+			descriptor.XClawDiscovery = &describe.DiscoveryMetadata{
+				Command:            "runtime-descriptor",
+				WrapperImage:       imageRef,
+				WrapperImageDigest: digest,
+				WrapperImageID:     imageID,
+				DiscoveredAt:       time.Now().UTC().Format(time.RFC3339),
+			}
+			if err := writeDescriptorSnapshot(snapshotPath, descriptor); err != nil {
+				return nil, fmt.Errorf("service %q: write runtime descriptor snapshot: %w", serviceName, err)
+			}
+			return descriptor, nil
+		}
+
+		if runtimeDescriptorRefreshTimeout <= 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(runtimeDescriptorRefreshPollInterval)
+	}
+
+	logs := runtimeDescriptorLogs(composePath, serviceName)
+	return nil, fmt.Errorf("service %q: descriptor %q was not available after refresh: %v%s", serviceName, descriptorPath, lastErr, logs)
+}
+
+func runtimeDescriptorLogs(composePath, serviceName string) string {
+	out, err := runRuntimeDescriptorCommand("compose", "-f", composePath, "logs", "--tail", "80", serviceName)
+	if err != nil {
+		return fmt.Sprintf("\ncontainer logs unavailable: %v%s", err, commandOutputSuffix(out))
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return "\ncontainer logs were empty"
+	}
+	return "\ncontainer logs:\n" + string(out)
+}
+
+func commandOutputSuffix(out []byte) string {
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return ""
+	}
+	return ": " + trimmed
 }
 
 func resolvedImageDescriptorPath(info *inspect.ClawInfo) (string, bool) {
@@ -4378,6 +4636,11 @@ func runComposeDockerCommandDefault(args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func runRuntimeDescriptorCommandDefault(args ...string) ([]byte, error) {
+	cmd := exec.Command("docker", args...)
+	return cmd.CombinedOutput()
 }
 
 func warnRunnerBaseDrift(podFile string, plans []plannedServiceImage) {

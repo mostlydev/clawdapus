@@ -464,6 +464,93 @@ func TestResolveServiceMetadataLoadsDiscoveredSnapshot(t *testing.T) {
 	}
 }
 
+func TestResolveServiceMetadataLoadsRuntimeSnapshotForBuildService(t *testing.T) {
+	tmpDir := t.TempDir()
+	serviceDir := filepath.Join(tmpDir, "services", "trading-api")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	descriptor := &describe.ServiceDescriptor{
+		Version: 2,
+		Tools: []describe.ToolDescriptor{{
+			Name:        "update_position",
+			Description: "Update a position.",
+			InputSchema: map[string]interface{}{"type": "object"},
+			HTTP:        &describe.ToolHTTP{Method: "POST", Path: "/tools/update_position"},
+		}},
+		XClawDiscovery: &describe.DiscoveryMetadata{
+			Command:      "runtime-descriptor",
+			WrapperImage: "trading-api:latest",
+		},
+	}
+	if err := writeDescriptorSnapshot(discoveredSnapshotPath(tmpDir, "trading-api"), descriptor); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+	p := &pod.Pod{Services: map[string]*pod.Service{
+		"trading-api": {
+			Image: "trading-api:latest",
+			Compose: map[string]interface{}{
+				"build": map[string]interface{}{
+					"context":    "./services/trading-api",
+					"dockerfile": "Dockerfile",
+				},
+			},
+		},
+	}}
+
+	_, _, got, err := resolveServiceMetadata(tmpDir, p, "trading-api", p.Services["trading-api"], map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err != nil {
+		t.Fatalf("resolveServiceMetadata: %v", err)
+	}
+	if got == nil || len(got.Tools) != 1 || got.Tools[0].Name != "update_position" {
+		t.Fatalf("unexpected descriptor: %+v", got)
+	}
+}
+
+func TestResolveServiceMetadataIgnoresNonRuntimeSnapshotForBuildService(t *testing.T) {
+	tmpDir := t.TempDir()
+	serviceDir := filepath.Join(tmpDir, "services", "trading-api")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	descriptor := &describe.ServiceDescriptor{
+		Version: 2,
+		Tools: []describe.ToolDescriptor{{
+			Name:        "stale_tool",
+			Description: "Stale tool.",
+			InputSchema: map[string]interface{}{"type": "object"},
+			HTTP:        &describe.ToolHTTP{Method: "POST", Path: "/tools/stale"},
+		}},
+	}
+	if err := writeDescriptorSnapshot(discoveredSnapshotPath(tmpDir, "trading-api"), descriptor); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+	p := &pod.Pod{Services: map[string]*pod.Service{
+		"trading-api": {
+			Compose: map[string]interface{}{
+				"build": map[string]interface{}{
+					"context":    "./services/trading-api",
+					"dockerfile": "Dockerfile",
+				},
+			},
+		},
+	}}
+
+	_, _, got, err := resolveServiceMetadata(tmpDir, p, "trading-api", p.Services["trading-api"], map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err != nil {
+		t.Fatalf("resolveServiceMetadata: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected non-runtime snapshot to be ignored, got %+v", got)
+	}
+}
+
 func TestResolveServiceMetadataRequiresSnapshotForMCPStdio(t *testing.T) {
 	prevImageExists := imageExistsLocally
 	prevInspect := inspectClawImage
@@ -491,6 +578,108 @@ func TestResolveServiceMetadataRequiresSnapshotForMCPStdio(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "run 'claw discover echo'") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRefreshRuntimeDescriptorDefaultUsesExistingComposeAndWritesSnapshot(t *testing.T) {
+	podDir := t.TempDir()
+	serviceDir := filepath.Join(podDir, "services", "trading-api")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile"), []byte("FROM scratch\nLABEL claw.describe=/app/.claw-describe.json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	composePath := filepath.Join(podDir, "compose.generated.yml")
+	if err := os.WriteFile(composePath, []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prevExists := imageExistsLocally
+	prevDockerBuild := dockerBuildTaggedImage
+	prevRun := runRuntimeDescriptorCommand
+	prevTimeout := runtimeDescriptorRefreshTimeout
+	prevPoll := runtimeDescriptorRefreshPollInterval
+	defer func() {
+		imageExistsLocally = prevExists
+		dockerBuildTaggedImage = prevDockerBuild
+		runRuntimeDescriptorCommand = prevRun
+		runtimeDescriptorRefreshTimeout = prevTimeout
+		runtimeDescriptorRefreshPollInterval = prevPoll
+	}()
+
+	imageExistsLocally = func(string) bool { return false }
+	var builtImage string
+	dockerBuildTaggedImage = func(imageRef, dockerfile, contextDir string, args map[string]buildArgValue, target string) error {
+		builtImage = imageRef
+		if dockerfile != filepath.Join(serviceDir, "Dockerfile") {
+			t.Fatalf("unexpected dockerfile: %q", dockerfile)
+		}
+		if contextDir != serviceDir {
+			t.Fatalf("unexpected build context: %q", contextDir)
+		}
+		return nil
+	}
+	runtimeDescriptorRefreshTimeout = 0
+	runtimeDescriptorRefreshPollInterval = 0
+	commands := make([]string, 0)
+	runRuntimeDescriptorCommand = func(args ...string) ([]byte, error) {
+		commands = append(commands, strings.Join(args, " "))
+		if len(args) >= 1 && args[0] == "compose" && slices.Contains(args, "cp") {
+			dest := args[len(args)-1]
+			data := `{
+  "version": 2,
+  "tools": [{
+    "name": "update_position",
+    "description": "Update a position.",
+    "inputSchema": {"type": "object"},
+    "http": {"method": "POST", "path": "/tools/update_position"}
+  }]
+}`
+			if err := os.WriteFile(dest, []byte(data), 0o644); err != nil {
+				return nil, err
+			}
+		}
+		return nil, nil
+	}
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"trading-api": {
+				Image: "trading-api:latest",
+				Compose: map[string]interface{}{
+					"build": map[string]interface{}{
+						"context":    "./services/trading-api",
+						"dockerfile": "Dockerfile",
+					},
+				},
+			},
+		},
+	}
+	descriptors := map[string]*describe.ServiceDescriptor{}
+	if err := refreshRuntimeDescriptorDefault("claw-pod.yml", podDir, p, "trading-api", map[string]string{}, map[string]*inspect.ClawInfo{}, descriptors); err != nil {
+		t.Fatalf("refreshRuntimeDescriptorDefault: %v", err)
+	}
+	if builtImage != "trading-api:latest" {
+		t.Fatalf("expected image rebuild, got %q", builtImage)
+	}
+	if len(commands) < 2 || !strings.Contains(commands[0], "up -d --force-recreate trading-api") || !strings.Contains(commands[1], "cp trading-api:/app/.claw-describe.json") {
+		t.Fatalf("unexpected refresh commands: %+v", commands)
+	}
+	descriptor := descriptors["trading-api"]
+	if descriptor == nil || len(descriptor.Tools) != 1 || descriptor.Tools[0].Name != "update_position" {
+		t.Fatalf("unexpected refreshed descriptor: %+v", descriptor)
+	}
+	if descriptor.XClawDiscovery == nil || descriptor.XClawDiscovery.Command != "runtime-descriptor" {
+		t.Fatalf("expected runtime discovery metadata, got %+v", descriptor.XClawDiscovery)
+	}
+	snapshot, err := os.ReadFile(discoveredSnapshotPath(podDir, "trading-api"))
+	if err != nil {
+		t.Fatalf("read runtime descriptor snapshot: %v", err)
+	}
+	if !strings.Contains(string(snapshot), `"update_position"`) || !strings.Contains(string(snapshot), `"runtime-descriptor"`) {
+		t.Fatalf("snapshot missing refreshed descriptor or metadata:\n%s", snapshot)
 	}
 }
 
@@ -3149,8 +3338,173 @@ func TestResolveToolSubscriptionsRejectsUnknownTool(t *testing.T) {
 		},
 	}
 
-	if _, err := resolveToolSubscriptions(p, registry); err == nil {
+	_, err := resolveToolSubscriptions(p, registry)
+	if err == nil {
 		t.Fatal("expected unknown tool error")
+	}
+	var toolErr *toolResolutionError
+	if !errors.As(err, &toolErr) {
+		t.Fatalf("expected toolResolutionError, got %T: %v", err, err)
+	}
+	if toolErr.ToolService != "trading-api" || toolErr.ToolName != "missing_tool" {
+		t.Fatalf("unexpected tool error metadata: %+v", toolErr)
+	}
+}
+
+func TestResolvePodCapabilitiesStrictHintsFixForBuildBackedUnknownTool(t *testing.T) {
+	prevFix := composeUpFix
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
+	composeUpFix = false
+	defer func() {
+		composeUpFix = prevFix
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
+	}()
+	imageExistsLocally = func(image string) bool { return image == "analyst:latest" }
+	inspectClawImage = func(string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{ClawType: "openclaw"}, nil
+	}
+	loadDescriptorFromImage = func(string, string) (*describe.ServiceDescriptor, error) {
+		return nil, os.ErrNotExist
+	}
+
+	podDir := t.TempDir()
+	serviceDir := filepath.Join(podDir, "services", "trading-api")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Image: "analyst:latest",
+				Claw: &pod.ClawBlock{
+					Tools: []pod.ToolPolicyEntry{
+						{Service: "trading-api", Allow: []string{"update_position"}},
+					},
+				},
+			},
+			"trading-api": {
+				Compose: map[string]interface{}{
+					"build": map[string]interface{}{
+						"context":    "./services/trading-api",
+						"dockerfile": "Dockerfile",
+					},
+				},
+			},
+		},
+	}
+
+	_, err := resolvePodCapabilities("claw-pod.yml", podDir, p, map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err == nil {
+		t.Fatal("expected strict mode remediation hint")
+	}
+	if !strings.Contains(err.Error(), "references unknown tool service \"trading-api\"") {
+		t.Fatalf("expected original tool error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "run: claw up --fix -d") {
+		t.Fatalf("expected claw up --fix remediation, got: %v", err)
+	}
+}
+
+func TestResolvePodCapabilitiesFixRefreshesAndRetriesUnknownTool(t *testing.T) {
+	prevFix := composeUpFix
+	prevRefresh := refreshRuntimeDescriptor
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
+	composeUpFix = true
+	defer func() {
+		composeUpFix = prevFix
+		refreshRuntimeDescriptor = prevRefresh
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
+	}()
+	imageExistsLocally = func(image string) bool { return image == "analyst:latest" }
+	inspectClawImage = func(string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{ClawType: "openclaw"}, nil
+	}
+	loadDescriptorFromImage = func(string, string) (*describe.ServiceDescriptor, error) {
+		return nil, os.ErrNotExist
+	}
+
+	podDir := t.TempDir()
+	serviceDir := filepath.Join(podDir, "services", "trading-api")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile"), []byte("FROM scratch\nLABEL claw.describe=/.claw-describe.json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleDescriptor := `{
+  "version": 2,
+  "tools": [{
+    "name": "old_tool",
+    "description": "Old tool",
+    "inputSchema": {"type": "object"},
+    "http": {"method": "POST", "path": "/old"}
+  }]
+}`
+	if err := os.WriteFile(filepath.Join(serviceDir, ".claw-describe.json"), []byte(staleDescriptor), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Image: "analyst:latest",
+				Claw: &pod.ClawBlock{
+					Tools: []pod.ToolPolicyEntry{
+						{Service: "trading-api", Allow: []string{"update_position"}},
+					},
+				},
+			},
+			"trading-api": {
+				Expose: []string{"4000"},
+				Compose: map[string]interface{}{
+					"build": map[string]interface{}{
+						"context":    "./services/trading-api",
+						"dockerfile": "Dockerfile",
+					},
+				},
+			},
+		},
+	}
+
+	var refreshedService string
+	refreshRuntimeDescriptor = func(_ string, _ string, _ *pod.Pod, serviceName string, _ map[string]string, _ map[string]*inspect.ClawInfo, descriptors map[string]*describe.ServiceDescriptor) error {
+		refreshedService = serviceName
+		descriptors[serviceName] = &describe.ServiceDescriptor{
+			Version: 2,
+			Tools: []describe.ToolDescriptor{{
+				Name:        "update_position",
+				Description: "Update a position.",
+				InputSchema: map[string]interface{}{"type": "object"},
+				HTTP:        &describe.ToolHTTP{Method: "POST", Path: "/tools/update_position"},
+			}},
+		}
+		return nil
+	}
+
+	capabilities, err := resolvePodCapabilities("claw-pod.yml", podDir, p, map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err != nil {
+		t.Fatalf("resolvePodCapabilities: %v", err)
+	}
+	if refreshedService != "trading-api" {
+		t.Fatalf("expected trading-api refresh, got %q", refreshedService)
+	}
+	tools := capabilities.Tools["analyst"]
+	if len(tools) != 1 || tools[0].Name != "update_position" {
+		t.Fatalf("expected refreshed tool selection, got %+v", tools)
 	}
 }
 

@@ -26,7 +26,7 @@ claw discover [-f <pod>.yml] [svc]   # discover stdio MCP tools into .claw-disco
 
 # Pod lifecycle (mirrors docker compose UX)
 claw up [-f <pod>.yml] [-d]         # strict: tells you to run claw pull/build when images are missing
-claw up --fix [-f <pod>.yml] [-d]   # pull/build missing images, then launch
+claw up --fix [-f <pod>.yml] [-d]   # pull/build missing images, refresh runtime descriptors, then launch
 claw up --discover-tools [-d]        # refresh missing/stale stdio MCP discovery snapshots, then launch
 claw down [-f <pod>.yml]            # tear down
 claw ps [-f <pod>.yml]              # container status
@@ -240,7 +240,7 @@ services:
 
 ## Service Self-Description (claw.describe)
 
-Services declare capabilities via a `.claw-describe.json` file (embedded in the image, discovered from Dockerfile labels, generated under `.claw-discovered/` by `claw discover`, or supplied with service-level `x-claw.describe-file`). `claw up` extracts descriptors and compiles them into pod-global registries.
+Services declare capabilities via a `.claw-describe.json` file (embedded in the image, discovered from Dockerfile labels, generated under `.claw-discovered/` by `claw discover`, refreshed there by `claw up --fix` for build-backed runtime-emitted descriptors, or supplied with service-level `x-claw.describe-file`). `claw up` extracts descriptors and compiles them into pod-global registries.
 
 ### Descriptor v2
 
