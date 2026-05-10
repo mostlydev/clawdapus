@@ -17,7 +17,13 @@ var composePassthroughCmd = &cobra.Command{
 			return fmt.Errorf("usage: claw compose <subcommand> [args...]")
 		}
 
-		generatedPath, err := resolveComposeGeneratedPath()
+		var generatedPath string
+		var err error
+		if composePassthroughAllowsStaleGenerated(args) {
+			generatedPath, err = resolveComposeGeneratedPathAllowStale(os.Stderr)
+		} else {
+			generatedPath, err = resolveComposeGeneratedPath()
+		}
 		if err != nil {
 			return err
 		}
@@ -32,6 +38,10 @@ var composePassthroughCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+func composePassthroughAllowsStaleGenerated(args []string) bool {
+	return len(args) > 0 && args[0] == "build"
 }
 
 func init() {

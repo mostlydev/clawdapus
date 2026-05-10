@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -9,7 +10,27 @@ import (
 var composePodFile string
 var skipStalenessCheck bool
 
+type composeStalenessPolicy int
+
+const (
+	composeStalenessError composeStalenessPolicy = iota
+	composeStalenessWarn
+	composeStalenessIgnore
+)
+
 func resolveComposeGeneratedPath() (string, error) {
+	policy := composeStalenessError
+	if skipStalenessCheck {
+		policy = composeStalenessIgnore
+	}
+	return resolveComposeGeneratedPathWithPolicy(policy, nil)
+}
+
+func resolveComposeGeneratedPathAllowStale(warningWriter io.Writer) (string, error) {
+	return resolveComposeGeneratedPathWithPolicy(composeStalenessWarn, warningWriter)
+}
+
+func resolveComposeGeneratedPathWithPolicy(policy composeStalenessPolicy, warningWriter io.Writer) (string, error) {
 	if composePodFile != "" {
 		absPodFile, err := filepath.Abs(composePodFile)
 		if err != nil {
@@ -21,12 +42,8 @@ func resolveComposeGeneratedPath() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("no compose.generated.yml found next to %q (run 'claw up %s' first)", composePodFile, composePodFile)
 		}
-		if !skipStalenessCheck {
-			if podInfo, err := os.Stat(absPodFile); err == nil {
-				if podInfo.ModTime().After(genInfo.ModTime()) {
-					return "", fmt.Errorf("claw-pod.yml is newer than compose.generated.yml — run 'claw up' to regenerate")
-				}
-			}
+		if err := checkComposeGeneratedStaleness(absPodFile, genInfo, policy, warningWriter); err != nil {
+			return "", err
 		}
 		return generatedPath, nil
 	}
@@ -41,15 +58,34 @@ func resolveComposeGeneratedPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("no compose.generated.yml found in %q (rerun from pod directory or pass --file <path-to-claw-pod.yml>)", cwd)
 	}
-	if !skipStalenessCheck {
-		podPath := filepath.Join(cwd, "claw-pod.yml")
-		if podInfo, err := os.Stat(podPath); err == nil {
-			if podInfo.ModTime().After(genInfo.ModTime()) {
-				return "", fmt.Errorf("claw-pod.yml is newer than compose.generated.yml — run 'claw up' to regenerate")
-			}
-		}
+	podPath := filepath.Join(cwd, "claw-pod.yml")
+	if err := checkComposeGeneratedStaleness(podPath, genInfo, policy, warningWriter); err != nil {
+		return "", err
 	}
 	return generatedPath, nil
+}
+
+func checkComposeGeneratedStaleness(podPath string, genInfo os.FileInfo, policy composeStalenessPolicy, warningWriter io.Writer) error {
+	if policy == composeStalenessIgnore {
+		return nil
+	}
+
+	podInfo, err := os.Stat(podPath)
+	if err != nil {
+		return nil
+	}
+	if !podInfo.ModTime().After(genInfo.ModTime()) {
+		return nil
+	}
+
+	if policy == composeStalenessWarn {
+		if warningWriter != nil {
+			fmt.Fprintln(warningWriter, "[claw] warning: claw-pod.yml is newer than compose.generated.yml; building against the previously generated compose. Run 'claw up' afterward to apply the new pod config.")
+		}
+		return nil
+	}
+
+	return fmt.Errorf("claw-pod.yml is newer than compose.generated.yml — run 'claw up' to regenerate")
 }
 
 func init() {
