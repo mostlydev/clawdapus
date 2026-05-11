@@ -76,8 +76,10 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 	env["MESSAGING_CWD"] = hermesWorkspaceDir
 	env["TERMINAL_CWD"] = hermesWorkspaceDir
 	env[hermesDefaultAgentIdentityEnv] = managedDefaultAgentIdentity
-	if hasDiscordHandle(rc) {
+	if hasDiscordHandle(rc) || hasSlackHandle(rc) {
 		env[hermesToolProgressModeEnv] = "off"
+	}
+	if hasDiscordHandle(rc) {
 		// Hermes upstream defaults reply-mention pings to True
 		// (DISCORD_ALLOW_MENTION_REPLIED_USER), which produces mention loops in
 		// multi-agent pods even with DISCORD_REQUIRE_MENTION=true. Force false
@@ -317,10 +319,15 @@ func allowedEnvPassthroughKeys() []string {
 		"OPENAI_API_KEY",
 		"OPENROUTER_API_KEY",
 		"SLACK_ALLOWED_USERS",
+		"SLACK_ALLOW_ALL_USERS",
+		"SLACK_ALLOW_BOTS",
 		"SLACK_APP_TOKEN",
 		"SLACK_BOT_TOKEN",
+		"SLACK_FREE_RESPONSE_CHANNELS",
 		"SLACK_HOME_CHANNEL",
 		"SLACK_HOME_CHANNEL_NAME",
+		"SLACK_REACTIONS",
+		"SLACK_REQUIRE_MENTION",
 		"TELEGRAM_ALLOWED_USERS",
 		"TELEGRAM_BOT_TOKEN",
 		"TELEGRAM_HOME_CHANNEL",
@@ -329,11 +336,19 @@ func allowedEnvPassthroughKeys() []string {
 }
 
 func hasDiscordHandle(rc *driver.ResolvedClaw) bool {
+	return hasHandle(rc, "discord")
+}
+
+func hasSlackHandle(rc *driver.ResolvedClaw) bool {
+	return hasHandle(rc, "slack")
+}
+
+func hasHandle(rc *driver.ResolvedClaw, platform string) bool {
 	if rc == nil {
 		return false
 	}
 	for rawPlatform := range rc.Handles {
-		if strings.ToLower(strings.TrimSpace(rawPlatform)) == "discord" {
+		if strings.ToLower(strings.TrimSpace(rawPlatform)) == platform {
 			return true
 		}
 	}
@@ -341,7 +356,7 @@ func hasDiscordHandle(rc *driver.ResolvedClaw) bool {
 }
 
 func resolveDisabledHermesTools(rc *driver.ResolvedClaw) []string {
-	if !hasDiscordHandle(rc) {
+	if !hasDiscordHandle(rc) && !hasSlackHandle(rc) {
 		return nil
 	}
 
@@ -372,6 +387,17 @@ func resolvedEnvValue(rc *driver.ResolvedClaw, key string) (string, error) {
 	value, err := shared.ResolveEnvTokenFromMapWithRuntimeEnv(rc.Environment, key, rc.RuntimeEnv)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", key, err)
+	}
+	return value, nil
+}
+
+func resolvedEnvOrDefault(rc *driver.ResolvedClaw, key, fallback string) (string, error) {
+	value, err := resolvedEnvValue(rc, key)
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return fallback, nil
 	}
 	return value, nil
 }

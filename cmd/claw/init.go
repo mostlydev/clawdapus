@@ -623,20 +623,11 @@ func renderInitPod(cfg *initResolvedConfig) string {
 			b.WriteString("\"\n")
 		}
 		b.WriteString("    environment:\n")
-		tokenKey := platformTokenKey(cfg.Platform)
-		idKey := platformIDKey(cfg.Platform)
-		if tokenKey != "" {
+		for _, key := range platformEnvironmentKeys(cfg.Platform) {
 			b.WriteString("      ")
-			b.WriteString(tokenKey)
+			b.WriteString(key)
 			b.WriteString(": \"${")
-			b.WriteString(tokenKey)
-			b.WriteString("}\"\n")
-		}
-		if idKey != "" {
-			b.WriteString("      ")
-			b.WriteString(idKey)
-			b.WriteString(": \"${")
-			b.WriteString(idKey)
+			b.WriteString(key)
 			b.WriteString("}\"\n")
 		}
 	} else if cfg.VolumeName != "" {
@@ -666,8 +657,9 @@ func renderInitEnvExample(cfg *initResolvedConfig) string {
 
 	if cfg.Platform != "none" {
 		lines = append(lines, "# Platform credentials")
-		lines = append(lines, platformTokenKey(cfg.Platform)+"=")
-		lines = append(lines, platformIDKey(cfg.Platform)+"=")
+		for _, key := range platformEnvironmentKeys(cfg.Platform) {
+			lines = append(lines, key+"=")
+		}
 		if cfg.Platform == "discord" {
 			lines = append(lines, "DISCORD_GUILD_ID=")
 		}

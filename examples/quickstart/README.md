@@ -98,7 +98,7 @@ Replace the Discord configuration:
 
 **Telegram:** Change `HANDLE discord` to `HANDLE telegram` in `agents/assistant/Clawfile`. In `claw-pod.yml`, replace the `handles:` block with `telegram: {id: "${TELEGRAM_BOT_ID}", username: "mybot"}` and set `TELEGRAM_BOT_TOKEN` in `environment:`.
 
-**Slack:** Same pattern — `HANDLE slack`, swap the handles block, use `SLACK_BOT_TOKEN`.
+**Slack:** Same pattern — `HANDLE slack`, swap the handles block, and use `SLACK_BOT_TOKEN`. Hermes Slack uses socket mode and also requires `SLACK_APP_TOKEN`.
 
 ## Add another agent
 

@@ -252,6 +252,20 @@ func platformTokenKey(platform string) string {
 	}
 }
 
+func platformEnvironmentKeys(platform string) []string {
+	tokenKey := platformTokenKey(platform)
+	idKey := platformIDKey(platform)
+	if tokenKey == "" || idKey == "" {
+		return nil
+	}
+	keys := []string{tokenKey}
+	if platform == "slack" {
+		keys = append(keys, "SLACK_APP_TOKEN")
+	}
+	keys = append(keys, idKey)
+	return keys
+}
+
 func platformIDKey(platform string) string {
 	switch platform {
 	case "discord":

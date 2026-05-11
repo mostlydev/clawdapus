@@ -261,6 +261,69 @@ func TestGenerateEnvFileDefaultsToolProgressOffForDiscord(t *testing.T) {
 	}
 }
 
+func TestGenerateEnvFileDefaultsToolProgressOffForSlack(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"slack": {}},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), hermesToolProgressModeEnv+"=off\n") {
+		t.Fatalf("expected %s=off in .env, got:\n%s", hermesToolProgressModeEnv, data)
+	}
+}
+
+func TestGenerateEnvFileDefaultsDiscordReplyMentionFalse(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"discord": {}},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), hermesDiscordReplyMentionEnv+"=false\n") {
+		t.Fatalf("expected %s=false in .env, got:\n%s", hermesDiscordReplyMentionEnv, data)
+	}
+}
+
+func TestGenerateEnvFileRespectsDiscordReplyMentionOverride(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"discord": {}},
+		Environment: map[string]string{
+			hermesDiscordReplyMentionEnv: "true",
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	if !strings.Contains(env, hermesDiscordReplyMentionEnv+"=true\n") {
+		t.Fatalf("expected %s override in .env, got:\n%s", hermesDiscordReplyMentionEnv, env)
+	}
+	if strings.Contains(env, hermesDiscordReplyMentionEnv+"=false\n") {
+		t.Fatalf("expected no default %s=false when override is set, got:\n%s", hermesDiscordReplyMentionEnv, env)
+	}
+}
+
+func TestGenerateEnvFileDoesNotSetReplyMentionForSlackOnly(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"slack": {}},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if strings.Contains(string(data), hermesDiscordReplyMentionEnv+"=") {
+		t.Fatalf("expected no %s for Slack-only Hermes agent, got:\n%s", hermesDiscordReplyMentionEnv, data)
+	}
+}
+
 func TestGenerateEnvFileAllowsToolProgressOverride(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Handles: map[string]*driver.HandleInfo{"discord": {}},
@@ -275,6 +338,37 @@ func TestGenerateEnvFileAllowsToolProgressOverride(t *testing.T) {
 
 	if !strings.Contains(string(data), hermesToolProgressModeEnv+"=verbose\n") {
 		t.Fatalf("expected %s override in .env, got:\n%s", hermesToolProgressModeEnv, data)
+	}
+}
+
+func TestGenerateEnvFilePassesThroughSlackRuntimeKnobs(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Environment: map[string]string{
+			"SLACK_ALLOWED_USERS":          "U111,U222",
+			"SLACK_ALLOW_ALL_USERS":        "false",
+			"SLACK_ALLOW_BOTS":             "true",
+			"SLACK_FREE_RESPONSE_CHANNELS": "C111,C222",
+			"SLACK_REACTIONS":              "false",
+			"SLACK_REQUIRE_MENTION":        "true",
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	for _, expected := range []string{
+		"SLACK_ALLOWED_USERS=U111,U222\n",
+		"SLACK_ALLOW_ALL_USERS=false\n",
+		"SLACK_ALLOW_BOTS=true\n",
+		"SLACK_FREE_RESPONSE_CHANNELS=C111,C222\n",
+		"SLACK_REACTIONS=false\n",
+		"SLACK_REQUIRE_MENTION=true\n",
+	} {
+		if !strings.Contains(env, expected) {
+			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
+		}
 	}
 }
 
@@ -306,9 +400,40 @@ func TestGenerateEnvFileDisablesTTSForDiscordByDefault(t *testing.T) {
 	}
 }
 
+func TestGenerateEnvFileDisablesTTSForSlackByDefault(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"slack": {}},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), clawdapusDisabledToolsEnv+"="+hermesTextToSpeechTool+"\n") {
+		t.Fatalf("expected %s=%s in .env, got:\n%s", clawdapusDisabledToolsEnv, hermesTextToSpeechTool, data)
+	}
+}
+
 func TestGenerateEnvFileAllowsTTSOptInForDiscord(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Handles: map[string]*driver.HandleInfo{"discord": {}},
+		Hermes: &driver.HermesConfig{
+			AllowTools: []string{hermesTextToSpeechTool},
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if strings.Contains(string(data), clawdapusDisabledToolsEnv+"=") {
+		t.Fatalf("expected no %s when text_to_speech is allowed, got:\n%s", clawdapusDisabledToolsEnv, data)
+	}
+}
+
+func TestGenerateEnvFileAllowsTTSOptInForSlack(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"slack": {}},
 		Hermes: &driver.HermesConfig{
 			AllowTools: []string{hermesTextToSpeechTool},
 		},

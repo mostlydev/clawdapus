@@ -70,6 +70,53 @@ func TestAgentAddCreatesFilesAndUpdatesPod(t *testing.T) {
 	}
 }
 
+func TestAgentAddSlackIncludesSocketModeTokens(t *testing.T) {
+	dir := t.TempDir()
+	podPath := seedCanonicalProject(t, dir)
+
+	opts := agentAddOptions{
+		AgentName: "relay",
+		ClawType:  "hermes",
+		Model:     defaultModel,
+		Cllama:    "inherit",
+		Platform:  "slack",
+		AssumeYes: true,
+	}
+	if err := runAgentAdd(podPath, opts); err != nil {
+		t.Fatalf("runAgentAdd failed: %v", err)
+	}
+
+	podData, err := os.ReadFile(podPath)
+	if err != nil {
+		t.Fatalf("read pod file: %v", err)
+	}
+	podText := string(podData)
+	for _, expect := range []string{
+		"SLACK_BOT_TOKEN: ${RELAY_SLACK_BOT_TOKEN}",
+		"SLACK_APP_TOKEN: ${RELAY_SLACK_APP_TOKEN}",
+		"SLACK_BOT_ID: ${RELAY_SLACK_BOT_ID}",
+	} {
+		if !strings.Contains(podText, expect) {
+			t.Fatalf("expected pod to contain %q, got:\n%s", expect, podText)
+		}
+	}
+
+	envData, err := os.ReadFile(filepath.Join(dir, ".env.example"))
+	if err != nil {
+		t.Fatalf("read .env.example: %v", err)
+	}
+	envText := string(envData)
+	for _, key := range []string{
+		"RELAY_SLACK_BOT_TOKEN=",
+		"RELAY_SLACK_APP_TOKEN=",
+		"RELAY_SLACK_BOT_ID=",
+	} {
+		if !strings.Contains(envText, key) {
+			t.Fatalf("expected .env.example to contain %q, got:\n%s", key, envText)
+		}
+	}
+}
+
 func TestAgentAddDryRunWritesNothing(t *testing.T) {
 	dir := t.TempDir()
 	podPath := seedCanonicalProject(t, dir)
