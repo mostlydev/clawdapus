@@ -823,10 +823,8 @@ func resolveAgentAddConfig(ctx *agentAddContext, opts agentAddOptions) (*agentAd
 	prefix := envPrefixFromName(cfg.AgentName)
 	cfg.EnvExampleVars = make([]string, 0, 2)
 	if cfg.Platform != "none" {
-		tokenKey := platformTokenKey(cfg.Platform)
-		idKey := platformIDKey(cfg.Platform)
-		if tokenKey != "" && idKey != "" {
-			cfg.EnvExampleVars = append(cfg.EnvExampleVars, prefix+"_"+tokenKey, prefix+"_"+idKey)
+		for _, key := range platformEnvironmentKeys(cfg.Platform) {
+			cfg.EnvExampleVars = append(cfg.EnvExampleVars, prefix+"_"+key)
 		}
 	}
 	if owners, ok := ctx.ExistingPrefixes[prefix]; ok && len(owners) > 0 {
@@ -860,11 +858,11 @@ func serviceNodeFromConfig(cfg *agentAddResolvedConfig) (*yaml.Node, error) {
 	env := make(map[string]string)
 	if cfg.Platform != "none" {
 		prefix := envPrefixFromName(cfg.AgentName)
-		tokenKey := platformTokenKey(cfg.Platform)
 		idKey := platformIDKey(cfg.Platform)
-		if tokenKey != "" && idKey != "" {
-			env[tokenKey] = fmt.Sprintf("${%s_%s}", prefix, tokenKey)
-			env[idKey] = fmt.Sprintf("${%s_%s}", prefix, idKey)
+		if idKey != "" {
+			for _, key := range platformEnvironmentKeys(cfg.Platform) {
+				env[key] = fmt.Sprintf("${%s_%s}", prefix, key)
+			}
 			handle := scaffoldHandle{
 				ID:       fmt.Sprintf("${%s_%s}", prefix, idKey),
 				Username: cfg.AgentName,

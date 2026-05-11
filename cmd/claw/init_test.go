@@ -158,6 +158,47 @@ func TestInitScaffoldTypeDefaults(t *testing.T) {
 	}
 }
 
+func TestInitScaffoldHermesSlackIncludesSocketModeTokens(t *testing.T) {
+	dir := t.TempDir()
+	err := runInitWithOptions(dir, "", initScaffoldOptions{
+		ClawType: "hermes",
+		Platform: "slack",
+	}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	podData, err := os.ReadFile(filepath.Join(dir, "claw-pod.yml"))
+	if err != nil {
+		t.Fatalf("read pod file: %v", err)
+	}
+	pod := string(podData)
+	for _, expected := range []string{
+		"SLACK_BOT_TOKEN: \"${SLACK_BOT_TOKEN}\"",
+		"SLACK_APP_TOKEN: \"${SLACK_APP_TOKEN}\"",
+		"SLACK_BOT_ID: \"${SLACK_BOT_ID}\"",
+	} {
+		if !strings.Contains(pod, expected) {
+			t.Fatalf("expected pod scaffold to include %q; got:\n%s", expected, pod)
+		}
+	}
+
+	envData, err := os.ReadFile(filepath.Join(dir, ".env.example"))
+	if err != nil {
+		t.Fatalf("read .env.example: %v", err)
+	}
+	env := string(envData)
+	for _, expected := range []string{
+		"SLACK_BOT_TOKEN=",
+		"SLACK_APP_TOKEN=",
+		"SLACK_BOT_ID=",
+	} {
+		if !strings.Contains(env, expected) {
+			t.Fatalf("expected .env.example to contain %q; got:\n%s", expected, env)
+		}
+	}
+}
+
 func TestInitTypeFlagUsageListsAllScaffoldTypes(t *testing.T) {
 	flag := initCmd.Flags().Lookup("type")
 	if flag == nil {
