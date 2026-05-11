@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.14.8 <Badge type="tip" text="Latest" /> {#v0-14-8}
+## v0.14.9 <Badge type="tip" text="Latest" /> {#v0-14-9}
+
+*2026-05-11*
+
+- **Hermes Slack handles get Discord-parity defaults** — Hermes-managed agents with a Slack handle now run in tool-only mode with `HERMES_TOOL_PROGRESS_MODE=off`, ship `SLACK_REQUIRE_MENTION=true` by default, and disable `text_to_speech` unless explicitly opted in via `x-claw.hermes.allow-tools`. Override knobs (`SLACK_ALLOW_BOTS`, `SLACK_ALLOW_ALL_USERS`, `SLACK_FREE_RESPONSE_CHANNELS`, `SLACK_REACTIONS`, `SLACK_REQUIRE_MENTION`) now pass through the Hermes `.env` allowlist so pod authors can tune quiet-channel behavior without forking the driver. Discord-specific reply-mention defaulting stays Discord-only. Closes [#229](https://github.com/mostlydev/clawdapus/issues/229).
+- **`claw init` and `claw agent add` scaffold Slack socket mode correctly** — Slack scaffolds now include `SLACK_APP_TOKEN` alongside `SLACK_BOT_TOKEN` and `SLACK_BOT_ID` in both the generated pod `environment:` block and `.env.example`, matching the socket-mode requirement Hermes upstream enforces. The quickstart Slack note calls out the socket-mode token requirement.
+
+## v0.14.8 {#v0-14-8}
 
 *2026-05-09*
 
