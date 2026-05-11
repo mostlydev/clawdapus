@@ -180,9 +180,9 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		"DISCORD_AUTO_THREAD":         "false",
 	}
 
-	// Discord needs deliberate communication behavior, and Clawdapus keeps
+	// Chat handles need deliberate communication behavior, and Clawdapus keeps
 	// runner-native tool progress silent by default so only real replies post.
-	if hasDiscordHandle(rc) {
+	if hasDiscordHandle(rc) || hasSlackHandle(rc) {
 		env["HERMES_TOOL_ONLY_MODE"] = "1"
 		env[hermesToolProgressModeEnv] = "off"
 		if disabled := resolveDisabledHermesTools(rc); len(disabled) > 0 {
@@ -194,6 +194,20 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		}
 		if value != "" {
 			env[hermesToolProgressModeEnv] = value
+		}
+	}
+	if hasSlackHandle(rc) {
+		value, err := resolvedEnvOrDefault(rc, "SLACK_REQUIRE_MENTION", "true")
+		if err != nil {
+			return nil, fmt.Errorf("hermes driver: %w", err)
+		}
+		env["SLACK_REQUIRE_MENTION"] = value
+		value, err = resolvedEnvValue(rc, "SLACK_ALLOW_BOTS")
+		if err != nil {
+			return nil, fmt.Errorf("hermes driver: %w", err)
+		}
+		if value != "" {
+			env["SLACK_ALLOW_BOTS"] = value
 		}
 	}
 	if rc.Hermes != nil && rc.Hermes.AllowSilent {

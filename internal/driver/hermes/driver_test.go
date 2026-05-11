@@ -390,6 +390,67 @@ func TestMaterializeDefaultsAutoThreadOff(t *testing.T) {
 	}
 }
 
+func TestMaterializeSlackAppliesTextChannelDefaults(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	rc.Handles = map[string]*driver.HandleInfo{"slack": {}}
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if got := result.Environment["HERMES_TOOL_ONLY_MODE"]; got != "1" {
+		t.Fatalf("expected HERMES_TOOL_ONLY_MODE=1, got %q", got)
+	}
+	if got := result.Environment[hermesToolProgressModeEnv]; got != "off" {
+		t.Fatalf("expected %s=off, got %q", hermesToolProgressModeEnv, got)
+	}
+	if got := result.Environment[clawdapusDisabledToolsEnv]; got != hermesTextToSpeechTool {
+		t.Fatalf("expected %s=%s, got %q", clawdapusDisabledToolsEnv, hermesTextToSpeechTool, got)
+	}
+	if got := result.Environment["SLACK_REQUIRE_MENTION"]; got != "true" {
+		t.Fatalf("expected SLACK_REQUIRE_MENTION=true, got %q", got)
+	}
+}
+
+func TestMaterializeSlackAllowsMentionDefaultOverride(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	rc.Handles = map[string]*driver.HandleInfo{"slack": {}}
+	rc.Environment["SLACK_REQUIRE_MENTION"] = "false"
+	rc.Environment["SLACK_ALLOW_BOTS"] = "mentions"
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if got := result.Environment["SLACK_REQUIRE_MENTION"]; got != "false" {
+		t.Fatalf("expected SLACK_REQUIRE_MENTION override, got %q", got)
+	}
+	if got := result.Environment["SLACK_ALLOW_BOTS"]; got != "mentions" {
+		t.Fatalf("expected SLACK_ALLOW_BOTS override, got %q", got)
+	}
+
+	envData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", ".env"))
+	if err != nil {
+		t.Fatalf("read .env: %v", err)
+	}
+	if !strings.Contains(string(envData), "SLACK_REQUIRE_MENTION=false\n") {
+		t.Fatalf("expected SLACK_REQUIRE_MENTION override in .env, got:\n%s", envData)
+	}
+	if !strings.Contains(string(envData), "SLACK_ALLOW_BOTS=mentions\n") {
+		t.Fatalf("expected SLACK_ALLOW_BOTS override in .env, got:\n%s", envData)
+	}
+}
+
 func TestMaterializeAllowsToolProgressOverride(t *testing.T) {
 	rc, tmp := newTestRC(t)
 	rc.Environment[hermesToolProgressModeEnv] = "verbose"

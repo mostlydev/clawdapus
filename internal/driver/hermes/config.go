@@ -391,6 +391,17 @@ func resolvedEnvValue(rc *driver.ResolvedClaw, key string) (string, error) {
 	return value, nil
 }
 
+func resolvedEnvOrDefault(rc *driver.ResolvedClaw, key, fallback string) (string, error) {
+	value, err := resolvedEnvValue(rc, key)
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return fallback, nil
+	}
+	return value, nil
+}
+
 func dotenvValue(value string) string {
 	if value == "" {
 		return `""`
