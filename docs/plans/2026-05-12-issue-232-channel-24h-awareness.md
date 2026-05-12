@@ -6,6 +6,7 @@
 - 2026-05-12 r1 — initial draft.
 - 2026-05-12 r2 — codex (`codex:27f8b72e`) r1 adversarial pass; folded in: (1) header rewrite now targets the real after-bound tail path (kind discriminator keyed on `after=` presence, not on `mode=delta` — which is no longer the default per #201); (2) explicit tool ACL/auto-subscription via compose-materialized per-agent channel allowlist; (3) v2 producer model clarified — `claw-channel-memory` emits the channel-awareness wire surface and may use #164 internals, but channel events do **not** flow through ADR-021's `/recall` in any phase; (4) v1 default flipped from opt-in to default-on with smaller per-Discord-channel caps, and #232 explicitly stays open through v2 since v1 is not acceptance-complete; (5) feed ordering enforced via compose-emitted manifest order with regression test; (6) retrieval out-of-buffer semantics spelled out (structured `not_in_buffer` response with retained-coverage range).
 - 2026-05-12 r3 — codex r2 adversarial pass; folded in: (a) auth model rewritten — claw-wall does **not** validate bearer auth on `/channel-context`; feeds remain generated-URL-only on the compose network; tools are strictly cllama-mediated with cllama validating agent identity + per-agent channel allowlist before forwarding to claw-wall (claw-wall enforces defense-in-depth via a service token + `X-Claw-ID` header); (b) tool auto-registration spelled out — compose-up emits a synthetic `claw.describe` v2 descriptor on the auto-injected claw-wall service that routes through the existing extraction path; (c) #220 epoch-bootstrap path gets its own `kind=bootstrap_tail` via a cllama-passed `context_kind=` URL hint; (d) ACL allowlist switched from env-var to a mounted JSON config file (`claw-wall-agent-channels.json`); claw-wall recreates on config change, no hot reload in v1; (e) `channel_context_op` telemetry spec'd explicitly for both feed and tool paths; (f) stale text scrubbed (§4.1 caps, §6 ">120 messages" wording, §7.5 spike vs integration, §4.1 "mode=delta header rewrite" residue).
+- 2026-05-12 r4 — codex r3 adversarial pass; folded in: (i) descriptor mechanism switched to **built-in compiler-owned descriptor** (`builtinClawWallDescriptor()`, sibling of `builtinClawAPIDescriptor()`) because `internal/inspect.ParseLabels` only knows `claw.describe` and treats the value as a build-context file path — neither inline JSON nor runtime bind-mount works at compile time; (ii) tool auto-subscription mechanism corrected — `injectConversationWall` appends a synthetic `tools: [{service: claw-wall, allow: [search_channel_context, get_channel_messages]}]` policy to each channel-consuming service **before** `resolveToolSubscriptions`, since that resolver only scans consumer `svc.Claw.Tools` and does not walk provider descriptors; (iii) allowlist file-content change triggers compose recreate via a sha256-hash env (`CLAW_WALL_AGENT_CHANNELS_SHA=<hash>`) on the claw-wall service — Docker Compose hashes service config, not bind-mounted file contents, so the file alone would not recreate the container; (iv) tool bearer-token projection corrected — token flows through `serviceAuth` map (`map[agentID]ServiceAuthEntry{Service:"claw-wall", AuthType:"bearer", Token:...}`) that `resolveManifestAuth` already consumes, NOT through `CLAW_WALL_TOOL_TOKEN` env on the agent container; (v) §4.1 "same allowlist guards both feed and tool paths" claim deleted — feeds stay generated-URL-only/network-scoped; (vi) §10 traceability note that r3 supersedes r2's after=-presence keying with explicit `context_kind=` stamping.
 
 **Issue:** https://github.com/mostlydev/clawdapus/issues/232
 
@@ -55,7 +56,7 @@ GET /channel-awareness?channels=<csv>&since=24h&limit=60&max_chars=8192&context_
 ```
 
 - **No cursor**. No `consumer=` param. No `mode=delta` path. This feed exists precisely to be cursor-independent.
-- Same channel-authorization model as `channel-context` (caller is upstream-restricted to surface-derived channels), PLUS the per-agent ACL of §4.2.1 (the same allowlist guards both feed and tool paths).
+- Same channel-authorization model as `channel-context`: caller is upstream-restricted to surface-derived channels, baked into the generated URL by compose-up. The feed path is **not** bearer-authenticated and does **not** consult the per-agent allowlist file — single-writer compose URLs on the compose network are the trust boundary (codex r3.4). The per-agent allowlist of §4.2.1 guards the **tool path only**, where channels are model-supplied.
 - Reuses `consumeTail` semantics from #201 (newest-first walk, dual cap, sort ASC for output) but rebranded.
 - v1 defaults (r2): `since=24h`, `limit=60`, `max_chars=8192` (8KB, aligned with cllama's `MaxFeedResponseBytes` so we don't double-truncate). Operator-tunable via `x-claw.context.channel-awareness` (parallel of #201's `x-claw.context.channel`).
 - Generated URL example: `/channel-awareness?channels=14645…,14647…&since=24h&limit=60&max_chars=8192&context_kind=raw_window`.
@@ -115,7 +116,7 @@ The model never speaks to claw-wall directly. Tool calls go: model → cllama va
 **Where the allowlist lives:** compose-up materializes a single JSON config at `claw up` time (codex r2: prefer file over env var) and mounts it read-only into `claw-wall`:
 
 ```json
-// claw-wall-agent-channels.json (mounted at /etc/claw-wall/agent-channels.json)
+// .claw-runtime/claw-wall-agent-channels.json (bind-mounted at /etc/claw-wall/agent-channels.json)
 {
   "version": 1,
   "agents": {
@@ -125,11 +126,30 @@ The model never speaks to claw-wall directly. Tool calls go: model → cllama va
 }
 ```
 
-The same allowlist is also projected into each agent's cllama context dir (`channels-allowlist.json`) so cllama can pre-check before forwarding. Two-lock model: cllama is the primary gate (correctness), claw-wall is the defense-in-depth (containment if cllama is bypassed or misconfigured).
+The same allowlist is also projected into each agent's cllama context dir (`channels-allowlist.json`) so cllama can pre-check before forwarding. Two-lock model: cllama is the primary gate (correctness, applied before any forwarding), claw-wall is the defense-in-depth (containment if cllama is bypassed or misconfigured).
 
-**No hot reload in v1** (codex r2): claw-wall reads the file at startup. `claw up` recreates the claw-wall container when the generated config changes (compose detects the file-mount diff). Operators who add a channel surface mid-life must `claw up` to re-materialize.
+**Compose recreates claw-wall when the allowlist content changes (codex r3.3).** Docker Compose's service-config hash sees the bind-mount path, not the file contents — so a file-only edit would not recreate the container. To force a recreate when the allowlist changes:
 
-**claw-wall service token:** compose-up generates a per-pod service token at `claw up` time (same pattern as the `claw-api` token from #44/`x-claw.master`). The token is mounted into cllama's per-agent context as part of the tool's auth descriptor (existing ADR-020 path) and into claw-wall's env as `CLAW_WALL_TOOL_TOKEN`. claw-wall validates incoming tool requests have `Authorization: Bearer <CLAW_WALL_TOOL_TOKEN>`; without it, 401.
+- compose-up computes `sha256` of the marshalled JSON and sets `CLAW_WALL_AGENT_CHANNELS_SHA=<hash>` on the auto-injected claw-wall service.
+- The env value is part of the service config, so Docker Compose detects the diff and recreates the container on `claw up`.
+- claw-wall reads the file at startup; no hot reload. The sha env is purely for compose-diff detection, not consulted by claw-wall itself.
+
+Test (§7.3): `TestComposeBumpsAllowlistShaOnAllowlistChange` — change a channel surface, re-run compose generation, assert the env hash changes.
+
+**claw-wall service token (codex r3.5):** compose-up generates a per-pod service token at `claw up` time (same pattern as the `claw-api` token from #44/`x-claw.master`). The token is set on the claw-wall service as `CLAW_WALL_TOOL_TOKEN` (server side only) and is projected per-consumer-agent through the existing `serviceAuth` map that `resolveManifestAuth` already consumes:
+
+```go
+// prepareConversationWallToolRuntime (new) returns one of these per channel-consuming agent
+ServiceAuthEntry{
+    Service:  "claw-wall",
+    AuthType: "bearer",
+    Token:    <generated-per-pod-token>,
+}
+```
+
+These entries are merged with the existing claw-api/history auth entries **before** `buildToolManifestEntries`, so `tools.json` gets the bearer token without adding `CLAW_WALL_TOOL_TOKEN` as an env on the consumer's container. Test (§7.3): `TestToolsJSONCarriesClawWallBearerWithoutLeakingEnv` — consumer's `tools.json` has the token, consumer container env does **not** contain `CLAW_WALL_TOOL_TOKEN`.
+
+claw-wall validates incoming tool requests have `Authorization: Bearer <CLAW_WALL_TOOL_TOKEN>`; without it, 401.
 
 **Tool request handler order:**
 1. Validate `Authorization` header against `CLAW_WALL_TOOL_TOKEN`. Miss → 401 `{"error":"unauthenticated"}`.
@@ -141,25 +161,60 @@ The same allowlist is also projected into each agent's cllama context dir (`chan
 
 cllama surfaces the 403 case to the model with a short hint ("This agent has no surface to channel X; ask the operator to add it.").
 
-#### 4.2.2 Tool auto-registration (codex r2 must-fix)
+#### 4.2.2 Tool auto-registration via built-in descriptor (codex r2+r3 must-fix)
 
-Auto-injected `claw-wall` is not a user-declared `x-claw` provider, so the existing descriptor extraction path needs an explicit hook. The mechanism:
+Auto-injected `claw-wall` is not a user-declared `x-claw` provider, and (per r3.1) `internal/inspect.ParseLabels` only recognizes `claw.describe` whose value is a build-context file path — it does not consume `claw.describe.path` and does not consume inline JSON. Bind-mounted runtime files are also not visible to the compile-time descriptor extractor. The clean fix is a **compiler-owned built-in descriptor**, sibling of the existing `builtinClawAPIDescriptor()` used for the auto-injected `claw-api` service:
 
-1. compose-up generates the `claw-wall` service as today (including image, env, healthcheck).
-2. compose-up additionally writes a **synthetic `claw.describe` v2 descriptor** to the runtime artifact dir (`.claw-runtime/describe/claw-wall.json`) declaring the two tool entries with their HTTP paths and `auth: {type: bearer, env: CLAW_WALL_TOOL_TOKEN}`.
-3. compose-up adds a label to the claw-wall service: `claw.describe.path=/etc/claw-wall/describe.json`, and bind-mounts the synthetic descriptor file at that path. This routes auto-injected claw-wall through the existing `internal/describe/` extraction code path without a new code branch — the descriptor extractor reads from image labels OR from the filesystem-fallback path that already exists for build-context descriptors.
-4. The normal compile pipeline (`internal/describe/registry.go`) projects the two tool entries into the `tools.json` of each agent whose `x-claw` consumes a channel surface (the same auto-subscription trigger that injects `claw-wall` itself).
-5. Per-agent `tools.json` gets the standard ADR-020 mediated tool entry shape, with `http.base_url=http://claw-wall:8080`, `http.path=/search_channel_context` (or `/get_channel_messages`), and `auth.token=<service-token-value>`.
+```go
+// internal/describe/builtins.go (new sibling)
+func builtinClawWallDescriptor() ServiceDescriptor {
+    return ServiceDescriptor{
+        Version: 2,
+        Service: "claw-wall",
+        Tools: []ToolSpec{
+            {
+                Name: "search_channel_context",
+                HTTP: &ToolHTTPSpec{BaseURL: "http://claw-wall:8080", Path: "/search_channel_context"},
+                Auth: &ToolAuthSpec{Type: "bearer", Service: "claw-wall"},
+                Params: /* per §4.2 spec */,
+            },
+            {
+                Name: "get_channel_messages",
+                HTTP: &ToolHTTPSpec{BaseURL: "http://claw-wall:8080", Path: "/get_channel_messages"},
+                Auth: &ToolAuthSpec{Type: "bearer", Service: "claw-wall"},
+                Params: /* per §4.2 spec */,
+            },
+        },
+    }
+}
+```
 
-This means **no new code in the describe extractor or tool-manifest compiler** — we use the existing label + filesystem-fallback path, and the new code is confined to compose-up (synthetic descriptor emission) and claw-wall (the two new HTTP handlers + auth).
+Register it in `collectServiceDescriptors` / `resolveServiceMetadata` whenever the auto-injected claw-wall service is present (same condition that fires `injectConversationWall`).
 
-Regression test (§7.3 `TestComposeMaterializesAutoRegisteredToolsForChannelConsumers`): a pod with two agents — one consuming a Discord channel surface, one not — produces `tools.json` for the first agent containing both `search_channel_context` and `get_channel_messages` entries with the correct base URL and bearer token; the second agent's `tools.json` contains neither.
+#### 4.2.3 Synthetic tool-subscription policy (codex r3.2 must-fix)
 
-#### 4.2.3 Auto-subscription trigger
+Provider-descriptor presence alone does not subscribe consumers. `resolveToolSubscriptions` only scans consumer `svc.Claw.Tools` and matches against registered providers — it does not walk providers and attach to consumers.
+
+`injectConversationWall` therefore appends a synthetic tool-subscription policy to each channel-consuming service **before** `resolveToolSubscriptions` runs:
+
+```yaml
+# appended in-memory to each channel-consuming service's x-claw.tools
+tools:
+  - service: claw-wall
+    allow: [search_channel_context, get_channel_messages]
+```
+
+This keeps the existing registry-validation and `buildToolManifestEntries` code paths load-bearing — no new tool-resolution code branch. The synthetic policy is conditional: only services whose surfaces consume Discord channels get it, matching the §4.2.4 auto-subscription trigger.
+
+Regression tests (§7.3):
+- `TestInjectConversationWallAddsToolPolicyToChannelConsumers` — a pod with two services (one channel-consuming, one not) results in the channel-consumer's in-memory `x-claw.tools` containing `{service: claw-wall, allow: [...]}` after `injectConversationWall`; the non-consumer's is unchanged.
+- `TestComposeMaterializesAutoRegisteredToolsForChannelConsumers` — end-to-end: the same setup produces `tools.json` for the channel-consumer with both tool entries; the non-consumer's `tools.json` has neither.
+
+#### 4.2.4 Auto-subscription trigger condition
 
 Tools are auto-registered for any service whose `x-claw` consumes channel surfaces (i.e., the same condition that auto-injects `claw-wall`). No separate pod knob. Rationale: if the agent has channel surfaces declared, it already needs the tools to recover from cursor/buffer-bound gaps. Forcing operators to opt-in twice (channel surface + retrieval tool) is friction without value.
 
-#### 4.2.4 Out-of-buffer semantics (codex r1 must-fix)
+#### 4.2.5 Out-of-buffer semantics (codex r1 must-fix)
 
 claw-wall can only search/return messages currently in its in-process ring buffer (size from `CLAW_WALL_LIMIT`, default 50, configurable up to operator-set ceiling). When a query falls outside that window — either by `since` reach or by `message_ids` referring to evicted ids — the response is structured:
 
@@ -258,7 +313,7 @@ Schema (cllama records, claw-api surfaces):
 Emission sites:
 - every `channel-awareness` fetch → `kind=raw_window`
 - every `channel-context` fetch → `kind` mirrors the cllama-side `context_kind=` decision (`delta_tail` / `bootstrap_tail` / `tail`), so the audit view shows exactly which path served each turn
-- every retrieval tool call → `kind=tool_call`, `status` reflects the §4.2.4 enum, `tool_name` is the called tool
+- every retrieval tool call → `kind=tool_call`, `status` reflects the §4.2.5 enum, `tool_name` is the called tool
 - v2: digest production → `kind=digest_built`; digest injection → `kind=digest`
 
 The retrieval `status` is also embedded in the session-history tool-trace record (per r2: agents/audits that look at session history can see "the tool was called, it returned not_in_buffer" without re-correlating two streams). The cllama tool-trace shim writes `status` into the existing trace JSON alongside the request/response pair.
@@ -284,13 +339,15 @@ x-claw:
 
 Service-level overrides via the same pod-defaults pattern (`x-claw.context.channel-awareness` on individual services). There is **no** `enabled` knob — see §8; the feed is emitted automatically when the service consumes any channel surface, matching the auto-injection of `claw-wall` itself.
 
-`appendConversationWallFeed` (in `cmd/claw/compose_up.go`) gains a sibling `appendConversationWallAwarenessFeed` that emits `/channel-awareness?channels=...&since=...&limit=...&max_chars=...&context_kind=raw_window` whenever the service has any consumed channel IDs. Three additional emissions:
+`appendConversationWallFeed` (in `cmd/claw/compose_up.go`) gains a sibling `appendConversationWallAwarenessFeed` that emits `/channel-awareness?channels=...&since=...&limit=...&max_chars=...&context_kind=raw_window` whenever the service has any consumed channel IDs. Plus the following compose-time work (codex r3 refinements):
 
-1. The synthetic `claw.describe` v2 descriptor at `.claw-runtime/describe/claw-wall.json` declaring the two retrieval tools (per §4.2.2). The claw-wall service gets a `claw.describe.path` label and a bind-mount for that file.
-2. The per-agent channel allowlist at `.claw-runtime/claw-wall-agent-channels.json` (per §4.2.1). Bind-mounted into claw-wall at `/etc/claw-wall/agent-channels.json`.
-3. The per-agent allowlist is also projected into each agent's cllama context dir as `channels-allowlist.json` so cllama can pre-check before forwarding tool calls.
+1. **Built-in descriptor registration (§4.2.2):** `collectServiceDescriptors` registers `builtinClawWallDescriptor()` when the auto-injected claw-wall service is present. No bind-mount, no `claw.describe.path` label, no synthetic descriptor file on disk — the descriptor is compiler-owned, sibling of `builtinClawAPIDescriptor()`.
+2. **Synthetic tool-subscription policy (§4.2.3):** before `resolveToolSubscriptions`, `injectConversationWall` appends `tools: [{service: claw-wall, allow: [search_channel_context, get_channel_messages]}]` in-memory to each channel-consuming service's `x-claw`. The normal resolver then materializes those into the consumer's `tools.json`.
+3. **Per-agent allowlist file (§4.2.1):** materialized at `.claw-runtime/claw-wall-agent-channels.json`, bind-mounted into claw-wall at `/etc/claw-wall/agent-channels.json`. Also projected into each consuming agent's cllama context as `channels-allowlist.json` (cllama-side primary gate).
+4. **Allowlist sha env (§4.2.1, codex r3.3):** the sha256 of the marshalled allowlist JSON is set as `CLAW_WALL_AGENT_CHANNELS_SHA=<hash>` on the claw-wall service. This is what makes Docker Compose recreate the container when allowlist contents change; without it, the bind-mount path alone would be considered stable.
+5. **Tool bearer projection via `serviceAuth` (§4.2.1, codex r3.5):** `prepareConversationWallToolRuntime` emits a `ServiceAuthEntry{Service: "claw-wall", AuthType: "bearer", Token: <generated>}` per channel-consuming agent. These flow into the existing `serviceAuth` map consumed by `resolveManifestAuth`, so per-agent `tools.json` gets the bearer token **without** the consumer container's env carrying `CLAW_WALL_TOOL_TOKEN`. Only the claw-wall service env has it.
 
-claw-wall reloads neither file at runtime in v1: a generated-config change triggers compose recreate-on-diff (Docker compose hashes mounted file content), so `claw up` after any pod edit gives claw-wall the fresh allowlist. No SIGHUP path needed.
+claw-wall reloads neither file at runtime in v1; the sha-env mechanism above ensures `claw up` after any pod edit produces a fresh claw-wall container with the fresh allowlist.
 
 ## 6. Stopgap discipline (codex challenge #2)
 
@@ -318,7 +375,7 @@ The acceptance criterion in the issue body — "later Boulton turn still include
   - `TestToolRequestRejectsDisallowedChannel` — Bearer ok, agent known, requested channel not in agent's allowlist → 403 with `{"error":"channel_not_allowed", ...}`.
   - `TestToolRequestAcceptsAllowedAgentAndChannel` — full happy path → 200.
 - `TestToolRequestLoadsAllowlistFromMountedFile` — claw-wall reads `/etc/claw-wall/agent-channels.json` at startup; a malformed file produces a startup failure (fail-closed).
-- `TestRetrievalToolNotInBufferStatus` — buffer has 10min; tool query with `since=12h` returns `status=not_in_buffer` + `retained_coverage` shape per §4.2.4.
+- `TestRetrievalToolNotInBufferStatus` — buffer has 10min; tool query with `since=12h` returns `status=not_in_buffer` + `retained_coverage` shape per §4.2.5.
 - `TestRetrievalToolEmptyVsNotInBuffer` — distinguishes `status=empty` (in-buffer, no match) from `status=not_in_buffer` (out-of-buffer).
 - `TestGetChannelMessagesByIDRange` — fetch by id range returns exact messages, ordered, each carrying its snowflake id.
 
@@ -343,9 +400,11 @@ The acceptance criterion in the issue body — "later Boulton turn still include
 - `TestConversationWallFeedsEmittedInAwarenessBeforeDeltaOrder` — manifest-order regression: when both feeds are emitted, awareness appears before delta in the materialized `feeds.json`. (codex r1 must-fix §4.3.1)
 - `TestComposeMaterializesAgentChannelAllowlistJSON` — when claw-wall is auto-injected, the runtime dir contains `claw-wall-agent-channels.json` with the per-agent allowlist, bind-mounted at `/etc/claw-wall/agent-channels.json`. (codex r2 must-fix §4.2.1)
 - `TestComposeProjectsAllowlistIntoCllamaContext` — each consuming agent's cllama context dir contains `channels-allowlist.json` mirroring the same surface-derived channels.
-- `TestComposeEmitsSyntheticClawWallDescriptor` — `.claw-runtime/describe/claw-wall.json` exists with the two tool entries; the claw-wall service has a `claw.describe.path` label pointing at the bind-mounted descriptor. (codex r2 must-fix §4.2.2)
-- `TestComposeMaterializesAutoRegisteredToolsForChannelConsumers` — pod with two agents (one channel-consuming, one not); the channel-consuming agent's `tools.json` contains both `search_channel_context` and `get_channel_messages` with `http.base_url=http://claw-wall:8080` and the service token in `auth.token`; the non-consumer's `tools.json` contains neither.
-- `TestComposeEmitsClawWallToolTokenEnv` — auto-injected claw-wall service env contains `CLAW_WALL_TOOL_TOKEN=<generated>`; the same value appears in the consuming agent's `tools.json` auth descriptor.
+- `TestComposeBumpsAllowlistShaOnAllowlistChange` — changing a channel surface in the pod re-runs compose generation; `CLAW_WALL_AGENT_CHANNELS_SHA` env on the claw-wall service has a different value than before the change. (codex r3.3 must-fix)
+- `TestBuiltinClawWallDescriptorRegisteredWhenInjected` — `collectServiceDescriptors` returns the built-in claw-wall descriptor when `injectConversationWall` runs; not registered when no service consumes channels. (codex r3.1 must-fix)
+- `TestInjectConversationWallAddsToolPolicyToChannelConsumers` — channel-consuming service's in-memory `x-claw.tools` contains `{service: claw-wall, allow: [search_channel_context, get_channel_messages]}` after `injectConversationWall`; non-consumer's is unchanged. (codex r3.2 must-fix)
+- `TestComposeMaterializesAutoRegisteredToolsForChannelConsumers` — end-to-end: pod with two agents (one channel-consuming, one not); the channel-consuming agent's `tools.json` contains both tools with `http.base_url=http://claw-wall:8080` and the service token in `auth.token`; the non-consumer's `tools.json` contains neither.
+- `TestToolsJSONCarriesClawWallBearerWithoutLeakingEnv` — `tools.json` for the channel-consumer has the bearer token in `auth.token`; the same consumer's container env does **NOT** contain `CLAW_WALL_TOOL_TOKEN`. Only the claw-wall service env has the token. (codex r3.5 must-fix)
 
 ### 7.4 Pod parser (`internal/pod/`)
 
@@ -404,7 +463,8 @@ The PR body explicitly says:
 
 2. **Header rewrite on `channel-context`.** r1 said "change to `[channel-context delta] kind=delta`".
    - **Codex r1 must-fix:** rewrite targeted the wrong path (`mode=delta` is no longer the default since #201). The real delta path is `mode=tail` + `after=`.
-   - **r2 resolution:** rewrite is keyed on `after=` presence. See §4.4 for the four kinds (`delta_tail`, `tail`, `raw_window`, `tool_call`).
+   - **r2 resolution:** rewrite was keyed on `after=` presence.
+   - **r3 supersedes:** keying is now explicit `context_kind=` URL param stamped by cllama; `after=`-presence inference is only a back-compat fallback. See §4.4 for the five kinds (`delta_tail`, `bootstrap_tail`, `tail`, `raw_window`, `tool_call`). (codex r3 cleanup)
 
 3. **v1 retrieval tools live where?** r1 leaned claw-wall-direct.
    - **Codex r1:** claw-wall-direct OK *only after* ACL/auto-subscribe is solved.
@@ -436,26 +496,53 @@ The PR body explicitly says:
    - **Codex r2:** start under `examples/channel-memory/` (or #164-aligned path); avoid published infra image and release pinning in phase 1.
    - **r3 resolution:** §3 v2 row, §11 build sequence, and §12 non-goals all say `examples/channel-memory/`. No `release_manifest.go` entry; no ghcr.io publication in phase 1.
 
-## 10c. Open questions for codex r3 review
+## 10c. r3 open questions — codex answers and r4 resolution
 
-1. **`context_kind=` URL hint vs request header.** §4.4 uses a URL query param (`context_kind=delta_tail` etc.) because it's the lowest-friction change at compose-up/cllama and survives cache-keys naturally. Alternative: an `X-Claw-Context-Kind` request header. Header is cleaner if the value should never affect upstream caching; query param is cleaner if claw-wall ever wants to log per-kind hit ratios via existing access-log infrastructure. Lean query param.
-2. **Defense-in-depth allowlist on feed paths.** §4.2.1 says feeds remain unauthenticated-on-compose-net. claw-wall could *additionally* check that `channels=` matches the agent's allowlist if it received `X-Claw-ID` on feed requests too — but feed requests don't carry `X-Claw-ID` today. Adding it would tighten the model but require cllama to send the header (small change). Lean "leave feeds as today" because the single-writer compose-URL invariant is already enforced; revisit if/when claw-wall ever gains a non-compose ingress.
-3. **`claw.describe.path` label semantics.** §4.2.2 uses this label to point at a bind-mounted descriptor file. Is the existing descriptor extractor (`internal/describe/registry.go`) actually wired for label-based path indirection, or does it only consume `claw.describe` as the JSON inline? If the latter, the alternative is to embed the descriptor JSON directly in the label value. Lean inline JSON to avoid filesystem indirection for a small descriptor.
+1. **`context_kind=` URL hint vs request header.** r3 leaned query param.
+   - **Codex r3:** confirmed. Query param is fine; the URL already carries `after`, `channels`, `mode`, so adding another fetch-metadata param is in keeping. Header would be cleaner abstractly but not worth the change.
+   - **r4 resolution:** stays as URL query param.
+
+2. **Defense-in-depth allowlist on feed paths.** r3 leaned "leave feeds generated-URL-only".
+   - **Codex r3:** confirmed. The threat #232 fixes is model-supplied tool args, not cllama's compiler-generated feed URL. Leave feeds as-is for v1.
+   - **r4 resolution:** §4.1 wording corrected — feed path is not bearer-authenticated and does not consult the allowlist. The "same allowlist guards both" claim is deleted. Allowlist guards tools only.
+
+3. **`claw.describe.path` label semantics.** r3 leaned inline JSON.
+   - **Codex r3:** neither works. `internal/inspect.ParseLabels` only recognizes `claw.describe` and treats the value as a build-context file path; it does not consume `.path` label variants and does not parse inline JSON. The right path is a compiler-owned built-in descriptor sibling of `builtinClawAPIDescriptor()`.
+   - **r4 resolution:** §4.2.2 rewritten to use `builtinClawWallDescriptor()`. No `claw.describe.path` label, no inline JSON, no synthetic descriptor file on disk.
+
+## 10d. Implementation-readiness checklist (post r4)
+
+This section exists so a future implementer can confirm the plan is settled before starting work.
+
+- [x] Auth model two-lock (cllama primary gate via `channels-allowlist.json`; claw-wall defense-in-depth via mounted allowlist + service token)
+- [x] Feed path stays generated-URL-only/network-scoped (no bearer, no allowlist on feed)
+- [x] Tool path strictly cllama-mediated (Bearer + `X-Claw-ID` headers; `serviceAuth`-projected token)
+- [x] Built-in descriptor approach (no label indirection)
+- [x] Synthetic tool-subscription policy (so existing `resolveToolSubscriptions` works)
+- [x] Allowlist sha env for compose recreate-on-content-change
+- [x] `context_kind=` URL param keying for header rewrite (delta_tail / bootstrap_tail / tail / raw_window)
+- [x] Manifest order discipline (awareness before delta)
+- [x] `channel_context_op` telemetry alongside `feed_fetch`/`memory_op`
+- [x] Default-on with smaller caps (60 / 8KB); #232 stays open through v2
+- [x] Plain integration test, no spike
+- [x] v2 producer (`claw-channel-memory`) emits same wire surface; channel events never transit ADR-021 `/recall`
 
 ## 11. Build sequence (assuming codex r3 sign-off)
 
 1. **claw-wall** —
    - `channel-awareness` endpoint reusing `consumeTail`.
    - Mounted allowlist loader (`/etc/claw-wall/agent-channels.json`), fail-closed on parse error.
-   - Tool handlers `search_channel_context`, `get_channel_messages` with the §4.2.1 auth order (Bearer service token + `X-Claw-ID` + allowlist check) and §4.2.4 `not_in_buffer` semantics.
+   - Tool handlers `search_channel_context`, `get_channel_messages` with the §4.2.1 auth order (Bearer service token + `X-Claw-ID` + allowlist check) and §4.2.5 `not_in_buffer` semantics.
    - Header rewrite keyed on `context_kind=` URL param (with `after=` fallback) per §4.4.
    - Tests in §7.1.
 2. **compose_up wiring** —
    - `appendConversationWallAwarenessFeed` emits awareness URL **before** the existing delta feed (manifest order).
    - Pod parser for `x-claw.context.channel-awareness`.
    - Per-agent allowlist materialization → `.claw-runtime/claw-wall-agent-channels.json`, bind-mounted into claw-wall + projected into cllama context as `channels-allowlist.json`.
-   - Generated `CLAW_WALL_TOOL_TOKEN` env on claw-wall; same value flowed into per-agent `tools.json` auth descriptor.
-   - Synthetic `claw.describe` v2 descriptor for claw-wall written to `.claw-runtime/describe/claw-wall.json`, with `claw.describe.path` label or inline JSON (§10c.3 pending).
+   - `CLAW_WALL_AGENT_CHANNELS_SHA=<sha256(allowlist json)>` env on the claw-wall service so Docker Compose recreates the container when allowlist content changes.
+   - Generated per-pod tool token on claw-wall service env (`CLAW_WALL_TOOL_TOKEN`); the same value flows through `prepareConversationWallToolRuntime` → `serviceAuth[agent]` → consumer `tools.json` auth descriptor. Consumer container env does **not** carry the token.
+   - **`builtinClawWallDescriptor()`** registered in `collectServiceDescriptors` whenever the auto-injected claw-wall service is present. No `claw.describe.path` label, no synthetic descriptor file on disk.
+   - `injectConversationWall` appends synthetic `tools: [{service: claw-wall, allow: [...]}]` to each channel-consuming service's `x-claw` before `resolveToolSubscriptions`.
    - Tests in §7.3, §7.4.
 3. **cllama side** —
    - `prepareChannelContextFeed` stamps `context_kind=` into the URL based on `channelContextPrepareDecision`.
