@@ -2,13 +2,12 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
+	"github.com/mostlydev/clawdapus/internal/initimport"
 	"github.com/spf13/cobra"
 )
 
@@ -21,6 +20,8 @@ var (
 	initCllama     string
 	initPlatform   string
 	initVolumeSpec string
+	initSource     string
+	initAcceptLoss string
 )
 
 type initScaffoldOptions struct {
@@ -31,6 +32,8 @@ type initScaffoldOptions struct {
 	Cllama      string
 	Platform    string
 	VolumeSpec  string
+	Source      string
+	AcceptLoss  string
 }
 
 type initResolvedConfig struct {
@@ -67,6 +70,8 @@ var initCmd = &cobra.Command{
 			Cllama:      initCllama,
 			Platform:    initPlatform,
 			VolumeSpec:  initVolumeSpec,
+			Source:      initSource,
+			AcceptLoss:  initAcceptLoss,
 		}
 
 		return runInitWithOptions(absTarget, initFromPath, opts, shouldPromptInteractively())
@@ -79,239 +84,71 @@ func runInit(dir, fromPath string) error {
 
 func runInitWithOptions(dir, fromPath string, opts initScaffoldOptions, interactive bool) error {
 	if fromPath != "" {
-		// Intentional: keep --from migration on the legacy flat scaffold.
-		// We do not force existing OpenClaw users into the canonical agents/<name>/ layout.
-		return runInitFrom(dir, fromPath)
+		return runInitFromImport(dir, fromPath, opts)
 	}
 	return runInitScaffold(dir, opts, interactive)
 }
 
 func runInitFrom(dir, fromPath string) error {
+	return runInitFromImport(dir, fromPath, initScaffoldOptions{})
+}
+
+func runInitFromImport(dir, fromPath string, opts initScaffoldOptions) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create target directory: %w", err)
 	}
-
-	// Look for openclaw.json at fromPath, fromPath/openclaw.json, or fromPath/config/openclaw.json.
-	configPath := findOpenClawConfig(fromPath)
-	if configPath == "" {
-		return fmt.Errorf("no openclaw.json found in %q or its subdirectories", fromPath)
-	}
-
-	data, err := os.ReadFile(configPath)
+	sourceOverride := initimport.SourceKind(strings.ToLower(strings.TrimSpace(opts.Source)))
+	src, err := initimport.Detect(fromPath, sourceOverride)
 	if err != nil {
-		return fmt.Errorf("read config: %w", err)
+		return err
 	}
-
-	var config map[string]interface{}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("parse openclaw.json: %w", err)
+	target, err := initimport.ResolveImportTarget(opts.ClawType, src.Kind)
+	if err != nil {
+		return err
 	}
-
-	channels := detectChannels(config)
-	models := detectModels(config)
-
-	return generateMigrationScaffold(dir, channels, models)
-}
-
-func findOpenClawConfig(path string) string {
-	// Check direct path.
-	if filepath.Base(path) == "openclaw.json" {
-		if _, err := os.Stat(path); err == nil {
-			return path
+	projectName := strings.TrimSpace(opts.ProjectName)
+	if projectName == "" {
+		projectName = filepath.Base(dir)
+	}
+	plan, err := initimport.Translate(src, target, initimport.Options{
+		ProjectName:    projectName,
+		AgentName:      opts.AgentName,
+		ModelOverride:  opts.Model,
+		CllamaOverride: opts.Cllama,
+		AcceptLoss:     parseAcceptLoss(opts.AcceptLoss),
+	})
+	if err != nil {
+		return err
+	}
+	accepted := parseAcceptLoss(opts.AcceptLoss)
+	if plan.Notes.HasFatal() && !initimport.AcceptLossAllows(accepted, plan.Notes.FatalFeatures()) {
+		for _, loss := range plan.Notes.FatalLosses {
+			fmt.Printf("[claw] note: %s (accept with --accept-loss=%s)\n", loss.Reason, loss.Feature)
 		}
+		return fmt.Errorf("import would lose unsupported source features; re-run with --accept-loss=%s or adjust the source/target", strings.Join(plan.Notes.FatalFeatures(), ","))
 	}
-	// Check in path/openclaw.json.
-	candidate := filepath.Join(path, "openclaw.json")
-	if _, err := os.Stat(candidate); err == nil {
-		return candidate
+	if err := initimport.Emit(plan, dir); err != nil {
+		return err
 	}
-	// Check in path/config/openclaw.json.
-	candidate = filepath.Join(path, "config", "openclaw.json")
-	if _, err := os.Stat(candidate); err == nil {
-		return candidate
-	}
-	return ""
-}
-
-func detectChannels(config map[string]interface{}) []string {
-	channels := make([]string, 0)
-	channelsMap, ok := config["channels"].(map[string]interface{})
-	if !ok {
-		return channels
-	}
-	for platform, v := range channelsMap {
-		m, ok := v.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if enabled, ok := m["enabled"].(bool); ok && enabled {
-			channels = append(channels, platform)
-		}
-	}
-	sort.Strings(channels)
-	return channels
-}
-
-func detectModels(config map[string]interface{}) []string {
-	models := make([]string, 0)
-	// OpenClaw stores model as agents.defaults.model.primary: "provider/model-name".
-	if primary, ok := getNestedString(config, "agents", "defaults", "model", "primary"); ok && primary != "" {
-		models = append(models, primary)
-	}
-	return models
-}
-
-func getNestedString(m map[string]interface{}, keys ...string) (string, bool) {
-	if len(keys) == 0 {
-		return "", false
-	}
-	current := m
-	for _, key := range keys[:len(keys)-1] {
-		next, ok := current[key].(map[string]interface{})
-		if !ok {
-			return "", false
-		}
-		current = next
-	}
-	s, ok := current[keys[len(keys)-1]].(string)
-	return s, ok
-}
-
-func generateMigrationScaffold(dir string, channels, models []string) error {
-	modelDirective := defaultModel
-	if len(models) > 0 {
-		modelDirective = models[0]
-	}
-
-	// Build HANDLE lines.
-	var handleLines []string
-	for _, ch := range channels {
-		handleLines = append(handleLines, fmt.Sprintf("HANDLE %s", ch))
-	}
-	// Add commented-out handles for platforms not detected.
-	allPlatforms := []string{"discord", "telegram", "slack"}
-	for _, p := range allPlatforms {
-		found := false
-		for _, ch := range channels {
-			if ch == p {
-				found = true
-				break
-			}
-		}
-		if !found {
-			handleLines = append(handleLines, fmt.Sprintf("# HANDLE %s", p))
-		}
-	}
-
-	clawfileContent := fmt.Sprintf(`FROM openclaw:latest
-
-CLAW_TYPE openclaw
-AGENT AGENTS.md
-
-MODEL primary %s
-
-CLLAMA passthrough
-
-%s
-`, modelDirective, strings.Join(handleLines, "\n"))
-
-	// Build handle block for claw-pod.yml.
-	var handleBlock strings.Builder
-	for _, ch := range channels {
-		tokenVar := strings.ToUpper(ch) + "_BOT_ID"
-		handleBlock.WriteString(fmt.Sprintf("      %s:\n", ch))
-		handleBlock.WriteString(fmt.Sprintf("        id: \"${%s}\"\n", tokenVar))
-		handleBlock.WriteString("        username: \"my-bot\"\n")
-	}
-
-	// Build environment block.
-	var envLines []string
-	for _, ch := range channels {
-		tokenVar := strings.ToUpper(ch) + "_BOT_TOKEN"
-		idVar := strings.ToUpper(ch) + "_BOT_ID"
-		envLines = append(envLines, fmt.Sprintf("      %s: \"${%s}\"", tokenVar, tokenVar))
-		envLines = append(envLines, fmt.Sprintf("      %s: \"${%s}\"", idVar, idVar))
-	}
-
-	handlesSection := ""
-	if len(channels) > 0 {
-		handlesSection = fmt.Sprintf("      handles:\n%s", handleBlock.String())
-	}
-
-	envSection := ""
-	if len(envLines) > 0 {
-		envSection = fmt.Sprintf("    environment:\n%s\n", strings.Join(envLines, "\n"))
-	}
-
-	podContent := fmt.Sprintf(`services:
-  my-agent:
-    image: my-claw:latest
-    x-claw:
-      agent: ./AGENTS.md
-      cllama: passthrough
-      cllama-env:
-        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
-%s%s`, handlesSection, envSection)
-
-	// Build .env.example with detected platforms uncommented.
-	var envExampleLines []string
-	envExampleLines = append(envExampleLines, "# LLM Provider (required — used by cllama proxy, never by agent directly)")
-	envExampleLines = append(envExampleLines, "OPENROUTER_API_KEY=sk-or-...")
-	envExampleLines = append(envExampleLines, "")
-
-	enabledSet := make(map[string]bool)
-	for _, ch := range channels {
-		enabledSet[ch] = true
-	}
-
-	envExampleLines = append(envExampleLines, "# Platform credentials")
-	for _, p := range allPlatforms {
-		prefix := "# "
-		if enabledSet[p] {
-			prefix = ""
-		}
-		upper := strings.ToUpper(p)
-		envExampleLines = append(envExampleLines, fmt.Sprintf("%s%s_BOT_TOKEN=", prefix, upper))
-		envExampleLines = append(envExampleLines, fmt.Sprintf("%s%s_BOT_ID=", prefix, upper))
-	}
-	envExampleLines = append(envExampleLines, "")
-
-	files := map[string]string{
-		"Clawfile":     clawfileContent,
-		"claw-pod.yml": podContent,
-		"AGENTS.md": `# Agent Contract
-
-You are a helpful assistant. Follow these rules:
-
-1. Be concise and direct
-2. Stay on topic
-3. Ask for clarification when instructions are ambiguous
-`,
-		".env.example": strings.Join(envExampleLines, "\n"),
-	}
-
-	for name := range files {
-		path := filepath.Join(dir, name)
-		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf("%s already exists; refusing to overwrite (delete it first or use a new directory)", name)
-		}
-	}
-
-	for name, content := range files {
-		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", name, err)
-		}
-		fmt.Printf("[claw] created %s\n", name)
-	}
-
-	fmt.Printf("\n[claw] migrated from OpenClaw config (detected: %s)\n", strings.Join(channels, ", "))
+	fmt.Printf("[claw] imported %s config as %s project\n", src.Kind, target)
 	fmt.Println("[claw] scaffold ready. Next steps:")
 	fmt.Println("  1. cp .env.example .env && edit .env")
-	fmt.Println("  2. edit AGENTS.md (your bot's behavioral contract)")
-	fmt.Println("  3. claw build -t my-claw .")
+	fmt.Printf("  2. claw build -t %s-%s:latest ./agents/%s\n", plan.ProjectName, plan.AgentName, plan.AgentName)
+	fmt.Println("  3. review MIGRATION.md")
 	fmt.Println("  4. claw up -d")
 	return nil
+}
+
+func parseAcceptLoss(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func runInitScaffold(dir string, opts initScaffoldOptions, interactive bool) error {
@@ -684,7 +521,9 @@ You are a helpful assistant. Follow these rules:
 }
 
 func init() {
-	initCmd.Flags().StringVar(&initFromPath, "from", "", "Path to existing OpenClaw config directory to migrate from")
+	initCmd.Flags().StringVar(&initFromPath, "from", "", "Path to existing OpenClaw or Hermes config directory to import")
+	initCmd.Flags().StringVar(&initSource, "source", "", "Source runtime for --from autodetect override (openclaw, hermes)")
+	initCmd.Flags().StringVar(&initAcceptLoss, "accept-loss", "", "Comma-separated unsupported import features to accept (slack-routing, discord-routing, custom-provider, cron, identity-env, all)")
 	initCmd.Flags().StringVar(&initProject, "project", "", "Project name used for x-claw.pod and image prefix")
 	initCmd.Flags().StringVar(&initAgent, "agent", "", "Primary agent name (service + directory name)")
 	initCmd.Flags().StringVar(&initType, "type", "", "Claw type ("+strings.Join(scaffoldClawTypes, ", ")+")")

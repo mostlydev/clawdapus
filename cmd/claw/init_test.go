@@ -88,14 +88,125 @@ func TestInitFromOpenClawConfig(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify generated Clawfile has detected handles
-	clawfile, _ := os.ReadFile(filepath.Join(destDir, "Clawfile"))
+	for _, name := range []string{
+		"agents/assistant/Clawfile",
+		"agents/assistant/AGENTS.md",
+		"claw-pod.yml",
+		".env.example",
+		"MIGRATION.md",
+	} {
+		if _, err := os.Stat(filepath.Join(destDir, name)); err != nil {
+			t.Fatalf("expected %s to exist: %v", name, err)
+		}
+	}
+
+	clawfile, err := os.ReadFile(filepath.Join(destDir, "agents", "assistant", "Clawfile"))
+	if err != nil {
+		t.Fatalf("read imported Clawfile: %v", err)
+	}
 	content := string(clawfile)
 	if !strings.Contains(content, "HANDLE discord") {
 		t.Error("expected Clawfile to contain HANDLE discord")
 	}
 	if !strings.Contains(content, "HANDLE telegram") {
 		t.Error("expected Clawfile to contain HANDLE telegram")
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "Clawfile")); !os.IsNotExist(err) {
+		t.Fatalf("expected no legacy root Clawfile, got err=%v", err)
+	}
+}
+
+func TestInitFromOpenClawWithHermesTarget(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "openclaw.json"), []byte(`{
+		"channels": {
+			"slack": {"enabled": true, "token": "${SLACK_BOT_TOKEN}"}
+		},
+		"agents": {
+			"defaults": {
+				"model": {"primary": "openrouter/anthropic/claude-sonnet-4"}
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write source config: %v", err)
+	}
+
+	destDir := t.TempDir()
+	err := runInitWithOptions(destDir, srcDir, initScaffoldOptions{ClawType: "hermes"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	clawfile, err := os.ReadFile(filepath.Join(destDir, "agents", "assistant", "Clawfile"))
+	if err != nil {
+		t.Fatalf("read Clawfile: %v", err)
+	}
+	for _, expected := range []string{
+		"CLAW_TYPE hermes",
+		"HANDLE slack",
+	} {
+		if !strings.Contains(string(clawfile), expected) {
+			t.Fatalf("expected imported Hermes Clawfile to contain %q, got:\n%s", expected, clawfile)
+		}
+	}
+	env, err := os.ReadFile(filepath.Join(destDir, ".env.example"))
+	if err != nil {
+		t.Fatalf("read .env.example: %v", err)
+	}
+	for _, expected := range []string{"SLACK_BOT_TOKEN=", "SLACK_APP_TOKEN=", "SLACK_BOT_ID="} {
+		if !strings.Contains(string(env), expected) {
+			t.Fatalf("expected .env.example to contain %q, got:\n%s", expected, env)
+		}
+	}
+}
+
+func TestInitFromHermesWithOpenClawTarget(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "config.yaml"), []byte(`model:
+  provider: openrouter
+  default: anthropic/claude-sonnet-4
+`), 0o644); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, ".env"), []byte(`DISCORD_BOT_TOKEN=token
+DISCORD_BOT_ID=111
+DISCORD_ALLOWED_USERS=222,333
+`), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	destDir := t.TempDir()
+	err := runInitWithOptions(destDir, srcDir, initScaffoldOptions{ClawType: "openclaw"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	pod, err := os.ReadFile(filepath.Join(destDir, "claw-pod.yml"))
+	if err != nil {
+		t.Fatalf("read pod: %v", err)
+	}
+	for _, expected := range []string{
+		"channel://discord",
+		`- "222"`,
+		`- "333"`,
+	} {
+		if !strings.Contains(string(pod), expected) {
+			t.Fatalf("expected pod to contain %q, got:\n%s", expected, pod)
+		}
+	}
+}
+
+func TestInitFromRejectsUnsupportedTargetType(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "openclaw.json"), []byte(`{"channels":{}}`), 0o644); err != nil {
+		t.Fatalf("write source config: %v", err)
+	}
+
+	err := runInitWithOptions(t.TempDir(), srcDir, initScaffoldOptions{ClawType: "nanobot"}, false)
+	if err == nil {
+		t.Fatal("expected unsupported import target to fail")
+	}
+	if !strings.Contains(err.Error(), "import target") {
+		t.Fatalf("expected import target error, got: %v", err)
 	}
 }
 

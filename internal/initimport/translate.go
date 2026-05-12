@@ -1,0 +1,221 @@
+package initimport
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/mostlydev/clawdapus/internal/driver/hermes"
+)
+
+func Translate(src Descriptor, target TargetRuntime, opts Options) (Plan, error) {
+	model := src.Models.Primary
+	if override := strings.TrimSpace(opts.ModelOverride); override != "" {
+		parsed, ok := SplitModelRef(override)
+		if !ok {
+			return Plan{}, fmt.Errorf("--model %q is invalid (expected provider/model)", override)
+		}
+		model = parsed
+	}
+	if model.Provider == "" {
+		model = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4"}
+	}
+
+	env := newEnvBuilder()
+	notes := Notes{}
+	for _, note := range src.RawNotes {
+		notes.Action = append(notes.Action, note)
+	}
+
+	projectName := normalizeName(opts.ProjectName, "clawdapus-import")
+	agentName := normalizeName(opts.AgentName, normalizeName(src.AgentName, "assistant"))
+	if strings.TrimSpace(opts.AgentName) == "" && strings.TrimSpace(src.AgentName) != "" {
+		agentName = normalizeName(src.AgentName, "assistant")
+	}
+
+	cllama := src.Cllama || model.BaseURL != "" || isCllamaForced(opts.CllamaOverride)
+	if strings.EqualFold(strings.TrimSpace(opts.CllamaOverride), "no") || strings.EqualFold(strings.TrimSpace(opts.CllamaOverride), "false") {
+		cllama = model.BaseURL != ""
+	}
+
+	plan := Plan{
+		Source:        src,
+		Target:        target,
+		ProjectName:   projectName,
+		AgentName:     agentName,
+		BaseImage:     baseImageForTarget(target),
+		Model:         model,
+		Cllama:        cllama,
+		Environment:   map[string]string{},
+		CllamaEnv:     map[string]string{},
+		AgentContract: defaultImportedContract(src, target),
+		SoulContent:   sourceSoul(src),
+		SkillsDir:     src.SkillsDir,
+		CronDir:       src.CronDir,
+	}
+
+	if err := translateModel(&plan, &notes, env); err != nil {
+		return Plan{}, err
+	}
+	translateChannels(&plan, &notes, env)
+	if src.CronDir != "" {
+		notes.Action = append(notes.Action, fmt.Sprintf("cron files copied to imported/cron/ as references; translate them to INVOKE directives"))
+		notes.FatalLosses = append(notes.FatalLosses, FatalLoss{Feature: "cron", Reason: "Hermes cron files are not active in Clawdapus imports; pass --accept-loss=cron to keep them as references only"})
+	}
+	if src.Identity != "" && src.EnvVars["HERMES_DEFAULT_AGENT_IDENTITY"] != "" {
+		notes.Action = append(notes.Action, "HERMES_DEFAULT_AGENT_IDENTITY was folded into AGENTS.md/SOUL.md, not preserved as raw env")
+	}
+
+	for key, value := range env.values {
+		plan.Environment[key] = value
+	}
+	if plan.Cllama {
+		for key, value := range plan.Environment {
+			if strings.HasSuffix(key, "_API_KEY") || strings.HasSuffix(key, "_TOKEN") {
+				switch key {
+				case "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "TELEGRAM_BOT_TOKEN":
+					continue
+				default:
+					plan.CllamaEnv[key] = value
+				}
+			}
+		}
+	}
+	notes.SecretNotes = append(notes.SecretNotes, env.secretNotes...)
+	plan.Notes = notes
+	return plan, nil
+}
+
+func translateModel(plan *Plan, notes *Notes, env *envBuilder) error {
+	model := plan.Model
+	if model.BaseURL != "" {
+		plan.Cllama = true
+		notes.Action = append(notes.Action, fmt.Sprintf("model provider %q had a custom base_url; emitted CLLAMA passthrough and left upstream verification to the operator", model.Provider))
+	}
+	providerKey := providerEnvKey(model.Provider)
+	if providerKey == "" && model.BaseURL == "" {
+		notes.FatalLosses = append(notes.FatalLosses, FatalLoss{
+			Feature: "custom-provider",
+			Reason:  fmt.Sprintf("provider %q is not natively supported; pass --model <provider/model> or --accept-loss=custom-provider", model.Provider),
+		})
+		return nil
+	}
+	if providerKey != "" {
+		apiKey := model.APIKey
+		if model.BaseURL != "" {
+			apiKey = ""
+		}
+		env.addSecret(providerKey, apiKey, "model API key")
+		notes.Applied = append(notes.Applied, fmt.Sprintf("MODEL primary %s", model.String()))
+	}
+	if plan.Cllama {
+		notes.Applied = append(notes.Applied, "CLLAMA passthrough")
+	}
+	return nil
+}
+
+func translateChannels(plan *Plan, notes *Notes, env *envBuilder) {
+	src := plan.Source
+	if src.Channels.Discord != nil {
+		d := src.Channels.Discord
+		env.addSecret("DISCORD_BOT_TOKEN", firstNonEmpty(d.Token, src.EnvVars["DISCORD_BOT_TOKEN"]), "Discord bot token")
+		env.addSecret("DISCORD_BOT_ID", firstNonEmpty(d.BotID, src.EnvVars["DISCORD_BOT_ID"]), "Discord bot id")
+		plan.Handles = append(plan.Handles, HandlePlan{Platform: "discord", IDEnv: "DISCORD_BOT_ID", Username: plan.AgentName, Guilds: d.Guilds})
+		notes.Applied = append(notes.Applied, "HANDLE discord")
+		switch plan.Target {
+		case TargetOpenClaw:
+			if len(d.AllowFrom) > 0 || d.DMPolicy != "" || len(d.Guilds) > 0 {
+				plan.Surfaces = append(plan.Surfaces, SurfacePlan{
+					Platform: "discord",
+					Discord:  &DiscordSurface{DMAllowFrom: d.AllowFrom, DMPolicy: d.DMPolicy, Guilds: d.Guilds},
+				})
+				notes.Applied = append(notes.Applied, "Discord routing mapped to channel://discord")
+			}
+		case TargetHermes:
+			if len(d.AllowFrom) > 0 {
+				env.addLiteral("DISCORD_ALLOWED_USERS", strings.Join(d.AllowFrom, ","))
+				notes.Applied = append(notes.Applied, "DISCORD_ALLOWED_USERS preserved")
+			}
+			if d.RequireMention {
+				env.addLiteral("DISCORD_REQUIRE_MENTION", "true")
+			}
+			if d.DMPolicy != "" && d.DMPolicy != "pairing" {
+				notes.FatalLosses = append(notes.FatalLosses, FatalLoss{Feature: "discord-routing", Reason: "Discord dmPolicy has no Hermes equivalent; pass --accept-loss=discord-routing to drop it"})
+			}
+		}
+	}
+	if src.Channels.Slack != nil {
+		s := src.Channels.Slack
+		env.addSecret("SLACK_BOT_TOKEN", firstNonEmpty(s.BotToken, src.EnvVars["SLACK_BOT_TOKEN"]), "Slack bot token")
+		if plan.Target == TargetHermes {
+			env.addSecret("SLACK_APP_TOKEN", firstNonEmpty(s.AppToken, src.EnvVars["SLACK_APP_TOKEN"]), "Slack app token")
+		}
+		env.addSecret("SLACK_BOT_ID", firstNonEmpty(s.BotID, src.EnvVars["SLACK_BOT_ID"]), "Slack bot id")
+		plan.Handles = append(plan.Handles, HandlePlan{Platform: "slack", IDEnv: "SLACK_BOT_ID", Username: plan.AgentName})
+		notes.Applied = append(notes.Applied, "HANDLE slack")
+		if len(s.AllowedUsers) > 0 {
+			if plan.Target == TargetHermes {
+				env.addLiteral("SLACK_ALLOWED_USERS", strings.Join(s.AllowedUsers, ","))
+				notes.Applied = append(notes.Applied, "SLACK_ALLOWED_USERS preserved")
+			} else {
+				notes.FatalLosses = append(notes.FatalLosses, FatalLoss{Feature: "slack-routing", Reason: "Slack routing has no channel://slack surface in v1; pass --accept-loss=slack-routing to drop it"})
+			}
+		}
+	}
+	if src.Channels.Telegram != nil {
+		t := src.Channels.Telegram
+		env.addSecret("TELEGRAM_BOT_TOKEN", firstNonEmpty(t.Token, src.EnvVars["TELEGRAM_BOT_TOKEN"]), "Telegram bot token")
+		env.addSecret("TELEGRAM_BOT_ID", firstNonEmpty(t.BotID, src.EnvVars["TELEGRAM_BOT_ID"]), "Telegram bot id")
+		plan.Handles = append(plan.Handles, HandlePlan{Platform: "telegram", IDEnv: "TELEGRAM_BOT_ID", Username: plan.AgentName})
+		notes.Applied = append(notes.Applied, "HANDLE telegram")
+	}
+}
+
+func baseImageForTarget(target TargetRuntime) string {
+	switch target {
+	case TargetHermes:
+		return hermes.BaseImageTag
+	default:
+		return "openclaw:latest"
+	}
+}
+
+func isCllamaForced(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "yes", "true", "1", "passthrough":
+		return true
+	default:
+		return false
+	}
+}
+
+func defaultImportedContract(src Descriptor, target TargetRuntime) string {
+	var b strings.Builder
+	b.WriteString("# Agent Contract\n\n")
+	if strings.TrimSpace(src.Identity) != "" {
+		b.WriteString(strings.TrimSpace(src.Identity))
+		b.WriteString("\n\n")
+	}
+	b.WriteString("You are an imported ")
+	b.WriteString(string(target))
+	b.WriteString(" agent managed by Clawdapus. Follow the source identity and the generated migration notes until the operator refines this contract.\n")
+	return b.String()
+}
+
+func sourceSoul(src Descriptor) string {
+	if strings.TrimSpace(src.Identity) == "" {
+		return ""
+	}
+	if strings.Contains(src.Identity, "\n") || strings.HasPrefix(strings.TrimSpace(src.Identity), "#") {
+		return strings.TrimRight(src.Identity, "\n") + "\n"
+	}
+	return "# Imported Identity\n\n" + strings.TrimSpace(src.Identity) + "\n"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
