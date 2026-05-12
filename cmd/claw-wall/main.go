@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,10 +17,12 @@ import (
 )
 
 type config struct {
-	Addr         string
-	TokenPairs   string
-	BufferLimit  int
-	PollInterval time.Duration
+	Addr              string
+	TokenPairs        string
+	BufferLimit       int
+	PollInterval      time.Duration
+	ToolToken         string
+	AgentChannelsPath string
 }
 
 func main() {
@@ -49,6 +52,10 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("claw-wall: parse CLAW_WALL_TOKENS: %w", err)
 	}
+	agentChannels, err := loadAgentChannels(cfg.AgentChannelsPath)
+	if err != nil {
+		return err
+	}
 
 	store := newConversationStore(cfg.BufferLimit)
 	poller := newDiscordPoller(&http.Client{Timeout: 10 * time.Second}, store, targets, cfg.BufferLimit)
@@ -59,7 +66,7 @@ func run(args []string) error {
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           newHandler(store),
+		Handler:           newHandler(store, handlerConfig{toolToken: cfg.ToolToken, agentChannels: agentChannels}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -111,11 +118,46 @@ func loadConfig() (config, error) {
 	}
 
 	return config{
-		Addr:         envOr("CLAW_WALL_ADDR", ":8080"),
-		TokenPairs:   tokenPairs,
-		BufferLimit:  bufferLimit,
-		PollInterval: time.Duration(pollSeconds) * time.Second,
+		Addr:              envOr("CLAW_WALL_ADDR", ":8080"),
+		TokenPairs:        tokenPairs,
+		BufferLimit:       bufferLimit,
+		PollInterval:      time.Duration(pollSeconds) * time.Second,
+		ToolToken:         strings.TrimSpace(os.Getenv("CLAW_WALL_TOOL_TOKEN")),
+		AgentChannelsPath: envOr("CLAW_WALL_AGENT_CHANNELS_FILE", "/etc/claw-wall/agent-channels.json"),
 	}, nil
+}
+
+func loadAgentChannels(path string) (map[string]map[string]struct{}, error) {
+	if strings.TrimSpace(os.Getenv("CLAW_WALL_TOOL_TOKEN")) == "" {
+		return nil, nil
+	}
+	// Tool auth is configured once at startup. If an operator adds
+	// CLAW_WALL_TOOL_TOKEN later, claw-wall must be recreated so the matching
+	// allowlist is loaded too; otherwise requests fail closed as unknown_agent.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("claw-wall: read agent channel allowlist: %w", err)
+	}
+	var parsed agentChannelAllowlistFile
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("claw-wall: parse agent channel allowlist: %w", err)
+	}
+	out := make(map[string]map[string]struct{}, len(parsed.Agents))
+	for agentID, channels := range parsed.Agents {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		set := make(map[string]struct{}, len(channels))
+		for _, channelID := range channels {
+			channelID = strings.TrimSpace(channelID)
+			if channelID != "" {
+				set[channelID] = struct{}{}
+			}
+		}
+		out[agentID] = set
+	}
+	return out, nil
 }
 
 func envOr(key, fallback string) string {

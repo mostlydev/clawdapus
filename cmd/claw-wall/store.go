@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -14,15 +16,16 @@ const (
 	defaultResponseLimit  = 20
 	backgroundContextSize = 10
 	defaultTailLimit      = 40
+	defaultAwarenessLimit = 60
 	defaultTailMaxChars   = 8 * 1024
 )
 
 type wallMessage struct {
-	ID        string
-	ChannelID string
-	Author    string
-	Content   string
-	Timestamp time.Time
+	ID        string    `json:"id"`
+	ChannelID string    `json:"channel_id"`
+	Author    string    `json:"author"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 type channelBuffer struct {
@@ -57,6 +60,48 @@ type tailResult struct {
 	BufferNewest time.Time
 	Cursor       map[string]string
 	After        map[string]string
+}
+
+type handlerConfig struct {
+	toolToken     string
+	agentChannels map[string]map[string]struct{}
+}
+
+type agentChannelAllowlistFile struct {
+	Version int                 `json:"version"`
+	Agents  map[string][]string `json:"agents"`
+}
+
+type retrievalResult struct {
+	Messages         []wallMessage `json:"messages"`
+	RetainedCoverage coverageInfo  `json:"retained_coverage"`
+	Status           string        `json:"status"`
+	Hint             string        `json:"hint,omitempty"`
+}
+
+type coverageInfo struct {
+	OldestTS   string `json:"oldest_ts,omitempty"`
+	NewestTS   string `json:"newest_ts,omitempty"`
+	BufferSize int    `json:"buffer_size"`
+	oldestTime time.Time
+	newestTime time.Time
+}
+
+type searchChannelContextRequest struct {
+	Channels []string `json:"channels"`
+	Query    string   `json:"query"`
+	Since    string   `json:"since"`
+	Author   string   `json:"author"`
+	Limit    int      `json:"limit"`
+}
+
+type getChannelMessagesRequest struct {
+	Channels   []string `json:"channels"`
+	MessageIDs []string `json:"message_ids"`
+	After      string   `json:"after"`
+	Before     string   `json:"before"`
+	Author     string   `json:"author"`
+	Limit      int      `json:"limit"`
 }
 
 func newConversationStore(limit int) *conversationStore {
@@ -299,7 +344,141 @@ func (s *conversationStore) tail(req tailRequest) tailResult {
 	return result
 }
 
-func newHandler(store *conversationStore) http.Handler {
+func (s *conversationStore) search(req searchChannelContextRequest, now time.Time) retrievalResult {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = defaultResponseLimit
+	}
+	if limit > s.limit {
+		limit = s.limit
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	var windowStart time.Time
+	if strings.TrimSpace(req.Since) != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(req.Since)); err == nil && d > 0 {
+			windowStart = now.Add(-d)
+		}
+	}
+	query := strings.ToLower(strings.TrimSpace(req.Query))
+	author := strings.ToLower(strings.TrimSpace(req.Author))
+	result := s.scan(req.Channels, func(msg wallMessage) bool {
+		if !windowStart.IsZero() && !msg.Timestamp.IsZero() && msg.Timestamp.Before(windowStart) {
+			return false
+		}
+		if author != "" && !strings.Contains(strings.ToLower(msg.Author), author) {
+			return false
+		}
+		if query != "" && !strings.Contains(strings.ToLower(msg.Content), query) {
+			return false
+		}
+		return true
+	}, limit)
+	if result.Status == "empty" && !windowStart.IsZero() && !result.RetainedCoverage.oldestTime.IsZero() && windowStart.Before(result.RetainedCoverage.oldestTime) {
+		result.Status = "not_in_buffer"
+		result.Hint = "Requested window extends before buffer's oldest_ts. Operator can widen CLAW_WALL_LIMIT or rely on v2 digest once available."
+	}
+	return result
+}
+
+func (s *conversationStore) getMessages(req getChannelMessagesRequest) retrievalResult {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = defaultResponseLimit
+	}
+	if limit > s.limit {
+		limit = s.limit
+	}
+	wanted := make(map[string]struct{}, len(req.MessageIDs))
+	for _, id := range req.MessageIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			wanted[id] = struct{}{}
+		}
+	}
+	author := strings.ToLower(strings.TrimSpace(req.Author))
+	result := s.scan(req.Channels, func(msg wallMessage) bool {
+		if len(wanted) > 0 {
+			if _, ok := wanted[msg.ID]; !ok {
+				return false
+			}
+		}
+		if after := strings.TrimSpace(req.After); after != "" && !messageAfterBoundary(msg, after) {
+			return false
+		}
+		if before := strings.TrimSpace(req.Before); before != "" && !messageBeforeBoundary(msg, before) {
+			return false
+		}
+		if author != "" && !strings.Contains(strings.ToLower(msg.Author), author) {
+			return false
+		}
+		return true
+	}, limit)
+	if len(wanted) > 0 && len(result.Messages) < len(wanted) {
+		result.Status = "not_in_buffer"
+		result.Hint = "One or more requested message_ids are not retained in claw-wall's current buffer."
+	}
+	return result
+}
+
+func (s *conversationStore) scan(channelIDs []string, match func(wallMessage) bool, limit int) retrievalResult {
+	channelIDs = normalizeChannelIDs(channelIDs)
+	if limit <= 0 {
+		limit = defaultResponseLimit
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	candidates := make([]wallMessage, 0)
+	var bufferOldest, bufferNewest time.Time
+	bufferSize := 0
+	for _, channelID := range channelIDs {
+		state := s.channels[channelID]
+		if state == nil {
+			continue
+		}
+		bufferSize += len(state.messages)
+		for _, msg := range state.messages {
+			if !msg.Timestamp.IsZero() {
+				if bufferOldest.IsZero() || msg.Timestamp.Before(bufferOldest) {
+					bufferOldest = msg.Timestamp
+				}
+				if bufferNewest.IsZero() || msg.Timestamp.After(bufferNewest) {
+					bufferNewest = msg.Timestamp
+				}
+			}
+			if match == nil || match(msg) {
+				candidates = append(candidates, msg)
+			}
+		}
+	}
+	sortWallMessages(candidates)
+	if len(candidates) > limit {
+		candidates = candidates[len(candidates)-limit:]
+	}
+	status := "ok"
+	if len(candidates) == 0 {
+		status = "empty"
+	}
+	return retrievalResult{
+		Messages: candidates,
+		RetainedCoverage: coverageInfo{
+			OldestTS:   formatOptionalHeaderTimestamp(bufferOldest),
+			NewestTS:   formatOptionalHeaderTimestamp(bufferNewest),
+			BufferSize: bufferSize,
+			oldestTime: bufferOldest,
+			newestTime: bufferNewest,
+		},
+		Status: status,
+	}
+}
+
+func newHandler(store *conversationStore, cfgs ...handlerConfig) http.Handler {
+	cfg := handlerConfig{}
+	if len(cfgs) > 0 {
+		cfg = cfgs[0]
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -381,9 +560,131 @@ func newHandler(store *conversationStore) http.Handler {
 			MaxChars:   maxChars,
 			Now:        time.Now(),
 		})
-		_, _ = w.Write([]byte(formatTailContext(result, since)))
+		kind := contextKindFromRequest(r, result)
+		_, _ = w.Write([]byte(formatTailContext(result, since, kind)))
+	})
+	mux.HandleFunc("/channel-awareness", func(w http.ResponseWriter, r *http.Request) {
+		rawChannels := strings.TrimSpace(r.URL.Query().Get("channels"))
+		if rawChannels == "" {
+			http.Error(w, "channels is required", http.StatusBadRequest)
+			return
+		}
+		channelIDs := strings.Split(rawChannels, ",")
+		limit := defaultAwarenessLimit
+		if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+			parsed, err := strconv.Atoi(rawLimit)
+			if err != nil || parsed < 1 {
+				http.Error(w, "limit must be a positive integer", http.StatusBadRequest)
+				return
+			}
+			limit = parsed
+		}
+		since, err := parseDurationQuery(r.URL.Query().Get("since"), r.URL.Query().Get("window"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		maxChars := defaultTailMaxChars
+		if rawMaxChars := strings.TrimSpace(r.URL.Query().Get("max_chars")); rawMaxChars != "" {
+			parsed, err := strconv.Atoi(rawMaxChars)
+			if err != nil || parsed < 1 {
+				http.Error(w, "max_chars must be a positive integer", http.StatusBadRequest)
+				return
+			}
+			maxChars = parsed
+		}
+		result := store.tail(tailRequest{
+			ChannelIDs: channelIDs,
+			Since:      since,
+			Limit:      limit,
+			MaxChars:   maxChars,
+			Now:        time.Now(),
+		})
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(formatChannelAwareness(result, since)))
+	})
+	mux.HandleFunc("/search_channel_context", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizeToolRequest(w, r, cfg) {
+			return
+		}
+		var req searchChannelContextRequest
+		if !decodeJSONRequest(w, r, &req) {
+			return
+		}
+		if disallowed := firstDisallowedToolChannel(req.Channels, r.Header.Get("X-Claw-ID"), cfg.agentChannels); disallowed != "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "channel_not_allowed", "agent": r.Header.Get("X-Claw-ID"), "channel": disallowed})
+			return
+		}
+		writeJSON(w, http.StatusOK, store.search(req, time.Now()))
+	})
+	mux.HandleFunc("/get_channel_messages", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizeToolRequest(w, r, cfg) {
+			return
+		}
+		var req getChannelMessagesRequest
+		if !decodeJSONRequest(w, r, &req) {
+			return
+		}
+		if disallowed := firstDisallowedToolChannel(req.Channels, r.Header.Get("X-Claw-ID"), cfg.agentChannels); disallowed != "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "channel_not_allowed", "agent": r.Header.Get("X-Claw-ID"), "channel": disallowed})
+			return
+		}
+		writeJSON(w, http.StatusOK, store.getMessages(req))
 	})
 	return mux
+}
+
+func authorizeToolRequest(w http.ResponseWriter, r *http.Request, cfg handlerConfig) bool {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return false
+	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	want := "Bearer " + strings.TrimSpace(cfg.toolToken)
+	if cfg.toolToken == "" || auth != want {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+		return false
+	}
+	agentID := strings.TrimSpace(r.Header.Get("X-Claw-ID"))
+	if agentID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_agent_id"})
+		return false
+	}
+	if _, ok := cfg.agentChannels[agentID]; !ok {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "unknown_agent"})
+		return false
+	}
+	return true
+}
+
+func firstDisallowedToolChannel(channels []string, agentID string, allowlists map[string]map[string]struct{}) string {
+	allowed := allowlists[strings.TrimSpace(agentID)]
+	for _, channelID := range normalizeChannelIDs(channels) {
+		if _, ok := allowed[channelID]; !ok {
+			return channelID
+		}
+	}
+	return ""
+}
+
+func decodeJSONRequest(w http.ResponseWriter, r *http.Request, out any) bool {
+	defer r.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read_failed"})
+		return false
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+		return false
+	}
+	return true
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
 }
 
 func formatWallMessages(messages []wallMessage) string {
@@ -401,9 +702,29 @@ func formatWallMessage(msg wallMessage) string {
 	return fmt.Sprintf("[%s] %s: %s", formatWallTimestamp(msg.Timestamp), msg.Author, msg.Content)
 }
 
-func formatTailContext(result tailResult, since time.Duration) string {
+func contextKindFromRequest(r *http.Request, result tailResult) string {
+	kind := strings.TrimSpace(r.URL.Query().Get("context_kind"))
+	switch kind {
+	case "delta_tail", "bootstrap_tail", "tail":
+		return kind
+	}
+	if len(result.After) > 0 {
+		return "delta_tail"
+	}
+	return "tail"
+}
+
+func formatTailContext(result tailResult, since time.Duration, kind string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[channel-context] mode=tail since=%s channels=%s messages=%d available=%d omitted=%d",
+	switch kind {
+	case "delta_tail":
+		fmt.Fprintf(&b, "[channel-context delta] kind=delta_tail")
+	case "bootstrap_tail":
+		fmt.Fprintf(&b, "[channel-context bootstrap] kind=bootstrap_tail reason=epoch_changed")
+	default:
+		fmt.Fprintf(&b, "[channel-context] kind=tail")
+	}
+	fmt.Fprintf(&b, " mode=tail since=%s channels=%s messages=%d available=%d omitted=%d",
 		formatDurationForHeader(since), strings.Join(result.ChannelIDs, ","), len(result.Messages), result.Available, result.Omitted)
 	if result.CapReason != "" {
 		fmt.Fprintf(&b, " cap=%s", result.CapReason)
@@ -413,6 +734,35 @@ func formatTailContext(result tailResult, since time.Duration) string {
 	}
 	if len(result.Cursor) > 0 {
 		fmt.Fprintf(&b, " cursor=%s", formatCursorMap(result.Cursor))
+	}
+	fmt.Fprintf(&b, " range=%s buffer_range=%s",
+		formatTimeRange(messageRange(result.Messages)),
+		formatTimeRange(result.BufferOldest, result.BufferNewest))
+	b.WriteString("\n")
+	if result.Omitted > 0 {
+		fmt.Fprintf(&b, "[omitted %d older retained messages due to %s; newest retained messages follow]\n",
+			result.Omitted, result.CapReason)
+	}
+	if len(result.Messages) > 0 {
+		b.WriteByte('\n')
+		b.WriteString(formatWallMessages(result.Messages))
+	}
+	return b.String()
+}
+
+func formatChannelAwareness(result tailResult, since time.Duration) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[channel-awareness] kind=raw_window since=%s channels=%s messages=%d available=%d omitted=%d retained=%d/since-%s digest=unavailable",
+		formatDurationForHeader(since),
+		strings.Join(result.ChannelIDs, ","),
+		len(result.Messages),
+		result.Available,
+		result.Omitted,
+		result.Available,
+		formatDurationForHeader(since),
+	)
+	if result.CapReason != "" {
+		fmt.Fprintf(&b, " cap=%s", result.CapReason)
 	}
 	fmt.Fprintf(&b, " range=%s buffer_range=%s",
 		formatTimeRange(messageRange(result.Messages)),
@@ -540,6 +890,41 @@ func formatHeaderTimestamp(ts time.Time) string {
 		return "unknown-time"
 	}
 	return ts.UTC().Format("2006-01-02T15:04Z")
+}
+
+func formatOptionalHeaderTimestamp(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+	return formatHeaderTimestamp(ts)
+}
+
+func messageAfterBoundary(msg wallMessage, raw string) bool {
+	if boundary, ok := parseMessageBoundaryTime(raw); ok {
+		return !msg.Timestamp.IsZero() && msg.Timestamp.After(boundary)
+	}
+	return compareSnowflakes(msg.ID, raw) > 0
+}
+
+func messageBeforeBoundary(msg wallMessage, raw string) bool {
+	if boundary, ok := parseMessageBoundaryTime(raw); ok {
+		return !msg.Timestamp.IsZero() && msg.Timestamp.Before(boundary)
+	}
+	return compareSnowflakes(msg.ID, raw) < 0
+}
+
+func parseMessageBoundaryTime(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04Z", "2006-01-02 15:04"} {
+		ts, err := time.Parse(layout, raw)
+		if err == nil {
+			return ts, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func formatWallTimestamp(ts time.Time) string {

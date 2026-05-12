@@ -80,6 +80,40 @@ func TestNormalizeLineParseFeedFetchEvent(t *testing.T) {
 	}
 }
 
+func TestNormalizeLineParseChannelContextOpEvent(t *testing.T) {
+	line := `{"ts":"2026-05-12T10:00:00Z","claw_id":"weston","type":"channel_context_op","kind":"raw_window","channels":["chan-1","chan-2"],"retained":60,"returned":40,"omitted":20,"source":"claw-wall","status":"ok","tool_name":"search_channel_context","status_code":200}`
+	event, err := NormalizeLine([]byte(line))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if event.Type != "channel_context_op" || event.ChannelKind != "raw_window" || event.SourceService != "claw-wall" || event.Status != "ok" {
+		t.Fatalf("unexpected event: %+v", event)
+	}
+	if len(event.Channels) != 2 || event.Channels[0] != "chan-1" || event.Channels[1] != "chan-2" {
+		t.Fatalf("unexpected channels: %+v", event.Channels)
+	}
+	if event.Retained == nil || *event.Retained != 60 || event.Returned == nil || *event.Returned != 40 || event.Omitted == nil || *event.Omitted != 20 {
+		t.Fatalf("unexpected counts: %+v", event)
+	}
+	if event.ToolName != "search_channel_context" {
+		t.Fatalf("unexpected tool name: %+v", event)
+	}
+}
+
+func TestSummarizeCountsChannelContextOps(t *testing.T) {
+	events := []Event{
+		{ClawID: "weston", Type: "channel_context_op", Status: "ok"},
+		{ClawID: "weston", Type: "channel_context_op", Status: "not_in_buffer"},
+	}
+	summary := Summarize(events)
+	if len(summary.Agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(summary.Agents))
+	}
+	if summary.Agents[0].ChannelContextOps != 2 || summary.Agents[0].ChannelContextErrs != 1 {
+		t.Fatalf("unexpected channel context summary: %+v", summary.Agents[0])
+	}
+}
+
 func TestNormalizeLineParseToolManifestEvent(t *testing.T) {
 	line := `{"ts":"2026-04-05T19:00:00Z","claw_id":"weston","type":"tool_manifest_loaded","model":"openai/gpt-4o","manifest_present":true,"tools_count":2}`
 	event, err := NormalizeLine([]byte(line))
@@ -117,7 +151,7 @@ func TestSummarizeCountsFeedFetches(t *testing.T) {
 }
 
 func TestNormalizeSessionHistoryLineOpenAIManagedTool(t *testing.T) {
-	line := `{"version":1,"id":"hist1_abc","status":"ok","ts":"2026-04-03T12:00:00Z","claw_id":"tiverton","path":"/v1/chat/completions","requested_model":"xai/grok-4.1-fast","effective_provider":"xai","effective_model":"xai/grok-4.1-fast","status_code":200,"usage":{"prompt_tokens":120,"completion_tokens":40,"total_rounds":2},"tool_trace":[{"round":1,"tool_calls":[{"name":"trading-api.get_market_context","service":"trading-api","latency_ms":87,"status_code":200,"result":{"ok":true,"data":{"balance":5000}}}]}]}`
+	line := `{"version":1,"id":"hist1_abc","status":"ok","ts":"2026-04-03T12:00:00Z","claw_id":"tiverton","path":"/v1/chat/completions","requested_model":"xai/grok-4.1-fast","effective_provider":"xai","effective_model":"xai/grok-4.1-fast","status_code":200,"usage":{"prompt_tokens":120,"completion_tokens":40,"total_rounds":2},"tool_trace":[{"round":1,"tool_calls":[{"name":"trading-api.get_market_context","service":"trading-api","status":"ok","latency_ms":87,"status_code":200,"result":{"ok":true,"data":{"balance":5000}}}]}]}`
 	events, err := NormalizeSessionHistoryLine([]byte(line))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -137,6 +171,9 @@ func TestNormalizeSessionHistoryLineOpenAIManagedTool(t *testing.T) {
 	}
 	if event.StatusCode == nil || *event.StatusCode != 200 {
 		t.Fatalf("expected tool status_code 200, got %+v", event)
+	}
+	if event.ToolStatus != "ok" {
+		t.Fatalf("expected tool status ok, got %+v", event)
 	}
 	if event.FinalStatusCode == nil || *event.FinalStatusCode != 200 {
 		t.Fatalf("expected final status_code 200, got %+v", event)

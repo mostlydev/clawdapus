@@ -34,7 +34,14 @@ func NormalizeLine(line []byte) (*Event, error) {
 		FeedName:      strings.TrimSpace(stringField(raw, "feed_name")),
 		FeedURL:       strings.TrimSpace(stringField(raw, "feed_url")),
 		SourceService: strings.TrimSpace(stringField(raw, "source_service")),
+		ChannelKind:   strings.TrimSpace(stringField(raw, "kind")),
+		Status:        strings.TrimSpace(stringField(raw, "status")),
+		ToolName:      strings.TrimSpace(stringField(raw, "tool_name")),
 	}
+	if event.SourceService == "" {
+		event.SourceService = strings.TrimSpace(stringField(raw, "source"))
+	}
+	event.Channels = stringSliceField(raw, "channels")
 	if value, ok := nullableStringField(raw, "intervention_reason"); ok {
 		event.InterventionReason = strings.TrimSpace(value)
 	} else if value, ok := nullableStringField(raw, "intervention"); ok {
@@ -57,6 +64,15 @@ func NormalizeLine(line []byte) (*Event, error) {
 	}
 	if value, ok := intField(raw, "tokens_out"); ok {
 		event.TokensOut = &value
+	}
+	if value, ok := intField(raw, "retained"); ok {
+		event.Retained = &value
+	}
+	if value, ok := intField(raw, "returned"); ok {
+		event.Returned = &value
+	}
+	if value, ok := intField(raw, "omitted"); ok {
+		event.Omitted = &value
 	}
 	if value, ok := float64Field(raw, "cost_usd"); ok {
 		event.CostUSD = &value
@@ -129,6 +145,7 @@ func NormalizeSessionHistoryLine(line []byte) ([]Event, error) {
 				FinalStatus:    finalStatus,
 				ToolName:       strings.TrimSpace(stringField(callMap, "name")),
 				ToolService:    strings.TrimSpace(stringField(callMap, "service")),
+				ToolStatus:     strings.TrimSpace(stringField(callMap, "status")),
 			}
 			if latencyMS, ok := int64Field(callMap, "latency_ms"); ok {
 				event.LatencyMS = &latencyMS
@@ -319,6 +336,25 @@ func sliceField(raw map[string]any, key string) ([]any, bool) {
 	}
 	s, ok := value.([]any)
 	return s, ok
+}
+
+func stringSliceField(raw map[string]any, key string) []string {
+	values, ok := sliceField(raw, key)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		item, ok := value.(string)
+		if !ok {
+			continue
+		}
+		item = strings.TrimSpace(item)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func extractToolResultError(call map[string]any) string {

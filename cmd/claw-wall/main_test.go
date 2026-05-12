@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -209,7 +210,7 @@ func TestChannelContextHandlerTailModeIsDefault(t *testing.T) {
 	if firstResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", firstResp.StatusCode)
 	}
-	if !strings.Contains(string(firstBody), "[channel-context] mode=tail") {
+	if !strings.Contains(string(firstBody), "[channel-context] kind=tail mode=tail") {
 		t.Fatalf("expected tail coverage header, got %q", string(firstBody))
 	}
 	if !strings.Contains(string(firstBody), "latest signals") {
@@ -230,6 +231,112 @@ func TestChannelContextHandlerTailModeIsDefault(t *testing.T) {
 	}
 	if string(firstBody) != string(secondBody) {
 		t.Fatalf("expected stable tail response across repeated fetches\nfirst: %q\nsecond: %q", string(firstBody), string(secondBody))
+	}
+}
+
+func TestChannelAwarenessHandlerReturnsRawWindow(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "older signal", Timestamp: time.Unix(100, 0)},
+		{ID: "101", Author: "bob", Content: "newer signal", Timestamp: time.Unix(101, 0)},
+	})
+
+	server := httptest.NewServer(newHandler(store))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/channel-awareness?channels=chan-1&limit=1&max_chars=4096")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
+	}
+	text := string(body)
+	if !strings.Contains(text, "[channel-awareness] kind=raw_window") || !strings.Contains(text, "retained=2/since-all") || !strings.Contains(text, "digest=unavailable") {
+		t.Fatalf("expected raw awareness header, got %q", text)
+	}
+	if strings.Contains(text, "older signal") || !strings.Contains(text, "newer signal") {
+		t.Fatalf("expected newest bounded awareness body, got %q", text)
+	}
+}
+
+func TestToolSearchRequiresAuthAndChannelAllowlist(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "alpha signal", Timestamp: time.Unix(100, 0)},
+	})
+	store.merge("chan-2", []wallMessage{
+		{ID: "200", Author: "bob", Content: "beta signal", Timestamp: time.Unix(200, 0)},
+	})
+
+	server := httptest.NewServer(newHandler(store, handlerConfig{
+		toolToken: "tool-token",
+		agentChannels: map[string]map[string]struct{}{
+			"trader-0": {"chan-1": {}},
+		},
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/search_channel_context", strings.NewReader(`{"channels":["chan-1"],"query":"alpha"}`))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer tool-token")
+	req.Header.Set("X-Claw-ID", "trader-0")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
+	}
+	var result retrievalResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.Status != "ok" || len(result.Messages) != 1 || result.Messages[0].ID != "100" {
+		t.Fatalf("unexpected search result: %+v", result)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/get_channel_messages", strings.NewReader(`{"channels":["chan-2"],"message_ids":["200"]}`))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer tool-token")
+	req.Header.Set("X-Claw-ID", "trader-0")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST forbidden: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 403 for disallowed channel, got %d: %s", resp.StatusCode, string(body))
+	}
+}
+
+func TestGetChannelMessagesSupportsTimestampRange(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "before", Timestamp: time.Date(2026, 5, 12, 8, 0, 0, 0, time.UTC)},
+		{ID: "101", Author: "bob", Content: "inside", Timestamp: time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC)},
+		{ID: "102", Author: "carol", Content: "after", Timestamp: time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)},
+	})
+
+	result := store.getMessages(getChannelMessagesRequest{
+		Channels: []string{"chan-1"},
+		After:    "2026-05-12T08:30Z",
+		Before:   "2026-05-12T09:30Z",
+	})
+	if result.Status != "ok" || len(result.Messages) != 1 || result.Messages[0].ID != "101" {
+		t.Fatalf("unexpected timestamp-bounded result: %+v", result)
 	}
 }
 
@@ -302,6 +409,46 @@ func TestChannelContextHandlerTailAfterCursor(t *testing.T) {
 	}
 	if !strings.Contains(text, "after=chan-1:100") || !strings.Contains(text, "cursor=chan-1:101") {
 		t.Fatalf("expected after and returned cursor in header, got %q", text)
+	}
+}
+
+func TestChannelContextHeaderByContextKindParam(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "first", Timestamp: time.Unix(100, 0)},
+		{ID: "101", Author: "bob", Content: "second", Timestamp: time.Unix(101, 0)},
+	})
+
+	server := httptest.NewServer(newHandler(store))
+	defer server.Close()
+
+	cases := []struct {
+		name string
+		kind string
+		want string
+	}{
+		{name: "delta", kind: "delta_tail", want: "[channel-context delta] kind=delta_tail"},
+		{name: "bootstrap", kind: "bootstrap_tail", want: "[channel-context bootstrap] kind=bootstrap_tail reason=epoch_changed"},
+		{name: "tail", kind: "tail", want: "[channel-context] kind=tail"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Get(server.URL + "/channel-context?channels=chan-1&mode=tail&context_kind=" + tc.kind)
+			if err != nil {
+				t.Fatalf("GET: %v", err)
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read response: %v", err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
+			}
+			if !strings.Contains(string(body), tc.want) {
+				t.Fatalf("expected %q, got %q", tc.want, string(body))
+			}
+		})
 	}
 }
 

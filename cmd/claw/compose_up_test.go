@@ -3852,6 +3852,17 @@ func testConversationWallService(token string, channelIDs ...string) *pod.Servic
 	}
 }
 
+func testFeedByName(t *testing.T, feeds []pod.FeedEntry, name string) pod.FeedEntry {
+	t.Helper()
+	for _, feed := range feeds {
+		if feed.Name == name {
+			return feed
+		}
+	}
+	t.Fatalf("expected feed %q, got %+v", name, feeds)
+	return pod.FeedEntry{}
+}
+
 func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	t.Setenv("CLAW_WALL_POLL_INTERVAL", "")
 
@@ -3896,14 +3907,26 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	}
 
 	traderFeeds := p.Services["trader"].Claw.Feeds
-	if len(traderFeeds) != 1 {
-		t.Fatalf("expected one injected wall feed, got %+v", traderFeeds)
+	if len(traderFeeds) != 2 {
+		t.Fatalf("expected awareness and cursor wall feeds, got %+v", traderFeeds)
 	}
-	if traderFeeds[0].Source != conversationWallServiceName {
-		t.Fatalf("expected claw-wall feed source, got %+v", traderFeeds[0])
+	awarenessFeed := testFeedByName(t, traderFeeds, conversationWallAwarenessName)
+	if awarenessFeed.Source != conversationWallServiceName {
+		t.Fatalf("expected claw-wall awareness source, got %+v", awarenessFeed)
 	}
-	if traderFeeds[0].Path != "/channel-context?consumer={claw_id}&channels=chan-1,chan-2&mode=tail&since=24h&limit=40&max_chars=8192" {
-		t.Fatalf("unexpected wall feed path: %q", traderFeeds[0].Path)
+	if awarenessFeed.Path != "/channel-awareness?channels=chan-1,chan-2&since=24h&limit=60&max_chars=8192&context_kind=raw_window" {
+		t.Fatalf("unexpected awareness feed path: %q", awarenessFeed.Path)
+	}
+	contextFeed := testFeedByName(t, traderFeeds, conversationWallFeedName)
+	if contextFeed.Source != conversationWallServiceName {
+		t.Fatalf("expected claw-wall context source, got %+v", contextFeed)
+	}
+	if contextFeed.Path != "/channel-context?consumer={claw_id}&channels=chan-1,chan-2&mode=tail&since=24h&limit=40&max_chars=8192" {
+		t.Fatalf("unexpected wall feed path: %q", contextFeed.Path)
+	}
+	traderTools := p.Services["trader"].Claw.Tools
+	if len(traderTools) != 1 || traderTools[0].Service != conversationWallServiceName || !slices.Equal(traderTools[0].Allow, []string{"search_channel_context", "get_channel_messages"}) {
+		t.Fatalf("expected claw-wall retrieval tool policy, got %+v", traderTools)
 	}
 	if len(p.Services["observer"].Claw.Feeds) != 0 {
 		t.Fatalf("expected no wall feed for non-cllama service, got %+v", p.Services["observer"].Claw.Feeds)
@@ -3945,24 +3968,169 @@ func TestInjectConversationWallHonorsChannelContextConfig(t *testing.T) {
 	}
 
 	traderFeeds := p.Services["trader"].Claw.Feeds
-	if len(traderFeeds) != 1 {
+	if len(traderFeeds) != 2 {
 		t.Fatalf("expected trader feed, got %+v", traderFeeds)
 	}
-	if traderFeeds[0].Path != "/channel-context?consumer={claw_id}&channels=chan-1&mode=tail&since=6h&limit=25&max_chars=4096" {
-		t.Fatalf("unexpected trader feed path: %q", traderFeeds[0].Path)
+	traderAwareness := testFeedByName(t, traderFeeds, conversationWallAwarenessName)
+	if traderAwareness.Path != "/channel-awareness?channels=chan-1&since=24h&limit=60&max_chars=8192&context_kind=raw_window" {
+		t.Fatalf("unexpected trader awareness path: %q", traderAwareness.Path)
+	}
+	traderContext := testFeedByName(t, traderFeeds, conversationWallFeedName)
+	if traderContext.Path != "/channel-context?consumer={claw_id}&channels=chan-1&mode=tail&since=6h&limit=25&max_chars=4096" {
+		t.Fatalf("unexpected trader feed path: %q", traderContext.Path)
 	}
 
 	scoutFeeds := p.Services["scout"].Claw.Feeds
-	if len(scoutFeeds) != 1 {
+	if len(scoutFeeds) != 2 {
 		t.Fatalf("expected scout feed, got %+v", scoutFeeds)
 	}
-	if scoutFeeds[0].Path != "/channel-context?consumer={claw_id}&channels=chan-1&mode=tail&since=30m&limit=8&max_chars=1024" {
-		t.Fatalf("unexpected scout feed path: %q", scoutFeeds[0].Path)
+	scoutAwareness := testFeedByName(t, scoutFeeds, conversationWallAwarenessName)
+	if scoutAwareness.Path != "/channel-awareness?channels=chan-1&since=24h&limit=60&max_chars=8192&context_kind=raw_window" {
+		t.Fatalf("unexpected scout awareness path: %q", scoutAwareness.Path)
+	}
+	scoutContext := testFeedByName(t, scoutFeeds, conversationWallFeedName)
+	if scoutContext.Path != "/channel-context?consumer={claw_id}&channels=chan-1&mode=tail&since=30m&limit=8&max_chars=1024" {
+		t.Fatalf("unexpected scout feed path: %q", scoutContext.Path)
 	}
 
 	wall := p.Services[conversationWallServiceName]
 	if wall.Environment["CLAW_WALL_LIMIT"] != "700" {
 		t.Fatalf("expected wall buffer to use max service buffer, got %q", wall.Environment["CLAW_WALL_LIMIT"])
+	}
+}
+
+func TestPrepareConversationWallRuntimeWritesAllowlistAndServiceAuth(t *testing.T) {
+	runtimeDir := t.TempDir()
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			conversationWallServiceName: {
+				Image:       resolveConversationWallImageRef(),
+				Environment: map[string]string{},
+			},
+			"trader": testConversationWallService("${TRADER_DISCORD_BOT_TOKEN}", "chan-2", "chan-1"),
+		},
+	}
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"trader": {ServiceName: "trader", Cllama: []string{"passthrough"}, Count: 2},
+	}
+
+	auth, allowlists, err := prepareConversationWallRuntime(runtimeDir, p, resolvedClaws)
+	if err != nil {
+		t.Fatalf("prepareConversationWallRuntime: %v", err)
+	}
+	if !slices.Equal(allowlists["trader-0"], []string{"chan-1", "chan-2"}) || !slices.Equal(allowlists["trader-1"], []string{"chan-1", "chan-2"}) {
+		t.Fatalf("unexpected allowlists: %+v", allowlists)
+	}
+	if auth["trader-0"].Service != conversationWallServiceName || auth["trader-0"].Token == "" || auth["trader-1"].Token != auth["trader-0"].Token {
+		t.Fatalf("unexpected service auth: %+v", auth)
+	}
+
+	wall := p.Services[conversationWallServiceName]
+	if wall.Environment[conversationWallToolTokenEnv] != auth["trader-0"].Token {
+		t.Fatalf("expected wall tool token to match service auth")
+	}
+	if wall.Environment["CLAW_WALL_AGENT_CHANNELS_SHA"] == "" {
+		t.Fatal("expected allowlist sha env")
+	}
+	volumes, ok := wall.Compose["volumes"].([]string)
+	if !ok || len(volumes) != 1 || !strings.HasSuffix(volumes[0], ":"+conversationWallAllowlistPath+":ro") {
+		t.Fatalf("unexpected claw-wall volumes: %#v", wall.Compose["volumes"])
+	}
+
+	raw, err := os.ReadFile(filepath.Join(runtimeDir, "claw-wall-agent-channels.json"))
+	if err != nil {
+		t.Fatalf("read allowlist: %v", err)
+	}
+	var manifest conversationWallAllowlistFile
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("parse allowlist: %v", err)
+	}
+	if manifest.Version != 1 || !slices.Equal(manifest.Agents["trader-0"], []string{"chan-1", "chan-2"}) {
+		t.Fatalf("unexpected allowlist manifest: %+v", manifest)
+	}
+}
+
+func TestComposeMaterializesAutoRegisteredToolsForChannelConsumers(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"observer": testConversationWallService("${OBSERVER_DISCORD_BOT_TOKEN}", "chan-2"),
+			"trader":   testConversationWallService("${TRADER_DISCORD_BOT_TOKEN}", "chan-1"),
+		},
+	}
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"observer": {ServiceName: "observer"},
+		"trader":   {ServiceName: "trader", Cllama: []string{"passthrough"}},
+	}
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		t.Fatalf("injectConversationWall: %v", err)
+	}
+
+	descriptors := map[string]*describe.ServiceDescriptor{
+		conversationWallServiceName: builtinClawWallDescriptor(),
+	}
+	registry, err := describe.BuildToolRegistry(descriptors)
+	if err != nil {
+		t.Fatalf("BuildToolRegistry: %v", err)
+	}
+	resolvedTools, err := resolveToolSubscriptions(p, registry)
+	if err != nil {
+		t.Fatalf("resolveToolSubscriptions: %v", err)
+	}
+	if len(resolvedTools["observer"]) != 0 {
+		t.Fatalf("expected no observer tools, got %+v", resolvedTools["observer"])
+	}
+	if len(resolvedTools["trader"]) != 2 {
+		t.Fatalf("expected two trader tools, got %+v", resolvedTools["trader"])
+	}
+}
+
+func TestToolsJSONCarriesClawWallBearerWithoutLeakingEnv(t *testing.T) {
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"trader": testConversationWallService("${TRADER_DISCORD_BOT_TOKEN}", "chan-1"),
+		},
+	}
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"trader": {ServiceName: "trader", Cllama: []string{"passthrough"}},
+	}
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		t.Fatalf("injectConversationWall: %v", err)
+	}
+	auth, _, err := prepareConversationWallRuntime(t.TempDir(), p, resolvedClaws)
+	if err != nil {
+		t.Fatalf("prepareConversationWallRuntime: %v", err)
+	}
+	descriptors := map[string]*describe.ServiceDescriptor{
+		conversationWallServiceName: builtinClawWallDescriptor(),
+	}
+	registry, err := describe.BuildToolRegistry(descriptors)
+	if err != nil {
+		t.Fatalf("BuildToolRegistry: %v", err)
+	}
+	resolvedTools, err := resolveToolSubscriptions(p, registry)
+	if err != nil {
+		t.Fatalf("resolveToolSubscriptions: %v", err)
+	}
+	tools, err := buildToolManifestEntries(p, descriptors, nil, "trader", resolvedTools["trader"], lookupServiceAuth(auth, "trader"))
+	if err != nil {
+		t.Fatalf("buildToolManifestEntries: %v", err)
+	}
+	if len(tools) != 2 {
+		t.Fatalf("expected two tool manifest entries, got %+v", tools)
+	}
+	for _, tool := range tools {
+		if tool.Execution.Service != conversationWallServiceName || tool.Execution.BaseURL != "http://claw-wall:8080" {
+			t.Fatalf("unexpected claw-wall execution metadata: %+v", tool)
+		}
+		if tool.Execution.Auth == nil || tool.Execution.Auth.Type != "bearer" || tool.Execution.Auth.Token == "" {
+			t.Fatalf("expected projected bearer auth in tools.json entry: %+v", tool)
+		}
+		if tool.Execution.Auth.Token != p.Services[conversationWallServiceName].Environment[conversationWallToolTokenEnv] {
+			t.Fatalf("expected tools.json token to match claw-wall service token")
+		}
+	}
+	if _, leaked := p.Services["trader"].Environment[conversationWallToolTokenEnv]; leaked {
+		t.Fatalf("consumer env leaked %s", conversationWallToolTokenEnv)
 	}
 }
 

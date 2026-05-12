@@ -126,6 +126,7 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 			Token:     "capi_deadbeef",
 			Principal: "octopus",
 		}},
+		ChannelAllowlist: []string{"chan-1", "chan-2"},
 	}}
 
 	if err := GenerateContextDir(dir, agents); err != nil {
@@ -186,6 +187,18 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 	}
 	if auth["principal"] != "octopus" {
 		t.Fatalf("unexpected service-auth payload: %v", auth)
+	}
+
+	allowlistRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "channels-allowlist.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var allowlist ChannelAllowlistManifest
+	if err := json.Unmarshal(allowlistRaw, &allowlist); err != nil {
+		t.Fatal(err)
+	}
+	if allowlist.Version != 1 || len(allowlist.Channels) != 2 || allowlist.Channels[0] != "chan-1" || allowlist.Channels[1] != "chan-2" {
+		t.Fatalf("unexpected channel allowlist payload: %+v", allowlist)
 	}
 }
 
