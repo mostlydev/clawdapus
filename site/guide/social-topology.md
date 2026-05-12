@@ -149,13 +149,15 @@ This declares that the agent's Discord channel surface only accepts messages fro
 
 When a cllama-enabled service has Discord channels in its handle config, `claw up` automatically injects the `claw-wall` sidecar and a `channel-context` feed for that service. The feed delivers the recent channel transcript so the agent sees the conversation immediately preceding any mention — without it, an invocation can land in the prompt while the messages that triggered it are missing from the agent's context.
 
-The wall polls Discord every 30s, keeps a per-channel ring buffer (default 500 messages), and serves the latest tail on each fetch. By default the tail covers the last 24 hours, capped at 40 messages or 8KB whichever fires first, sorted oldest-to-newest like a chat log. A coverage header line declares what was actually returned so silent gaps are visible:
+The wall polls Discord every 30s, backfills Discord history on startup to the configured retention horizon (default 24h), keeps a per-channel time-retained store bounded by a safety cap (default 5000 messages), and serves the latest tail on each fetch. By default the tail covers the last 24 hours, capped at 40 messages or 8KB whichever fires first, sorted oldest-to-newest like a chat log. A coverage header line declares what was actually returned so silent gaps are visible:
 
 ```
-[channel-context] mode=tail since=24h channels=1464509330... messages=23 available=23 omitted=0 range=2026-04-29T03:14Z..2026-04-29T05:42Z buffer_range=2026-04-28T17:02Z..2026-04-29T05:42Z
+[channel-context] mode=tail since=24h channels=1464509330... messages=23 available=23 omitted=0 range=2026-04-29T03:14Z..2026-04-29T05:42Z buffer_range=2026-04-28T17:02Z..2026-04-29T05:42Z backfill_status=complete
 ```
 
 Tune the window per pod or service with `x-claw.context.channel: { since, limit, max-chars, buffer }` (see [Pod YAML · Channel Context Tuning](/guide/pod-yaml#channel-context-tuning)). Each consuming agent only sees channels it has surface authorization for.
+
+`buffer` is a memory-safety cap on retained messages, not the time contract. The sidecar's retention and backfill horizon come from `CLAW_WALL_RETENTION` (default `24h`), and startup pagination is bounded by `CLAW_WALL_BACKFILL_MAX_PAGES` (default `25`) per channel. If a channel cannot be fully backfilled because of the page budget, safety cap, or Discord rate limits, the feed header reports `backfill_status=partial` or `backfill_status=rate_limited`; mixed-channel responses use `channel_id:status` pairs.
 
 ### Cursored Append-Only Deltas
 

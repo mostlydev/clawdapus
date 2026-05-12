@@ -21,6 +21,8 @@ type config struct {
 	TokenPairs        string
 	BufferLimit       int
 	PollInterval      time.Duration
+	Retention         time.Duration
+	BackfillMaxPages  int
 	ToolToken         string
 	AgentChannelsPath string
 }
@@ -57,8 +59,10 @@ func run(args []string) error {
 		return err
 	}
 
-	store := newConversationStore(cfg.BufferLimit)
+	store := newConversationStore(cfg.BufferLimit, cfg.Retention)
 	poller := newDiscordPoller(&http.Client{Timeout: 10 * time.Second}, store, targets, cfg.BufferLimit)
+	poller.backfillRetention = cfg.Retention
+	poller.backfillMaxPages = cfg.BackfillMaxPages
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -96,7 +100,7 @@ func run(args []string) error {
 }
 
 func loadConfig() (config, error) {
-	bufferLimit, err := envInt("CLAW_WALL_LIMIT", 500)
+	bufferLimit, err := envInt("CLAW_WALL_LIMIT", 5000)
 	if err != nil {
 		return config{}, err
 	}
@@ -112,6 +116,22 @@ func loadConfig() (config, error) {
 		return config{}, fmt.Errorf("claw-wall: CLAW_WALL_POLL_INTERVAL must be at least 1")
 	}
 
+	retention, err := envDuration("CLAW_WALL_RETENTION", 24*time.Hour)
+	if err != nil {
+		return config{}, err
+	}
+	if retention < 0 {
+		return config{}, fmt.Errorf("claw-wall: CLAW_WALL_RETENTION must be non-negative")
+	}
+
+	backfillMaxPages, err := envInt("CLAW_WALL_BACKFILL_MAX_PAGES", 25)
+	if err != nil {
+		return config{}, err
+	}
+	if backfillMaxPages < 0 {
+		return config{}, fmt.Errorf("claw-wall: CLAW_WALL_BACKFILL_MAX_PAGES must be non-negative")
+	}
+
 	tokenPairs := strings.TrimSpace(os.Getenv("CLAW_WALL_TOKENS"))
 	if tokenPairs == "" {
 		return config{}, fmt.Errorf("claw-wall: CLAW_WALL_TOKENS is required")
@@ -122,6 +142,8 @@ func loadConfig() (config, error) {
 		TokenPairs:        tokenPairs,
 		BufferLimit:       bufferLimit,
 		PollInterval:      time.Duration(pollSeconds) * time.Second,
+		Retention:         retention,
+		BackfillMaxPages:  backfillMaxPages,
 		ToolToken:         strings.TrimSpace(os.Getenv("CLAW_WALL_TOOL_TOKEN")),
 		AgentChannelsPath: envOr("CLAW_WALL_AGENT_CHANNELS_FILE", "/etc/claw-wall/agent-channels.json"),
 	}, nil
@@ -177,6 +199,19 @@ func envInt(key string, fallback int) (int, error) {
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
 		return 0, fmt.Errorf("claw-wall: %s must be an integer: %w", key, err)
+	}
+	return parsed, nil
+}
+
+func envDuration(key string, fallback time.Duration) (time.Duration, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("claw-wall: %s must be a duration: %w", key, err)
 	}
 	return parsed, nil
 }

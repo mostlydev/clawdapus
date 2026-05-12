@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -20,14 +21,16 @@ type tokenPair struct {
 }
 
 type discordPoller struct {
-	client       *http.Client
-	store        *conversationStore
-	targets      []tokenPair
-	fetchLimit   int
-	latestByPair map[string]string
-	baseURL      string
-	cooldowns    *rateLimitTracker
-	now          func() time.Time
+	client            *http.Client
+	store             *conversationStore
+	targets           []tokenPair
+	fetchLimit        int
+	backfillRetention time.Duration
+	backfillMaxPages  int
+	latestByPair      map[string]string
+	baseURL           string
+	cooldowns         *rateLimitTracker
+	now               func() time.Time
 }
 
 type discordAPIMessage struct {
@@ -120,6 +123,7 @@ func newDiscordPoller(client *http.Client, store *conversationStore, targets []t
 }
 
 func (p *discordPoller) Run(ctx context.Context, interval time.Duration, logWriter io.Writer) {
+	p.backfillAll(ctx, logWriter)
 	p.pollOnce(ctx, logWriter)
 
 	ticker := time.NewTicker(interval)
@@ -157,6 +161,7 @@ func (p *discordPoller) pollOnce(ctx context.Context, logWriter io.Writer) {
 		}
 		if len(messages) > 0 {
 			p.store.merge(target.ChannelID, messages)
+			p.recoverGapIfNeeded(ctx, target, latestID, messages, logWriter)
 		}
 		if strings.TrimSpace(newestID) != "" {
 			p.latestByPair[pairKey(target)] = newestID
@@ -165,17 +170,30 @@ func (p *discordPoller) pollOnce(ctx context.Context, logWriter io.Writer) {
 }
 
 func (p *discordPoller) fetchMessages(ctx context.Context, target tokenPair, afterID string) ([]wallMessage, string, error) {
+	return p.fetchMessagesPage(ctx, target, afterID, "")
+}
+
+func (p *discordPoller) fetchMessagesBefore(ctx context.Context, target tokenPair, beforeID string) ([]wallMessage, string, error) {
+	return p.fetchMessagesPage(ctx, target, "", beforeID)
+}
+
+func (p *discordPoller) fetchMessagesPage(ctx context.Context, target tokenPair, afterID, beforeID string) ([]wallMessage, string, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(p.baseURL), "/")
 	if baseURL == "" {
 		baseURL = "https://discord.com/api/v10"
 	}
 
-	url := fmt.Sprintf("%s/channels/%s/messages?limit=%d", baseURL, target.ChannelID, p.fetchLimit)
+	values := url.Values{}
+	values.Set("limit", fmt.Sprintf("%d", p.fetchLimit))
 	if strings.TrimSpace(afterID) != "" {
-		url += "&after=" + afterID
+		values.Set("after", strings.TrimSpace(afterID))
 	}
+	if strings.TrimSpace(beforeID) != "" {
+		values.Set("before", strings.TrimSpace(beforeID))
+	}
+	requestURL := fmt.Sprintf("%s/channels/%s/messages?%s", baseURL, target.ChannelID, values.Encode())
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, "", err
 	}
@@ -221,6 +239,141 @@ func (p *discordPoller) fetchMessages(ctx context.Context, target tokenPair, aft
 	}
 	sortWallMessages(messages)
 	return messages, newestID, nil
+}
+
+func (p *discordPoller) backfillAll(ctx context.Context, logWriter io.Writer) {
+	if p.backfillRetention <= 0 || p.backfillMaxPages <= 0 {
+		return
+	}
+	for _, target := range p.targets {
+		if p.cooldowns.blocked(target, p.now()) {
+			p.store.setBackfillStatus(target.ChannelID, backfillStatusRateLimited)
+			continue
+		}
+		p.store.setBackfillStatus(target.ChannelID, backfillStatusInProgress)
+		status, newestID, err := p.backfillChannel(ctx, target, p.backfillRetention, p.backfillMaxPages)
+		if err != nil {
+			var rateLimitErr *discordRateLimitError
+			if errors.As(err, &rateLimitErr) {
+				if logWriter != nil && rateLimitErr.FirstOccurrence {
+					fmt.Fprintf(logWriter, "claw-wall: %v\n", rateLimitErr)
+				}
+			} else if logWriter != nil {
+				fmt.Fprintf(logWriter, "claw-wall: backfill channel %s failed: %v\n", target.ChannelID, err)
+			}
+		}
+		p.store.setBackfillStatus(target.ChannelID, status)
+		if strings.TrimSpace(newestID) != "" {
+			p.latestByPair[pairKey(target)] = newestID
+		}
+	}
+}
+
+func (p *discordPoller) backfillChannel(ctx context.Context, target tokenPair, retention time.Duration, maxPages int) (string, string, error) {
+	if retention <= 0 || maxPages <= 0 {
+		return backfillStatusUnavailable, "", nil
+	}
+	cutoff := p.now().Add(-retention)
+	beforeID := ""
+	newestID := ""
+	for page := 0; page < maxPages; page++ {
+		messages, pageNewestID, err := p.fetchMessagesBefore(ctx, target, beforeID)
+		if err != nil {
+			var rateLimitErr *discordRateLimitError
+			if errors.As(err, &rateLimitErr) {
+				return backfillStatusRateLimited, newestID, err
+			}
+			if newestID != "" {
+				return backfillStatusPartial, newestID, err
+			}
+			return backfillStatusUnavailable, "", err
+		}
+		if len(messages) == 0 {
+			return backfillStatusComplete, newestID, nil
+		}
+		if compareSnowflakes(pageNewestID, newestID) > 0 {
+			newestID = pageNewestID
+		}
+		p.store.mergeAt(target.ChannelID, messages, p.now())
+
+		oldestID := messages[0].ID
+		beforeID = oldestID
+		if oldest := oldestMessageTime(messages); !oldest.IsZero() && !oldest.After(cutoff) {
+			return backfillStatusComplete, newestID, nil
+		}
+		if len(messages) < p.fetchLimit {
+			return backfillStatusComplete, newestID, nil
+		}
+	}
+	return backfillStatusPartial, newestID, nil
+}
+
+func (p *discordPoller) recoverGapIfNeeded(ctx context.Context, target tokenPair, previousLatestID string, newestBatch []wallMessage, logWriter io.Writer) {
+	if p.backfillMaxPages <= 0 || strings.TrimSpace(previousLatestID) == "" || len(newestBatch) < p.fetchLimit {
+		return
+	}
+	oldestReturnedID := newestBatch[0].ID
+	status, err := p.backfillGap(ctx, target, previousLatestID, oldestReturnedID, p.backfillMaxPages)
+	if err != nil {
+		var rateLimitErr *discordRateLimitError
+		if errors.As(err, &rateLimitErr) {
+			if logWriter != nil && rateLimitErr.FirstOccurrence {
+				fmt.Fprintf(logWriter, "claw-wall: %v\n", rateLimitErr)
+			}
+		} else if logWriter != nil {
+			fmt.Fprintf(logWriter, "claw-wall: recover channel %s gap failed: %v\n", target.ChannelID, err)
+		}
+	}
+	if status == backfillStatusPartial || status == backfillStatusRateLimited || status == backfillStatusUnavailable {
+		p.store.setBackfillStatus(target.ChannelID, status)
+	}
+}
+
+func (p *discordPoller) backfillGap(ctx context.Context, target tokenPair, afterID, beforeID string, maxPages int) (string, error) {
+	for page := 0; page < maxPages; page++ {
+		messages, _, err := p.fetchMessagesBefore(ctx, target, beforeID)
+		if err != nil {
+			var rateLimitErr *discordRateLimitError
+			if errors.As(err, &rateLimitErr) {
+				return backfillStatusRateLimited, err
+			}
+			return backfillStatusPartial, err
+		}
+		if len(messages) == 0 {
+			return backfillStatusComplete, nil
+		}
+
+		filtered := make([]wallMessage, 0, len(messages))
+		reachedBoundary := false
+		for _, msg := range messages {
+			if compareSnowflakes(msg.ID, afterID) <= 0 {
+				reachedBoundary = true
+				continue
+			}
+			filtered = append(filtered, msg)
+		}
+		if len(filtered) > 0 {
+			p.store.merge(target.ChannelID, filtered)
+		}
+		if reachedBoundary || len(messages) < p.fetchLimit {
+			return backfillStatusComplete, nil
+		}
+		beforeID = messages[0].ID
+	}
+	return backfillStatusPartial, nil
+}
+
+func oldestMessageTime(messages []wallMessage) time.Time {
+	var oldest time.Time
+	for _, msg := range messages {
+		if msg.Timestamp.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || msg.Timestamp.Before(oldest) {
+			oldest = msg.Timestamp
+		}
+	}
+	return oldest
 }
 
 func convertDiscordMessage(channelID string, msg discordAPIMessage) (wallMessage, bool) {

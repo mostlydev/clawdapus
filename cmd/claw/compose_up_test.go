@@ -3865,6 +3865,8 @@ func testFeedByName(t *testing.T, feeds []pod.FeedEntry, name string) pod.FeedEn
 
 func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	t.Setenv("CLAW_WALL_POLL_INTERVAL", "")
+	t.Setenv("CLAW_WALL_RETENTION", "")
+	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
 
 	p := &pod.Pod{
 		Name: "desk",
@@ -3902,8 +3904,14 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	if wall.Environment["CLAW_WALL_POLL_INTERVAL"] != conversationWallPollInterval {
 		t.Fatalf("unexpected CLAW_WALL_POLL_INTERVAL: %q", wall.Environment["CLAW_WALL_POLL_INTERVAL"])
 	}
-	if wall.Environment["CLAW_WALL_LIMIT"] != "500" {
+	if wall.Environment["CLAW_WALL_LIMIT"] != "5000" {
 		t.Fatalf("unexpected CLAW_WALL_LIMIT: %q", wall.Environment["CLAW_WALL_LIMIT"])
+	}
+	if wall.Environment["CLAW_WALL_RETENTION"] != conversationWallRetention {
+		t.Fatalf("unexpected CLAW_WALL_RETENTION: %q", wall.Environment["CLAW_WALL_RETENTION"])
+	}
+	if wall.Environment["CLAW_WALL_BACKFILL_MAX_PAGES"] != conversationWallBackfillPages {
+		t.Fatalf("unexpected CLAW_WALL_BACKFILL_MAX_PAGES: %q", wall.Environment["CLAW_WALL_BACKFILL_MAX_PAGES"])
 	}
 
 	traderFeeds := p.Services["trader"].Claw.Feeds
@@ -3934,6 +3942,9 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 }
 
 func TestInjectConversationWallHonorsChannelContextConfig(t *testing.T) {
+	t.Setenv("CLAW_WALL_RETENTION", "")
+	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
+
 	p := &pod.Pod{
 		Name: "desk",
 		Context: &pod.ContextConfig{
@@ -3994,7 +4005,7 @@ func TestInjectConversationWallHonorsChannelContextConfig(t *testing.T) {
 	}
 
 	wall := p.Services[conversationWallServiceName]
-	if wall.Environment["CLAW_WALL_LIMIT"] != "700" {
+	if wall.Environment["CLAW_WALL_LIMIT"] != "5000" {
 		t.Fatalf("expected wall buffer to use max service buffer, got %q", wall.Environment["CLAW_WALL_LIMIT"])
 	}
 }
