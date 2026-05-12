@@ -95,6 +95,11 @@ func Summarize(events []Event) Summary {
 				agent.ToolErrors++
 				summary.ToolErrors++
 			}
+		case "channel_context_op":
+			agent.ChannelContextOps++
+			if channelContextEventFailed(event) {
+				agent.ChannelContextErrs++
+			}
 		case "provider_pool":
 			agent.ProviderPoolEvents++
 			summary.ProviderPoolEvents++
@@ -122,6 +127,21 @@ func Summarize(events []Event) Summary {
 	})
 	summary.Agents = agents
 	return summary
+}
+
+func channelContextEventFailed(event Event) bool {
+	if event.Error != "" {
+		return true
+	}
+	if event.StatusCode != nil && *event.StatusCode >= 400 {
+		return true
+	}
+	switch event.Status {
+	case "error", "not_in_buffer":
+		return true
+	default:
+		return false
+	}
 }
 
 func toolEventFailed(event Event) bool {

@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,19 +42,23 @@ var composeUpDiscoverTools bool
 var runtimePlaceholderPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 const (
-	conversationWallServiceName  = "claw-wall"
-	conversationWallFeedName     = "channel-context"
-	conversationWallFeedTTL      = 30
-	conversationWallFeedSince    = "24h"
-	conversationWallFeedLimit    = 40
-	conversationWallFeedMaxChars = 8 * 1024
-	conversationWallBufferLimit  = 500
-	conversationWallPollInterval = "30"
-	conversationWallInternalPort = "8080"
-	conversationWallDockerfile   = "dockerfiles/claw-wall/Dockerfile"
-	clawInternalNetworkName      = "claw-internal"
-	historyReplayAuthService     = "cllama-history"
-	historyReplayBaseURL         = "http://cllama:8080/history"
+	conversationWallServiceName    = "claw-wall"
+	conversationWallFeedName       = "channel-context"
+	conversationWallAwarenessName  = "channel-awareness"
+	conversationWallFeedTTL        = 30
+	conversationWallFeedSince      = "24h"
+	conversationWallFeedLimit      = 40
+	conversationWallAwarenessLimit = 60
+	conversationWallFeedMaxChars   = 8 * 1024
+	conversationWallBufferLimit    = 500
+	conversationWallPollInterval   = "30"
+	conversationWallInternalPort   = "8080"
+	conversationWallDockerfile     = "dockerfiles/claw-wall/Dockerfile"
+	conversationWallToolTokenEnv   = "CLAW_WALL_TOOL_TOKEN"
+	conversationWallAllowlistPath  = "/etc/claw-wall/agent-channels.json"
+	clawInternalNetworkName        = "claw-internal"
+	historyReplayAuthService       = "cllama-history"
+	historyReplayBaseURL           = "http://cllama:8080/history"
 )
 
 var (
@@ -433,6 +439,10 @@ func runComposeUp(podFile string) (err error) {
 	if err != nil {
 		return err
 	}
+	conversationWallAuth, conversationWallAllowlists, err := prepareConversationWallRuntime(runtimeDir, p, resolvedClaws)
+	if err != nil {
+		return err
+	}
 	for _, rc := range resolvedClaws {
 		if rc == nil {
 			continue
@@ -548,6 +558,7 @@ func runComposeUp(podFile string) (err error) {
 					ordinalAuth := mergeServiceAuthEntries(
 						lookupServiceAuth(clawAPIAuth, ordinalName),
 						lookupServiceAuth(historyReplayAuth, ordinalName),
+						lookupServiceAuth(conversationWallAuth, ordinalName),
 					)
 					feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, ordinalName, ordinalAuth)
 					if err != nil {
@@ -563,13 +574,14 @@ func runComposeUp(podFile string) (err error) {
 					}
 					md := augmentClawdapusMD(shared.GenerateClawdapusMD(&ordinalRC, p.Name), tools, memory)
 					contextInputs = append(contextInputs, cllama.AgentContextInput{
-						AgentID:     ordinalName,
-						AgentsMD:    string(agentContent),
-						ClawdapusMD: md,
-						Feeds:       feeds,
-						Tools:       tools,
-						Memory:      memory,
-						ServiceAuth: ordinalAuth,
+						AgentID:          ordinalName,
+						AgentsMD:         string(agentContent),
+						ClawdapusMD:      md,
+						Feeds:            feeds,
+						Tools:            tools,
+						Memory:           memory,
+						ServiceAuth:      ordinalAuth,
+						ChannelAllowlist: conversationWallAllowlists[ordinalName],
 						Metadata: cllama.InjectCompiledModelPolicy(map[string]any{
 							"service":  name,
 							"ordinal":  i,
@@ -586,6 +598,7 @@ func runComposeUp(podFile string) (err error) {
 			svcAuth := mergeServiceAuthEntries(
 				lookupServiceAuth(clawAPIAuth, name),
 				lookupServiceAuth(historyReplayAuth, name),
+				lookupServiceAuth(conversationWallAuth, name),
 			)
 			feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, name, svcAuth)
 			if err != nil {
@@ -601,13 +614,14 @@ func runComposeUp(podFile string) (err error) {
 			}
 			md := augmentClawdapusMD(shared.GenerateClawdapusMD(rc, p.Name), tools, memory)
 			contextInputs = append(contextInputs, cllama.AgentContextInput{
-				AgentID:     name,
-				AgentsMD:    string(agentContent),
-				ClawdapusMD: md,
-				Feeds:       feeds,
-				Tools:       tools,
-				Memory:      memory,
-				ServiceAuth: svcAuth,
+				AgentID:          name,
+				AgentsMD:         string(agentContent),
+				ClawdapusMD:      md,
+				Feeds:            feeds,
+				Tools:            tools,
+				Memory:           memory,
+				ServiceAuth:      svcAuth,
+				ChannelAllowlist: conversationWallAllowlists[name],
 				Metadata: cllama.InjectCompiledModelPolicy(map[string]any{
 					"service":  name,
 					"pod":      p.Name,
@@ -1783,7 +1797,10 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 			continue
 		}
 		settings := conversationWallChannelContext(p, svc)
+		awarenessSettings := conversationWallChannelAwarenessContext()
+		svc.Claw.Feeds = appendConversationWallAwarenessFeed(svc.Claw.Feeds, channelIDs, awarenessSettings)
 		svc.Claw.Feeds = appendConversationWallFeed(svc.Claw.Feeds, channelIDs, settings)
+		svc.Claw.Tools = appendConversationWallToolPolicy(svc.Claw.Tools)
 	}
 
 	p.Services[conversationWallServiceName] = &pod.Service{
@@ -1866,6 +1883,14 @@ func conversationWallChannelContext(p *pod.Pod, svc *pod.Service) conversationWa
 	return settings
 }
 
+func conversationWallChannelAwarenessContext() conversationWallContextSettings {
+	return conversationWallContextSettings{
+		Since:    conversationWallFeedSince,
+		Limit:    conversationWallAwarenessLimit,
+		MaxChars: conversationWallFeedMaxChars,
+	}
+}
+
 func applyConversationWallChannelContext(settings conversationWallContextSettings, cfg *pod.ChannelContextConfig) conversationWallContextSettings {
 	if cfg == nil {
 		return settings
@@ -1917,6 +1942,57 @@ func appendConversationWallFeed(feeds []pod.FeedEntry, channelIDs []string, sett
 		Source: conversationWallServiceName,
 		Path:   path,
 		TTL:    conversationWallFeedTTL,
+	})
+}
+
+func appendConversationWallAwarenessFeed(feeds []pod.FeedEntry, channelIDs []string, settings conversationWallContextSettings) []pod.FeedEntry {
+	path := fmt.Sprintf(
+		"/channel-awareness?channels=%s&since=%s&limit=%d&max_chars=%d&context_kind=raw_window",
+		strings.Join(channelIDs, ","),
+		settings.Since,
+		settings.Limit,
+		settings.MaxChars,
+	)
+	for _, feed := range feeds {
+		if feed.Name == conversationWallAwarenessName && feed.Source == conversationWallServiceName && feed.Path == path {
+			return feeds
+		}
+	}
+	return append(feeds, pod.FeedEntry{
+		Name:   conversationWallAwarenessName,
+		Source: conversationWallServiceName,
+		Path:   path,
+		TTL:    conversationWallFeedTTL,
+	})
+}
+
+func appendConversationWallToolPolicy(tools []pod.ToolPolicyEntry) []pod.ToolPolicyEntry {
+	required := []string{"search_channel_context", "get_channel_messages"}
+	for _, policy := range tools {
+		if policy.Service != conversationWallServiceName {
+			continue
+		}
+		if len(policy.Allow) == 1 && policy.Allow[0] == "all" {
+			return tools
+		}
+		seen := make(map[string]struct{}, len(policy.Allow))
+		for _, item := range policy.Allow {
+			seen[item] = struct{}{}
+		}
+		covered := true
+		for _, name := range required {
+			if _, ok := seen[name]; !ok {
+				covered = false
+				break
+			}
+		}
+		if covered {
+			return tools
+		}
+	}
+	return append(tools, pod.ToolPolicyEntry{
+		Service: conversationWallServiceName,
+		Allow:   required,
 	})
 }
 
@@ -2151,6 +2227,96 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 	return serviceAuth, nil
 }
 
+type conversationWallAllowlistFile struct {
+	Version int                 `json:"version"`
+	Agents  map[string][]string `json:"agents"`
+}
+
+func prepareConversationWallRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw) (map[string]cllama.ServiceAuthEntry, map[string][]string, error) {
+	if p == nil {
+		return nil, nil, nil
+	}
+	wallSvc := p.Services[conversationWallServiceName]
+	if wallSvc == nil {
+		return nil, nil, nil
+	}
+
+	allowlists := conversationWallAgentAllowlists(p, resolvedClaws)
+	if len(allowlists) == 0 {
+		return nil, nil, nil
+	}
+
+	manifest := conversationWallAllowlistFile{
+		Version: 1,
+		Agents:  allowlists,
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal claw-wall channel allowlist: %w", err)
+	}
+	data = append(data, '\n')
+	hostPath := filepath.Join(runtimeDir, "claw-wall-agent-channels.json")
+	if err := writeRuntimeFile(hostPath, data, 0644); err != nil {
+		return nil, nil, fmt.Errorf("write claw-wall channel allowlist: %w", err)
+	}
+
+	token := cllama.GenerateToken(conversationWallServiceName)
+	if wallSvc.Environment == nil {
+		wallSvc.Environment = make(map[string]string)
+	}
+	wallSvc.Environment[conversationWallToolTokenEnv] = token
+	sum := sha256.Sum256(data)
+	wallSvc.Environment["CLAW_WALL_AGENT_CHANNELS_SHA"] = hex.EncodeToString(sum[:])
+	if wallSvc.Compose == nil {
+		wallSvc.Compose = make(map[string]interface{})
+	}
+	volumes, err := appendComposeString(wallSvc.Compose["volumes"], fmt.Sprintf("%s:%s:ro", hostPath, conversationWallAllowlistPath))
+	if err != nil {
+		return nil, nil, fmt.Errorf("claw-wall volumes: %w", err)
+	}
+	wallSvc.Compose["volumes"] = volumes
+
+	serviceAuth := make(map[string]cllama.ServiceAuthEntry, len(allowlists))
+	for agentID := range allowlists {
+		serviceAuth[agentID] = cllama.ServiceAuthEntry{
+			Service:   conversationWallServiceName,
+			AuthType:  "bearer",
+			Token:     token,
+			Principal: agentID,
+		}
+	}
+	return serviceAuth, allowlists, nil
+}
+
+func conversationWallAgentAllowlists(p *pod.Pod, resolvedClaws map[string]*driver.ResolvedClaw) map[string][]string {
+	allowlists := make(map[string][]string)
+	if p == nil {
+		return allowlists
+	}
+	for _, name := range sortedResolvedClawNames(resolvedClaws) {
+		rc := resolvedClaws[name]
+		if rc == nil || len(rc.Cllama) == 0 {
+			continue
+		}
+		svc := p.Services[name]
+		if svc == nil || svc.Claw == nil {
+			continue
+		}
+		channelIDs := discordHandleChannelIDs(svc.Claw.Handles)
+		if len(channelIDs) == 0 {
+			continue
+		}
+		count := 1
+		if rc.Count > 0 {
+			count = rc.Count
+		}
+		for _, agentID := range expandedServiceNames(name, count) {
+			allowlists[agentID] = append([]string(nil), channelIDs...)
+		}
+	}
+	return allowlists
+}
+
 func writeClawAPIPrincipalStore(runtimeDir, hostPath string, store clawapi.Store) error {
 	principalsDir := filepath.Dir(hostPath)
 	if err := os.MkdirAll(principalsDir, 0700); err != nil {
@@ -2280,6 +2446,33 @@ func ensureServiceOnNetwork(svc *pod.Service, network string) error {
 	}
 	svc.Compose["networks"] = networks
 	return nil
+}
+
+func appendComposeString(base interface{}, value string) (interface{}, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return base, nil
+	}
+	switch current := base.(type) {
+	case nil:
+		return []string{value}, nil
+	case []string:
+		for _, item := range current {
+			if item == value {
+				return current, nil
+			}
+		}
+		return append(current, value), nil
+	case []interface{}:
+		for _, item := range current {
+			if s, ok := item.(string); ok && s == value {
+				return current, nil
+			}
+		}
+		return append(current, value), nil
+	default:
+		return nil, fmt.Errorf("expected list, got %T", base)
+	}
 }
 
 func appendComposeNetwork(base interface{}, network string) (interface{}, error) {
@@ -3566,6 +3759,11 @@ func resolveServiceMetadata(podDir string, p *pod.Pod, serviceName string, svc *
 		descriptors[serviceName] = descriptor
 		return "", nil, descriptor, nil
 	}
+	if serviceName == conversationWallServiceName && p != nil && p.Services[conversationWallServiceName] != nil {
+		descriptor := builtinClawWallDescriptor()
+		descriptors[serviceName] = descriptor
+		return strings.TrimSpace(svc.Image), infos[serviceName], descriptor, nil
+	}
 
 	if descriptorPath := explicitDescribeFile(podDir, svc); descriptorPath != "" {
 		descriptor, err := loadDescriptorFromFile(descriptorPath)
@@ -3889,6 +4087,9 @@ func collectServiceDescriptors(podDir string, p *pod.Pod, imageRefs map[string]s
 	if p.ClawAPI != nil {
 		descriptors["claw-api"] = builtinClawAPIDescriptor()
 	}
+	if p.Services[conversationWallServiceName] != nil {
+		descriptors[conversationWallServiceName] = builtinClawWallDescriptor()
+	}
 
 	serviceNames := make([]string, 0, len(p.Services))
 	for name := range p.Services {
@@ -4030,6 +4231,86 @@ func builtinClawAPIDescriptor() *describe.ServiceDescriptor {
 		Auth: &describe.AuthDescriptor{
 			Type: "bearer",
 			Env:  "CLAW_API_TOKEN",
+		},
+	}
+}
+
+func builtinClawWallDescriptor() *describe.ServiceDescriptor {
+	return &describe.ServiceDescriptor{
+		Version:     2,
+		Description: "Conversation wall channel context, awareness, and retrieval for Discord-backed surfaces.",
+		Auth: &describe.AuthDescriptor{
+			Type: "bearer",
+			Env:  conversationWallToolTokenEnv,
+		},
+		Tools: []describe.ToolDescriptor{
+			{
+				Name:        "search_channel_context",
+				Description: "Search this agent's recent channel buffer for messages matching a query.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"channels": map[string]interface{}{
+							"type":  "array",
+							"items": map[string]interface{}{"type": "string"},
+						},
+						"query": map[string]interface{}{
+							"type": "string",
+						},
+						"since": map[string]interface{}{
+							"type":    "string",
+							"default": "24h",
+						},
+						"author": map[string]interface{}{
+							"type": "string",
+						},
+						"limit": map[string]interface{}{
+							"type":    "integer",
+							"default": 20,
+						},
+					},
+					"required": []interface{}{"channels", "query"},
+				},
+				HTTP: &describe.ToolHTTP{
+					Method: http.MethodPost,
+					Path:   "/search_channel_context",
+				},
+			},
+			{
+				Name:        "get_channel_messages",
+				Description: "Fetch exact channel messages by message ID, ID range, or author/time window.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"channels": map[string]interface{}{
+							"type":  "array",
+							"items": map[string]interface{}{"type": "string"},
+						},
+						"message_ids": map[string]interface{}{
+							"type":  "array",
+							"items": map[string]interface{}{"type": "string"},
+						},
+						"after": map[string]interface{}{
+							"type": "string",
+						},
+						"before": map[string]interface{}{
+							"type": "string",
+						},
+						"author": map[string]interface{}{
+							"type": "string",
+						},
+						"limit": map[string]interface{}{
+							"type":    "integer",
+							"default": 20,
+						},
+					},
+					"required": []interface{}{"channels"},
+				},
+				HTTP: &describe.ToolHTTP{
+					Method: http.MethodPost,
+					Path:   "/get_channel_messages",
+				},
+			},
 		},
 	}
 }

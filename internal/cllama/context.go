@@ -8,14 +8,15 @@ import (
 )
 
 type AgentContextInput struct {
-	AgentID     string
-	AgentsMD    string
-	ClawdapusMD string
-	Metadata    map[string]interface{}
-	Feeds       []FeedManifestEntry
-	Tools       []ToolManifestEntry
-	Memory      *MemoryManifestEntry
-	ServiceAuth []ServiceAuthEntry
+	AgentID          string
+	AgentsMD         string
+	ClawdapusMD      string
+	Metadata         map[string]interface{}
+	Feeds            []FeedManifestEntry
+	Tools            []ToolManifestEntry
+	Memory           *MemoryManifestEntry
+	ServiceAuth      []ServiceAuthEntry
+	ChannelAllowlist []string
 }
 
 type FeedManifestEntry struct {
@@ -68,6 +69,11 @@ type ToolPolicy struct {
 	MaxRounds        int `json:"max_rounds"`
 	TimeoutPerToolMS int `json:"timeout_per_tool_ms"`
 	TotalTimeoutMS   int `json:"total_timeout_ms"`
+}
+
+type ChannelAllowlistManifest struct {
+	Version  int      `json:"version"`
+	Channels []string `json:"channels"`
 }
 
 type MemoryManifestEntry struct {
@@ -153,6 +159,19 @@ func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 			}
 			if err := os.WriteFile(filepath.Join(agentDir, "memory.json"), append(memoryJSON, '\n'), 0644); err != nil {
 				return fmt.Errorf("write memory.json for %q: %w", agent.AgentID, err)
+			}
+		}
+
+		if len(agent.ChannelAllowlist) > 0 {
+			allowlistJSON, err := json.MarshalIndent(ChannelAllowlistManifest{
+				Version:  1,
+				Channels: append([]string(nil), agent.ChannelAllowlist...),
+			}, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal channels allowlist for %q: %w", agent.AgentID, err)
+			}
+			if err := os.WriteFile(filepath.Join(agentDir, "channels-allowlist.json"), append(allowlistJSON, '\n'), 0644); err != nil {
+				return fmt.Errorf("write channels-allowlist.json for %q: %w", agent.AgentID, err)
 			}
 		}
 

@@ -188,7 +188,7 @@ func formatModelUsage(models map[string]int) string {
 func init() {
 	auditCmd.Flags().StringVar(&auditSince, "since", "", "Only include events since this duration or RFC3339 timestamp")
 	auditCmd.Flags().StringVar(&auditClaw, "claw", "", "Only include events for one claw_id")
-	auditCmd.Flags().StringVar(&auditType, "type", "", "Only include one event type (for example request, response, error, intervention, feed_fetch, provider_pool, tool_call)")
+	auditCmd.Flags().StringVar(&auditType, "type", "", "Only include one event type (for example request, response, error, intervention, feed_fetch, channel_context_op, provider_pool, tool_call)")
 	auditCmd.Flags().BoolVar(&auditJSON, "json", false, "Emit machine-readable JSON")
 	rootCmd.AddCommand(auditCmd)
 }

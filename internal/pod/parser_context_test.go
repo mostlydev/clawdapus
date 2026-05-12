@@ -125,3 +125,37 @@ services:
 		})
 	}
 }
+
+func TestParsePodContextChannelAwarenessIsNotPublicConfig(t *testing.T) {
+	p, err := Parse(strings.NewReader(`
+x-claw:
+  context:
+    channel-awareness:
+      since: 12h
+      limit: 60
+      max-chars: 8192
+services:
+  trader:
+    image: example/trader:latest
+    x-claw:
+      agent: ./AGENTS.md
+      context:
+        channel-awareness:
+          since: 30m
+          limit: 20
+          max_chars: 2048
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p.Context != nil && p.Context.Channel != nil {
+		t.Fatalf("channel-awareness should not populate pod context config: %+v", p.Context.Channel)
+	}
+	trader := p.Services["trader"]
+	if trader == nil || trader.Claw == nil {
+		t.Fatal("expected parsed trader claw block")
+	}
+	if trader.Claw.Context != nil && trader.Claw.Context.Channel != nil {
+		t.Fatalf("channel-awareness should not populate service context config: %+v", trader.Claw.Context.Channel)
+	}
+}

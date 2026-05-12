@@ -29,6 +29,13 @@ type Event struct {
 	ToolDuplicate      bool      `json:"tool_duplicate,omitempty"`
 	ToolDuplicateRound *int      `json:"tool_duplicate_of_round,omitempty"`
 	ToolDuplicateCount *int      `json:"tool_duplicate_count,omitempty"`
+	ToolStatus         string    `json:"tool_status,omitempty"`
+	ChannelKind        string    `json:"kind,omitempty"`
+	Channels           []string  `json:"channels,omitempty"`
+	Retained           *int      `json:"retained,omitempty"`
+	Returned           *int      `json:"returned,omitempty"`
+	Omitted            *int      `json:"omitted,omitempty"`
+	Status             string    `json:"status,omitempty"`
 	// provider_pool event fields
 	Provider      string `json:"provider,omitempty"`
 	KeyID         string `json:"key_id,omitempty"`
@@ -51,6 +58,8 @@ type AgentSummary struct {
 	FeedErrors         int            `json:"feed_errors"`
 	ToolCalls          int            `json:"tool_calls,omitempty"`
 	ToolErrors         int            `json:"tool_errors,omitempty"`
+	ChannelContextOps  int            `json:"channel_context_ops,omitempty"`
+	ChannelContextErrs int            `json:"channel_context_errors,omitempty"`
 	ProviderPoolEvents int            `json:"provider_pool_events,omitempty"`
 	FirstTimestamp     time.Time      `json:"first_timestamp,omitempty"`
 	LastTimestamp      time.Time      `json:"last_timestamp,omitempty"`
