@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Agent-authored skills now survive `claw up`** — every managed claw with a driver-reported skill directory gets a writable persistent mount at `.claw-skills/<claw-id>/skills/`, outside the regenerated `.claw-runtime` tree. Compile-time `SKILL` files, reference includes, and service manuals still mount read-only over that directory, so generated/operator-owned skills remain immutable while runner-created skills persist beside them. Closes [#235](https://github.com/mostlydev/clawdapus/issues/235).
 
 ## v0.15.0 <Badge type="tip" text="Latest" /> {#v0-15-0}
 

@@ -40,6 +40,7 @@ cmd/clawdash/node_modules/
 # Clawdapus specific
 *.generated.yml
 .claw-runtime/
+.claw-skills/
 .claw-memory/
 .claw-session-history/
 .claw-auth/

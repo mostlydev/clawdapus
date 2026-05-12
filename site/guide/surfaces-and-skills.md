@@ -95,6 +95,17 @@ Mount path: /mnt/shared-research (read-write)
 
 Operator-authored skills (policy files, includes with `mode: reference`) remain as separate mounted files in the runner's skill directory. Only generated context is collapsed into CLAWDAPUS.md.
 
+## Pod Skills vs. Claw Skills
+
+Clawdapus treats compile-time skill material and runtime-authored skills as different state classes:
+
+| Class | Owner | Source | Host path | Container path |
+|-------|-------|--------|-----------|----------------|
+| **Pod skills** | Operator / service | `SKILL`, `x-claw.skills`, `x-claw.include` reference material, and service descriptors | Generated or source files under the pod checkout / `.claw-runtime` | Read-only file mounts inside the runner skill directory |
+| **Claw skills** | Running claw | Skills the agent creates in its own runner skill directory | `.claw-skills/<claw-id>/skills/` | Writable mount at the driver-reported skill directory |
+
+The writable claw-skill directory is mounted first. Declared pod skills and service manuals are then mounted read-only at their exact paths, so operator-owned skills override name conflicts while agent-authored skills survive `claw up`, image rebuilds, and driver migrations.
+
 ## Skills Discovery
 
 Skills discovery is the mechanism by which agents learn what pod services can do. It is entirely compile-time -- no runtime querying, no service registration endpoints.

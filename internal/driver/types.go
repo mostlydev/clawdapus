@@ -210,9 +210,10 @@ type MaterializeResult struct {
 }
 
 type Mount struct {
-	HostPath      string
-	ContainerPath string
-	ReadOnly      bool
+	HostPath          string
+	HostPathByService map[string]string // optional host path override keyed by emitted compose service name
+	ContainerPath     string
+	ReadOnly          bool
 }
 
 type Healthcheck struct {
