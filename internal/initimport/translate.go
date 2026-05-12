@@ -9,19 +9,27 @@ import (
 
 func Translate(src Descriptor, target TargetRuntime, opts Options) (Plan, error) {
 	model := src.Models.Primary
+	fallbacks := append([]ModelRef(nil), src.Models.Fallback...)
+	notes := Notes{}
 	if override := strings.TrimSpace(opts.ModelOverride); override != "" {
 		parsed, ok := SplitModelRef(override)
 		if !ok {
 			return Plan{}, fmt.Errorf("--model %q is invalid (expected provider/model)", override)
 		}
 		model = parsed
+		if len(fallbacks) > 0 {
+			notes.Action = append(notes.Action, "source fallback models were not preserved because --model override was used")
+			fallbacks = nil
+		}
 	}
 	if model.Provider == "" {
 		model = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4"}
 	}
+	if isCllamaDisabled(opts.CllamaOverride) && model.BaseURL != "" {
+		return Plan{}, fmt.Errorf("--cllama=no cannot import source model base_url %q; pass --model <provider/model> to use a native route or omit --cllama=no", model.BaseURL)
+	}
 
 	env := newEnvBuilder()
-	notes := Notes{}
 	for _, note := range src.RawNotes {
 		notes.Action = append(notes.Action, note)
 	}
@@ -33,8 +41,12 @@ func Translate(src Descriptor, target TargetRuntime, opts Options) (Plan, error)
 	}
 
 	cllama := src.Cllama || model.BaseURL != "" || isCllamaForced(opts.CllamaOverride)
-	if strings.EqualFold(strings.TrimSpace(opts.CllamaOverride), "no") || strings.EqualFold(strings.TrimSpace(opts.CllamaOverride), "false") {
-		cllama = model.BaseURL != ""
+	if isCllamaDisabled(opts.CllamaOverride) {
+		cllama = false
+	}
+	baseImage := strings.TrimSpace(opts.BaseImage)
+	if baseImage == "" {
+		baseImage = baseImageForTarget(target)
 	}
 
 	plan := Plan{
@@ -42,8 +54,9 @@ func Translate(src Descriptor, target TargetRuntime, opts Options) (Plan, error)
 		Target:        target,
 		ProjectName:   projectName,
 		AgentName:     agentName,
-		BaseImage:     baseImageForTarget(target),
+		BaseImage:     baseImage,
 		Model:         model,
+		Fallback:      fallbacks,
 		Cllama:        cllama,
 		Environment:   map[string]string{},
 		CllamaEnv:     map[string]string{},
@@ -58,8 +71,7 @@ func Translate(src Descriptor, target TargetRuntime, opts Options) (Plan, error)
 	}
 	translateChannels(&plan, &notes, env)
 	if src.CronDir != "" {
-		notes.Action = append(notes.Action, fmt.Sprintf("cron files copied to imported/cron/ as references; translate them to INVOKE directives"))
-		notes.FatalLosses = append(notes.FatalLosses, FatalLoss{Feature: "cron", Reason: "Hermes cron files are not active in Clawdapus imports; pass --accept-loss=cron to keep them as references only"})
+		notes.Action = append(notes.Action, "cron files copied to imported/cron/ as references; translate them to INVOKE directives")
 	}
 	if src.Identity != "" && src.EnvVars["HERMES_DEFAULT_AGENT_IDENTITY"] != "" {
 		notes.Action = append(notes.Action, "HERMES_DEFAULT_AGENT_IDENTITY was folded into AGENTS.md/SOUL.md, not preserved as raw env")
@@ -88,24 +100,34 @@ func Translate(src Descriptor, target TargetRuntime, opts Options) (Plan, error)
 func translateModel(plan *Plan, notes *Notes, env *envBuilder) error {
 	model := plan.Model
 	if model.BaseURL != "" {
-		plan.Cllama = true
 		notes.Action = append(notes.Action, fmt.Sprintf("model provider %q had a custom base_url; emitted CLLAMA passthrough and left upstream verification to the operator", model.Provider))
 	}
 	providerKey := providerEnvKey(model.Provider)
 	if providerKey == "" && model.BaseURL == "" {
+		providerKey = bestEffortProviderEnvKey(model.Provider)
+		env.addSecret(providerKey, model.APIKey, "model API key")
+		notes.Action = append(notes.Action, fmt.Sprintf("custom provider %q is not natively supported; generated best-effort %s placeholder", model.Provider, providerKey))
 		notes.FatalLosses = append(notes.FatalLosses, FatalLoss{
 			Feature: "custom-provider",
 			Reason:  fmt.Sprintf("provider %q is not natively supported; pass --model <provider/model> or --accept-loss=custom-provider", model.Provider),
 		})
-		return nil
-	}
-	if providerKey != "" {
+	} else if providerKey != "" {
 		apiKey := model.APIKey
 		if model.BaseURL != "" {
 			apiKey = ""
 		}
 		env.addSecret(providerKey, apiKey, "model API key")
-		notes.Applied = append(notes.Applied, fmt.Sprintf("MODEL primary %s", model.String()))
+	}
+	notes.Applied = append(notes.Applied, fmt.Sprintf("MODEL primary %s", model.String()))
+	for i, fallback := range plan.Fallback {
+		if key := providerEnvKey(fallback.Provider); key != "" && fallback.BaseURL == "" {
+			env.addSecret(key, fallback.APIKey, "fallback model API key")
+		} else if fallback.Provider != "" && fallback.BaseURL == "" {
+			key := bestEffortProviderEnvKey(fallback.Provider)
+			env.addSecret(key, fallback.APIKey, "fallback model API key")
+			notes.Action = append(notes.Action, fmt.Sprintf("fallback provider %q is not natively supported; generated best-effort %s placeholder", fallback.Provider, key))
+		}
+		notes.Applied = append(notes.Applied, fmt.Sprintf("MODEL %s %s", fallbackSlot(i), fallback.String()))
 	}
 	if plan.Cllama {
 		notes.Applied = append(notes.Applied, "CLLAMA passthrough")
@@ -179,9 +201,25 @@ func baseImageForTarget(target TargetRuntime) string {
 	}
 }
 
+func fallbackSlot(index int) string {
+	if index == 0 {
+		return "fallback"
+	}
+	return fmt.Sprintf("fallback_%d", index+1)
+}
+
 func isCllamaForced(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "yes", "true", "1", "passthrough":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCllamaDisabled(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "no", "false", "0":
 		return true
 	default:
 		return false

@@ -119,22 +119,6 @@ func nestedString(m map[string]any, keys ...string) (string, bool) {
 	return strings.TrimSpace(value), ok
 }
 
-func nestedBool(m map[string]any, keys ...string) (bool, bool) {
-	if len(keys) == 0 {
-		return false, false
-	}
-	current := m
-	for _, key := range keys[:len(keys)-1] {
-		next, ok := current[key].(map[string]any)
-		if !ok {
-			return false, false
-		}
-		current = next
-	}
-	value, ok := current[keys[len(keys)-1]].(bool)
-	return value, ok
-}
-
 func readDotEnv(path string) (map[string]string, error) {
 	file, err := os.Open(path)
 	if err != nil {

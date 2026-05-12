@@ -74,3 +74,28 @@ func providerEnvKey(provider string) string {
 		return ""
 	}
 }
+
+func bestEffortProviderEnvKey(provider string) string {
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range strings.TrimSpace(provider) {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r - ('a' - 'A'))
+			lastUnderscore = false
+		case r >= 'A' && r <= 'Z' || r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastUnderscore = false
+		default:
+			if !lastUnderscore && b.Len() > 0 {
+				b.WriteRune('_')
+				lastUnderscore = true
+			}
+		}
+	}
+	name := strings.Trim(b.String(), "_")
+	if name == "" {
+		name = "CUSTOM_PROVIDER"
+	}
+	return name + "_API_KEY"
+}

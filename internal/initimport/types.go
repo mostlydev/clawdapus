@@ -108,6 +108,7 @@ type Options struct {
 	ModelOverride  string
 	CllamaOverride string
 	AcceptLoss     []string
+	BaseImage      string
 }
 
 type Plan struct {
@@ -117,6 +118,7 @@ type Plan struct {
 	AgentName     string
 	BaseImage     string
 	Model         ModelRef
+	Fallback      []ModelRef
 	Cllama        bool
 	Handles       []HandlePlan
 	Environment   map[string]string

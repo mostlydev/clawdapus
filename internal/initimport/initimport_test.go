@@ -67,6 +67,150 @@ func TestTranslateProxyModelEmitsCllama(t *testing.T) {
 	}
 }
 
+func TestTranslateRejectsCllamaNoWithProxySource(t *testing.T) {
+	src := Descriptor{
+		Kind: SourceHermes,
+		Models: ModelSlots{Primary: ModelRef{
+			Provider: "openrouter",
+			Model:    "anthropic/claude-sonnet-4",
+			BaseURL:  "http://proxy.example/v1",
+		}},
+	}
+
+	_, err := Translate(src, TargetHermes, Options{ProjectName: "demo", CllamaOverride: "0"})
+	if err == nil {
+		t.Fatal("expected --cllama=no/0 to fail with proxy source")
+	}
+	if !strings.Contains(err.Error(), "--cllama=no") {
+		t.Fatalf("expected clear cllama error, got: %v", err)
+	}
+}
+
+func TestTranslateCronIsMigrationActionNotFatal(t *testing.T) {
+	src := Descriptor{
+		Kind:    SourceHermes,
+		CronDir: "/tmp/source-cron",
+		Models:  ModelSlots{Primary: ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4"}},
+	}
+
+	plan, err := Translate(src, TargetHermes, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("unexpected translate error: %v", err)
+	}
+	if plan.Notes.HasFatal() {
+		t.Fatalf("cron should not be fatal, got %#v", plan.Notes.FatalLosses)
+	}
+	migration := renderMigration(plan)
+	if strings.Contains(migration, "--accept-loss=cron") {
+		t.Fatalf("cron migration note should not require accept-loss, got:\n%s", migration)
+	}
+	if !strings.Contains(migration, "cron files copied to imported/cron/") {
+		t.Fatalf("expected cron action note, got:\n%s", migration)
+	}
+}
+
+func TestTranslateCustomProviderAddsBestEffortPlaceholder(t *testing.T) {
+	src := Descriptor{
+		Kind:   SourceHermes,
+		Models: ModelSlots{Primary: ModelRef{Provider: "mistral-ai", Model: "large"}},
+	}
+
+	plan, err := Translate(src, TargetHermes, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("unexpected translate error: %v", err)
+	}
+	if !plan.Notes.HasFatal() || !AcceptLossAllows([]string{"custom-provider"}, plan.Notes.FatalFeatures()) {
+		t.Fatalf("expected custom-provider fatal loss, got %#v", plan.Notes.FatalLosses)
+	}
+	if got := plan.Environment["MISTRAL_AI_API_KEY"]; got != "${MISTRAL_AI_API_KEY}" {
+		t.Fatalf("expected best-effort provider placeholder, got %q", got)
+	}
+}
+
+func TestTranslateFallbackModelsEmitClawfileLines(t *testing.T) {
+	src := Descriptor{
+		Kind: SourceOpenClaw,
+		Models: ModelSlots{
+			Primary: ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4"},
+			Fallback: []ModelRef{
+				{Provider: "anthropic", Model: "claude-haiku-3-5"},
+				{Provider: "openai", Model: "gpt-4.1-mini"},
+			},
+		},
+	}
+
+	plan, err := Translate(src, TargetOpenClaw, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("unexpected translate error: %v", err)
+	}
+	clawfile := renderClawfile(plan)
+	if !strings.Contains(clawfile, "MODEL fallback anthropic/claude-haiku-3-5") {
+		t.Fatalf("expected fallback model in Clawfile, got:\n%s", clawfile)
+	}
+	if !strings.Contains(clawfile, "MODEL fallback_2 openai/gpt-4.1-mini") {
+		t.Fatalf("expected second fallback model in Clawfile, got:\n%s", clawfile)
+	}
+	if got := plan.Environment["ANTHROPIC_API_KEY"]; got != "${ANTHROPIC_API_KEY}" {
+		t.Fatalf("expected fallback provider key placeholder, got %q", got)
+	}
+	if got := plan.Environment["OPENAI_API_KEY"]; got != "${OPENAI_API_KEY}" {
+		t.Fatalf("expected second fallback provider key placeholder, got %q", got)
+	}
+}
+
+func TestReadOpenClawDiscordRequireMentionAndSortedGuilds(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "openclaw.json"), `{
+		"channels": {
+			"discord": {
+				"enabled": true,
+				"requireMention": true,
+				"guilds": {
+					"z-guild": {"users": ["9"]},
+					"a-guild": {"requireMention": true, "users": ["1"]}
+				}
+			}
+		}
+	}`)
+
+	desc, err := readOpenClaw(filepath.Join(dir, "openclaw.json"))
+	if err != nil {
+		t.Fatalf("read openclaw: %v", err)
+	}
+	discord := desc.Channels.Discord
+	if discord == nil || !discord.RequireMention {
+		t.Fatalf("expected root requireMention to be read, got %#v", discord)
+	}
+	if len(discord.Guilds) != 2 || discord.Guilds[0].ID != "a-guild" || discord.Guilds[1].ID != "z-guild" {
+		t.Fatalf("expected sorted guilds, got %#v", discord.Guilds)
+	}
+}
+
+func TestReadHermesFoldsEnvIdentityWithSoulAndNotesToolsets(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "config.yaml"), `model:
+  provider: openrouter
+  default: anthropic/claude-sonnet-4
+platform_toolsets:
+  slack: true
+`)
+	mustWrite(t, filepath.Join(dir, "SOUL.md"), "# Soul Identity\n\nSoul body.\n")
+	mustWrite(t, filepath.Join(dir, ".env"), "HERMES_DEFAULT_AGENT_IDENTITY=Env identity.\n")
+
+	desc, err := readHermes(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read hermes: %v", err)
+	}
+	for _, expected := range []string{"Soul body.", "Imported Hermes Default Identity", "Env identity."} {
+		if !strings.Contains(desc.Identity, expected) {
+			t.Fatalf("expected identity to contain %q, got:\n%s", expected, desc.Identity)
+		}
+	}
+	if len(desc.RawNotes) == 0 || !strings.Contains(desc.RawNotes[0], "platform_toolsets") {
+		t.Fatalf("expected platform_toolsets RawNotes entry, got %#v", desc.RawNotes)
+	}
+}
+
 func TestEmitCanonicalLayoutAndCronReferences(t *testing.T) {
 	srcDir := t.TempDir()
 	cronDir := filepath.Join(srcDir, "cron")

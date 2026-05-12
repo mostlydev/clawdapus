@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -105,6 +106,9 @@ func readOpenClawDiscord(channels map[string]any) *DiscordChannel {
 	if dmPolicy, ok := raw["dmPolicy"].(string); ok {
 		d.DMPolicy = strings.TrimSpace(dmPolicy)
 	}
+	if require, ok := raw["requireMention"].(bool); ok {
+		d.RequireMention = require
+	}
 	d.AllowFrom = stringSlice(raw["allowFrom"])
 	if guilds, ok := raw["guilds"].(map[string]any); ok {
 		for id, guildRaw := range guilds {
@@ -121,6 +125,9 @@ func readOpenClawDiscord(channels map[string]any) *DiscordChannel {
 			}
 			d.Guilds = append(d.Guilds, g)
 		}
+		sort.Slice(d.Guilds, func(i, j int) bool {
+			return d.Guilds[i].ID < d.Guilds[j].ID
+		})
 	}
 	return d
 }

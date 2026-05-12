@@ -43,8 +43,10 @@ func readHermes(configPath string) (Descriptor, error) {
 			desc.AgentName = normalizeName(heading, "assistant")
 		}
 	}
-	if desc.Identity == "" {
-		if value := strings.TrimSpace(env["HERMES_DEFAULT_AGENT_IDENTITY"]); value != "" {
+	if value := strings.TrimSpace(env["HERMES_DEFAULT_AGENT_IDENTITY"]); value != "" {
+		if desc.Identity != "" {
+			desc.Identity = strings.TrimRight(desc.Identity, "\n") + "\n\n# Imported Hermes Default Identity\n\n" + value
+		} else {
 			desc.Identity = value
 		}
 	}
@@ -90,7 +92,7 @@ func readHermes(configPath string) (Descriptor, error) {
 	}
 	for key := range raw {
 		switch key {
-		case "model", "terminal", "platform_toolsets":
+		case "model", "terminal":
 		default:
 			desc.RawNotes = append(desc.RawNotes, fmt.Sprintf("unrecognized Hermes config key %q was not imported", key))
 		}

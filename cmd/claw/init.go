@@ -89,10 +89,6 @@ func runInitWithOptions(dir, fromPath string, opts initScaffoldOptions, interact
 	return runInitScaffold(dir, opts, interactive)
 }
 
-func runInitFrom(dir, fromPath string) error {
-	return runInitFromImport(dir, fromPath, initScaffoldOptions{})
-}
-
 func runInitFromImport(dir, fromPath string, opts initScaffoldOptions) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create target directory: %w", err)
@@ -116,6 +112,7 @@ func runInitFromImport(dir, fromPath string, opts initScaffoldOptions) error {
 		ModelOverride:  opts.Model,
 		CllamaOverride: opts.Cllama,
 		AcceptLoss:     parseAcceptLoss(opts.AcceptLoss),
+		BaseImage:      defaultBaseImageForClawType(string(target)),
 	})
 	if err != nil {
 		return err

@@ -193,6 +193,20 @@ DISCORD_ALLOWED_USERS=222,333
 			t.Fatalf("expected pod to contain %q, got:\n%s", expected, pod)
 		}
 	}
+	migration, err := os.ReadFile(filepath.Join(destDir, "MIGRATION.md"))
+	if err != nil {
+		t.Fatalf("read MIGRATION.md: %v", err)
+	}
+	for _, expected := range []string{
+		"Target: openclaw",
+		"Discord routing mapped to channel://discord",
+		"Secret placeholders",
+		"Discord bot token contained a literal secret",
+	} {
+		if !strings.Contains(string(migration), expected) {
+			t.Fatalf("expected MIGRATION.md to contain %q, got:\n%s", expected, migration)
+		}
+	}
 }
 
 func TestInitFromRejectsUnsupportedTargetType(t *testing.T) {
@@ -207,6 +221,62 @@ func TestInitFromRejectsUnsupportedTargetType(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "import target") {
 		t.Fatalf("expected import target error, got: %v", err)
+	}
+}
+
+func TestInitFromSlackRoutingRequiresAcceptLoss(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "openclaw.json"), []byte(`{
+		"channels": {
+			"slack": {
+				"enabled": true,
+				"token": "${SLACK_BOT_TOKEN}",
+				"allowedUsers": ["U111"]
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write source config: %v", err)
+	}
+
+	err := runInitWithOptions(t.TempDir(), srcDir, initScaffoldOptions{ClawType: "openclaw"}, false)
+	if err == nil {
+		t.Fatal("expected Slack routing import to fail without accept-loss")
+	}
+	if !strings.Contains(err.Error(), "slack-routing") {
+		t.Fatalf("expected slack-routing accept-loss error, got: %v", err)
+	}
+}
+
+func TestInitFromCustomProviderAcceptLossAddsEnvPlaceholder(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "config.yaml"), []byte(`model:
+  provider: mistral-ai
+  default: large
+`), 0o644); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+
+	destDir := t.TempDir()
+	err := runInitWithOptions(destDir, srcDir, initScaffoldOptions{
+		ClawType:   "hermes",
+		AcceptLoss: "custom-provider",
+	}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	env, err := os.ReadFile(filepath.Join(destDir, ".env.example"))
+	if err != nil {
+		t.Fatalf("read .env.example: %v", err)
+	}
+	if !strings.Contains(string(env), "MISTRAL_AI_API_KEY=") {
+		t.Fatalf("expected custom provider placeholder, got:\n%s", env)
+	}
+	migration, err := os.ReadFile(filepath.Join(destDir, "MIGRATION.md"))
+	if err != nil {
+		t.Fatalf("read MIGRATION.md: %v", err)
+	}
+	if !strings.Contains(string(migration), "custom provider") || !strings.Contains(string(migration), "MISTRAL_AI_API_KEY") {
+		t.Fatalf("expected custom provider note, got:\n%s", migration)
 	}
 }
 

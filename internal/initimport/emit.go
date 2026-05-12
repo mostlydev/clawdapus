@@ -75,6 +75,13 @@ func renderClawfile(plan Plan) string {
 	b.WriteString("MODEL primary ")
 	b.WriteString(plan.Model.String())
 	b.WriteString("\n")
+	for i, fallback := range plan.Fallback {
+		b.WriteString("MODEL ")
+		b.WriteString(fallbackSlot(i))
+		b.WriteString(" ")
+		b.WriteString(fallback.String())
+		b.WriteString("\n")
+	}
 	if plan.Cllama {
 		b.WriteString("\nCLLAMA passthrough\n")
 	}
@@ -257,8 +264,8 @@ func renderMigration(plan Plan) string {
 	for _, loss := range plan.Notes.FatalLosses {
 		actions = append(actions, fmt.Sprintf("%s (accept with --accept-loss=%s)", loss.Reason, loss.Feature))
 	}
-	actions = append(actions, plan.Notes.SecretNotes...)
 	writeList("Action required", uniqueSorted(actions))
+	writeList("Secret placeholders", uniqueSorted(plan.Notes.SecretNotes))
 	verify := make([]string, 0)
 	for _, key := range sortedMapKeys(plan.Environment) {
 		if strings.HasSuffix(key, "_API_KEY") || strings.HasSuffix(key, "_TOKEN") || strings.HasSuffix(key, "_ID") {
