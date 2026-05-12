@@ -21,7 +21,6 @@ var (
 	initPlatform   string
 	initVolumeSpec string
 	initSource     string
-	initAcceptLoss string
 )
 
 type initScaffoldOptions struct {
@@ -33,7 +32,6 @@ type initScaffoldOptions struct {
 	Platform    string
 	VolumeSpec  string
 	Source      string
-	AcceptLoss  string
 }
 
 type initResolvedConfig struct {
@@ -71,7 +69,6 @@ var initCmd = &cobra.Command{
 			Platform:    initPlatform,
 			VolumeSpec:  initVolumeSpec,
 			Source:      initSource,
-			AcceptLoss:  initAcceptLoss,
 		}
 
 		return runInitWithOptions(absTarget, initFromPath, opts, shouldPromptInteractively())
@@ -93,12 +90,11 @@ func runInitFromImport(dir, fromPath string, opts initScaffoldOptions) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create target directory: %w", err)
 	}
+	if strings.TrimSpace(opts.ClawType) != "" {
+		return fmt.Errorf("--type is only supported for new scaffolds; --from imports preserve the detected source runtime")
+	}
 	sourceOverride := initimport.SourceKind(strings.ToLower(strings.TrimSpace(opts.Source)))
 	src, err := initimport.Detect(fromPath, sourceOverride)
-	if err != nil {
-		return err
-	}
-	target, err := initimport.ResolveImportTarget(opts.ClawType, src.Kind)
 	if err != nil {
 		return err
 	}
@@ -106,46 +102,26 @@ func runInitFromImport(dir, fromPath string, opts initScaffoldOptions) error {
 	if projectName == "" {
 		projectName = filepath.Base(dir)
 	}
-	plan, err := initimport.Translate(src, target, initimport.Options{
+	plan, err := initimport.Translate(src, initimport.Options{
 		ProjectName:    projectName,
 		AgentName:      opts.AgentName,
 		ModelOverride:  opts.Model,
 		CllamaOverride: opts.Cllama,
-		AcceptLoss:     parseAcceptLoss(opts.AcceptLoss),
-		BaseImage:      defaultBaseImageForClawType(string(target)),
+		BaseImage:      defaultBaseImageForClawType(string(src.Kind)),
 	})
 	if err != nil {
 		return err
 	}
-	accepted := parseAcceptLoss(opts.AcceptLoss)
-	if plan.Notes.HasFatal() && !initimport.AcceptLossAllows(accepted, plan.Notes.FatalFeatures()) {
-		for _, loss := range plan.Notes.FatalLosses {
-			fmt.Printf("[claw] note: %s (accept with --accept-loss=%s)\n", loss.Reason, loss.Feature)
-		}
-		return fmt.Errorf("import would lose unsupported source features; re-run with --accept-loss=%s or adjust the source/target", strings.Join(plan.Notes.FatalFeatures(), ","))
-	}
 	if err := initimport.Emit(plan, dir); err != nil {
 		return err
 	}
-	fmt.Printf("[claw] imported %s config as %s project\n", src.Kind, target)
+	fmt.Printf("[claw] imported %s config as claw-managed %s project\n", src.Kind, plan.Target)
 	fmt.Println("[claw] scaffold ready. Next steps:")
 	fmt.Println("  1. cp .env.example .env && edit .env")
 	fmt.Printf("  2. claw build -t %s-%s:latest ./agents/%s\n", plan.ProjectName, plan.AgentName, plan.AgentName)
 	fmt.Println("  3. review MIGRATION.md")
 	fmt.Println("  4. claw up -d")
 	return nil
-}
-
-func parseAcceptLoss(value string) []string {
-	parts := strings.Split(value, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.ToLower(strings.TrimSpace(part))
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
 }
 
 func runInitScaffold(dir string, opts initScaffoldOptions, interactive bool) error {
@@ -518,9 +494,8 @@ You are a helpful assistant. Follow these rules:
 }
 
 func init() {
-	initCmd.Flags().StringVar(&initFromPath, "from", "", "Path to existing OpenClaw or Hermes config directory to import")
+	initCmd.Flags().StringVar(&initFromPath, "from", "", "Path to existing OpenClaw or Hermes config directory to import into the same runtime")
 	initCmd.Flags().StringVar(&initSource, "source", "", "Source runtime for --from autodetect override (openclaw, hermes)")
-	initCmd.Flags().StringVar(&initAcceptLoss, "accept-loss", "", "Comma-separated unsupported import features to accept (slack-routing, discord-routing, custom-provider, cron, identity-env, all)")
 	initCmd.Flags().StringVar(&initProject, "project", "", "Project name used for x-claw.pod and image prefix")
 	initCmd.Flags().StringVar(&initAgent, "agent", "", "Primary agent name (service + directory name)")
 	initCmd.Flags().StringVar(&initType, "type", "", "Claw type ("+strings.Join(scaffoldClawTypes, ", ")+")")

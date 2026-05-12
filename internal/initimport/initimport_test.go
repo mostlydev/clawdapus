@@ -24,9 +24,9 @@ func TestDetectAmbiguousSourceRequiresOverride(t *testing.T) {
 	}
 }
 
-func TestTranslateSlackRoutingFatalUnlessAccepted(t *testing.T) {
+func TestTranslateOpenClawSlackRoutingWritesActionNote(t *testing.T) {
 	src := Descriptor{
-		Kind:      SourceHermes,
+		Kind:      SourceOpenClaw,
 		AgentName: "assistant",
 		Models:    ModelSlots{Primary: ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4"}},
 		Channels: Channels{Slack: &SlackChannel{
@@ -36,21 +36,19 @@ func TestTranslateSlackRoutingFatalUnlessAccepted(t *testing.T) {
 			AllowedUsers: []string{"U111"},
 		}},
 	}
-	plan, err := Translate(src, TargetOpenClaw, Options{ProjectName: "demo"})
+	plan, err := Translate(src, Options{ProjectName: "demo"})
 	if err != nil {
 		t.Fatalf("unexpected translate error: %v", err)
 	}
-	if !plan.Notes.HasFatal() {
-		t.Fatal("expected Slack routing fatal loss")
-	}
-	if !AcceptLossAllows([]string{"slack-routing"}, plan.Notes.FatalFeatures()) {
-		t.Fatal("expected slack-routing accept token to satisfy fatal loss")
+	migration := renderMigration(plan)
+	if !strings.Contains(migration, "Slack allowed-user routing has no channel://slack surface") {
+		t.Fatalf("expected Slack routing action note, got:\n%s", migration)
 	}
 }
 
 func TestTranslateProxyModelEmitsCllama(t *testing.T) {
 	src := Descriptor{
-		Kind:      SourceHermes,
+		Kind:      SourceOpenClaw,
 		AgentName: "assistant",
 		Models: ModelSlots{Primary: ModelRef{
 			Provider: "openrouter",
@@ -58,7 +56,7 @@ func TestTranslateProxyModelEmitsCllama(t *testing.T) {
 			BaseURL:  "http://cllama:8080/v1",
 		}},
 	}
-	plan, err := Translate(src, TargetHermes, Options{ProjectName: "demo"})
+	plan, err := Translate(src, Options{ProjectName: "demo"})
 	if err != nil {
 		t.Fatalf("unexpected translate error: %v", err)
 	}
@@ -69,7 +67,7 @@ func TestTranslateProxyModelEmitsCllama(t *testing.T) {
 
 func TestTranslateRejectsCllamaNoWithProxySource(t *testing.T) {
 	src := Descriptor{
-		Kind: SourceHermes,
+		Kind: SourceOpenClaw,
 		Models: ModelSlots{Primary: ModelRef{
 			Provider: "openrouter",
 			Model:    "anthropic/claude-sonnet-4",
@@ -77,7 +75,7 @@ func TestTranslateRejectsCllamaNoWithProxySource(t *testing.T) {
 		}},
 	}
 
-	_, err := Translate(src, TargetHermes, Options{ProjectName: "demo", CllamaOverride: "0"})
+	_, err := Translate(src, Options{ProjectName: "demo", CllamaOverride: "0"})
 	if err == nil {
 		t.Fatal("expected --cllama=no/0 to fail with proxy source")
 	}
@@ -86,44 +84,39 @@ func TestTranslateRejectsCllamaNoWithProxySource(t *testing.T) {
 	}
 }
 
-func TestTranslateCronIsMigrationActionNotFatal(t *testing.T) {
+func TestTranslateCronIsMigrationAction(t *testing.T) {
 	src := Descriptor{
 		Kind:    SourceHermes,
 		CronDir: "/tmp/source-cron",
 		Models:  ModelSlots{Primary: ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4"}},
+		Channels: Channels{Discord: &DiscordChannel{
+			Token: "${DISCORD_BOT_TOKEN}",
+			BotID: "${DISCORD_BOT_ID}",
+		}},
 	}
 
-	plan, err := Translate(src, TargetHermes, Options{ProjectName: "demo"})
+	plan, err := Translate(src, Options{ProjectName: "demo"})
 	if err != nil {
 		t.Fatalf("unexpected translate error: %v", err)
 	}
-	if plan.Notes.HasFatal() {
-		t.Fatalf("cron should not be fatal, got %#v", plan.Notes.FatalLosses)
-	}
 	migration := renderMigration(plan)
-	if strings.Contains(migration, "--accept-loss=cron") {
-		t.Fatalf("cron migration note should not require accept-loss, got:\n%s", migration)
-	}
 	if !strings.Contains(migration, "cron files copied to imported/cron/") {
 		t.Fatalf("expected cron action note, got:\n%s", migration)
 	}
 }
 
-func TestTranslateCustomProviderAddsBestEffortPlaceholder(t *testing.T) {
+func TestTranslateCustomProviderRequiresModelOverride(t *testing.T) {
 	src := Descriptor{
 		Kind:   SourceHermes,
 		Models: ModelSlots{Primary: ModelRef{Provider: "mistral-ai", Model: "large"}},
 	}
 
-	plan, err := Translate(src, TargetHermes, Options{ProjectName: "demo"})
-	if err != nil {
-		t.Fatalf("unexpected translate error: %v", err)
+	_, err := Translate(src, Options{ProjectName: "demo"})
+	if err == nil {
+		t.Fatal("expected custom provider to fail")
 	}
-	if !plan.Notes.HasFatal() || !AcceptLossAllows([]string{"custom-provider"}, plan.Notes.FatalFeatures()) {
-		t.Fatalf("expected custom-provider fatal loss, got %#v", plan.Notes.FatalLosses)
-	}
-	if got := plan.Environment["MISTRAL_AI_API_KEY"]; got != "${MISTRAL_AI_API_KEY}" {
-		t.Fatalf("expected best-effort provider placeholder, got %q", got)
+	if !strings.Contains(err.Error(), "pass --model") {
+		t.Fatalf("expected --model recovery hint, got: %v", err)
 	}
 }
 
@@ -139,7 +132,7 @@ func TestTranslateFallbackModelsEmitClawfileLines(t *testing.T) {
 		},
 	}
 
-	plan, err := Translate(src, TargetOpenClaw, Options{ProjectName: "demo"})
+	plan, err := Translate(src, Options{ProjectName: "demo"})
 	if err != nil {
 		t.Fatalf("unexpected translate error: %v", err)
 	}
@@ -159,6 +152,29 @@ func TestTranslateFallbackModelsEmitClawfileLines(t *testing.T) {
 	migration := renderMigration(plan)
 	if !strings.Contains(migration, "additional source fallback models") || !strings.Contains(migration, "openai/gpt-4.1-mini") {
 		t.Fatalf("expected additional fallback migration note, got:\n%s", migration)
+	}
+}
+
+func TestTranslateUnsupportedFallbackProviderIsNotEmitted(t *testing.T) {
+	src := Descriptor{
+		Kind: SourceOpenClaw,
+		Models: ModelSlots{
+			Primary:  ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4"},
+			Fallback: []ModelRef{{Provider: "mistral-ai", Model: "large"}},
+		},
+	}
+
+	plan, err := Translate(src, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("unexpected translate error: %v", err)
+	}
+	clawfile := renderClawfile(plan)
+	if strings.Contains(clawfile, "MODEL fallback mistral-ai/large") {
+		t.Fatalf("unsupported fallback should not be emitted, got:\n%s", clawfile)
+	}
+	migration := renderMigration(plan)
+	if !strings.Contains(migration, `fallback provider "mistral-ai" is not supported`) {
+		t.Fatalf("expected unsupported fallback migration note, got:\n%s", migration)
 	}
 }
 

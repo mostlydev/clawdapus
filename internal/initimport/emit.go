@@ -259,9 +259,6 @@ func renderMigration(plan Plan) string {
 	}
 	writeList("Applied", uniqueSorted(plan.Notes.Applied))
 	actions := append([]string(nil), plan.Notes.Action...)
-	for _, loss := range plan.Notes.FatalLosses {
-		actions = append(actions, fmt.Sprintf("%s (accept with --accept-loss=%s)", loss.Reason, loss.Feature))
-	}
 	writeList("Action required", uniqueSorted(actions))
 	writeList("Secret placeholders", uniqueSorted(plan.Notes.SecretNotes))
 	verify := make([]string, 0)

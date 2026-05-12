@@ -1,9 +1,6 @@
 package initimport
 
-import (
-	"fmt"
-	"strings"
-)
+import "strings"
 
 type SourceKind string
 
@@ -107,7 +104,6 @@ type Options struct {
 	AgentName      string
 	ModelOverride  string
 	CllamaOverride string
-	AcceptLoss     []string
 	BaseImage      string
 }
 
@@ -152,60 +148,5 @@ type DiscordSurface struct {
 type Notes struct {
 	Applied     []string
 	Action      []string
-	FatalLosses []FatalLoss
 	SecretNotes []string
-}
-
-type FatalLoss struct {
-	Feature string
-	Reason  string
-}
-
-func (n Notes) HasFatal() bool {
-	return len(n.FatalLosses) > 0
-}
-
-func (n Notes) FatalFeatures() []string {
-	out := make([]string, 0, len(n.FatalLosses))
-	for _, loss := range n.FatalLosses {
-		out = append(out, loss.Feature)
-	}
-	return uniqueSorted(out)
-}
-
-func ResolveImportTarget(value string, source SourceKind) (TargetRuntime, error) {
-	target := strings.ToLower(strings.TrimSpace(value))
-	if target == "" {
-		target = string(source)
-	}
-	switch target {
-	case string(TargetOpenClaw):
-		return TargetOpenClaw, nil
-	case string(TargetHermes):
-		return TargetHermes, nil
-	default:
-		return "", fmt.Errorf("import target %q not supported yet; use --type openclaw|hermes for --from", target)
-	}
-}
-
-func AcceptLossAllows(accepted []string, features []string) bool {
-	if len(features) == 0 {
-		return true
-	}
-	set := make(map[string]struct{}, len(accepted))
-	for _, token := range accepted {
-		token = strings.ToLower(strings.TrimSpace(token))
-		if token != "" {
-			set[token] = struct{}{}
-		}
-	}
-	if _, ok := set["all"]; ok {
-		return true
-	}
-	for _, feature := range features {
-		if _, ok := set[strings.ToLower(strings.TrimSpace(feature))]; !ok {
-			return false
-		}
-	}
-	return true
 }

@@ -7,10 +7,14 @@ import (
 	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
 
-func Translate(src Descriptor, target TargetRuntime, opts Options) (Plan, error) {
+func Translate(src Descriptor, opts Options) (Plan, error) {
 	model := src.Models.Primary
 	fallbacks := append([]ModelRef(nil), src.Models.Fallback...)
 	notes := Notes{}
+	target, err := targetForSource(src.Kind)
+	if err != nil {
+		return Plan{}, err
+	}
 	if override := strings.TrimSpace(opts.ModelOverride); override != "" {
 		parsed, ok := SplitModelRef(override)
 		if !ok {
@@ -74,6 +78,9 @@ func Translate(src Descriptor, target TargetRuntime, opts Options) (Plan, error)
 		return Plan{}, err
 	}
 	translateChannels(&plan, &notes, env)
+	if plan.Target == TargetHermes && len(plan.Handles) == 0 {
+		return Plan{}, fmt.Errorf("Hermes import requires at least one supported handle in the source .env (DISCORD_BOT_TOKEN, SLACK_BOT_TOKEN/SLACK_APP_TOKEN, or TELEGRAM_BOT_TOKEN)")
+	}
 	if src.CronDir != "" {
 		notes.Action = append(notes.Action, "cron files copied to imported/cron/ as references; translate them to INVOKE directives")
 	}
@@ -108,13 +115,7 @@ func translateModel(plan *Plan, notes *Notes, env *envBuilder) error {
 	}
 	providerKey := providerEnvKey(model.Provider)
 	if providerKey == "" && model.BaseURL == "" {
-		providerKey = bestEffortProviderEnvKey(model.Provider)
-		env.addSecret(providerKey, model.APIKey, "model API key")
-		notes.Action = append(notes.Action, fmt.Sprintf("custom provider %q is not natively supported; generated best-effort %s placeholder", model.Provider, providerKey))
-		notes.FatalLosses = append(notes.FatalLosses, FatalLoss{
-			Feature: "custom-provider",
-			Reason:  fmt.Sprintf("provider %q is not natively supported; pass --model <provider/model> or --accept-loss=custom-provider", model.Provider),
-		})
+		return fmt.Errorf("source model provider %q is not supported for same-runtime import; pass --model <provider/model> to choose openrouter, anthropic, or openai", model.Provider)
 	} else if providerKey != "" {
 		apiKey := model.APIKey
 		if model.BaseURL != "" {
@@ -123,16 +124,18 @@ func translateModel(plan *Plan, notes *Notes, env *envBuilder) error {
 		env.addSecret(providerKey, apiKey, "model API key")
 	}
 	notes.Applied = append(notes.Applied, fmt.Sprintf("MODEL primary %s", model.String()))
+	keptFallbacks := plan.Fallback[:0]
 	for _, fallback := range plan.Fallback {
 		if key := providerEnvKey(fallback.Provider); key != "" && fallback.BaseURL == "" {
 			env.addSecret(key, fallback.APIKey, "fallback model API key")
 		} else if fallback.Provider != "" && fallback.BaseURL == "" {
-			key := bestEffortProviderEnvKey(fallback.Provider)
-			env.addSecret(key, fallback.APIKey, "fallback model API key")
-			notes.Action = append(notes.Action, fmt.Sprintf("fallback provider %q is not natively supported; generated best-effort %s placeholder", fallback.Provider, key))
+			notes.Action = append(notes.Action, fmt.Sprintf("fallback provider %q is not supported for same-runtime import; the fallback was not emitted", fallback.Provider))
+			continue
 		}
 		notes.Applied = append(notes.Applied, fmt.Sprintf("MODEL fallback %s", fallback.String()))
+		keptFallbacks = append(keptFallbacks, fallback)
 	}
+	plan.Fallback = keptFallbacks
 	if plan.Cllama {
 		notes.Applied = append(notes.Applied, "CLLAMA passthrough")
 	}
@@ -165,7 +168,7 @@ func translateChannels(plan *Plan, notes *Notes, env *envBuilder) {
 				env.addLiteral("DISCORD_REQUIRE_MENTION", "true")
 			}
 			if d.DMPolicy != "" && d.DMPolicy != "pairing" {
-				notes.FatalLosses = append(notes.FatalLosses, FatalLoss{Feature: "discord-routing", Reason: "Discord dmPolicy has no Hermes equivalent; pass --accept-loss=discord-routing to drop it"})
+				notes.Action = append(notes.Action, fmt.Sprintf("Discord dmPolicy %q has no Hermes equivalent and was not preserved", d.DMPolicy))
 			}
 		}
 	}
@@ -183,7 +186,7 @@ func translateChannels(plan *Plan, notes *Notes, env *envBuilder) {
 				env.addLiteral("SLACK_ALLOWED_USERS", strings.Join(s.AllowedUsers, ","))
 				notes.Applied = append(notes.Applied, "SLACK_ALLOWED_USERS preserved")
 			} else {
-				notes.FatalLosses = append(notes.FatalLosses, FatalLoss{Feature: "slack-routing", Reason: "Slack routing has no channel://slack surface in v1; pass --accept-loss=slack-routing to drop it"})
+				notes.Action = append(notes.Action, "Slack allowed-user routing has no channel://slack surface in v1 and was not preserved")
 			}
 		}
 	}
@@ -202,6 +205,17 @@ func baseImageForTarget(target TargetRuntime) string {
 		return hermes.BaseImageTag
 	default:
 		return "openclaw:latest"
+	}
+}
+
+func targetForSource(source SourceKind) (TargetRuntime, error) {
+	switch source {
+	case SourceOpenClaw:
+		return TargetOpenClaw, nil
+	case SourceHermes:
+		return TargetHermes, nil
+	default:
+		return "", fmt.Errorf("unsupported import source %q", source)
 	}
 }
 

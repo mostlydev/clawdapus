@@ -116,51 +116,7 @@ func TestInitFromOpenClawConfig(t *testing.T) {
 	}
 }
 
-func TestInitFromOpenClawWithHermesTarget(t *testing.T) {
-	srcDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(srcDir, "openclaw.json"), []byte(`{
-		"channels": {
-			"slack": {"enabled": true, "token": "${SLACK_BOT_TOKEN}"}
-		},
-		"agents": {
-			"defaults": {
-				"model": {"primary": "openrouter/anthropic/claude-sonnet-4"}
-			}
-		}
-	}`), 0o644); err != nil {
-		t.Fatalf("write source config: %v", err)
-	}
-
-	destDir := t.TempDir()
-	err := runInitWithOptions(destDir, srcDir, initScaffoldOptions{ClawType: "hermes"}, false)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	clawfile, err := os.ReadFile(filepath.Join(destDir, "agents", "assistant", "Clawfile"))
-	if err != nil {
-		t.Fatalf("read Clawfile: %v", err)
-	}
-	for _, expected := range []string{
-		"CLAW_TYPE hermes",
-		"HANDLE slack",
-	} {
-		if !strings.Contains(string(clawfile), expected) {
-			t.Fatalf("expected imported Hermes Clawfile to contain %q, got:\n%s", expected, clawfile)
-		}
-	}
-	env, err := os.ReadFile(filepath.Join(destDir, ".env.example"))
-	if err != nil {
-		t.Fatalf("read .env.example: %v", err)
-	}
-	for _, expected := range []string{"SLACK_BOT_TOKEN=", "SLACK_APP_TOKEN=", "SLACK_BOT_ID="} {
-		if !strings.Contains(string(env), expected) {
-			t.Fatalf("expected .env.example to contain %q, got:\n%s", expected, env)
-		}
-	}
-}
-
-func TestInitFromHermesWithOpenClawTarget(t *testing.T) {
+func TestInitFromHermesConfig(t *testing.T) {
 	srcDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(srcDir, "config.yaml"), []byte(`model:
   provider: openrouter
@@ -176,18 +132,29 @@ DISCORD_ALLOWED_USERS=222,333
 	}
 
 	destDir := t.TempDir()
-	err := runInitWithOptions(destDir, srcDir, initScaffoldOptions{ClawType: "openclaw"}, false)
+	err := runInitWithOptions(destDir, srcDir, initScaffoldOptions{}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	clawfile, err := os.ReadFile(filepath.Join(destDir, "agents", "assistant", "Clawfile"))
+	if err != nil {
+		t.Fatalf("read Clawfile: %v", err)
+	}
+	for _, expected := range []string{
+		"CLAW_TYPE hermes",
+		"HANDLE discord",
+	} {
+		if !strings.Contains(string(clawfile), expected) {
+			t.Fatalf("expected imported Hermes Clawfile to contain %q, got:\n%s", expected, clawfile)
+		}
 	}
 	pod, err := os.ReadFile(filepath.Join(destDir, "claw-pod.yml"))
 	if err != nil {
 		t.Fatalf("read pod: %v", err)
 	}
 	for _, expected := range []string{
-		"channel://discord",
-		`- "222"`,
-		`- "333"`,
+		"DISCORD_ALLOWED_USERS: \"222,333\"",
+		"DISCORD_BOT_TOKEN: \"${DISCORD_BOT_TOKEN}\"",
 	} {
 		if !strings.Contains(string(pod), expected) {
 			t.Fatalf("expected pod to contain %q, got:\n%s", expected, pod)
@@ -198,8 +165,8 @@ DISCORD_ALLOWED_USERS=222,333
 		t.Fatalf("read MIGRATION.md: %v", err)
 	}
 	for _, expected := range []string{
-		"Target: openclaw",
-		"Discord routing mapped to channel://discord",
+		"Target: hermes",
+		"DISCORD_ALLOWED_USERS preserved",
 		"Secret placeholders",
 		"Discord bot token contained a literal secret",
 	} {
@@ -209,22 +176,22 @@ DISCORD_ALLOWED_USERS=222,333
 	}
 }
 
-func TestInitFromRejectsUnsupportedTargetType(t *testing.T) {
+func TestInitFromRejectsTypeFlag(t *testing.T) {
 	srcDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(srcDir, "openclaw.json"), []byte(`{"channels":{}}`), 0o644); err != nil {
 		t.Fatalf("write source config: %v", err)
 	}
 
-	err := runInitWithOptions(t.TempDir(), srcDir, initScaffoldOptions{ClawType: "nanobot"}, false)
+	err := runInitWithOptions(t.TempDir(), srcDir, initScaffoldOptions{ClawType: "openclaw"}, false)
 	if err == nil {
-		t.Fatal("expected unsupported import target to fail")
+		t.Fatal("expected --type with --from to fail")
 	}
-	if !strings.Contains(err.Error(), "import target") {
-		t.Fatalf("expected import target error, got: %v", err)
+	if !strings.Contains(err.Error(), "--type is only supported for new scaffolds") {
+		t.Fatalf("expected --type error, got: %v", err)
 	}
 }
 
-func TestInitFromSlackRoutingRequiresAcceptLoss(t *testing.T) {
+func TestInitFromSlackRoutingWritesMigrationNote(t *testing.T) {
 	srcDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(srcDir, "openclaw.json"), []byte(`{
 		"channels": {
@@ -238,16 +205,21 @@ func TestInitFromSlackRoutingRequiresAcceptLoss(t *testing.T) {
 		t.Fatalf("write source config: %v", err)
 	}
 
-	err := runInitWithOptions(t.TempDir(), srcDir, initScaffoldOptions{ClawType: "openclaw"}, false)
-	if err == nil {
-		t.Fatal("expected Slack routing import to fail without accept-loss")
+	destDir := t.TempDir()
+	err := runInitWithOptions(destDir, srcDir, initScaffoldOptions{}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "slack-routing") {
-		t.Fatalf("expected slack-routing accept-loss error, got: %v", err)
+	migration, err := os.ReadFile(filepath.Join(destDir, "MIGRATION.md"))
+	if err != nil {
+		t.Fatalf("read MIGRATION.md: %v", err)
+	}
+	if !strings.Contains(string(migration), "Slack allowed-user routing has no channel://slack surface") {
+		t.Fatalf("expected Slack routing note, got:\n%s", migration)
 	}
 }
 
-func TestInitFromCustomProviderAcceptLossAddsEnvPlaceholder(t *testing.T) {
+func TestInitFromCustomProviderRequiresModelOverride(t *testing.T) {
 	srcDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(srcDir, "config.yaml"), []byte(`model:
   provider: mistral-ai
@@ -256,27 +228,30 @@ func TestInitFromCustomProviderAcceptLossAddsEnvPlaceholder(t *testing.T) {
 		t.Fatalf("write config.yaml: %v", err)
 	}
 
-	destDir := t.TempDir()
-	err := runInitWithOptions(destDir, srcDir, initScaffoldOptions{
-		ClawType:   "hermes",
-		AcceptLoss: "custom-provider",
-	}, false)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := runInitWithOptions(t.TempDir(), srcDir, initScaffoldOptions{}, false)
+	if err == nil {
+		t.Fatal("expected custom provider import to fail")
 	}
-	env, err := os.ReadFile(filepath.Join(destDir, ".env.example"))
-	if err != nil {
-		t.Fatalf("read .env.example: %v", err)
+	if !strings.Contains(err.Error(), "pass --model") {
+		t.Fatalf("expected --model recovery hint, got: %v", err)
 	}
-	if !strings.Contains(string(env), "MISTRAL_AI_API_KEY=") {
-		t.Fatalf("expected custom provider placeholder, got:\n%s", env)
+}
+
+func TestInitFromHermesRequiresHandleEnv(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "config.yaml"), []byte(`model:
+  provider: openrouter
+  default: anthropic/claude-sonnet-4
+`), 0o644); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
 	}
-	migration, err := os.ReadFile(filepath.Join(destDir, "MIGRATION.md"))
-	if err != nil {
-		t.Fatalf("read MIGRATION.md: %v", err)
+
+	err := runInitWithOptions(t.TempDir(), srcDir, initScaffoldOptions{}, false)
+	if err == nil {
+		t.Fatal("expected Hermes import without handles to fail")
 	}
-	if !strings.Contains(string(migration), "custom provider") || !strings.Contains(string(migration), "MISTRAL_AI_API_KEY") {
-		t.Fatalf("expected custom provider note, got:\n%s", migration)
+	if !strings.Contains(err.Error(), "Hermes import requires at least one supported handle") {
+		t.Fatalf("expected handle recovery hint, got: %v", err)
 	}
 }
 
