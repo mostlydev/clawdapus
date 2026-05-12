@@ -25,6 +25,10 @@ func Translate(src Descriptor, target TargetRuntime, opts Options) (Plan, error)
 	if model.Provider == "" {
 		model = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4"}
 	}
+	if len(fallbacks) > 1 {
+		notes.Action = append(notes.Action, fmt.Sprintf("additional source fallback models are not emitted because current runtimes use only MODEL fallback: %s", strings.Join(modelRefStrings(fallbacks[1:]), ", ")))
+		fallbacks = fallbacks[:1]
+	}
 	if isCllamaDisabled(opts.CllamaOverride) && model.BaseURL != "" {
 		return Plan{}, fmt.Errorf("--cllama=no cannot import source model base_url %q; pass --model <provider/model> to use a native route or omit --cllama=no", model.BaseURL)
 	}
@@ -119,7 +123,7 @@ func translateModel(plan *Plan, notes *Notes, env *envBuilder) error {
 		env.addSecret(providerKey, apiKey, "model API key")
 	}
 	notes.Applied = append(notes.Applied, fmt.Sprintf("MODEL primary %s", model.String()))
-	for i, fallback := range plan.Fallback {
+	for _, fallback := range plan.Fallback {
 		if key := providerEnvKey(fallback.Provider); key != "" && fallback.BaseURL == "" {
 			env.addSecret(key, fallback.APIKey, "fallback model API key")
 		} else if fallback.Provider != "" && fallback.BaseURL == "" {
@@ -127,7 +131,7 @@ func translateModel(plan *Plan, notes *Notes, env *envBuilder) error {
 			env.addSecret(key, fallback.APIKey, "fallback model API key")
 			notes.Action = append(notes.Action, fmt.Sprintf("fallback provider %q is not natively supported; generated best-effort %s placeholder", fallback.Provider, key))
 		}
-		notes.Applied = append(notes.Applied, fmt.Sprintf("MODEL %s %s", fallbackSlot(i), fallback.String()))
+		notes.Applied = append(notes.Applied, fmt.Sprintf("MODEL fallback %s", fallback.String()))
 	}
 	if plan.Cllama {
 		notes.Applied = append(notes.Applied, "CLLAMA passthrough")
@@ -201,13 +205,6 @@ func baseImageForTarget(target TargetRuntime) string {
 	}
 }
 
-func fallbackSlot(index int) string {
-	if index == 0 {
-		return "fallback"
-	}
-	return fmt.Sprintf("fallback_%d", index+1)
-}
-
 func isCllamaForced(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "yes", "true", "1", "passthrough":
@@ -256,4 +253,14 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func modelRefStrings(models []ModelRef) []string {
+	out := make([]string, 0, len(models))
+	for _, model := range models {
+		if ref := strings.TrimSpace(model.String()); ref != "" {
+			out = append(out, ref)
+		}
+	}
+	return out
 }

@@ -147,14 +147,18 @@ func TestTranslateFallbackModelsEmitClawfileLines(t *testing.T) {
 	if !strings.Contains(clawfile, "MODEL fallback anthropic/claude-haiku-3-5") {
 		t.Fatalf("expected fallback model in Clawfile, got:\n%s", clawfile)
 	}
-	if !strings.Contains(clawfile, "MODEL fallback_2 openai/gpt-4.1-mini") {
-		t.Fatalf("expected second fallback model in Clawfile, got:\n%s", clawfile)
+	if strings.Contains(clawfile, "fallback_2") {
+		t.Fatalf("expected additional fallbacks to stay out of Clawfile, got:\n%s", clawfile)
 	}
 	if got := plan.Environment["ANTHROPIC_API_KEY"]; got != "${ANTHROPIC_API_KEY}" {
 		t.Fatalf("expected fallback provider key placeholder, got %q", got)
 	}
-	if got := plan.Environment["OPENAI_API_KEY"]; got != "${OPENAI_API_KEY}" {
-		t.Fatalf("expected second fallback provider key placeholder, got %q", got)
+	if _, ok := plan.Environment["OPENAI_API_KEY"]; ok {
+		t.Fatal("did not expect placeholder for additional fallback that current runtimes ignore")
+	}
+	migration := renderMigration(plan)
+	if !strings.Contains(migration, "additional source fallback models") || !strings.Contains(migration, "openai/gpt-4.1-mini") {
+		t.Fatalf("expected additional fallback migration note, got:\n%s", migration)
 	}
 }
 

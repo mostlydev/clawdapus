@@ -75,10 +75,8 @@ func renderClawfile(plan Plan) string {
 	b.WriteString("MODEL primary ")
 	b.WriteString(plan.Model.String())
 	b.WriteString("\n")
-	for i, fallback := range plan.Fallback {
-		b.WriteString("MODEL ")
-		b.WriteString(fallbackSlot(i))
-		b.WriteString(" ")
+	for _, fallback := range plan.Fallback {
+		b.WriteString("MODEL fallback ")
 		b.WriteString(fallback.String())
 		b.WriteString("\n")
 	}
