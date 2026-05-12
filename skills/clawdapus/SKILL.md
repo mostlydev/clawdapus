@@ -280,18 +280,20 @@ Services declare capabilities via a `.claw-describe.json` file (embedded in the 
 - **`memory`**: At least one of `recall` or `retain` required. All paths must start with `/`.
 - **`feeds`**: Unchanged from v1. Short-form names in `x-claw.feeds` resolve against the feed registry.
 
-## Persistence and Memory Surfaces
+## Persistence Surfaces
 
-Clawdapus provides two distinct, durable state surfaces for agents. Both survive container restarts (`claw up`) and even driver migrations (changing `CLAW_TYPE`).
+Clawdapus provides distinct durable state surfaces for agents. They survive container restarts (`claw up`) and driver migrations (changing `CLAW_TYPE`).
 
 | Surface | Owner | Written by | Path inside container | Host path |
 |---------|-------|------------|-----------------------|-----------|
 | **Session history** | Infrastructure | cllama proxy | `/claw/session-history` | `.claw-session-history/<agent-id>/history.jsonl` |
 | **Portable memory** | Runner / Agent | Agent | `/claw/memory` | `.claw-memory/<agent-id>/memory/` |
+| **Portable skills** | Runner / Agent | Agent | runner-specific skill dir, e.g. `/root/.hermes/skills` | `.claw-skills/<claw-id>/skills/` |
 
 - **Session History:** Normalized JSONL record of every successful LLM turn, captured transparently at the proxy boundary. The agent does not write this. Fields include `reported_cost_usd`, `tool_trace` (for managed tool calls), and `memory_op` (for recall/retain operations).
 - **Portable Memory:** The agent's own active scratchpad. Agents can read/write notes, drafts, and learned facts here.
-- **Cross-Runner Portability:** Because these paths are canonically managed by Clawdapus, you can swap an agent's `CLAW_TYPE` (e.g., migrating from OpenClaw to PicoClaw) and its memory and session history will automatically follow it into the new runtime.
+- **Portable Skills:** The runner's writable skill directory is backed by `.claw-skills/<claw-id>/skills/`. Compile-time `SKILL` files and service manuals are still mounted read-only over this directory, while agent-created skills persist beside them.
+- **Cross-Runner Portability:** Because these paths are canonically managed by Clawdapus, you can swap an agent's `CLAW_TYPE` (e.g., migrating from OpenClaw to PicoClaw) and its memory, session history, and self-authored skills will automatically follow it into the new runtime.
 
 ### Ambient Memory (v0.5.0)
 

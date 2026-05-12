@@ -4448,6 +4448,180 @@ func TestEnsurePersistentCllamaDirIsOutsideRuntimeDir(t *testing.T) {
 	}
 }
 
+func TestPersistentSkillDirIsOutsideRuntimeDir(t *testing.T) {
+	podDir := t.TempDir()
+	runtimeDir := filepath.Join(podDir, ".claw-runtime")
+	skillRoot, err := ensurePersistentCllamaDir(podDir, ".claw-skills")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	skillDir, err := preparePersistentSkillDir(skillRoot, "boulton")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected := filepath.Join(podDir, ".claw-skills", "boulton", "skills")
+	if skillDir != expected {
+		t.Fatalf("skillDir = %q; want %q", skillDir, expected)
+	}
+	if strings.HasPrefix(skillDir, runtimeDir) {
+		t.Fatalf("skillDir %q is under runtimeDir %q", skillDir, runtimeDir)
+	}
+	info, err := os.Stat(skillDir)
+	if err != nil {
+		t.Fatalf("stat skill dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("expected skill dir to be a directory")
+	}
+	if got := info.Mode().Perm(); got != 0o777 {
+		t.Fatalf("skill dir mode = %o; want 777", got)
+	}
+}
+
+func TestPreparePersistentSkillDirRejectsInvalidClawIDs(t *testing.T) {
+	skillRoot := filepath.Join(t.TempDir(), ".claw-skills")
+	invalid := []string{
+		"",
+		".",
+		"..",
+		".hidden",
+		"../escape",
+		"nested/escape",
+		`nested\escape`,
+	}
+
+	for _, id := range invalid {
+		if got, err := preparePersistentSkillDir(skillRoot, id); err == nil {
+			t.Fatalf("preparePersistentSkillDir(%q) = %q, nil; want error", id, got)
+		}
+	}
+}
+
+func TestAppendPersistentSkillMountPrecedesDeclaredSkillMounts(t *testing.T) {
+	podDir := t.TempDir()
+	skillRoot, err := ensurePersistentCllamaDir(podDir, ".claw-skills")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := &driver.MaterializeResult{
+		SkillDir: "/root/.hermes/skills",
+	}
+
+	rc := &driver.ResolvedClaw{ServiceName: "boulton"}
+	if err := appendPersistentSkillMount(result, skillRoot, rc); err != nil {
+		t.Fatal(err)
+	}
+	result.Mounts = append(result.Mounts, driver.Mount{
+		HostPath:      "/repo/docs/skills/desk-scripts.md",
+		ContainerPath: "/root/.hermes/skills/desk-scripts/SKILL.md",
+		ReadOnly:      true,
+	})
+
+	if len(result.Mounts) != 2 {
+		t.Fatalf("expected 2 mounts, got %d", len(result.Mounts))
+	}
+	persistent := result.Mounts[0]
+	if persistent.HostPath != filepath.Join(podDir, ".claw-skills", "boulton", "skills") {
+		t.Fatalf("unexpected persistent skill host path: %q", persistent.HostPath)
+	}
+	if persistent.ContainerPath != "/root/.hermes/skills" {
+		t.Fatalf("unexpected persistent skill container path: %q", persistent.ContainerPath)
+	}
+	if persistent.ReadOnly {
+		t.Fatal("persistent skill mount must be writable")
+	}
+	if !result.Mounts[1].ReadOnly {
+		t.Fatal("declared skill mount should remain read-only")
+	}
+}
+
+func TestAppendPersistentSkillMountExpandsCountOrdinals(t *testing.T) {
+	podDir := t.TempDir()
+	skillRoot, err := ensurePersistentCllamaDir(podDir, ".claw-skills")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := &driver.MaterializeResult{
+		SkillDir: "/workspace/container/skills",
+	}
+	rc := &driver.ResolvedClaw{ServiceName: "worker", Count: 2}
+
+	if err := appendPersistentSkillMount(result, skillRoot, rc); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Mounts) != 1 {
+		t.Fatalf("expected one persistent mount, got %d", len(result.Mounts))
+	}
+	got := result.Mounts[0].HostPathByService
+	if got["worker-0"] != filepath.Join(podDir, ".claw-skills", "worker-0", "skills") {
+		t.Fatalf("worker-0 skill path = %q", got["worker-0"])
+	}
+	if got["worker-1"] != filepath.Join(podDir, ".claw-skills", "worker-1", "skills") {
+		t.Fatalf("worker-1 skill path = %q", got["worker-1"])
+	}
+	if result.Mounts[0].HostPath != "" {
+		t.Fatalf("counted persistent mount should use per-service host paths, got HostPath %q", result.Mounts[0].HostPath)
+	}
+}
+
+func TestEmitComposeUsesOrdinalPersistentSkillHostPaths(t *testing.T) {
+	p := &pod.Pod{
+		Name: "test",
+		Services: map[string]*pod.Service{
+			"worker": {
+				Image: "example/worker:latest",
+				Claw:  &pod.ClawBlock{Count: 2},
+			},
+		},
+	}
+	result := &driver.MaterializeResult{
+		Mounts: []driver.Mount{
+			{
+				HostPathByService: map[string]string{
+					"worker-0": "/state/.claw-skills/worker-0/skills",
+					"worker-1": "/state/.claw-skills/worker-1/skills",
+				},
+				ContainerPath: "/workspace/container/skills",
+				ReadOnly:      false,
+			},
+			{
+				HostPath:      "/repo/policy.md",
+				ContainerPath: "/workspace/container/skills/policy/SKILL.md",
+				ReadOnly:      true,
+			},
+		},
+		ReadOnly: true,
+		Restart:  "on-failure",
+	}
+
+	out, err := pod.EmitCompose(p, map[string]*driver.MaterializeResult{"worker": result})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	worker0Mount := "/state/.claw-skills/worker-0/skills:/workspace/container/skills:rw"
+	worker1Mount := "/state/.claw-skills/worker-1/skills:/workspace/container/skills:rw"
+	policyMount := "/repo/policy.md:/workspace/container/skills/policy/SKILL.md:ro"
+	if !strings.Contains(out, worker0Mount) {
+		t.Fatalf("expected worker-0 persistent skill mount in compose:\n%s", out)
+	}
+	if !strings.Contains(out, worker1Mount) {
+		t.Fatalf("expected worker-1 persistent skill mount in compose:\n%s", out)
+	}
+	if strings.Contains(out, "/state/.claw-skills/worker/skills") {
+		t.Fatalf("unexpected shared base-service skill mount in compose:\n%s", out)
+	}
+	if strings.Index(out, worker0Mount) > strings.Index(out, policyMount) {
+		t.Fatalf("worker-0 persistent skill mount must precede read-only policy mount:\n%s", out)
+	}
+	if strings.LastIndex(out, worker1Mount) > strings.LastIndex(out, policyMount) {
+		t.Fatalf("worker-1 persistent skill mount must precede read-only policy mount:\n%s", out)
+	}
+}
+
 func TestPreMigratePortableMemoryCopiesServiceRuntimeState(t *testing.T) {
 	podDir := t.TempDir()
 	runtimeDir := filepath.Join(podDir, ".claw-runtime")

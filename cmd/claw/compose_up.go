@@ -154,6 +154,10 @@ func runComposeUp(podFile string) (err error) {
 	if err != nil {
 		return err
 	}
+	skillRoot, err := ensurePersistentCllamaDir(podDir, ".claw-skills")
+	if err != nil {
+		return err
+	}
 	if err := preMigratePortableMemory(runtimeDir, memoryRoot, p); err != nil {
 		return fmt.Errorf("migrate portable memory: %w", err)
 	}
@@ -741,6 +745,9 @@ func runComposeUp(podFile string) (err error) {
 		})
 		if err != nil {
 			return fmt.Errorf("service %q: materialization failed: %w", name, err)
+		}
+		if err := appendPersistentSkillMount(result, skillRoot, rc); err != nil {
+			return fmt.Errorf("service %q: prepare persistent skill dir: %w", name, err)
 		}
 
 		if rc.CllamaToken != "" {
@@ -4858,6 +4865,61 @@ func ensurePersistentCllamaDir(podDir, name string) (string, error) {
 	dir := filepath.Join(podDir, name)
 	if err := os.MkdirAll(dir, 0o777); err != nil {
 		return "", fmt.Errorf("create %s dir: %w", name, err)
+	}
+	return dir, nil
+}
+
+func appendPersistentSkillMount(result *driver.MaterializeResult, skillRoot string, rc *driver.ResolvedClaw) error {
+	if result == nil {
+		return nil
+	}
+	containerSkillDir := strings.TrimSpace(result.SkillDir)
+	if containerSkillDir == "" {
+		return nil
+	}
+	if rc == nil {
+		return fmt.Errorf("resolved claw is nil")
+	}
+	serviceName := strings.TrimSpace(rc.ServiceName)
+	ids := expandedServiceNames(serviceName, rc.Count)
+	hostPaths := make(map[string]string, len(ids))
+	for _, id := range ids {
+		hostSkillDir, err := preparePersistentSkillDir(skillRoot, id)
+		if err != nil {
+			return err
+		}
+		hostPaths[id] = hostSkillDir
+	}
+	mount := driver.Mount{
+		ContainerPath: containerSkillDir,
+		ReadOnly:      false,
+	}
+	if len(ids) == 1 {
+		mount.HostPath = hostPaths[ids[0]]
+	} else {
+		mount.HostPathByService = hostPaths
+	}
+	result.Mounts = append(result.Mounts, mount)
+	return nil
+}
+
+func preparePersistentSkillDir(skillRoot, serviceName string) (string, error) {
+	serviceName = strings.TrimSpace(serviceName)
+	if serviceName == "" || serviceName == "." || serviceName == ".." ||
+		strings.HasPrefix(serviceName, ".") ||
+		strings.ContainsAny(serviceName, `/\`) {
+		return "", fmt.Errorf("invalid service name %q", serviceName)
+	}
+	if strings.TrimSpace(skillRoot) == "" {
+		return "", fmt.Errorf("skill root is empty")
+	}
+
+	dir := filepath.Join(skillRoot, serviceName, "skills")
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		return "", fmt.Errorf("create persistent skill dir: %w", err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		return "", fmt.Errorf("chmod persistent skill dir: %w", err)
 	}
 	return dir, nil
 }

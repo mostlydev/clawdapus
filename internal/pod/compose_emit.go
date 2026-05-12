@@ -227,11 +227,22 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 			// Mounts from driver
 			var mounts []interface{}
 			for _, m := range result.Mounts {
+				hostPath := m.HostPath
+				if len(m.HostPathByService) > 0 {
+					selected, ok := m.HostPathByService[serviceName]
+					if !ok {
+						selected, ok = m.HostPathByService[name]
+					}
+					if !ok || strings.TrimSpace(selected) == "" {
+						return "", fmt.Errorf("service %q: no host path for mount %q", serviceName, m.ContainerPath)
+					}
+					hostPath = selected
+				}
 				mode := "rw"
 				if m.ReadOnly {
 					mode = "ro"
 				}
-				mounts = append(mounts, fmt.Sprintf("%s:%s:%s", m.HostPath, m.ContainerPath, mode))
+				mounts = append(mounts, fmt.Sprintf("%s:%s:%s", hostPath, m.ContainerPath, mode))
 			}
 			mounts = append(mounts, volumeMounts...)
 			if len(mounts) > 0 {
