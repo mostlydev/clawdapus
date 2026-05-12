@@ -2,6 +2,10 @@
 
 **Author (draft):** claude (`claude:dbaba2df`) on branch `issue-232-channel-24h-awareness` — for adversarial review by codex before any implementation.
 
+**Revision history:**
+- 2026-05-12 r1 — initial draft.
+- 2026-05-12 r2 — codex (`codex:27f8b72e`) r1 adversarial pass; folded in: (1) header rewrite now targets the real after-bound tail path (kind discriminator keyed on `after=` presence, not on `mode=delta` — which is no longer the default per #201); (2) explicit tool ACL/auto-subscription via compose-materialized per-agent channel allowlist; (3) v2 producer model clarified — `claw-channel-memory` emits the channel-awareness wire surface and may use #164 internals, but channel events do **not** flow through ADR-021's `/recall` in any phase; (4) v1 default flipped from opt-in to default-on with smaller per-Discord-channel caps, and #232 explicitly stays open through v2 since v1 is not acceptance-complete; (5) feed ordering enforced via compose-emitted manifest order with regression test; (6) retrieval out-of-buffer semantics spelled out (structured `not_in_buffer` response with retained-coverage range).
+
 **Issue:** https://github.com/mostlydev/clawdapus/issues/232
 
 **Predecessors:**
@@ -33,11 +37,13 @@ The plan splits along a hard dependency: part (2) needs a memory-grade producer,
 | Part | v1 producer | v2 producer | Wire surface in both phases |
 |------|-------------|-------------|------------------------------|
 | (1) Raw recent window | `claw-wall` (new `channel-awareness` endpoint, uncursored, dual-capped) | unchanged | feed: `channel-awareness` |
-| (2) Rolling 24h digest | **stopgap: omitted** with explicit metadata label `digest=unavailable`; busy rooms rely on retrieval | `claw-channel-memory` (subscribes to claw-wall events, retains via #164's adapter contract, emits `digest=ready`) | feed: `channel-awareness` (composite block) |
-| (3) Retrieval path | `claw-wall` exposes managed tools (ADR-020): `search_channel_context`, `get_channel_messages` | unchanged | `tools[]` |
-| (4) Metadata | header-line discipline on every channel-flavored feed; new `channel_context_op` telemetry event distinguishing `delta` / `raw_window` / `digest` / `tool_call` | unchanged | feed header + telemetry |
+| (2) Rolling 24h digest | **stopgap: omitted** with explicit metadata label `digest=unavailable`; busy rooms rely on retrieval | `claw-channel-memory` service (new) — subscribes to claw-wall events, builds rolling digest (may use #164 salience-memory internals as a library, but channel events do **not** transit ADR-021 `/recall`); emits the **same** `channel-awareness` wire surface with `digest=ready` and an appended digest section | feed: `channel-awareness` (composite block, same name) |
+| (3) Retrieval path | `claw-wall` exposes managed tools (ADR-020) `search_channel_context` and `get_channel_messages`, gated by per-agent channel allowlist (see §4.2) | `claw-channel-memory` may offer richer retrieval (e.g., digest-cited source pull); v1 tools remain | `tools[]` |
+| (4) Metadata | header-line discipline keyed on `after=` presence (see §4.4), new `channel_context_op` telemetry distinguishing `delta_tail` / `raw_window` / `digest` / `tool_call` | unchanged | feed header + telemetry |
 
-The v1 channel-awareness block is **not** rebranded as "the 24h fix". The plan explicitly labels it as bounded raw-window + retrieval; full 24h coverage under busy-room load is only guaranteed once digest lands.
+The v1 channel-awareness block is **not** rebranded as "the 24h fix". The plan explicitly labels it as bounded raw-window + retrieval; full 24h coverage under busy-room load is only guaranteed once digest lands. **#232 itself stays open through v2** (codex r1) — v1 ships a meaningful improvement but is not acceptance-complete against the issue body's r2 contract.
+
+**Architectural invariant (codex r1):** in no phase do channel events flow through ADR-021's per-agent `/recall`. `/recall` payload is `messages[]`/`system`/metadata — agent/session shaped, not room-shaped. Channel awareness is its own producer/consumer pair with its own wire surface. #164's salience-memory adapter may be used as an internal library by `claw-channel-memory` (sharing LLM prompts, dedupe heuristics, etc.) but the two adapters do not share the recall/retain wire endpoints.
 
 ## 4. Wire surfaces
 
@@ -48,9 +54,9 @@ GET /channel-awareness?channels=<csv>&since=24h&limit=120&max_chars=12288
 ```
 
 - **No cursor**. No `consumer=` param. No `mode=delta` path. This feed exists precisely to be cursor-independent.
-- Same channel-authorization model as `channel-context` (caller is upstream-restricted to surface-derived channels).
-- Reuses `consumeTail` semantics from #201 (newest-first walk, dual cap, sort ASC for output) but rebranded:
-  - Defaults: `since=24h`, `limit=120`, `max_chars=12288` (≈12KB). These are **larger** than `channel-context` tail defaults because this block carries 24h, not "recent ping context". Operator-tunable via `x-claw.context.channel-awareness` (parallel of #201's `x-claw.context.channel`).
+- Same channel-authorization model as `channel-context` (caller is upstream-restricted to surface-derived channels), PLUS the per-agent ACL of §4.2.1 (the same allowlist guards both feed and tool paths).
+- Reuses `consumeTail` semantics from #201 (newest-first walk, dual cap, sort ASC for output) but rebranded.
+- v1 defaults (r2): `since=24h`, `limit=60`, `max_chars=8192` (8KB, aligned with cllama's `MaxFeedResponseBytes` so we don't double-truncate). Operator-tunable via `x-claw.context.channel-awareness` (parallel of #201's `x-claw.context.channel`).
 - Header line is explicit about layer kind, exactly so the model cannot conflate it with a delta:
 
 ```
@@ -87,11 +93,54 @@ tools:
     http: { path: /get_channel_messages }
 ```
 
-Both are **mediated** by cllama (ADR-020) so policy/telemetry/auth flow through the standard plane. Mediation gives us per-call audit, channel ACL enforcement, and bounded response sizing without a runner-specific tool plumbing pass.
+Both are **mediated** by cllama (ADR-020) so policy/telemetry/auth flow through the standard plane.
 
-Tool responses include the same `kind=raw_window source=claw-wall channels=…` metadata header as the feed, so the model treats tool output and feed injection symmetrically.
+#### 4.2.1 Per-agent channel ACL (codex r1 must-fix)
 
-### 4.3 Late-context placement (per #204)
+Today's `claw-wall` (`cmd/claw-wall/store.go`, `newHandler`) accepts `channels=` from any caller — auto-generated feed URLs are safe only because compose-up writes surface-derived channel IDs into the URL. Model-supplied tool arguments are **not** safe by construction: an agent could call `search_channel_context(channels=["<other-channel-id>"])` and read a room it has no surface to.
+
+Compose-up materializes a per-agent allowlist at `claw up` time and writes it into the `claw-wall` service config alongside `CLAW_WALL_TOKENS`:
+
+```
+CLAW_WALL_AGENT_CHANNELS=<agentID>:<chA>,<chB>;<agentID2>:<chC>,...
+```
+
+`agentID` is the bearer-authenticated principal (already validated by claw-wall for the feed path; same path used for tool path). The allowlist is exactly the surface-derived channel set used to materialize that agent's `channel-context` and `channel-awareness` feed URLs — i.e., what the agent already legitimately has access to.
+
+Tool request handler:
+1. Authenticate caller → `agentID` (existing Bearer validation; tools share auth with feeds).
+2. Parse requested `channels[]`.
+3. Reject any channel not in `allowlist[agentID]` with HTTP 403 and a structured `{"error": "channel_not_allowed", "agent": "...", "channel": "..."}` body. cllama surfaces this as a tool-call error to the model with a short hint ("This agent has no surface to channel X; ask the operator to add it.").
+4. Pass through to store with the validated channel set.
+
+The same allowlist guards both new tool endpoints and is checked once per request.
+
+#### 4.2.2 Auto-subscription
+
+Both tools are auto-registered for any service whose `x-claw` consumes channel surfaces (i.e., the same condition that auto-injects `claw-wall`). No separate pod knob. Rationale: if the agent has channel surfaces declared, it already needs the tools to recover from cursor/buffer-bound gaps. Forcing operators to opt-in twice (channel surface + retrieval tool) is friction without value.
+
+#### 4.2.3 Out-of-buffer semantics (codex r1 must-fix)
+
+claw-wall can only search/return messages currently in its in-process ring buffer (size from `CLAW_WALL_LIMIT`, default 50, configurable up to operator-set ceiling). When a query falls outside that window — either by `since` reach or by `message_ids` referring to evicted ids — the response is structured:
+
+```json
+{
+  "messages": [],
+  "retained_coverage": {
+    "oldest_ts": "2026-05-12T01:14Z",
+    "newest_ts": "2026-05-12T05:42Z",
+    "buffer_size": 500
+  },
+  "status": "not_in_buffer",
+  "hint": "Requested window extends before buffer's oldest_ts. Operator can widen CLAW_WALL_LIMIT or rely on v2 digest once available."
+}
+```
+
+`status: "ok"` for normal hits, `"empty"` for in-buffer-but-no-match, `"not_in_buffer"` for the eviction case. cllama renders this as a tool response with header `[channel-tool] kind=tool_call name=... status=not_in_buffer retained_coverage=...` so the model can see explicitly that the gap is buffer-bound, not absence-of-message.
+
+Tool responses include the same `kind=tool_call source=claw-wall channels=…` metadata header as the feed, so the model treats tool output and feed injection symmetrically. Every returned message carries its Discord snowflake `id` so the model can chain `search_channel_context` → `get_channel_messages` deterministically.
+
+### 4.3 Late-context placement and feed ordering (per #204)
 
 The `channel-awareness` block is appended to the late runtime-context system message (OpenAI) or final user content block (Anthropic), alongside the existing `channel-context` delta block and the memory recall block.
 
@@ -104,25 +153,38 @@ Order inside the late block (deterministic for cache-friendliness):
 
 Rationale: digest/awareness first sets the model's frame of "what the room knows"; delta then signals "what's new since you last looked"; time anchors the moment. Reversing this lets a stale-but-large window dominate fresh signal.
 
+#### 4.3.1 Manifest-order enforcement (codex r1 must-fix)
+
+cllama's `fetchFeeds` / `FormatAllFeeds` (`cllama/internal/feeds/inject.go`) iterate the feed manifest in order. There is no sort step today. The r1 plan said "order inside the late block" without saying who enforces it; codex flagged this. v1 enforces ordering at the **compose-up emission** side:
+
+- `appendConversationWallAwarenessFeed` emits the awareness entry **before** `appendConversationWallFeed` emits the delta entry, both immediately after any memory recall slot.
+- Regression test `TestConversationWallFeedsEmittedInAwarenessBeforeDeltaOrder` asserts the manifest order matches the §4.3 list.
+- A cllama-side deterministic sort for channel-flavored feeds is **deferred** (would require feed-name introspection in `inject.go`). Manifest-order discipline is sufficient because compose-up is the single writer.
+
 ### 4.4 Header discipline (part 4 of contract)
 
 Every channel-flavored block carries an explicit `kind=` field in its header. The implicit assumption "channel-context = full room" is the bug we are killing.
 
-| Block kind | Header prefix | Notes |
-|------------|---------------|-------|
-| `delta` | `[channel-context delta] kind=delta cursor=<ch>:<id>,...` | rewrite of today's `[channel-context]` header; cursor pair already present |
-| `raw_window` | `[channel-awareness] kind=raw_window since=...` | v1 default |
-| `digest` | `[channel-awareness] kind=digest since=... source_count=...` | v2 only, appended below raw_window in composite block |
-| `tool_call` | tool response body, header `[channel-tool] kind=tool_call name=...` | retrieval tool output |
+**Important (codex r1 must-fix):** the discriminator is keyed on the **presence of an `after=` cursor in the fetch URL**, not on the legacy `mode=delta` query param. Since #201, the default `channel-context` fetch uses `mode=tail`, and cllama injects `after=` from its cursor ledger when one exists (see `cllama/internal/proxy/channel_context_feed.go::prepareChannelContextFeed`). The r1 plan's "rewrite mode=delta header" missed this — the real steady-state delta path is `mode=tail` with an `after=` injection, and that is the path the model actually sees and misreads.
 
-A small change to the existing `[channel-context]` header is the riskiest back-compat surface. It's necessary: today's header has no `kind=` discriminator and operators have already observed the model misinterpreting delta as "the room". v2 of #204's `coverage_partial=true` annotation is preserved verbatim.
+| Source URL pattern | Block kind | Header prefix | Notes |
+|--------------------|------------|---------------|-------|
+| `channel-context` with `after=` (steady-state, post-cursor) | `delta_tail` | `[channel-context delta] kind=delta_tail cursor=<ch>:<id>,...` | the headline rewrite; today emits `[channel-context]` with no kind |
+| `channel-context` without `after=` (epoch bootstrap, first turn, empty cursor map) | `tail` | `[channel-context] kind=tail` | one-shot bootstrap or legacy; the cllama-side decision struct (`channelContextPrepareDecision.AppliedAfter == false`) is the trigger |
+| `channel-awareness` (always uncursored) | `raw_window` | `[channel-awareness] kind=raw_window since=...` | v1 default |
+| `channel-awareness` v2 composite | `raw_window` + `digest` sections | `[channel-awareness] kind=raw_window+digest since=... digest_source_count=...` | v2 only; v1 emits `digest=unavailable` instead |
+| Tool response | `tool_call` | `[channel-tool] kind=tool_call name=... status=...` | retrieval tool output |
+
+The header rewrite is generated in claw-wall's response formatter (it already produces the `[channel-context] mode=tail …` line per #201 §4.3). claw-wall doesn't know whether cllama is injecting `after=` against it; but the `mode=tail`-with-`after=` URL parameter is visible to claw-wall on the request, so it can switch the header based on that signal directly. v2 of #204's `coverage_partial=true` annotation is preserved verbatim.
+
+**Back-compat note:** model prompts that contained the old `[channel-context]` header for delta will now see `[channel-context delta] kind=delta_tail` once v1 ships. This is the intended behavior — the old prefix was the bug. No tool/agent code parses this header; only the model reads it.
 
 ### 4.5 Telemetry (part 4 of contract)
 
 New normalized event kind: `channel_context_op` with fields `{kind, channels[], retained, returned, omitted, latency_ms, source, status}`. Emitted for:
 - every channel-awareness fetch (kind=raw_window)
-- every channel-context delta fetch (kind=delta) — reuses existing claw-wall log line but normalizes it through cllama
-- every retrieval tool call (kind=tool_call)
+- every channel-context fetch — kind=delta_tail if `after=` was present, kind=tail otherwise — normalizes the existing claw-wall log line through cllama
+- every retrieval tool call (kind=tool_call) with `status` from §4.2.3 (`ok` / `empty` / `not_in_buffer`)
 - v2 digest production (kind=digest_built) and consumption (kind=digest)
 
 `claw audit` surfaces this alongside `memory_op` and `feed_fetch`.
@@ -138,16 +200,15 @@ x-claw:
       since: 24h
       limit: 40
       max_chars: 8192
-    channel-awareness:          # NEW
+    channel-awareness:          # NEW — defaults applied automatically; pod block only needed for overrides
       since: 24h
-      limit: 120
-      max_chars: 12288
-      enabled: true             # explicit opt-in for v1 (default false) — see §8
+      limit: 60                 # default (r2: tightened from 120)
+      max_chars: 8192           # default (r2: tightened from 12288)
 ```
 
-Service-level overrides via the same pod-defaults pattern (`x-claw.context.channel-awareness` on individual services).
+Service-level overrides via the same pod-defaults pattern (`x-claw.context.channel-awareness` on individual services). There is **no** `enabled` knob — see §8; the feed is emitted automatically when the service consumes any channel surface, matching the auto-injection of `claw-wall` itself.
 
-`appendConversationWallFeed` (in `cmd/claw/compose_up.go`) gains a sibling `appendConversationWallAwarenessFeed` that emits `/channel-awareness?channels=...&since=...&limit=...&max_chars=...` when `enabled: true` and the service has any consumed channel IDs. Tool registration uses the existing claw-wall descriptor extraction path.
+`appendConversationWallFeed` (in `cmd/claw/compose_up.go`) gains a sibling `appendConversationWallAwarenessFeed` that emits `/channel-awareness?channels=...&since=...&limit=...&max_chars=...` whenever the service has any consumed channel IDs. Tool registration uses the existing claw-wall descriptor extraction path. A second emission writes `CLAW_WALL_AGENT_CHANNELS` into the auto-injected `claw-wall` service env, per §4.2.1.
 
 ## 6. Stopgap discipline (codex challenge #2)
 
@@ -165,25 +226,32 @@ The acceptance criterion in the issue body — "later Boulton turn still include
 - `TestChannelAwarenessHandlerDualCap` — 200-message buffer, `limit=50&max_chars=…` → returns newest 50 sorted ASC, header shows `retained=50/...`.
 - `TestChannelAwarenessHandlerColdStart` — buffer holds 10 minutes worth → header reads `retained=N/buffer range=...` honest about coverage.
 - `TestChannelAwarenessHandlerDoesNotMutateCursor` — interleave with `channel-context` delta consumer; awareness fetch leaves delta cursor untouched.
-- `TestSearchChannelContextRespectsACL` — request includes channel not in caller's surface → 403 (reuses claw-wall's existing ACL).
-- `TestGetChannelMessagesByIDRange` — fetch by id range returns exact messages, ordered.
+- `TestChannelContextHeaderRewriteByAfterPresence` — same handler, two requests: one with `after=…` query param emits `[channel-context delta] kind=delta_tail`; one without emits `[channel-context] kind=tail`. (codex r1 must-fix)
+- `TestPerAgentChannelACLAllowsListed` — `CLAW_WALL_AGENT_CHANNELS=A:ch1,ch2` + Bearer for A; tool request for `channels=[ch1]` → 200 with messages.
+- `TestPerAgentChannelACLRejectsUnlisted` — same env; tool request for `channels=[ch3]` → 403 with `{"error":"channel_not_allowed",...}`.
+- `TestRetrievalToolNotInBufferStatus` — buffer has 10min; tool query with `since=12h` returns `status=not_in_buffer` + `retained_coverage` shape per §4.2.3.
+- `TestRetrievalToolEmptyVsNotInBuffer` — distinguishes `status=empty` (in-buffer, no match) from `status=not_in_buffer` (out-of-buffer).
+- `TestGetChannelMessagesByIDRange` — fetch by id range returns exact messages, ordered, each carrying its snowflake id.
 
 ### 7.2 cllama (`cllama/internal/proxy/`)
 
 - `TestChannelAwarenessFeedIsFetchedWithoutCursor` — register a `channel-awareness` feed entry; assert URL has no `after=` and `X-Claw-Consumer-Session-Epoch` is **not** consulted for it (orthogonal to #220's epoch).
 - `TestChannelAwarenessAndDeltaCoExist` — pod wires both feeds; both blocks appear in the late-context section, in the §4.3 order, with their respective `kind=` headers.
-- `TestChannelContextDeltaHeaderRewrite` — existing delta path now emits `[channel-context delta] kind=delta cursor=...`. Regression test reads the new prefix.
-- `TestChannelContextOpTelemetryNormalized` — fetch each kind, assert `audit.go`-style normalized records for `kind=raw_window`, `kind=delta`, `kind=tool_call`.
+- `TestChannelContextHeaderRewriteFlowsThroughCllama` — claw-wall returns `[channel-context delta] kind=delta_tail` for an `after=`-bound fetch; cllama formats it into the late context without further mutation. (codex r1 must-fix)
+- `TestChannelContextOpTelemetryNormalized` — fetch each kind, assert `audit.go`-style normalized records for `kind=raw_window`, `kind=delta_tail`, `kind=tail`, `kind=tool_call`.
 
 ### 7.3 compose_up (`cmd/claw/`)
 
 - `TestAppendChannelAwarenessFeedHonorsPodConfig` — pod-level `x-claw.context.channel-awareness` overrides flow into generated URL.
-- `TestChannelAwarenessFeedDisabledByDefault` — without explicit `enabled: true`, no feed entry is emitted (v1 opt-in; see §8).
-- `TestChannelAwarenessToolsRegisteredFromDescriptor` — claw-wall descriptor extraction picks up the two tool entries when service is auto-injected.
+- `TestChannelAwarenessFeedDefaultOnWithChannelSurface` — service consumes a Discord channel surface; pod has no explicit `channel-awareness` block; feed entry IS emitted with default `since=24h&limit=60&max_chars=8192`. (codex r1, default-on)
+- `TestChannelAwarenessFeedAbsentWithoutChannelSurface` — service has no channel surface; no awareness feed entry emitted.
+- `TestConversationWallFeedsEmittedInAwarenessBeforeDeltaOrder` — manifest-order regression: when both feeds are emitted, awareness appears before delta in the materialized `feeds.json`. (codex r1 must-fix §4.3.1)
+- `TestComposeMaterializesAgentChannelAllowlist` — when claw-wall is auto-injected, the service env contains `CLAW_WALL_AGENT_CHANNELS=<agentID>:<chA>,<chB>;...` reflecting each consuming agent's surface-derived channel set. (codex r1 must-fix §4.2.1)
+- `TestChannelAwarenessToolsRegisteredFromDescriptor` — claw-wall descriptor extraction picks up the two tool entries; tools auto-subscribe to any service with a channel surface (§4.2.2).
 
 ### 7.4 Pod parser (`internal/pod/`)
 
-- `TestParseChannelAwarenessConfig` — accepts `since` / `limit` / `max_chars` / `enabled`; rejects negatives; rejects unparseable durations.
+- `TestParseChannelAwarenessConfig` — accepts `since` / `limit` / `max_chars`; rejects negatives; rejects unparseable durations. No `enabled` field (default-on).
 - `TestPodDefaultsChannelAwareness` — service-level overrides pod defaults using the standard pattern.
 
 ### 7.5 Integration / spike
@@ -191,14 +259,25 @@ The acceptance criterion in the issue body — "later Boulton turn still include
 - Extend `TestSpikeRollCall` (or a sibling spike) so that the rollcall pod's `channel-awareness` feed body contains a header-line `kind=raw_window` and matches the retained-coverage shape. The spike already exercises real LLM calls through cllama; this just asserts the new feed flows end-to-end.
 - A targeted fixture test reproduces the Tiverton case: pre-seed `claw-wall` buffer with messages spanning the cursor, run a turn that advances cursor past Logan's hypothetical CMCSA message, then run a second turn with a human-mention prompt and assert the `channel-awareness` block contains Logan's message even though the `channel-context` delta does not.
 
-## 8. Default behavior and ramp
+## 8. Default behavior and ramp (revised r2)
 
-`channel-awareness` is **opt-in** in v1 (`enabled: true` required at pod level). Two reasons:
+**Codex r1 made the v1-opt-in posture untenable:** if v1 is opt-in and explicitly partial, then operators who don't flip the knob get nothing, and #232 closes on a stopgap that pods haven't actually adopted. The new default is **on**, with smaller caps tuned to Discord channel density, and `digest=unavailable` honestly documenting the gap in v1.
 
-1. Token cost is non-trivial: 12KB default added to every cllama turn for pods with active channels. Operators should choose the trade-off explicitly until v2 makes the cost bounded by digest length rather than raw message count.
-2. The header rewrite of `channel-context` delta is the only forced change. Awareness layering itself is opt-in until digest lands and v2 can flip the default.
+v1 defaults (active when the service consumes any channel surface, no explicit opt-in needed):
 
-Once v2 ships, the default flips to `enabled: true` and pods get the full contract automatically.
+| Knob | v1 default | r1 draft | Rationale |
+|------|-----------|----------|-----------|
+| `enabled` | `true` (implicit) | `false` (explicit opt-in) | codex r1: opt-in fails the issue's acceptance contract |
+| `since` | `24h` | `24h` | unchanged |
+| `limit` | `60` | `120` | r1 caps were generous; smaller default reflects "raw window + retrieval pressure valve" model |
+| `max_chars` | `8192` (8KB) | `12288` (12KB) | aligned with cllama's `MaxFeedResponseBytes` so we don't risk double-truncation |
+
+Per-pod overrides still available via `x-claw.context.channel-awareness`. Operators with low-density rooms can raise the caps; high-traffic rooms keep the smaller defaults and lean on retrieval until v2.
+
+**#232 stays open through v2.** Per codex r1: v1 is a meaningful improvement (raw-window + retrieval + metadata) but does not satisfy the issue body's r2 acceptance contract ("guaranteed 24h awareness regardless of session state and trigger"). The PR that lands v1 is titled `#232 phase 1: raw-window + retrieval + metadata` and closes #232 only when v2 (digest via `claw-channel-memory`) ships.
+
+The PR body explicitly says:
+> Phase 1 of #232. Lands the raw-window feed, retrieval tools, and metadata header discipline; busy rooms still rely on retrieval to close gaps. Phase 2 (rolling digest via `claw-channel-memory`) lands when #164 is far enough along to share its salience primitives. #232 stays open through both phases.
 
 ## 9. Out of scope (deliberately)
 
@@ -208,27 +287,50 @@ Once v2 ships, the default flips to `enabled: true` and pods get the full contra
 - **Per-channel awareness/delta toggles.** v1 keeps the pod/service knob granularity from #201.
 - **Anthropic `cache_control` markers** for awareness blocks. Same deferral as #204 v2.
 
-## 10. Open questions for codex r1 review
+## 10. r1 open questions — codex answers and r2 resolution
 
-1. **Composite vs co-injection.** Plan currently treats `channel-awareness` and `channel-context` as two separate feeds. Codex flagged "make the provider-visible surface a channel-awareness block, with the memory adapter as the producer/backend." Should the single block model be enforced from v1 — i.e., one `channel-awareness` feed that *contains* a delta section + a raw-window section + (v2) a digest section, and `channel-context` is retired? Two-feed wins on cache stability and incremental v1→v2 path; one-block wins on model framing and metadata clarity. Lean two-feed but flag for challenge.
-2. **Header rewrite on existing `channel-context`.** v1 changes the prefix from `[channel-context]` to `[channel-context delta] kind=delta`. This is necessary for part-4 metadata discipline but is back-compat-flavored. Acceptable, or should the existing header stay verbatim and only the new feed introduce `kind=`?
-3. **v1 retrieval tools live where?** Plan puts them on `claw-wall` via `claw.describe` v2. Alternative: a thin `claw-channel-memory` shim service that proxies to claw-wall, so when v2 lands the same service produces the digest. Lower v1 cost vs lower v2 refactor cost. Lean claw-wall-direct for v1 with a clear v2 migration note.
-4. **Should the v1 default really be opt-in?** §8 argues opt-in for token-cost discipline. Counter-argument: the issue body is a live trading-desk incident and Tiverton operators would prefer opt-out semantics. Lean opt-in but flag.
-5. **Spike test scope.** Should the targeted Tiverton-reproduction fixture (§7.5 last bullet) be a new spike (`-tags spike`) or a normal integration test against a faked claw-wall? Lean integration; spike-tag inflates CI cost and requires real provider credentials, which this scenario doesn't need.
+(Original five questions kept for traceability; codex r1 answers and r2 outcome inline.)
 
-## 11. Build sequence (assuming codex sign-off)
+1. **Composite vs co-injection.** r1 leaned two-feed.
+   - **Codex r1:** two-feed OK for v1 *if* rendered/ordered as one coherent channel layer.
+   - **r2 resolution:** two feeds (`channel-awareness`, `channel-context`) with compose-emitted manifest order enforced (§4.3.1). Telemetry treats them as one logical layer via `channel_context_op`. v2 can collapse to one feed if useful but is not required.
 
-1. **claw-wall** — `channel-awareness` endpoint reusing `consumeTail`; new tool handlers; descriptor declares tools. Tests in §7.1.
-2. **cllama feed plumbing** — feed name registry already supports per-feed configuration; the new feed flows through with `kind=raw_window` metadata parsing. Tests in §7.2.
-3. **compose_up wiring** — `appendConversationWallAwarenessFeed`; pod parser for `x-claw.context.channel-awareness`. Tests in §7.3, §7.4.
-4. **Header rewrite for delta path** — minimal change in `channel_context_feed.go`; regression covers existing tests.
-5. **Telemetry normalization** — `channel_context_op` event kind, `claw audit` rendering.
+2. **Header rewrite on `channel-context`.** r1 said "change to `[channel-context delta] kind=delta`".
+   - **Codex r1 must-fix:** rewrite targeted the wrong path (`mode=delta` is no longer the default since #201). The real delta path is `mode=tail` + `after=`.
+   - **r2 resolution:** rewrite is keyed on `after=` presence. See §4.4 for the four kinds (`delta_tail`, `tail`, `raw_window`, `tool_call`).
+
+3. **v1 retrieval tools live where?** r1 leaned claw-wall-direct.
+   - **Codex r1:** claw-wall-direct OK *only after* ACL/auto-subscribe is solved.
+   - **r2 resolution:** claw-wall-direct with §4.2.1 per-agent channel allowlist materialized at compose time + §4.2.2 auto-subscription. ACL is the gating condition; not a separate phase.
+
+4. **v1 default opt-in vs opt-out.** r1 leaned opt-in for token cost discipline.
+   - **Codex r1:** opt-in means v1 is not acceptance-complete; either split issues or make default-on with smaller caps.
+   - **r2 resolution:** default-on with smaller caps (`limit=60`, `max_chars=8192`), and #232 stays open through v2 (§8). The smaller caps keep token-cost discipline without requiring operators to flip a knob.
+
+5. **Spike test scope.** r1 leaned plain integration over spike-tagged.
+   - **Codex r1:** plain integration, fake claw-wall, no spike-tag.
+   - **r2 resolution:** confirmed — §7.5 targeted reproduction is a normal integration test.
+
+## 10b. Open questions for codex r2 review
+
+1. **Compose CLAW_WALL_AGENT_CHANNELS env shape.** §4.2.1 specifies `<agentID>:<chA>,<chB>;<agentID2>:...` as a single env var. Alternative: a separate small JSON file mounted into claw-wall (e.g., `claw-wall-agent-channels.json`) like the cllama memory.json pattern. Env-var keeps wiring simple but is shell-fragile for large pods; JSON is more idiomatic but adds a mount. Lean env-var for v1 because the value is small and pure ASCII.
+2. **Tool error rendering.** §4.2.3 specifies `status=not_in_buffer` with a `hint` field. Should cllama's tool-call telemetry record `status` separately from `error_class`, or fold it into the existing `tool_call_result` event? Lean separate so audits can filter "the model retrieved nothing" cases without parsing free-text hints.
+3. **digest=unavailable signaling.** v1 header always carries `digest=unavailable`. Should the model see this once at the top of `channel-awareness` or repeated in `channel-context delta` blocks too? Lean once (in awareness only) — repeating it in delta would invite the model to assume delta is the entire room when digest is unavailable, which is the original bug.
+4. **`claw-channel-memory` service naming and image location.** v2 introduces a new service. Live under `examples/channel-memory/` like `examples/reference-memory/`, or directly as `cmd/claw-channel-memory/` + published image? Lean `examples/` for v2 initial wave (operator-visible but not yet a published infra image), promote later. Matches #164's `examples/salience-memory/` pattern.
+
+## 11. Build sequence (assuming codex r2 sign-off)
+
+1. **claw-wall** — `channel-awareness` endpoint reusing `consumeTail`; per-agent channel ACL (§4.2.1) parsing `CLAW_WALL_AGENT_CHANNELS`; new tool handlers (`search_channel_context`, `get_channel_messages`) with `not_in_buffer` semantics (§4.2.3); descriptor declares tools. Tests in §7.1.
+2. **compose_up wiring** — `appendConversationWallAwarenessFeed`; pod parser for `x-claw.context.channel-awareness`; ACL allowlist materialization writes `CLAW_WALL_AGENT_CHANNELS` into the `claw-wall` service env; manifest-order discipline emits awareness before delta. Tests in §7.3, §7.4.
+3. **Header rewrite (claw-wall side)** — `channel-context` response formatter switches on `after=` presence to emit `[channel-context delta] kind=delta_tail` vs `[channel-context] kind=tail`. Tests in §7.1.
+4. **cllama feed plumbing** — feed name registry already supports per-feed configuration; the new feed flows through with `kind=raw_window` metadata parsing. Tests in §7.2.
+5. **Telemetry normalization** — `channel_context_op` event kind, `claw audit` rendering; `tool_call_result` status fold-in (or new field per §10b.2).
 6. **Docs sweep** — `docs/CLLAMA_SPEC.md`, ADR (likely new ADR-025 once codex agrees), `skills/clawdapus/SKILL.md` mirror.
 7. **Integration test** — Tiverton-reproduction fixture (§7.5).
-8. **PR body** explicitly labels phase 1 vs phase 2 per §6.
+8. **PR body** explicitly labels phase 1 vs phase 2 per §6; does **not** close #232.
 
 ## 12. Non-goals for this PR (clean cut-line)
 
 - No #164 implementation. This PR depends on #164 *contract* only at the descriptor level; v1 wire surface has no digest section.
-- No changes to ADR-021 (memory plane). v1 of #232 produces nothing through `/recall`; v2 does, but only via the #164 adapter, not directly from claw-wall.
+- **No channel events flow through ADR-021's `/recall` in any phase.** v1 produces only through the `channel-awareness` feed and the retrieval tools. v2 produces only through the same `channel-awareness` feed and the same retrieval tools, via `claw-channel-memory` as the new producer; the v2 producer may use #164's salience-memory primitives **as a library**, but channel events do not transit per-agent `/recall`/`/retain`.
 - No release artifact changes (no `release_manifest.go` bumps, no changelog `Latest` badge, no nav dropdown). Per repo CLAUDE.md release discipline.
