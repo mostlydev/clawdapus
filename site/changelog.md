@@ -31,7 +31,17 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.14.9 <Badge type="tip" text="Latest" /> {#v0-14-9}
+## v0.15.0 <Badge type="tip" text="Latest" /> {#v0-15-0}
+
+*2026-05-12*
+
+- **Bounded 24h channel awareness, default-on** — every Discord-channel-consuming service now gets an auto-wired `channel-awareness` feed from `claw-wall`: an uncursored last-24h raw window bounded by internal defaults (`limit=60`, `max_chars=8192`). Cursorized `channel-context` deltas remain the steady-state feed for routine and cron turns; the new feed exists so a human reference like "wanna pick up CMCSA on Logan's read?" no longer hits the wall just because the consumer's cursor has advanced past that earlier message. Zero new pod YAML — phase 1 ships without a public config surface so the defaults can keep moving. Refs [#232](https://github.com/mostlydev/clawdapus/issues/232).
+- **Channel retrieval tools, cllama-mediated** — channel-consuming agents are auto-subscribed to two managed tools projected through cllama: `search_channel_context(query, channels, since, author, limit)` and `get_channel_messages(channels, since, limit, max_chars)`. Calls are mediated by a generated per-agent channel allowlist, claw-wall service-token auth, and forwarded `X-Claw-ID` identity; defense-in-depth checks live on the claw-wall side as well. The compiler now owns a built-in claw-wall descriptor so consumers don't need to know wall paths or auth shape.
+- **`context_kind` metadata on channel-context fetches** — provider-visible blocks and audit logs now distinguish `tail` (initial bootstrap), `delta_tail` (steady-state cursorized), and `bootstrap_tail` (post-restart no-cursor catchup from [v0.14.7](#v0-14-7)). Models can stop conflating a cursorized delta with the full 24h room, and `channel_context_op` telemetry lets operators see retrieval intent end-to-end.
+- **Pins cllama [v0.6.5](https://github.com/mostlydev/cllama/releases/tag/v0.6.5) and infra images at `v0.15.0`** — `claw-wall`, `claw-api`, `clawdash`, and `claw-mcp-stdio` move in lockstep to `v0.15.0`. Hermes-base stays at `v2026.4.23-claw.2`.
+- **Phase 2 deferred** — rolling 24h digest / channel-memory work stays on [#232](https://github.com/mostlydev/clawdapus/issues/232) so the raw-window primitive can settle in production before the salience layer goes on top.
+
+## v0.14.9 {#v0-14-9}
 
 *2026-05-11*
 

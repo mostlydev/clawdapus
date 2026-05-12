@@ -387,7 +387,7 @@ The proxy sits between agents and LLM providers. Agents get bearer tokens, proxy
 
 ### claw-wall sidecar
 
-Auto-injected by `claw up` when any cllama-enabled service has Discord channel IDs. Polls Discord channels and serves the recent channel transcript to agents through `channel-context` tail feeds; legacy unread-mailbox cursor paging remains available as `mode=delta`. Configure the generated tail window with pod or service `x-claw.context.channel` (`since`, `limit`, `max-chars`, `buffer`). The service name `claw-wall` is reserved — declaring it in `claw-pod.yml` is a hard error.
+Auto-injected by `claw up` when any cllama-enabled service has Discord channel IDs. Polls Discord channels and serves the recent channel transcript to agents through `channel-context` tail feeds; legacy unread-mailbox cursor paging remains available as `mode=delta`. Configure the generated tail window with pod or service `x-claw.context.channel` (`since`, `limit`, `max-chars`, `buffer`). Since `v0.15.0` channel-consuming services also get a default-on `channel-awareness` feed (uncursored 24h raw window, internally bounded) plus two cllama-mediated retrieval tools — `search_channel_context` and `get_channel_messages` — auto-subscribed via a compiler-owned claw-wall descriptor. Calls are gated by a generated per-agent channel allowlist, claw-wall service-token auth, and forwarded `X-Claw-ID`. The service name `claw-wall` is reserved — declaring it in `claw-pod.yml` is a hard error.
 
 ## Generated Artifacts
 
