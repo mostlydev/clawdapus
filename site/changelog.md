@@ -29,9 +29,15 @@ outline: deep
 
 ## Unreleased
 
-- **Restart-resilient Discord channel awareness** - `claw-wall` now paginates Discord history backward on startup to fill the configured retention window (default `24h`) before its first forward poll, and uses the same bounded walk to recover full-page poll gaps. The wall retains by time plus a 5000-message safety cap, generated sidecars expose `CLAW_WALL_RETENTION` and `CLAW_WALL_BACKFILL_MAX_PAGES`, and channel feed headers include `backfill_status=complete|partial|rate_limited|unavailable` so short windows are visible instead of silent. Closes [#238](https://github.com/mostlydev/clawdapus/issues/238).
+<!-- Nothing yet -->
 
-## v0.16.0 <Badge type="tip" text="Latest" /> {#v0-16-0}
+## v0.17.0 <Badge type="tip" text="Latest" /> {#v0-17-0}
+
+*2026-05-13*
+
+- **Restart-resilient Discord channel awareness** - `claw-wall` now paginates Discord history backward on startup to fill the configured retention window (default `24h`) before its first forward poll, and uses the same bounded walk to recover full-page poll gaps. The wall retains by time plus a 5000-message safety cap (raised from 500), generated sidecars expose `CLAW_WALL_RETENTION` and `CLAW_WALL_BACKFILL_MAX_PAGES`, and channel feed headers include `backfill_status=complete|partial|rate_limited|unavailable` so short windows are visible instead of silent. The auto-injected sidecar also honors a `CLAW_WALL_DISCORD_BASE_URL` env override so contributor spike tests can run against a fake Discord. Closes [#238](https://github.com/mostlydev/clawdapus/issues/238).
+
+## v0.16.0 {#v0-16-0}
 
 *2026-05-12*
 
