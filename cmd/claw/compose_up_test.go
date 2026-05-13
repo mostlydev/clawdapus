@@ -3651,6 +3651,22 @@ func TestBuildToolManifestEntriesProjectsMCPTools(t *testing.T) {
 	}
 }
 
+func TestAugmentClawdapusMDShowsProviderSafeManagedToolName(t *testing.T) {
+	presented := cllama.PresentedToolName("claw-wall.search_channel_context")
+	if presented != "claw-wall_search_channel_context_2919442f" {
+		t.Fatalf("unexpected presented tool name: %s", presented)
+	}
+
+	out := augmentClawdapusMD("", []cllama.ToolManifestEntry{{
+		Name:        "claw-wall.search_channel_context",
+		Description: "Search channel context.",
+	}}, nil)
+	want := "- `claw-wall_search_channel_context_2919442f` (canonical: `claw-wall.search_channel_context`) — Search channel context."
+	if !strings.Contains(out, want) {
+		t.Fatalf("expected provider-safe tool name in CLAWDAPUS.md, got:\n%s", out)
+	}
+}
+
 func TestBuildMemoryManifestEntryUsesProjectedServiceAuth(t *testing.T) {
 	p := &pod.Pod{
 		Services: map[string]*pod.Service{

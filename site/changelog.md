@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Managed tool guidance now matches callable schema names** — generated `CLAWDAPUS.md` lists the provider-safe managed tool name first, with the canonical dotted name retained as metadata, so agents are not told to call dotted names that the provider schema does not expose. Refs [#240](https://github.com/mostlydev/clawdapus/issues/240).
 
 ## v0.17.0 <Badge type="tip" text="Latest" /> {#v0-17-0}
 
