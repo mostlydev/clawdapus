@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -265,6 +267,30 @@ func TestChannelAwarenessHandlerReturnsRawWindow(t *testing.T) {
 	}
 }
 
+func TestChannelAwarenessHeaderReportsBackfillStatus(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "signal", Timestamp: time.Unix(100, 0)},
+	})
+	store.setBackfillStatus("chan-1", backfillStatusPartial)
+
+	server := httptest.NewServer(newHandler(store))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/channel-awareness?channels=chan-1&max_chars=4096")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if !strings.Contains(string(body), "backfill_status=partial") {
+		t.Fatalf("expected backfill status in header, got %q", string(body))
+	}
+}
+
 func TestToolSearchRequiresAuthAndChannelAllowlist(t *testing.T) {
 	store := newConversationStore(50)
 	store.merge("chan-1", []wallMessage{
@@ -471,6 +497,9 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	t.Setenv("CLAW_WALL_ADDR", "")
 	t.Setenv("CLAW_WALL_LIMIT", "")
 	t.Setenv("CLAW_WALL_POLL_INTERVAL", "")
+	t.Setenv("CLAW_WALL_RETENTION", "")
+	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
+	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
 
 	cfg, err := loadConfig()
@@ -480,8 +509,35 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	if cfg.PollInterval != 30*time.Second {
 		t.Fatalf("expected 30s poll interval, got %s", cfg.PollInterval)
 	}
-	if cfg.BufferLimit != 500 {
-		t.Fatalf("expected default buffer limit 500, got %d", cfg.BufferLimit)
+	if cfg.BufferLimit != 5000 {
+		t.Fatalf("expected default buffer limit 5000, got %d", cfg.BufferLimit)
+	}
+	if cfg.Retention != 24*time.Hour {
+		t.Fatalf("expected 24h retention, got %s", cfg.Retention)
+	}
+	if cfg.BackfillMaxPages != 25 {
+		t.Fatalf("expected 25 backfill pages, got %d", cfg.BackfillMaxPages)
+	}
+	if cfg.DiscordBaseURL != "" {
+		t.Fatalf("expected empty discord base url by default, got %q", cfg.DiscordBaseURL)
+	}
+}
+
+func TestLoadConfigReadsDiscordBaseURLOverride(t *testing.T) {
+	t.Setenv("CLAW_WALL_ADDR", "")
+	t.Setenv("CLAW_WALL_LIMIT", "")
+	t.Setenv("CLAW_WALL_POLL_INTERVAL", "")
+	t.Setenv("CLAW_WALL_RETENTION", "")
+	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
+	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "http://fake-discord:9000/api/v10")
+	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.DiscordBaseURL != "http://fake-discord:9000/api/v10" {
+		t.Fatalf("unexpected DiscordBaseURL: %q", cfg.DiscordBaseURL)
 	}
 }
 
@@ -489,6 +545,8 @@ func TestLoadConfigUsesPollIntervalOverride(t *testing.T) {
 	t.Setenv("CLAW_WALL_ADDR", "")
 	t.Setenv("CLAW_WALL_LIMIT", "")
 	t.Setenv("CLAW_WALL_POLL_INTERVAL", "42")
+	t.Setenv("CLAW_WALL_RETENTION", "6h")
+	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "7")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
 
 	cfg, err := loadConfig()
@@ -498,12 +556,171 @@ func TestLoadConfigUsesPollIntervalOverride(t *testing.T) {
 	if cfg.PollInterval != 42*time.Second {
 		t.Fatalf("expected 42s poll interval, got %s", cfg.PollInterval)
 	}
+	if cfg.Retention != 6*time.Hour {
+		t.Fatalf("expected 6h retention, got %s", cfg.Retention)
+	}
+	if cfg.BackfillMaxPages != 7 {
+		t.Fatalf("expected 7 backfill pages, got %d", cfg.BackfillMaxPages)
+	}
 }
 
 func TestDiscordPollerClampsFetchLimitToDiscordMaximum(t *testing.T) {
 	poller := newDiscordPoller(nil, newConversationStore(500), []tokenPair{{ChannelID: "chan-1", Token: "token-a"}}, 500)
 	if poller.fetchLimit != maxDiscordFetchLimit {
 		t.Fatalf("expected fetch limit %d, got %d", maxDiscordFetchLimit, poller.fetchLimit)
+	}
+}
+
+func TestConversationStoreTrimsByRetentionHorizon(t *testing.T) {
+	now := time.Date(2026, 5, 12, 18, 0, 0, 0, time.UTC)
+	store := newConversationStore(50, 24*time.Hour)
+	store.mergeAt("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "too old", Timestamp: now.Add(-30 * time.Hour)},
+		{ID: "101", Author: "bob", Content: "recent", Timestamp: now.Add(-12 * time.Hour)},
+		{ID: "102", Author: "carol", Content: "now", Timestamp: now},
+		{ID: "103", Author: "dave", Content: "bad timestamp"},
+	}, now)
+
+	got := store.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Since: 24 * time.Hour, Limit: 10, Now: now})
+	if len(got.Messages) != 2 || got.Messages[0].ID != "101" || got.Messages[1].ID != "102" {
+		t.Fatalf("expected only timestamp-valid in-window messages, got %+v", got.Messages)
+	}
+}
+
+func TestConversationStoreSafetyCapMarksCoveragePartial(t *testing.T) {
+	now := time.Date(2026, 5, 12, 18, 0, 0, 0, time.UTC)
+	store := newConversationStore(2, 24*time.Hour)
+	store.setBackfillStatus("chan-1", backfillStatusComplete)
+	store.mergeAt("chan-1", []wallMessage{
+		{ID: "100", Author: "alice", Content: "first", Timestamp: now.Add(-3 * time.Hour)},
+		{ID: "101", Author: "bob", Content: "second", Timestamp: now.Add(-2 * time.Hour)},
+		{ID: "102", Author: "carol", Content: "third", Timestamp: now.Add(-1 * time.Hour)},
+	}, now)
+
+	got := store.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Since: 24 * time.Hour, Limit: 10, Now: now})
+	if len(got.Messages) != 2 || got.Messages[0].ID != "101" || got.Messages[1].ID != "102" {
+		t.Fatalf("expected newest capped messages, got %+v", got.Messages)
+	}
+	if formatBackfillStatus(got.BackfillStatus) != backfillStatusPartial {
+		t.Fatalf("expected partial coverage after cap eviction, got %+v", got.BackfillStatus)
+	}
+}
+
+func TestDiscordPollerBackfillsPastFirstPageToHorizon(t *testing.T) {
+	now := time.Date(2026, 5, 12, 18, 0, 0, 0, time.UTC)
+	messages := makeDiscordMessages(now.Add(-36*time.Hour), 360, 6*time.Minute)
+	var beforeRequests int
+	server := newDiscordMessagesServer(t, messages, func(r *http.Request) {
+		if r.URL.Query().Get("before") != "" {
+			beforeRequests++
+		}
+	})
+	defer server.Close()
+
+	store := newConversationStore(500, 24*time.Hour)
+	poller := newDiscordPoller(server.Client(), store, []tokenPair{{ChannelID: "chan-1", Token: "token-a"}}, 500)
+	poller.baseURL = server.URL
+	poller.now = func() time.Time { return now }
+	poller.backfillRetention = 24 * time.Hour
+	poller.backfillMaxPages = 5
+
+	poller.backfillAll(context.Background(), io.Discard)
+
+	got := store.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Since: 24 * time.Hour, Limit: 500, Now: now})
+	if len(got.Messages) != 240 {
+		t.Fatalf("expected 240 in-window messages after backfill, got %d", len(got.Messages))
+	}
+	if got.Messages[0].ID != "1120" || got.Messages[len(got.Messages)-1].ID != "1359" {
+		t.Fatalf("unexpected retained range: first=%s last=%s", got.Messages[0].ID, got.Messages[len(got.Messages)-1].ID)
+	}
+	if beforeRequests < 2 {
+		t.Fatalf("expected pagination with before=, got %d before requests", beforeRequests)
+	}
+	if formatBackfillStatus(got.BackfillStatus) != backfillStatusComplete {
+		t.Fatalf("expected complete backfill, got %+v", got.BackfillStatus)
+	}
+}
+
+func TestDiscordPollerBackfillStopsAtPageBudget(t *testing.T) {
+	now := time.Date(2026, 5, 12, 18, 0, 0, 0, time.UTC)
+	messages := makeDiscordMessages(now.Add(-10*time.Hour), 500, time.Minute)
+	server := newDiscordMessagesServer(t, messages, nil)
+	defer server.Close()
+
+	store := newConversationStore(500, 24*time.Hour)
+	poller := newDiscordPoller(server.Client(), store, []tokenPair{{ChannelID: "chan-1", Token: "token-a"}}, 500)
+	poller.baseURL = server.URL
+	poller.now = func() time.Time { return now }
+	poller.backfillRetention = 24 * time.Hour
+	poller.backfillMaxPages = 2
+
+	poller.backfillAll(context.Background(), io.Discard)
+
+	got := store.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Since: 24 * time.Hour, Limit: 500, Now: now})
+	if len(got.Messages) != 200 {
+		t.Fatalf("expected two pages retained, got %d", len(got.Messages))
+	}
+	if formatBackfillStatus(got.BackfillStatus) != backfillStatusPartial {
+		t.Fatalf("expected partial backfill, got %+v", got.BackfillStatus)
+	}
+}
+
+func TestDiscordPollerBackfillRespectsRateLimit(t *testing.T) {
+	now := time.Date(2026, 5, 12, 18, 0, 0, 0, time.UTC)
+	messages := makeDiscordMessages(now.Add(-10*time.Hour), 200, time.Minute)
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if hits == 2 {
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"retry_after":60}`)
+			return
+		}
+		writeDiscordMessagesPage(t, w, r, messages)
+	}))
+	defer server.Close()
+
+	store := newConversationStore(500, 24*time.Hour)
+	poller := newDiscordPoller(server.Client(), store, []tokenPair{{ChannelID: "chan-1", Token: "token-a"}}, 500)
+	poller.baseURL = server.URL
+	poller.now = func() time.Time { return now }
+	poller.backfillRetention = 24 * time.Hour
+	poller.backfillMaxPages = 5
+
+	poller.backfillAll(context.Background(), io.Discard)
+
+	got := store.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Since: 24 * time.Hour, Limit: 500, Now: now})
+	if len(got.Messages) != 100 {
+		t.Fatalf("expected first page retained before rate limit, got %d", len(got.Messages))
+	}
+	if formatBackfillStatus(got.BackfillStatus) != backfillStatusRateLimited {
+		t.Fatalf("expected rate_limited backfill, got %+v", got.BackfillStatus)
+	}
+}
+
+func TestDiscordPollerRecoversFullForwardPollGap(t *testing.T) {
+	now := time.Date(2026, 5, 12, 18, 0, 0, 0, time.UTC)
+	messages := makeDiscordMessages(now.Add(-4*time.Hour), 350, time.Minute)
+	server := newDiscordMessagesServer(t, messages, nil)
+	defer server.Close()
+
+	store := newConversationStore(500, 24*time.Hour)
+	poller := newDiscordPoller(server.Client(), store, []tokenPair{{ChannelID: "chan-1", Token: "token-a"}}, 500)
+	poller.baseURL = server.URL
+	poller.now = func() time.Time { return now }
+	poller.latestByPair[pairKey(tokenPair{ChannelID: "chan-1", Token: "token-a"})] = "1100"
+	poller.backfillMaxPages = 5
+
+	poller.pollOnce(context.Background(), io.Discard)
+
+	result := store.search(searchChannelContextRequest{Channels: []string{"chan-1"}, Query: "message-101"}, now)
+	if result.Status != "ok" || len(result.Messages) != 1 || result.Messages[0].ID != "1101" {
+		t.Fatalf("expected gap recovery to retain oldest missed message, got %+v", result)
+	}
+	got := store.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Since: 24 * time.Hour, Limit: 500, Now: now})
+	if len(got.Messages) != 249 {
+		t.Fatalf("expected all 249 messages after previous cursor, got %d", len(got.Messages))
 	}
 }
 
@@ -715,5 +932,73 @@ func TestDiscordPollerResumesPollingAfterCooldownExpires(t *testing.T) {
 	defer mu.Unlock()
 	if hits["chan-1"] != 2 {
 		t.Fatalf("expected polling to resume after cooldown expiry, got %d hits", hits["chan-1"])
+	}
+}
+
+func makeDiscordMessages(start time.Time, count int, step time.Duration) []discordAPIMessage {
+	messages := make([]discordAPIMessage, 0, count)
+	for i := 0; i < count; i++ {
+		messages = append(messages, discordAPIMessage{
+			ID:        fmt.Sprintf("%d", 1000+i),
+			Content:   fmt.Sprintf("message-%03d", i),
+			Timestamp: start.Add(time.Duration(i) * step).Format(time.RFC3339),
+			Author: discordAPIAuthor{
+				Username: fmt.Sprintf("user-%03d", i),
+			},
+		})
+	}
+	return messages
+}
+
+func newDiscordMessagesServer(t *testing.T, messages []discordAPIMessage, hook func(*http.Request)) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hook != nil {
+			hook(r)
+		}
+		writeDiscordMessagesPage(t, w, r, messages)
+	}))
+}
+
+func writeDiscordMessagesPage(t *testing.T, w http.ResponseWriter, r *http.Request, messages []discordAPIMessage) {
+	t.Helper()
+	if !strings.Contains(r.URL.Path, "/channels/chan-1/messages") {
+		t.Fatalf("unexpected path: %s", r.URL.Path)
+	}
+	limit := maxDiscordFetchLimit
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			t.Fatalf("invalid limit %q: %v", raw, err)
+		}
+		limit = parsed
+	}
+	if limit > maxDiscordFetchLimit {
+		limit = maxDiscordFetchLimit
+	}
+
+	after := strings.TrimSpace(r.URL.Query().Get("after"))
+	before := strings.TrimSpace(r.URL.Query().Get("before"))
+	filtered := make([]discordAPIMessage, 0, len(messages))
+	for _, msg := range messages {
+		if after != "" && compareSnowflakes(msg.ID, after) <= 0 {
+			continue
+		}
+		if before != "" && compareSnowflakes(msg.ID, before) >= 0 {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	if len(filtered) > limit {
+		filtered = filtered[len(filtered)-limit:]
+	}
+
+	out := make([]discordAPIMessage, 0, len(filtered))
+	for i := len(filtered) - 1; i >= 0; i-- {
+		out = append(out, filtered[i])
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(out); err != nil {
+		t.Fatalf("encode response: %v", err)
 	}
 }

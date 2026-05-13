@@ -50,8 +50,10 @@ const (
 	conversationWallFeedLimit      = 40
 	conversationWallAwarenessLimit = 60
 	conversationWallFeedMaxChars   = 8 * 1024
-	conversationWallBufferLimit    = 500
+	conversationWallBufferLimit    = 5000
 	conversationWallPollInterval   = "30"
+	conversationWallRetention      = "24h"
+	conversationWallBackfillPages  = "25"
 	conversationWallInternalPort   = "8080"
 	conversationWallDockerfile     = "dockerfiles/claw-wall/Dockerfile"
 	conversationWallToolTokenEnv   = "CLAW_WALL_TOOL_TOKEN"
@@ -1813,9 +1815,11 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 	p.Services[conversationWallServiceName] = &pod.Service{
 		Image: resolveConversationWallImageRef(),
 		Environment: map[string]string{
-			"CLAW_WALL_TOKENS":        formatConversationWallTokenPairs(tokenPairs),
-			"CLAW_WALL_LIMIT":         strconv.Itoa(conversationWallBufferForPod(p, triggerServices)),
-			"CLAW_WALL_POLL_INTERVAL": envOrDefault("CLAW_WALL_POLL_INTERVAL", conversationWallPollInterval),
+			"CLAW_WALL_TOKENS":             formatConversationWallTokenPairs(tokenPairs),
+			"CLAW_WALL_LIMIT":              strconv.Itoa(conversationWallBufferForPod(p, triggerServices)),
+			"CLAW_WALL_POLL_INTERVAL":      envOrDefault("CLAW_WALL_POLL_INTERVAL", conversationWallPollInterval),
+			"CLAW_WALL_RETENTION":          envOrDefault("CLAW_WALL_RETENTION", conversationWallRetention),
+			"CLAW_WALL_BACKFILL_MAX_PAGES": envOrDefault("CLAW_WALL_BACKFILL_MAX_PAGES", conversationWallBackfillPages),
 		},
 		Expose: []string{conversationWallInternalPort},
 		Compose: map[string]interface{}{

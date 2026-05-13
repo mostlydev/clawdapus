@@ -20,6 +20,14 @@ const (
 	defaultTailMaxChars   = 8 * 1024
 )
 
+const (
+	backfillStatusComplete    = "complete"
+	backfillStatusInProgress  = "in_progress"
+	backfillStatusPartial     = "partial"
+	backfillStatusRateLimited = "rate_limited"
+	backfillStatusUnavailable = "unavailable"
+)
+
 type wallMessage struct {
 	ID        string    `json:"id"`
 	ChannelID string    `json:"channel_id"`
@@ -34,10 +42,12 @@ type channelBuffer struct {
 }
 
 type conversationStore struct {
-	limit    int
-	mu       sync.Mutex
-	channels map[string]*channelBuffer
-	cursors  map[string]map[string]string
+	limit          int
+	retention      time.Duration
+	mu             sync.Mutex
+	channels       map[string]*channelBuffer
+	cursors        map[string]map[string]string
+	backfillStatus map[string]string
 }
 
 type tailRequest struct {
@@ -50,16 +60,17 @@ type tailRequest struct {
 }
 
 type tailResult struct {
-	ChannelIDs   []string
-	Messages     []wallMessage
-	Available    int
-	Omitted      int
-	CapReason    string
-	WindowStart  time.Time
-	BufferOldest time.Time
-	BufferNewest time.Time
-	Cursor       map[string]string
-	After        map[string]string
+	ChannelIDs     []string
+	Messages       []wallMessage
+	Available      int
+	Omitted        int
+	CapReason      string
+	WindowStart    time.Time
+	BufferOldest   time.Time
+	BufferNewest   time.Time
+	Cursor         map[string]string
+	After          map[string]string
+	BackfillStatus map[string]string
 }
 
 type handlerConfig struct {
@@ -80,11 +91,12 @@ type retrievalResult struct {
 }
 
 type coverageInfo struct {
-	OldestTS   string `json:"oldest_ts,omitempty"`
-	NewestTS   string `json:"newest_ts,omitempty"`
-	BufferSize int    `json:"buffer_size"`
-	oldestTime time.Time
-	newestTime time.Time
+	OldestTS       string `json:"oldest_ts,omitempty"`
+	NewestTS       string `json:"newest_ts,omitempty"`
+	BufferSize     int    `json:"buffer_size"`
+	BackfillStatus string `json:"backfill_status,omitempty"`
+	oldestTime     time.Time
+	newestTime     time.Time
 }
 
 type searchChannelContextRequest struct {
@@ -104,16 +116,33 @@ type getChannelMessagesRequest struct {
 	Limit      int      `json:"limit"`
 }
 
-func newConversationStore(limit int) *conversationStore {
+func newConversationStore(limit int, retentions ...time.Duration) *conversationStore {
+	var retention time.Duration
+	if len(retentions) > 0 {
+		retention = retentions[0]
+	}
 	return &conversationStore{
-		limit:    limit,
-		channels: make(map[string]*channelBuffer),
-		cursors:  make(map[string]map[string]string),
+		limit:          limit,
+		retention:      retention,
+		channels:       make(map[string]*channelBuffer),
+		cursors:        make(map[string]map[string]string),
+		backfillStatus: make(map[string]string),
 	}
 }
 
 func (s *conversationStore) merge(channelID string, messages []wallMessage) {
+	s.mergeAt(channelID, messages, time.Now())
+}
+
+func (s *conversationStore) mergeAt(channelID string, messages []wallMessage, now time.Time) {
 	if len(messages) == 0 {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
 		return
 	}
 
@@ -130,6 +159,14 @@ func (s *conversationStore) merge(channelID string, messages []wallMessage) {
 		if strings.TrimSpace(msg.ID) == "" {
 			continue
 		}
+		if s.retention > 0 {
+			if msg.Timestamp.IsZero() {
+				continue
+			}
+			if msg.Timestamp.Before(now.Add(-s.retention)) {
+				continue
+			}
+		}
 		msg.ChannelID = channelID
 		if _, exists := state.seenIDs[msg.ID]; exists {
 			continue
@@ -139,17 +176,86 @@ func (s *conversationStore) merge(channelID string, messages []wallMessage) {
 	}
 
 	sortWallMessages(state.messages)
-	if len(state.messages) <= s.limit {
+	s.trimChannelLocked(channelID, state, now)
+}
+
+func (s *conversationStore) setBackfillStatus(channelID, status string) {
+	channelID = strings.TrimSpace(channelID)
+	status = normalizeBackfillStatus(status)
+	if channelID == "" {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setBackfillStatusLocked(channelID, status)
+}
 
-	trimmed := state.messages[len(state.messages)-s.limit:]
-	newSeen := make(map[string]struct{}, len(trimmed))
-	for _, msg := range trimmed {
+func (s *conversationStore) setBackfillStatusLocked(channelID, status string) {
+	if status == backfillStatusComplete && s.backfillStatus[channelID] == backfillStatusPartial {
+		return
+	}
+	s.backfillStatus[channelID] = normalizeBackfillStatus(status)
+}
+
+func (s *conversationStore) markBackfillPartialLocked(channelID string) {
+	if strings.TrimSpace(channelID) == "" {
+		return
+	}
+	if s.backfillStatus[channelID] == backfillStatusRateLimited {
+		return
+	}
+	s.backfillStatus[channelID] = backfillStatusPartial
+}
+
+func (s *conversationStore) trimChannelLocked(channelID string, state *channelBuffer, now time.Time) {
+	if state == nil {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	messages := state.messages
+	if s.retention > 0 {
+		cutoff := now.Add(-s.retention)
+		filtered := make([]wallMessage, 0, len(messages))
+		for _, msg := range messages {
+			if msg.Timestamp.IsZero() || msg.Timestamp.Before(cutoff) {
+				continue
+			}
+			filtered = append(filtered, msg)
+		}
+		messages = filtered
+	}
+
+	if s.limit > 0 && len(messages) > s.limit {
+		messages = messages[len(messages)-s.limit:]
+		s.markBackfillPartialLocked(channelID)
+	}
+
+	newSeen := make(map[string]struct{}, len(messages))
+	for _, msg := range messages {
 		newSeen[msg.ID] = struct{}{}
 	}
-	state.messages = append([]wallMessage(nil), trimmed...)
+	state.messages = append([]wallMessage(nil), messages...)
 	state.seenIDs = newSeen
+}
+
+func (s *conversationStore) trimChannelsLocked(channelIDs []string, now time.Time) {
+	for _, channelID := range normalizeChannelIDs(channelIDs) {
+		if state := s.channels[channelID]; state != nil {
+			s.trimChannelLocked(channelID, state, now)
+		}
+	}
+}
+
+func normalizeBackfillStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case backfillStatusComplete, backfillStatusInProgress, backfillStatusPartial, backfillStatusRateLimited:
+		return strings.TrimSpace(status)
+	default:
+		return backfillStatusUnavailable
+	}
 }
 
 func (s *conversationStore) consume(consumer string, channelIDs []string, limit int) []wallMessage {
@@ -164,6 +270,7 @@ func (s *conversationStore) consume(consumer string, channelIDs []string, limit 
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.trimChannelsLocked(channelIDs, time.Now())
 
 	cursorByChannel := s.cursors[consumer]
 	collected := make([]wallMessage, 0)
@@ -254,6 +361,7 @@ func (s *conversationStore) tail(req tailRequest) tailResult {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.trimChannelsLocked(channelIDs, now)
 
 	candidates := make([]wallMessage, 0)
 	for _, channelID := range channelIDs {
@@ -311,6 +419,9 @@ func (s *conversationStore) tail(req tailRequest) tailResult {
 		CapReason:   capReason,
 		WindowStart: windowStart,
 		After:       cloneStringMap(req.After),
+		BackfillStatus: cloneStringMap(
+			s.backfillStatusForChannelsLocked(channelIDs),
+		),
 	}
 	for _, msg := range messages {
 		if msg.ChannelID == "" || msg.ID == "" {
@@ -429,6 +540,8 @@ func (s *conversationStore) scan(channelIDs []string, match func(wallMessage) bo
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now()
+	s.trimChannelsLocked(channelIDs, now)
 
 	candidates := make([]wallMessage, 0)
 	var bufferOldest, bufferNewest time.Time
@@ -464,14 +577,28 @@ func (s *conversationStore) scan(channelIDs []string, match func(wallMessage) bo
 	return retrievalResult{
 		Messages: candidates,
 		RetainedCoverage: coverageInfo{
-			OldestTS:   formatOptionalHeaderTimestamp(bufferOldest),
-			NewestTS:   formatOptionalHeaderTimestamp(bufferNewest),
-			BufferSize: bufferSize,
-			oldestTime: bufferOldest,
-			newestTime: bufferNewest,
+			OldestTS:       formatOptionalHeaderTimestamp(bufferOldest),
+			NewestTS:       formatOptionalHeaderTimestamp(bufferNewest),
+			BufferSize:     bufferSize,
+			BackfillStatus: formatBackfillStatus(s.backfillStatusForChannelsLocked(channelIDs)),
+			oldestTime:     bufferOldest,
+			newestTime:     bufferNewest,
 		},
 		Status: status,
 	}
+}
+
+func (s *conversationStore) backfillStatusForChannelsLocked(channelIDs []string) map[string]string {
+	channelIDs = normalizeChannelIDs(channelIDs)
+	out := make(map[string]string, len(channelIDs))
+	for _, channelID := range channelIDs {
+		status := s.backfillStatus[channelID]
+		if strings.TrimSpace(status) == "" {
+			status = backfillStatusUnavailable
+		}
+		out[channelID] = normalizeBackfillStatus(status)
+	}
+	return out
 }
 
 func newHandler(store *conversationStore, cfgs ...handlerConfig) http.Handler {
@@ -738,6 +865,7 @@ func formatTailContext(result tailResult, since time.Duration, kind string) stri
 	fmt.Fprintf(&b, " range=%s buffer_range=%s",
 		formatTimeRange(messageRange(result.Messages)),
 		formatTimeRange(result.BufferOldest, result.BufferNewest))
+	fmt.Fprintf(&b, " backfill_status=%s", formatBackfillStatus(result.BackfillStatus))
 	b.WriteString("\n")
 	if result.Omitted > 0 {
 		fmt.Fprintf(&b, "[omitted %d older retained messages due to %s; newest retained messages follow]\n",
@@ -767,6 +895,7 @@ func formatChannelAwareness(result tailResult, since time.Duration) string {
 	fmt.Fprintf(&b, " range=%s buffer_range=%s",
 		formatTimeRange(messageRange(result.Messages)),
 		formatTimeRange(result.BufferOldest, result.BufferNewest))
+	fmt.Fprintf(&b, " backfill_status=%s", formatBackfillStatus(result.BackfillStatus))
 	b.WriteString("\n")
 	if result.Omitted > 0 {
 		fmt.Fprintf(&b, "[omitted %d older retained messages due to %s; newest retained messages follow]\n",
@@ -847,6 +976,40 @@ func formatCursorMap(cursors map[string]string) string {
 	parts := make([]string, 0, len(keys))
 	for _, channelID := range keys {
 		parts = append(parts, channelID+":"+cursors[channelID])
+	}
+	return strings.Join(parts, ",")
+}
+
+func formatBackfillStatus(statuses map[string]string) string {
+	if len(statuses) == 0 {
+		return backfillStatusUnavailable
+	}
+	keys := make([]string, 0, len(statuses))
+	var first string
+	allSame := true
+	for channelID, status := range statuses {
+		channelID = strings.TrimSpace(channelID)
+		if channelID == "" {
+			continue
+		}
+		status = normalizeBackfillStatus(status)
+		if first == "" {
+			first = status
+		} else if status != first {
+			allSame = false
+		}
+		keys = append(keys, channelID)
+	}
+	if len(keys) == 0 {
+		return backfillStatusUnavailable
+	}
+	if allSame {
+		return first
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, channelID := range keys {
+		parts = append(parts, channelID+":"+normalizeBackfillStatus(statuses[channelID]))
 	}
 	return strings.Join(parts, ",")
 }
