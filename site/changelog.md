@@ -29,9 +29,16 @@ outline: deep
 
 ## Unreleased
 
-- **Managed tool guidance now matches callable schema names** — generated `CLAWDAPUS.md` lists the provider-safe managed tool name first, with the canonical dotted name retained as metadata, so agents are not told to call dotted names that the provider schema does not expose. Refs [#240](https://github.com/mostlydev/clawdapus/issues/240).
+<!-- Nothing yet -->
 
-## v0.17.0 <Badge type="tip" text="Latest" /> {#v0-17-0}
+## v0.17.1 <Badge type="tip" text="Latest" /> {#v0-17-1}
+
+*2026-05-13*
+
+- **Boulton's claw-wall tools now actually fire** — managed tool name resolution between the proxy schema and the system prompt is realigned end-to-end. cllama [v0.6.6](https://github.com/mostlydev/cllama/releases/tag/v0.6.6) now accepts unique sanitized aliases without the disambiguation hash (e.g. `claw-wall_search_channel_context`) in addition to the canonical dotted name and the full hashed presented name, with ambiguous aliases left unresolved and fallback use logged as `managed_tool_hashless_alias:<canonical>`. The `[channel-tool]` result header reinforces the provider-safe schema name on every mediated turn, and generated `CLAWDAPUS.md` now lists the callable provider-safe name first with the canonical dotted name retained as parenthetical metadata. Before this release, models running on Anthropic-format runners (Hermes) emitted the sanitized canonical without the hash because the prompt and the schema disagreed; cllama classified those calls as runner-native and the runner correctly rejected them as nonexistent. Closes [#240](https://github.com/mostlydev/clawdapus/issues/240).
+- **Pins cllama [v0.6.6](https://github.com/mostlydev/cllama/releases/tag/v0.6.6) and infra images at `v0.17.1`** — `claw-wall`, `claw-api`, `clawdash`, and `claw-mcp-stdio` move in lockstep to `v0.17.1`. Hermes-base stays at `v2026.4.23-claw.2`.
+
+## v0.17.0 {#v0-17-0}
 
 *2026-05-13*
 
