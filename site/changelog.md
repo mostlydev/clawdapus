@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Channel feeds carry the whole conversation, not just the tail** — the default `max_chars` cap on both `channel-context` and `channel-awareness` feeds is raised from 8 KB to 32 KB so 24h on a modestly-active channel actually fits, and `channel-awareness` now honors the existing `x-claw.context.channel` tuning block (pod and service level). One knob raises both feeds together; busy production rooms can crank `max-chars` to 64-256 KB so the awareness surface covers a meaningful slice of the day rather than the last handful of messages. Closes [#242](https://github.com/mostlydev/clawdapus/issues/242).
 
 ## v0.17.1 <Badge type="tip" text="Latest" /> {#v0-17-1}
 

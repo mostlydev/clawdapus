@@ -211,20 +211,20 @@ services:
 
 ## Channel Context Tuning
 
-When any cllama-enabled service has Discord channels in its handles, `claw up` auto-injects the `claw-wall` sidecar and a `channel-context` feed for each consuming agent. The feed serves the recent room transcript so a mentioned agent sees the conversation that prompted it (see [Social Topology · Channel Context Feed](/guide/social-topology#channel-context-feed-claw-wall)). Tune the generated tail with `x-claw.context.channel`:
+When any cllama-enabled service has Discord channels in its handles, `claw up` auto-injects the `claw-wall` sidecar plus two feeds for each consuming agent: `channel-context` (cursored delta tail, mention/turn context) and `channel-awareness` (uncursored last-24h raw window, always-on memory of the room). Both feeds share the same tuning knob — see [Social Topology · Channel Context Feed](/guide/social-topology#channel-context-feed-claw-wall). Tune them with `x-claw.context.channel`:
 
 ```yaml
 x-claw:
   pod: trading-desk
   context:
     channel:
-      since: 24h         # window covered by the tail (default 24h)
-      limit: 40          # max messages returned (default 40)
-      max-chars: 8192    # byte cap on rendered body (default 8192)
-      buffer: 5000       # per-channel safety cap in the wall sidecar (default 5000)
+      since: 24h          # window covered by the feeds (default 24h)
+      limit: 40           # max messages returned (default: 40 for channel-context, 60 for channel-awareness)
+      max-chars: 32768    # byte cap on rendered body (default 32 KB)
+      buffer: 5000        # per-channel safety cap in the wall sidecar (default 5000)
 ```
 
-Service-level `x-claw.context.channel` overrides pod-level values for that service. `buffer` is shared across the pod, so when services disagree the largest value wins, with the built-in 5000-message floor still applied. `since` accepts any Go duration (`30m`, `2h15m`, `24h`). Set `max_chars` if you prefer the underscore alias; mixing the two with conflicting values is a parse error.
+Service-level `x-claw.context.channel` overrides pod-level values for that service. The same block tunes both `channel-context` and `channel-awareness` — busy production rooms typically want `max-chars` somewhere in the 64-256 KB range so the 24h awareness feed actually covers a meaningful slice of the day rather than the last handful of messages. `buffer` is shared across the pod, so when services disagree the largest value wins, with the built-in 5000-message floor still applied. `since` accepts any Go duration (`30m`, `2h15m`, `24h`). Set `max_chars` if you prefer the underscore alias; mixing the two with conflicting values is a parse error.
 
 The wall serves `mode=tail` (non-consuming, latest-N walk) by default. Starting in v0.14.0, cllama drives the feed as a delta-since-watermark by adding `after=<channel_id>:<message_id>` cursors to the URL, so each turn fetches only new messages instead of re-pasting the full tail. `since` and `limit` from `x-claw.context.channel` remain the bootstrap and dual-cap bounds. The wall's retention horizon and startup backfill budget are sidecar env settings (`CLAW_WALL_RETENTION`, `CLAW_WALL_BACKFILL_MAX_PAGES`) rather than pod-YAML schema. See [Social Topology · Cursored Append-Only Deltas](/guide/social-topology#cursored-append-only-deltas) for the proxy-side model. The legacy cursor/mailbox path remains callable as `mode=delta` for any consumer that genuinely wants oldest-unread paging; generated feeds do not use it.
 
