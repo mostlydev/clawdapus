@@ -29,9 +29,16 @@ outline: deep
 
 ## Unreleased
 
-- **Channel feeds carry the whole conversation, not just the tail** — the default `max_chars` cap on both `channel-context` and `channel-awareness` feeds is raised from 8 KB to 32 KB so 24h on a modestly-active channel actually fits, and `channel-awareness` now honors the existing `x-claw.context.channel` tuning block (pod and service level). One knob raises both feeds together; busy production rooms can crank `max-chars` to 64-256 KB so the awareness surface covers a meaningful slice of the day rather than the last handful of messages. Closes [#242](https://github.com/mostlydev/clawdapus/issues/242).
+<!-- Nothing yet -->
 
-## v0.17.1 <Badge type="tip" text="Latest" /> {#v0-17-1}
+## v0.17.2 <Badge type="tip" text="Latest" /> {#v0-17-2}
+
+*2026-05-13*
+
+- **Channel feeds carry the whole conversation, not just the tail** — the default `max_chars` cap on both `channel-context` and `channel-awareness` feeds is raised from 8 KB to 32 KB so 24h on a modestly-active channel actually fits, and `channel-awareness` now honors the existing `x-claw.context.channel` tuning block (pod and service level). One knob raises both feeds together; busy production rooms can crank `max-chars` to 64-256 KB so the awareness surface covers a meaningful slice of the day rather than the last handful of messages. Closes [#242](https://github.com/mostlydev/clawdapus/issues/242).
+- **Pins infra images at `v0.17.2`** — `claw-wall`, `claw-api`, `clawdash`, and `claw-mcp-stdio` move in lockstep to `v0.17.2`. cllama stays at `v0.6.6`. Hermes-base stays at `v2026.4.23-claw.2`.
+
+## v0.17.1 {#v0-17-1}
 
 *2026-05-13*
 
