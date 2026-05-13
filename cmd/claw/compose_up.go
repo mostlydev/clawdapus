@@ -1698,7 +1698,11 @@ func augmentClawdapusMD(base string, tools []cllama.ToolManifestEntry, memory *c
 		b.WriteString("## Tools\n\n")
 		b.WriteString("Managed service tools are compiled into your proxy context.\n\n")
 		for _, tool := range tools {
-			line := fmt.Sprintf("- `%s`", tool.Name)
+			presentedName := cllama.PresentedToolName(tool.Name)
+			line := fmt.Sprintf("- `%s`", presentedName)
+			if presentedName != tool.Name {
+				line += fmt.Sprintf(" (canonical: `%s`)", tool.Name)
+			}
 			if tool.Description != "" {
 				line += fmt.Sprintf(" — %s", tool.Description)
 			}
