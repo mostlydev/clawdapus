@@ -17,7 +17,7 @@ const (
 	backgroundContextSize = 10
 	defaultTailLimit      = 40
 	defaultAwarenessLimit = 60
-	defaultTailMaxChars   = 8 * 1024
+	defaultTailMaxChars   = 32 * 1024
 )
 
 const (

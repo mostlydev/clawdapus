@@ -3209,7 +3209,7 @@ func TestBuildFeedManifestUsesOrdinalClawID(t *testing.T) {
 						{
 							Name:   conversationWallFeedName,
 							Source: conversationWallServiceName,
-							Path:   "/channel-context?consumer={claw_id}&channels=chan-a,chan-b&mode=tail&since=24h&limit=40&max_chars=8192",
+							Path:   "/channel-context?consumer={claw_id}&channels=chan-a,chan-b&mode=tail&since=24h&limit=40&max_chars=32768",
 							TTL:    conversationWallFeedTTL,
 						},
 					},
@@ -3225,10 +3225,10 @@ func TestBuildFeedManifestUsesOrdinalClawID(t *testing.T) {
 	if len(feeds) != 1 {
 		t.Fatalf("expected one feed, got %d", len(feeds))
 	}
-	if feeds[0].Path != "/channel-context?consumer=trader-1&channels=chan-a,chan-b&mode=tail&since=24h&limit=40&max_chars=8192" {
+	if feeds[0].Path != "/channel-context?consumer=trader-1&channels=chan-a,chan-b&mode=tail&since=24h&limit=40&max_chars=32768" {
 		t.Fatalf("expected ordinal claw_id substitution, got %q", feeds[0].Path)
 	}
-	if feeds[0].URL != "http://claw-wall:8080/channel-context?consumer=trader-1&channels=chan-a,chan-b&mode=tail&since=24h&limit=40&max_chars=8192" {
+	if feeds[0].URL != "http://claw-wall:8080/channel-context?consumer=trader-1&channels=chan-a,chan-b&mode=tail&since=24h&limit=40&max_chars=32768" {
 		t.Fatalf("expected ordinal wall URL, got %q", feeds[0].URL)
 	}
 }
@@ -3938,14 +3938,14 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	if awarenessFeed.Source != conversationWallServiceName {
 		t.Fatalf("expected claw-wall awareness source, got %+v", awarenessFeed)
 	}
-	if awarenessFeed.Path != "/channel-awareness?channels=chan-1,chan-2&since=24h&limit=60&max_chars=8192&context_kind=raw_window" {
+	if awarenessFeed.Path != "/channel-awareness?channels=chan-1,chan-2&since=24h&limit=60&max_chars=32768&context_kind=raw_window" {
 		t.Fatalf("unexpected awareness feed path: %q", awarenessFeed.Path)
 	}
 	contextFeed := testFeedByName(t, traderFeeds, conversationWallFeedName)
 	if contextFeed.Source != conversationWallServiceName {
 		t.Fatalf("expected claw-wall context source, got %+v", contextFeed)
 	}
-	if contextFeed.Path != "/channel-context?consumer={claw_id}&channels=chan-1,chan-2&mode=tail&since=24h&limit=40&max_chars=8192" {
+	if contextFeed.Path != "/channel-context?consumer={claw_id}&channels=chan-1,chan-2&mode=tail&since=24h&limit=40&max_chars=32768" {
 		t.Fatalf("unexpected wall feed path: %q", contextFeed.Path)
 	}
 	traderTools := p.Services["trader"].Claw.Tools
@@ -3999,7 +3999,7 @@ func TestInjectConversationWallHonorsChannelContextConfig(t *testing.T) {
 		t.Fatalf("expected trader feed, got %+v", traderFeeds)
 	}
 	traderAwareness := testFeedByName(t, traderFeeds, conversationWallAwarenessName)
-	if traderAwareness.Path != "/channel-awareness?channels=chan-1&since=24h&limit=60&max_chars=8192&context_kind=raw_window" {
+	if traderAwareness.Path != "/channel-awareness?channels=chan-1&since=6h&limit=25&max_chars=4096&context_kind=raw_window" {
 		t.Fatalf("unexpected trader awareness path: %q", traderAwareness.Path)
 	}
 	traderContext := testFeedByName(t, traderFeeds, conversationWallFeedName)
@@ -4012,7 +4012,7 @@ func TestInjectConversationWallHonorsChannelContextConfig(t *testing.T) {
 		t.Fatalf("expected scout feed, got %+v", scoutFeeds)
 	}
 	scoutAwareness := testFeedByName(t, scoutFeeds, conversationWallAwarenessName)
-	if scoutAwareness.Path != "/channel-awareness?channels=chan-1&since=24h&limit=60&max_chars=8192&context_kind=raw_window" {
+	if scoutAwareness.Path != "/channel-awareness?channels=chan-1&since=30m&limit=8&max_chars=1024&context_kind=raw_window" {
 		t.Fatalf("unexpected scout awareness path: %q", scoutAwareness.Path)
 	}
 	scoutContext := testFeedByName(t, scoutFeeds, conversationWallFeedName)

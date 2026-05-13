@@ -49,7 +49,7 @@ const (
 	conversationWallFeedSince      = "24h"
 	conversationWallFeedLimit      = 40
 	conversationWallAwarenessLimit = 60
-	conversationWallFeedMaxChars   = 8 * 1024
+	conversationWallFeedMaxChars   = 32 * 1024
 	conversationWallBufferLimit    = 5000
 	conversationWallPollInterval   = "30"
 	conversationWallRetention      = "24h"
@@ -1810,7 +1810,7 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 			continue
 		}
 		settings := conversationWallChannelContext(p, svc)
-		awarenessSettings := conversationWallChannelAwarenessContext()
+		awarenessSettings := conversationWallChannelAwarenessContext(p, svc)
 		svc.Claw.Feeds = appendConversationWallAwarenessFeed(svc.Claw.Feeds, channelIDs, awarenessSettings)
 		svc.Claw.Feeds = appendConversationWallFeed(svc.Claw.Feeds, channelIDs, settings)
 		svc.Claw.Tools = appendConversationWallToolPolicy(svc.Claw.Tools)
@@ -1898,12 +1898,19 @@ func conversationWallChannelContext(p *pod.Pod, svc *pod.Service) conversationWa
 	return settings
 }
 
-func conversationWallChannelAwarenessContext() conversationWallContextSettings {
-	return conversationWallContextSettings{
+func conversationWallChannelAwarenessContext(p *pod.Pod, svc *pod.Service) conversationWallContextSettings {
+	settings := conversationWallContextSettings{
 		Since:    conversationWallFeedSince,
 		Limit:    conversationWallAwarenessLimit,
 		MaxChars: conversationWallFeedMaxChars,
 	}
+	if p != nil && p.Context != nil {
+		settings = applyConversationWallChannelContext(settings, p.Context.Channel)
+	}
+	if svc != nil && svc.Claw != nil && svc.Claw.Context != nil {
+		settings = applyConversationWallChannelContext(settings, svc.Claw.Context.Channel)
+	}
+	return settings
 }
 
 func applyConversationWallChannelContext(settings conversationWallContextSettings, cfg *pod.ChannelContextConfig) conversationWallContextSettings {
