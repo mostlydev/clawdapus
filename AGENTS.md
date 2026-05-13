@@ -65,6 +65,8 @@ Releases are tag-driven and cut by the maintainer using the `clawdapus-release` 
 
 **If a release-related artifact genuinely needs to change in a fix PR**, leave a note in the PR body explaining what the maintainer must do to ship the fix (e.g. "Submodule pointer moves past v0.5.0; cllama v0.5.1 release required before next clawdapus release"). Do not silently bake the requirement into the diff — a future agent reading the PR cannot tell that an out-of-band step is missing.
 
+**Do not reference specific deployments or their agents by name in public Clawdapus or cllama artifacts** — changelog entries, release notes, issue comments, generated docs, PR bodies. Clawdapus is a general tool; named downstream deployments (Tiverton, the trading desk pod, individual claws like Boulton/Logan/Westin/etc.) are use cases. Describe symptoms and fixes generically: "Hermes runners", "Anthropic-format runners", "Discord-channel-consuming agents", "production deployments", "downstream operators". Internal investigation channels (talking-stick rooms, private repos, agent memory) are where deployment-specific context lives. The public OSS surface stays general. This applies to both new changelog entries and existing ones — leave historical entries alone unless the maintainer explicitly asks for a rewrite, but never add a new entry that names a downstream deployment.
+
 ## Compilation Principles
 
 `claw up` is a compiler. These principles govern the pipeline and must not be violated by new features:

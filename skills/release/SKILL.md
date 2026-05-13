@@ -214,6 +214,20 @@ so there's always a place for future notes:
 <!-- Nothing yet -->
 ```
 
+### Keep entries deployment-agnostic
+
+Do **not** name specific deployments or their agents in the changelog. Clawdapus
+is a general tool; downstream deployments (Tiverton, the trading desk pod,
+individual claws like Boulton/Logan/Westin/etc.) are use cases. Describe the
+symptom and the fix generically — "Hermes runners", "Anthropic-format runners",
+"Discord-channel-consuming agents", "production deployments", "downstream
+operators". The internal investigation that surfaced the bug (talking-stick
+rooms, private repos, agent memory) is where deployment-specific context lives.
+The same rule applies to GitHub release notes, public issue comments, and
+generated docs. Leave historical entries alone unless the maintainer explicitly
+asks for a rewrite, but never add a new entry that names a downstream
+deployment.
+
 ## Step 6: Docs sweep
 
 Release changes often ripple into non-changelog docs. Sweep each of these:
