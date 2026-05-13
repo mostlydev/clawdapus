@@ -499,6 +499,7 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	t.Setenv("CLAW_WALL_POLL_INTERVAL", "")
 	t.Setenv("CLAW_WALL_RETENTION", "")
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
+	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
 
 	cfg, err := loadConfig()
@@ -516,6 +517,27 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	}
 	if cfg.BackfillMaxPages != 25 {
 		t.Fatalf("expected 25 backfill pages, got %d", cfg.BackfillMaxPages)
+	}
+	if cfg.DiscordBaseURL != "" {
+		t.Fatalf("expected empty discord base url by default, got %q", cfg.DiscordBaseURL)
+	}
+}
+
+func TestLoadConfigReadsDiscordBaseURLOverride(t *testing.T) {
+	t.Setenv("CLAW_WALL_ADDR", "")
+	t.Setenv("CLAW_WALL_LIMIT", "")
+	t.Setenv("CLAW_WALL_POLL_INTERVAL", "")
+	t.Setenv("CLAW_WALL_RETENTION", "")
+	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
+	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "http://fake-discord:9000/api/v10")
+	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.DiscordBaseURL != "http://fake-discord:9000/api/v10" {
+		t.Fatalf("unexpected DiscordBaseURL: %q", cfg.DiscordBaseURL)
 	}
 }
 

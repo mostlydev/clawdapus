@@ -23,6 +23,7 @@ type config struct {
 	PollInterval      time.Duration
 	Retention         time.Duration
 	BackfillMaxPages  int
+	DiscordBaseURL    string
 	ToolToken         string
 	AgentChannelsPath string
 }
@@ -63,6 +64,9 @@ func run(args []string) error {
 	poller := newDiscordPoller(&http.Client{Timeout: 10 * time.Second}, store, targets, cfg.BufferLimit)
 	poller.backfillRetention = cfg.Retention
 	poller.backfillMaxPages = cfg.BackfillMaxPages
+	if strings.TrimSpace(cfg.DiscordBaseURL) != "" {
+		poller.baseURL = strings.TrimRight(strings.TrimSpace(cfg.DiscordBaseURL), "/")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -144,6 +148,7 @@ func loadConfig() (config, error) {
 		PollInterval:      time.Duration(pollSeconds) * time.Second,
 		Retention:         retention,
 		BackfillMaxPages:  backfillMaxPages,
+		DiscordBaseURL:    strings.TrimSpace(os.Getenv("CLAW_WALL_DISCORD_BASE_URL")),
 		ToolToken:         strings.TrimSpace(os.Getenv("CLAW_WALL_TOOL_TOKEN")),
 		AgentChannelsPath: envOr("CLAW_WALL_AGENT_CHANNELS_FILE", "/etc/claw-wall/agent-channels.json"),
 	}, nil
