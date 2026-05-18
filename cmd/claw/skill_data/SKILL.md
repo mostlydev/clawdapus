@@ -391,6 +391,20 @@ The proxy sits between agents and LLM providers. Agents get bearer tokens, proxy
 
 Auto-injected by `claw up` when any cllama-enabled service has Discord channel IDs. Polls Discord channels and serves the recent channel transcript to agents through `channel-context` tail feeds; legacy unread-mailbox cursor paging remains available as `mode=delta`. On startup, wall backfills Discord history before its first forward poll up to `CLAW_WALL_RETENTION` (default `24h`) and `CLAW_WALL_BACKFILL_MAX_PAGES` (default `25`), while `CLAW_WALL_LIMIT` is a per-channel safety cap (default `5000`). Configure the generated tail window with pod or service `x-claw.context.channel` (`since`, `limit`, `max-chars`, `buffer`). Since `v0.15.0` channel-consuming services also get a default-on `channel-awareness` feed (uncursored 24h raw window; `x-claw.context.channel.max-chars` tunes both feeds together, default 32 KB) plus two cllama-mediated retrieval tools - `search_channel_context` and `get_channel_messages` - auto-subscribed via a compiler-owned claw-wall descriptor. Feed headers include `backfill_status`; `partial` or `rate_limited` means the backing window did not fully satisfy the requested horizon. Calls are gated by a generated per-agent channel allowlist, claw-wall service-token auth, and forwarded `X-Claw-ID`. The service name `claw-wall` is reserved - declaring it in `claw-pod.yml` is a hard error.
 
+### cllama feed injection budgets
+
+`x-claw.context.channel.max-chars` only sizes the *source* window claw-wall returns. cllama applies its own byte budgets when it injects feeds into the prompt: `32 KB` per feed (`CLLAMA_FEED_MAX_RESPONSE_BYTES`) and `64 KB` aggregate across all feed blocks (`CLLAMA_FEED_MAX_TOTAL_BYTES`). Defaults are bounded; invalid values fall back to defaults. A pod that raises `max-chars` to a large 24h window but leaves cllama at defaults will still have the feed truncated, or skipped entirely once earlier feeds consume the shared aggregate budget. Raise both via `x-claw.cllama-defaults.env` (or service-level `x-claw.cllama-env`):
+
+```yaml
+x-claw:
+  cllama-defaults:
+    env:
+      CLLAMA_FEED_MAX_RESPONSE_BYTES: "262144"
+      CLLAMA_FEED_MAX_TOTAL_BYTES: "393216"
+```
+
+When the aggregate cap drops a feed the model sees an explicit `--- FEED: <name> skipped (...) ---` notice (not a silent omission), and cllama emits a `feed_injection` audit event per feed (`included` / `empty` / `skipped_total_cap`) with byte metadata. The aggregate cap drops whole feeds in manifest order — there is no per-feed priority yet, so raise `CLLAMA_FEED_MAX_TOTAL_BYTES` rather than relying on ordering.
+
 ## Generated Artifacts
 
 | File | Purpose | Location |
