@@ -190,6 +190,8 @@ The cllama container receives its configuration through environment variables in
 | `CLAW_CONTEXT_ROOT` | Path to the shared context mount root (defaults to `/claw/context`). |
 | `CLAW_SESSION_HISTORY_DIR` | Path to the read-write session history mount (defaults to `/claw/session-history`). When set, also seeds the default `CLAW_CONTEXT_LEDGER_DIR`. |
 | `CLAW_CONTEXT_LEDGER_DIR` | Path where per-agent channel cursors are persisted (defaults to `$CLAW_SESSION_HISTORY_DIR/context-ledger`). When unset, cursors fall back to in-memory and every restart re-bootstraps with a 24h tail. |
+| `CLLAMA_FEED_MAX_RESPONSE_BYTES` | Per-feed byte cap applied at fetch time before formatting. Default `32768`. Invalid or non-positive values fall back to the default. |
+| `CLLAMA_FEED_MAX_TOTAL_BYTES` | Aggregate cap across all formatted feed blocks injected into one request. Default `65536`. Invalid or non-positive values fall back to the default. |
 | `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `AI_GATEWAY_API_KEY`, etc. |
 
 ### Where Provider Keys Go
@@ -214,6 +216,32 @@ endpoint when needed.
 
 ::: warning cllama-env, Not environment
 Provider API keys belong in `x-claw.cllama-defaults.env` (or service-level `x-claw.cllama-env`), never in the service's compose `environment:` block. Putting real keys in `environment:` defeats credential starvation -- the agent container would have direct provider access.
+:::
+
+### Feed Injection Budgets
+
+cllama applies two byte budgets when it injects subscribed feeds into a request: a per-feed cap (read at fetch time, before formatting) and an aggregate cap across all formatted feed blocks. Feeds are injected in manifest order until the aggregate cap is reached.
+
+These budgets are intentionally bounded by default -- `32 KB` per feed and `64 KB` aggregate -- so a small pod cannot accidentally turn feed subscriptions into unbounded prompt stuffing. The defaults are independent of the feed *source* window: a `claw-wall` `channel-awareness` feed configured with a large `x-claw.context.channel.max-chars` can return far more than 32 KB, but cllama will still cap what reaches the model unless you raise its budgets too.
+
+Raise both caps together through `x-claw.cllama-defaults.env` (or service-level `x-claw.cllama-env`):
+
+```yaml
+x-claw:
+  pod: trading-desk
+  cllama-defaults:
+    proxy: [passthrough]
+    env:
+      CLLAMA_FEED_MAX_RESPONSE_BYTES: "262144"   # accept up to 256 KB from any one feed
+      CLLAMA_FEED_MAX_TOTAL_BYTES: "393216"      # 384 KB across all injected feeds combined
+```
+
+Invalid or non-positive values fall back to the bounded defaults, so a typo cannot silently unbound injection. Set `CLLAMA_FEED_MAX_TOTAL_BYTES` high enough to hold the *sum* of every feed a turn carries (market/style context, scaffolds, memory recall, channel awareness, channel context) -- the aggregate cap is shared across all of them, not per feed.
+
+When the aggregate cap does drop a feed, cllama no longer fails silently: the model sees an explicit `--- FEED: <name> skipped (total feed size cap reached; block_bytes=… total_before=… max_total_bytes=…) ---` notice in the runtime context, and a structured `feed_injection` telemetry event records the outcome (see [Telemetry Fields](#telemetry-fields)). Context snapshots store the actual provider-visible blocks and skip notices.
+
+::: tip Skip is in manifest order
+The aggregate cap drops whole feeds in manifest order once the budget is exhausted; there is no per-feed priority or reservation yet. If a large feed earlier in the manifest can starve a later one, raise `CLLAMA_FEED_MAX_TOTAL_BYTES` rather than relying on ordering.
 :::
 
 ## Pod Configuration
@@ -344,7 +372,7 @@ Every request through the proxy produces a structured JSON log entry on stdout. 
 |-------|-------------|
 | `ts` | ISO-8601 UTC timestamp. |
 | `claw_id` | The calling agent's identifier. |
-| `type` | Event type: `request`, `response`, `error`, `intervention`, `feed_fetch`, `provider_pool`, `memory_op`. |
+| `type` | Event type: `request`, `response`, `error`, `intervention`, `feed_fetch`, `feed_injection`, `provider_pool`, `memory_op`. |
 | `intervention` | Why the proxy modified a prompt, dropped a tool, or amended a response. References the specific policy module or rule. |
 | `model` | The model used for the request. |
 | `tokens_in` | Input token count. |
@@ -363,6 +391,7 @@ Event-specific fields may also be present depending on `type`:
 - `status_code`, `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd`, `cached_tokens`, `cache_write_tokens` — request/response/error events
 - `static_system_hash`, `first_system_hash`, `first_non_system_hash`, `dynamic_context_hash`, `tools_hash` — request events (prompt assembly fingerprint)
 - `feed_name`, `feed_url`, `fetched_at`, `cached` — feed fetch events
+- `feed_name`, `source`, `feed_status` (`included` / `empty` / `skipped_total_cap`), `feed_truncated`, `feed_source_bytes`, `feed_source_exact`, `feed_content_bytes`, `feed_block_bytes`, `feed_total_before`, `feed_total_after`, `feed_max_response_bytes`, `feed_max_total_bytes` — `feed_injection` events (one per manifest entry, recording whether the feed actually reached the provider-visible context after the per-feed and aggregate byte caps)
 - `provider`, `key_id`, `action`, `reason`, `cooldown_until` — provider pool events
 - `memory_service`, `memory_op`, `memory_status`, `memory_blocks`, `memory_bytes`, `memory_removed` — memory telemetry events
 
