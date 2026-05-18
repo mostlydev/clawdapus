@@ -44,6 +44,7 @@ type channelBuffer struct {
 type conversationStore struct {
 	limit          int
 	retention      time.Duration
+	now            func() time.Time
 	mu             sync.Mutex
 	channels       map[string]*channelBuffer
 	cursors        map[string]map[string]string
@@ -124,23 +125,38 @@ func newConversationStore(limit int, retentions ...time.Duration) *conversationS
 	return &conversationStore{
 		limit:          limit,
 		retention:      retention,
+		now:            time.Now,
 		channels:       make(map[string]*channelBuffer),
 		cursors:        make(map[string]map[string]string),
 		backfillStatus: make(map[string]string),
 	}
 }
 
+func (s *conversationStore) currentTime() time.Time {
+	if s != nil && s.now != nil {
+		if now := s.now(); !now.IsZero() {
+			return now
+		}
+	}
+	return time.Now()
+}
+
+func (s *conversationStore) effectiveTime(now time.Time) time.Time {
+	if now.IsZero() {
+		return s.currentTime()
+	}
+	return now
+}
+
 func (s *conversationStore) merge(channelID string, messages []wallMessage) {
-	s.mergeAt(channelID, messages, time.Now())
+	s.mergeAt(channelID, messages, s.currentTime())
 }
 
 func (s *conversationStore) mergeAt(channelID string, messages []wallMessage, now time.Time) {
 	if len(messages) == 0 {
 		return
 	}
-	if now.IsZero() {
-		now = time.Now()
-	}
+	now = s.effectiveTime(now)
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
 		return
@@ -211,9 +227,7 @@ func (s *conversationStore) trimChannelLocked(channelID string, state *channelBu
 	if state == nil {
 		return
 	}
-	if now.IsZero() {
-		now = time.Now()
-	}
+	now = s.effectiveTime(now)
 
 	messages := state.messages
 	if s.retention > 0 {
@@ -270,7 +284,7 @@ func (s *conversationStore) consume(consumer string, channelIDs []string, limit 
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.trimChannelsLocked(channelIDs, time.Now())
+	s.trimChannelsLocked(channelIDs, s.currentTime())
 
 	cursorByChannel := s.cursors[consumer]
 	collected := make([]wallMessage, 0)
@@ -350,7 +364,7 @@ func (s *conversationStore) tail(req tailRequest) tailResult {
 	}
 	now := req.Now
 	if now.IsZero() {
-		now = time.Now()
+		now = s.currentTime()
 	}
 	var windowStart time.Time
 	if req.Since > 0 {
@@ -464,7 +478,7 @@ func (s *conversationStore) search(req searchChannelContextRequest, now time.Tim
 		limit = s.limit
 	}
 	if now.IsZero() {
-		now = time.Now()
+		now = s.currentTime()
 	}
 	var windowStart time.Time
 	if strings.TrimSpace(req.Since) != "" {
@@ -485,7 +499,7 @@ func (s *conversationStore) search(req searchChannelContextRequest, now time.Tim
 			return false
 		}
 		return true
-	}, limit)
+	}, limit, now)
 	if result.Status == "empty" && !windowStart.IsZero() && !result.RetainedCoverage.oldestTime.IsZero() && windowStart.Before(result.RetainedCoverage.oldestTime) {
 		result.Status = "not_in_buffer"
 		result.Hint = "Requested window extends before buffer's oldest_ts. Operator can widen CLAW_WALL_LIMIT or rely on v2 digest once available."
@@ -525,7 +539,7 @@ func (s *conversationStore) getMessages(req getChannelMessagesRequest) retrieval
 			return false
 		}
 		return true
-	}, limit)
+	}, limit, time.Time{})
 	if len(wanted) > 0 && len(result.Messages) < len(wanted) {
 		result.Status = "not_in_buffer"
 		result.Hint = "One or more requested message_ids are not retained in claw-wall's current buffer."
@@ -533,14 +547,14 @@ func (s *conversationStore) getMessages(req getChannelMessagesRequest) retrieval
 	return result
 }
 
-func (s *conversationStore) scan(channelIDs []string, match func(wallMessage) bool, limit int) retrievalResult {
+func (s *conversationStore) scan(channelIDs []string, match func(wallMessage) bool, limit int, now time.Time) retrievalResult {
 	channelIDs = normalizeChannelIDs(channelIDs)
 	if limit <= 0 {
 		limit = defaultResponseLimit
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now()
+	now = s.effectiveTime(now)
 	s.trimChannelsLocked(channelIDs, now)
 
 	candidates := make([]wallMessage, 0)
@@ -685,7 +699,7 @@ func newHandler(store *conversationStore, cfgs ...handlerConfig) http.Handler {
 			After:      after,
 			Limit:      limit,
 			MaxChars:   maxChars,
-			Now:        time.Now(),
+			Now:        store.currentTime(),
 		})
 		kind := contextKindFromRequest(r, result)
 		_, _ = w.Write([]byte(formatTailContext(result, since, kind)))
@@ -725,7 +739,7 @@ func newHandler(store *conversationStore, cfgs ...handlerConfig) http.Handler {
 			Since:      since,
 			Limit:      limit,
 			MaxChars:   maxChars,
-			Now:        time.Now(),
+			Now:        store.currentTime(),
 		})
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte(formatChannelAwareness(result, since)))
@@ -742,7 +756,7 @@ func newHandler(store *conversationStore, cfgs ...handlerConfig) http.Handler {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "channel_not_allowed", "agent": r.Header.Get("X-Claw-ID"), "channel": disallowed})
 			return
 		}
-		writeJSON(w, http.StatusOK, store.search(req, time.Now()))
+		writeJSON(w, http.StatusOK, store.search(req, store.currentTime()))
 	})
 	mux.HandleFunc("/get_channel_messages", func(w http.ResponseWriter, r *http.Request) {
 		if !authorizeToolRequest(w, r, cfg) {
