@@ -160,7 +160,7 @@ func (p *discordPoller) pollOnce(ctx context.Context, logWriter io.Writer) {
 			continue
 		}
 		if len(messages) > 0 {
-			p.store.merge(target.ChannelID, messages)
+			p.store.mergeAt(target.ChannelID, messages, p.now())
 			p.recoverGapIfNeeded(ctx, target, latestID, messages, logWriter)
 		}
 		if strings.TrimSpace(newestID) != "" {
@@ -353,7 +353,7 @@ func (p *discordPoller) backfillGap(ctx context.Context, target tokenPair, after
 			filtered = append(filtered, msg)
 		}
 		if len(filtered) > 0 {
-			p.store.merge(target.ChannelID, filtered)
+			p.store.mergeAt(target.ChannelID, filtered, p.now())
 		}
 		if reachedBoundary || len(messages) < p.fetchLimit {
 			return backfillStatusComplete, nil
