@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **cllama feed injection budgets are configurable** — cllama previously capped every injected feed at a hard-coded 32 KB and the aggregate feed block at 64 KB, so a pod that raised its 24h `channel-awareness` window past those limits would still have the provider-visible context silently truncated or dropped, with earlier feeds (market/style context) crowding out live channel awareness in an all-or-nothing budget. Both caps are now tunable via `CLLAMA_FEED_MAX_RESPONSE_BYTES` and `CLLAMA_FEED_MAX_TOTAL_BYTES`, set through `x-claw.cllama-defaults.env` (or service-level `x-claw.cllama-env`). Defaults stay bounded at 32 KB / 64 KB and invalid values fall back to the defaults, so the knob cannot accidentally unbound prompt injection. When the aggregate cap does drop a feed, the model now sees an explicit `--- FEED: <name> skipped (...) ---` notice instead of the feed vanishing silently, and cllama emits a structured `feed_injection` telemetry event per feed (`included` / `empty` / `skipped_total_cap`) with source/content/block byte counts and effective caps. Context snapshots store the actual provider-visible blocks. Consumes cllama `v0.6.7`. Closes [#244](https://github.com/mostlydev/clawdapus/issues/244).
 
 ## v0.17.2 <Badge type="tip" text="Latest" /> {#v0-17-2}
 
