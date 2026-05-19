@@ -40,6 +40,7 @@ os.environ["CLAWDAPUS_DISABLED_TOOLS"] = "text_to_speech"
 os.environ["CLLAMA_CONSUMER_SESSION_EPOCH"] = "epoch-contract"
 os.environ["HERMES_GATEWAY_LOCK_DIR"] = "/tmp/hermes-gateway-locks"
 os.environ["XDG_STATE_HOME"] = "/tmp/xdg-state"
+os.environ["HERMES_ALLOW_SILENT_FINAL"] = "1"
 assert importlib.util.find_spec("minisweagent_path") is not None
 import tools.terminal_tool
 
@@ -98,7 +99,20 @@ epoch_agent = AIAgent(
 headers = {str(k).lower(): v for k, v in dict(getattr(epoch_agent.client, "default_headers", {}) or {}).items()}
 assert headers.get("x-claw-consumer-session-epoch") == "epoch-contract", headers
 
-from gateway.run import GatewayRunner
+from gateway.run import GatewayRunner, _normalize_empty_agent_response
+assert _normalize_empty_agent_response(
+    {"api_calls": 1, "completed": True, "partial": False},
+    "",
+) == ""
+assert "request failed" in _normalize_empty_agent_response(
+    {"api_calls": 1, "completed": True, "failed": True, "error": "boom"},
+    "",
+)
+assert "Processing stopped" in _normalize_empty_agent_response(
+    {"api_calls": 1, "completed": True, "partial": True, "error": "cut off"},
+    "",
+)
+
 assert GatewayRunner._claw_turn_sent_message([
     {
         "role": "assistant",

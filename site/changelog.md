@@ -29,7 +29,12 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Fix: Hermes silent-final no-op turns stay silent through gateway delivery** — The
+  Hermes agent loop already marked empty visible responses as completed no-op
+  turns when `HERMES_ALLOW_SILENT_FINAL=1`, but the gateway empty-response
+  formatter still converted those completed no-ops into visible "no response
+  was generated" alerts. The gateway now preserves completed silent-final
+  no-ops while still warning on failed or partial turns.
 
 ## v0.17.4 <Badge type="tip" text="Latest" /> {#v0-17-4}
 

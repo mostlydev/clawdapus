@@ -287,6 +287,28 @@ run_agent.write_text(text)
 
 gateway_run = purelib / "gateway" / "run.py"
 text = gateway_run.read_text()
+
+# The run_agent.py patch above marks empty visible final responses as
+# successful completed no-op turns when HERMES_ALLOW_SILENT_FINAL=1.  The
+# gateway has a second empty-response normalizer that otherwise rewrites that
+# completed no-op into a visible "no response was generated" warning.
+text = replace_once(
+    text,
+    '    if agent_result.get("failed"):\n',
+    '    if (\n'
+    '        os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1"\n'
+    '        and agent_result.get("completed")\n'
+    '        and not agent_result.get("failed")\n'
+    '        and not agent_result.get("partial")\n'
+    '        and not agent_result.get("interrupted")\n'
+    '    ):\n'
+    '        logger.debug("Silent final enabled; suppressing empty-response warning")\n'
+    '        return response\n'
+    '\n'
+    '    if agent_result.get("failed"):\n',
+    "gateway run silent final empty-response normalization",
+)
+
 text = replace_once(
     text,
     '    async def _handle_message(self, event: MessageEvent) -> Optional[str]:\n'
