@@ -261,15 +261,16 @@ text = replace_once(
     "run_agent tool_choice=required per turn in tool-only mode",
 )
 
-# Silent-final opt-in: when HERMES_ALLOW_SILENT_FINAL=1, treat empty-after-think
-# final responses as a successful no-op turn instead of retrying. Reasoning
-# models in mention_only channels can legitimately decide to stay silent.
+# Silent-final opt-in: when HERMES_ALLOW_SILENT_FINAL=1, treat empty visible
+# final responses as a successful no-op turn instead of retrying/nudging.
+# Managed messaging agents often deliver the visible reply through send_message
+# and then intentionally have nothing else to say.
 text = replace_once(
     text,
     '                    if not self._has_content_after_think_block(final_response):\n',
     '                    if not self._has_content_after_think_block(final_response):\n'
     '                        if os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1":\n'
-    '                            logger.debug("Silent final enabled; treating empty-after-think response as completed no-op")\n'
+    '                            logger.debug("Silent final enabled; treating empty visible response as completed no-op")\n'
     '                            self._empty_content_retries = 0\n'
     '                            self._cleanup_task_resources(effective_task_id)\n'
     '                            self._persist_session(messages, conversation_history)\n'

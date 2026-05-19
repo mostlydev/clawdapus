@@ -79,8 +79,9 @@ source = inspect.getsource(run_agent.AIAgent)
 assert "_already_used_tools_this_turn" in source
 assert "api_messages[_last_user_index + 1 :]" in source
 assert "HERMES_ALLOW_SILENT_FINAL" in source
-assert "Silent final enabled; treating empty-after-think response as completed no-op" in source
+assert "Silent final enabled; treating empty visible response as completed no-op" in source
 assert '"completed": True' in source
+assert source.index('os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1"') < source.index("Model returned empty after tool calls")
 assert "X-Claw-Consumer-Session-Epoch" in source
 assert "CLLAMA_CONSUMER_SESSION_EPOCH" in source
 

@@ -209,6 +209,9 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	if got := result.Environment["HERMES_TOOL_ONLY_MODE"]; got != "1" {
 		t.Fatalf("expected HERMES_TOOL_ONLY_MODE=1, got %q", got)
 	}
+	if got := result.Environment[hermesAllowSilentFinalEnv]; got != "1" {
+		t.Fatalf("expected %s=1, got %q", hermesAllowSilentFinalEnv, got)
+	}
 	if got := result.Environment[hermesToolProgressModeEnv]; got != "off" {
 		t.Fatalf("expected %s=off, got %q", hermesToolProgressModeEnv, got)
 	}
@@ -493,6 +496,9 @@ func TestMaterializeSlackAppliesTextChannelDefaults(t *testing.T) {
 	if got := result.Environment[hermesToolProgressModeEnv]; got != "off" {
 		t.Fatalf("expected %s=off, got %q", hermesToolProgressModeEnv, got)
 	}
+	if got := result.Environment[hermesAllowSilentFinalEnv]; got != "1" {
+		t.Fatalf("expected %s=1, got %q", hermesAllowSilentFinalEnv, got)
+	}
 	if got := result.Environment[clawdapusDisabledToolsEnv]; got != hermesTextToSpeechTool {
 		t.Fatalf("expected %s=%s, got %q", clawdapusDisabledToolsEnv, hermesTextToSpeechTool, got)
 	}
@@ -558,6 +564,36 @@ func TestMaterializeAllowsToolProgressOverride(t *testing.T) {
 	}
 	if !strings.Contains(string(envData), hermesToolProgressModeEnv+"=verbose\n") {
 		t.Fatalf("expected %s override in .env, got:\n%s", hermesToolProgressModeEnv, envData)
+	}
+}
+
+func TestMaterializeAllowsSilentFinalDefaultOverride(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	rc.Environment[hermesAllowSilentFinalEnv] = "0"
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if got := result.Environment[hermesAllowSilentFinalEnv]; got != "0" {
+		t.Fatalf("expected %s override, got %q", hermesAllowSilentFinalEnv, got)
+	}
+
+	envData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", ".env"))
+	if err != nil {
+		t.Fatalf("read .env: %v", err)
+	}
+	env := string(envData)
+	if !strings.Contains(env, hermesAllowSilentFinalEnv+"=0\n") {
+		t.Fatalf("expected %s override in .env, got:\n%s", hermesAllowSilentFinalEnv, env)
+	}
+	if strings.Contains(env, hermesAllowSilentFinalEnv+"=1\n") {
+		t.Fatalf("expected no default %s=1 when override is set, got:\n%s", hermesAllowSilentFinalEnv, env)
 	}
 }
 

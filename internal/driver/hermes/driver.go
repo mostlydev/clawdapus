@@ -196,6 +196,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	// runner-native tool progress silent by default so only real replies post.
 	if hasDiscordHandle(rc) || hasSlackHandle(rc) {
 		env["HERMES_TOOL_ONLY_MODE"] = "1"
+		env[hermesAllowSilentFinalEnv] = "1"
 		env[hermesToolProgressModeEnv] = "off"
 		if disabled := resolveDisabledHermesTools(rc); len(disabled) > 0 {
 			env[clawdapusDisabledToolsEnv] = strings.Join(disabled, ",")
@@ -207,6 +208,13 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		if value != "" {
 			env[hermesToolProgressModeEnv] = value
 		}
+	}
+	value, err := resolvedEnvValue(rc, hermesAllowSilentFinalEnv)
+	if err != nil {
+		return nil, fmt.Errorf("hermes driver: %w", err)
+	}
+	if value != "" {
+		env[hermesAllowSilentFinalEnv] = value
 	}
 	if hasSlackHandle(rc) {
 		value, err := resolvedEnvOrDefault(rc, "SLACK_REQUIRE_MENTION", "true")

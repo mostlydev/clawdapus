@@ -82,6 +82,7 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 	env["XDG_STATE_HOME"] = hermesDefaultXDGStateHome
 	env[hermesDefaultAgentIdentityEnv] = managedDefaultAgentIdentity
 	if hasDiscordHandle(rc) || hasSlackHandle(rc) {
+		env[hermesAllowSilentFinalEnv] = "1"
 		env[hermesToolProgressModeEnv] = "off"
 	}
 	if hasDiscordHandle(rc) {

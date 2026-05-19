@@ -303,6 +303,9 @@ func TestGenerateEnvFileDefaultsToolProgressOffForDiscord(t *testing.T) {
 	if !strings.Contains(string(data), hermesToolProgressModeEnv+"=off\n") {
 		t.Fatalf("expected %s=off in .env, got:\n%s", hermesToolProgressModeEnv, data)
 	}
+	if !strings.Contains(string(data), hermesAllowSilentFinalEnv+"=1\n") {
+		t.Fatalf("expected %s=1 in .env, got:\n%s", hermesAllowSilentFinalEnv, data)
+	}
 }
 
 func TestGenerateEnvFileDefaultsToolProgressOffForSlack(t *testing.T) {
@@ -316,6 +319,30 @@ func TestGenerateEnvFileDefaultsToolProgressOffForSlack(t *testing.T) {
 
 	if !strings.Contains(string(data), hermesToolProgressModeEnv+"=off\n") {
 		t.Fatalf("expected %s=off in .env, got:\n%s", hermesToolProgressModeEnv, data)
+	}
+	if !strings.Contains(string(data), hermesAllowSilentFinalEnv+"=1\n") {
+		t.Fatalf("expected %s=1 in .env, got:\n%s", hermesAllowSilentFinalEnv, data)
+	}
+}
+
+func TestGenerateEnvFileAllowsSilentFinalDefaultOverride(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"discord": {}},
+		Environment: map[string]string{
+			hermesAllowSilentFinalEnv: "0",
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	if !strings.Contains(env, hermesAllowSilentFinalEnv+"=0\n") {
+		t.Fatalf("expected %s override in .env, got:\n%s", hermesAllowSilentFinalEnv, env)
+	}
+	if strings.Contains(env, hermesAllowSilentFinalEnv+"=1\n") {
+		t.Fatalf("expected no default %s=1 when override is set, got:\n%s", hermesAllowSilentFinalEnv, env)
 	}
 }
 

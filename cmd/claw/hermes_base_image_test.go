@@ -58,7 +58,7 @@ func TestHermesBaseImageSourceContract(t *testing.T) {
 		`_claw_filter_tools`,
 		`_HERMES_CORE_TOOLS = _claw_filter_tools(_HERMES_CORE_TOOLS)`,
 		`HERMES_ALLOW_SILENT_FINAL`,
-		`Silent final enabled; treating empty-after-think response as completed no-op`,
+		`Silent final enabled; treating empty visible response as completed no-op`,
 		`intents.voice_states = False`,
 		`CLLAMA_CONSUMER_SESSION_EPOCH`,
 		`X-Claw-Consumer-Session-Epoch`,
