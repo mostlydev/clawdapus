@@ -203,6 +203,12 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	if got := result.Environment["XDG_STATE_HOME"]; got != hermesDefaultXDGStateHome {
 		t.Fatalf("expected XDG_STATE_HOME=%s, got %q", hermesDefaultXDGStateHome, got)
 	}
+	if got := result.Environment["NO_PROXY"]; got != hermesDefaultNoProxy {
+		t.Fatalf("expected NO_PROXY=%s, got %q", hermesDefaultNoProxy, got)
+	}
+	if got := result.Environment["no_proxy"]; got != hermesDefaultNoProxy {
+		t.Fatalf("expected no_proxy=%s, got %q", hermesDefaultNoProxy, got)
+	}
 	if got := result.Environment[hermesDefaultAgentIdentityEnv]; got != managedDefaultAgentIdentity {
 		t.Fatalf("unexpected %s: %q", hermesDefaultAgentIdentityEnv, got)
 	}
@@ -285,7 +291,9 @@ func TestMaterializeGatewayLocksStayWritableWithReadOnlyRootfs(t *testing.T) {
 	}
 	for key, want := range map[string]string{
 		hermesGatewayLockDirEnv: hermesDefaultGatewayLockDir,
+		"NO_PROXY":              hermesDefaultNoProxy,
 		"XDG_STATE_HOME":        hermesDefaultXDGStateHome,
+		"no_proxy":              hermesDefaultNoProxy,
 	} {
 		if got := result.Environment[key]; got != want {
 			t.Fatalf("expected container env %s=%s, got %q", key, want, got)
@@ -299,7 +307,9 @@ func TestMaterializeGatewayLocksStayWritableWithReadOnlyRootfs(t *testing.T) {
 	env := string(envData)
 	for _, expected := range []string{
 		hermesGatewayLockDirEnv + "=" + hermesDefaultGatewayLockDir + "\n",
+		"NO_PROXY=" + hermesDefaultNoProxy + "\n",
 		"XDG_STATE_HOME=" + hermesDefaultXDGStateHome + "\n",
+		"no_proxy=" + hermesDefaultNoProxy + "\n",
 	} {
 		if !strings.Contains(env, expected) {
 			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
@@ -314,6 +324,8 @@ func TestMaterializeAllowsGatewayStateOverrides(t *testing.T) {
 	rc, tmp := newTestRC(t)
 	rc.Environment[hermesGatewayLockDirEnv] = "/custom/locks"
 	rc.Environment["XDG_STATE_HOME"] = "/custom/state"
+	rc.Environment["NO_PROXY"] = "localhost,cllama,internal"
+	rc.Environment["no_proxy"] = "localhost,cllama,internal"
 	runtimeDir := filepath.Join(tmp, "runtime")
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -330,6 +342,12 @@ func TestMaterializeAllowsGatewayStateOverrides(t *testing.T) {
 	if got := result.Environment["XDG_STATE_HOME"]; got != "/custom/state" {
 		t.Fatalf("expected XDG_STATE_HOME override, got %q", got)
 	}
+	if got := result.Environment["NO_PROXY"]; got != "localhost,cllama,internal" {
+		t.Fatalf("expected NO_PROXY override, got %q", got)
+	}
+	if got := result.Environment["no_proxy"]; got != "localhost,cllama,internal" {
+		t.Fatalf("expected no_proxy override, got %q", got)
+	}
 
 	envData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", ".env"))
 	if err != nil {
@@ -338,7 +356,9 @@ func TestMaterializeAllowsGatewayStateOverrides(t *testing.T) {
 	env := string(envData)
 	for _, expected := range []string{
 		hermesGatewayLockDirEnv + "=/custom/locks\n",
+		"NO_PROXY=localhost,cllama,internal\n",
 		"XDG_STATE_HOME=/custom/state\n",
+		"no_proxy=localhost,cllama,internal\n",
 	} {
 		if !strings.Contains(env, expected) {
 			t.Fatalf("expected %q in .env, got:\n%s", expected, env)

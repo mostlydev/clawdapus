@@ -176,13 +176,15 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		hermesGatewayLockDirEnv:       hermesDefaultGatewayLockDir,
 		hermesDefaultAgentIdentityEnv: managedDefaultAgentIdentity,
 		"MESSAGING_CWD":               hermesWorkspaceDir,
+		"NO_PROXY":                    hermesDefaultNoProxy,
+		"no_proxy":                    hermesDefaultNoProxy,
 		"TERMINAL_CWD":                hermesWorkspaceDir,
 		"XDG_STATE_HOME":              hermesDefaultXDGStateHome,
 		"DISCORD_REQUIRE_MENTION":     "true",
 		"DISCORD_AUTO_THREAD":         "false",
 	}
 
-	for _, key := range []string{hermesGatewayLockDirEnv, "XDG_STATE_HOME"} {
+	for _, key := range []string{hermesGatewayLockDirEnv, "XDG_STATE_HOME", "NO_PROXY", "no_proxy"} {
 		value, err := resolvedEnvValue(rc, key)
 		if err != nil {
 			return nil, fmt.Errorf("hermes driver: %w", err)

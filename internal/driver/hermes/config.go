@@ -27,6 +27,7 @@ const (
 	hermesTextToSpeechTool        = "text_to_speech"
 	hermesDefaultGatewayLockDir   = "/tmp/hermes-gateway-locks"
 	hermesDefaultXDGStateHome     = "/tmp/xdg-state"
+	hermesDefaultNoProxy          = "localhost,127.0.0.1,cllama"
 	managedDefaultAgentIdentity   = "You are a Clawdapus-managed agent. Your identity, authority, communication policy, memory policy, and tool-use rules are defined by the Clawdapus project context loaded below: AGENTS.md, CLAWDAPUS.md, SOUL.md, mounted skills, feeds, and managed-tool policy. Do not identify as Hermes or as a generic assistant. Follow the Clawdapus contract when it is more specific than runner defaults; otherwise retain the Hermes runtime guidance below, including persistent memory behavior."
 )
 
@@ -104,6 +105,8 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 	env["MESSAGING_CWD"] = hermesWorkspaceDir
 	env["TERMINAL_CWD"] = hermesWorkspaceDir
 	env["XDG_STATE_HOME"] = hermesDefaultXDGStateHome
+	env["NO_PROXY"] = hermesDefaultNoProxy
+	env["no_proxy"] = hermesDefaultNoProxy
 	env[hermesDefaultAgentIdentityEnv] = managedDefaultAgentIdentity
 	if hasDiscordHandle(rc) || hasSlackHandle(rc) {
 		env[hermesAllowSilentFinalEnv] = "1"
@@ -349,6 +352,8 @@ func allowedEnvPassthroughKeys() []string {
 		hermesGatewayLockDirEnv,
 		hermesAllowSilentFinalEnv,
 		hermesToolProgressModeEnv,
+		"NO_PROXY",
+		"no_proxy",
 		"OPENAI_API_KEY",
 		"OPENROUTER_API_KEY",
 		"SLACK_ALLOWED_USERS",

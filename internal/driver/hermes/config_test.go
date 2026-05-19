@@ -339,7 +339,9 @@ func TestGenerateEnvFileDefaultsWritableGatewayState(t *testing.T) {
 	env := string(data)
 	for _, expected := range []string{
 		hermesGatewayLockDirEnv + "=" + hermesDefaultGatewayLockDir + "\n",
+		"NO_PROXY=" + hermesDefaultNoProxy + "\n",
 		"XDG_STATE_HOME=" + hermesDefaultXDGStateHome + "\n",
+		"no_proxy=" + hermesDefaultNoProxy + "\n",
 	} {
 		if !strings.Contains(env, expected) {
 			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
@@ -366,6 +368,29 @@ func TestGenerateEnvFileAllowsGatewayStateOverride(t *testing.T) {
 	for _, expected := range []string{
 		hermesGatewayLockDirEnv + "=/custom/locks\n",
 		"XDG_STATE_HOME=/custom/state\n",
+	} {
+		if !strings.Contains(env, expected) {
+			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
+		}
+	}
+}
+
+func TestGenerateEnvFileAllowsNoProxyOverride(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Environment: map[string]string{
+			"NO_PROXY": "localhost,cllama,internal",
+			"no_proxy": "localhost,cllama,internal",
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	for _, expected := range []string{
+		"NO_PROXY=localhost,cllama,internal\n",
+		"no_proxy=localhost,cllama,internal\n",
 	} {
 		if !strings.Contains(env, expected) {
 			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
