@@ -44,6 +44,14 @@ os.environ["HERMES_ALLOW_SILENT_FINAL"] = "1"
 assert importlib.util.find_spec("minisweagent_path") is not None
 import tools.terminal_tool
 
+from cron import scheduler as cron_scheduler
+assert not cron_scheduler._claw_should_deliver_cron_failure("upstream request failed")
+assert not cron_scheduler._claw_should_deliver_cron_failure("Internal Server Error")
+assert cron_scheduler._claw_should_deliver_cron_failure("prompt injection scanner blocked the job")
+os.environ["HERMES_CRON_DELIVER_TRANSIENT_FAILURES"] = "1"
+assert cron_scheduler._claw_should_deliver_cron_failure("upstream request failed")
+del os.environ["HERMES_CRON_DELIVER_TRANSIENT_FAILURES"]
+
 from gateway.status import _get_lock_dir
 assert str(_get_lock_dir()) == "/tmp/hermes-gateway-locks"
 
