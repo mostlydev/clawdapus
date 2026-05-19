@@ -122,8 +122,8 @@ _HERMES_CORE_TOOLS = [""",
 )
 text = replace_once(
     text,
-    "    \"ha_list_entities\", \"ha_get_state\", \"ha_list_services\", \"ha_call_service\",\n]\n",
-    "    \"ha_list_entities\", \"ha_get_state\", \"ha_list_services\", \"ha_call_service\",\n]\n_HERMES_CORE_TOOLS = _claw_filter_tools(_HERMES_CORE_TOOLS)\n",
+    "    \"computer_use\",\n]\n",
+    "    \"computer_use\",\n]\n_HERMES_CORE_TOOLS = _claw_filter_tools(_HERMES_CORE_TOOLS)\n",
     "_HERMES_CORE_TOOLS env-driven disable filter application",
 )
 text = replace_once(
@@ -179,32 +179,62 @@ text = replace_once(
 )
 
 # Tool-only mode: force tool_choice=required per user turn.
-# Upstream now builds api_kwargs through a transport (`_ct.build_kwargs(...)`)
-# inside `_build_api_kwargs`. We capture the returned kwargs and inject
-# `tool_choice="required"` at the start of each user turn so the model must
-# call a tool (preferably send_message) before falling back to plain text.
+# Upstream now has a provider-profile path and a legacy fallback inside
+# `_build_api_kwargs`. Capture the chat-completions kwargs in both paths and
+# inject `tool_choice="required"` at the start of each user turn so the model
+# must call a tool (preferably send_message) before falling back to plain text.
+text = replace_once(
+    text,
+    "            return _ct.build_kwargs(\n"
+    "                model=self.model,\n"
+    "                messages=api_messages,\n"
+    "                tools=tools_for_api,\n"
+    "                base_url=self.base_url,\n",
+    "            _claw_kwargs = _ct.build_kwargs(\n"
+    "                model=self.model,\n"
+    "                messages=api_messages,\n"
+    "                tools=tools_for_api,\n"
+    "                base_url=self.base_url,\n",
+    "run_agent provider-profile _build_api_kwargs capture for tool-only mode",
+)
+text = replace_once(
+    text,
+    "                qwen_session_metadata=_qwen_meta,\n"
+    "            )\n"
+    "\n"
+    "        # ── Legacy flag path",
+    "                qwen_session_metadata=_qwen_meta,\n"
+    "            )\n"
+    "            return self._claw_apply_tool_only_choice(_claw_kwargs, api_messages)\n"
+    "\n"
+    "        # ── Legacy flag path",
+    "run_agent provider-profile tool-only mode return",
+)
 text = replace_once(
     text,
     "        return _ct.build_kwargs(\n"
     "            model=self.model,\n"
-    "            messages=api_messages,\n"
-    "            tools=self.tools,\n"
-    "            timeout=self._resolved_api_call_timeout(),\n",
+    "            messages=_msgs_for_chat,\n"
+    "            tools=tools_for_api,\n"
+    "            base_url=self.base_url,\n",
     "        _claw_kwargs = _ct.build_kwargs(\n"
     "            model=self.model,\n"
-    "            messages=api_messages,\n"
-    "            tools=self.tools,\n"
-    "            timeout=self._resolved_api_call_timeout(),\n",
-    "run_agent _build_api_kwargs capture for tool-only mode",
+    "            messages=_msgs_for_chat,\n"
+    "            tools=tools_for_api,\n"
+    "            base_url=self.base_url,\n",
+    "run_agent legacy _build_api_kwargs capture for tool-only mode",
 )
 text = replace_once(
     text,
-    "            anthropic_max_output=_ant_max,\n"
+    "            provider_name=self.provider,\n"
     "        )\n"
     "\n"
     "    def _supports_reasoning_extra_body(self) -> bool:\n",
-    "            anthropic_max_output=_ant_max,\n"
+    "            provider_name=self.provider,\n"
     "        )\n"
+    "        return self._claw_apply_tool_only_choice(_claw_kwargs, _msgs_for_chat)\n"
+    "\n"
+    "    def _claw_apply_tool_only_choice(self, _claw_kwargs: dict, api_messages: list) -> dict:\n"
     "        # In tool-only mode, force tool_choice=required on the first LLM\n"
     "        # call of each user turn. Inspect only messages after the latest\n"
     "        # user message so prior turns' tool_calls do not satisfy this turn.\n"
