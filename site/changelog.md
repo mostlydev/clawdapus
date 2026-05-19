@@ -29,9 +29,18 @@ outline: deep
 
 ## Unreleased
 
-- **Hermes silent-final behavior is default for managed messaging agents** — Hermes Discord and Slack agents now set `HERMES_ALLOW_SILENT_FINAL=1` by default so tool-delivered replies can intentionally end without an extra final message. This avoids noisy "empty after tool calls" nudges when `send_message` already delivered the visible response, while preserving an escape hatch via `HERMES_ALLOW_SILENT_FINAL=0`. Closes [#251](https://github.com/mostlydev/clawdapus/issues/251).
+<!-- Nothing yet -->
 
-## v0.17.3 <Badge type="tip" text="Latest" /> {#v0-17-3}
+## v0.17.4 <Badge type="tip" text="Latest" /> {#v0-17-4}
+
+*2026-05-19*
+
+- **Hermes base refreshed to upstream v2026.5.16** — The pinned Clawdapus `hermes-base` image moves from upstream Hermes `v2026.4.23` to `v2026.5.16`. The Clawdapus runtime patch anchors were re-synced against upstream `toolsets.py` and agent-kwargs drift so every compatibility patch (intent trimming, non-blocking slash-command sync, reply-mention suppression, contracted identity, tool-only send behavior) still applies cleanly. The Hermes mount contract is unchanged: `HERMES_HOME`, workspace context, memory, session history, and read-only/writable skill surfaces all stay where they were. Closes [#248](https://github.com/mostlydev/clawdapus/issues/248).
+- **Hermes silent-final behavior is default for managed messaging agents** — Hermes Discord and Slack agents now set `HERMES_ALLOW_SILENT_FINAL=1` by default so tool-delivered replies can intentionally end without an extra final message. This avoids noisy "empty after tool calls" nudges when `send_message` already delivered the visible response, while preserving an escape hatch via `HERMES_ALLOW_SILENT_FINAL=0`. Closes [#251](https://github.com/mostlydev/clawdapus/issues/251).
+- **Fix: Hermes gateway state no longer breaks read-only-rootfs containers** — The Hermes gateway lock directory and XDG state defaulted under `HOME`, which is not writable when an agent container runs with a read-only root filesystem, so the gateway crashed on boot. Hermes now defaults `HERMES_GATEWAY_LOCK_DIR=/tmp/hermes-gateway-locks` and `XDG_STATE_HOME=/tmp/xdg-state` in both the container environment and the sourced Hermes `.env`, with operator overrides preserved. Closes [#249](https://github.com/mostlydev/clawdapus/issues/249).
+- **Pins infra images** — `hermes-base` moves to `v2026.5.16-claw.1` (upstream Hermes v2026.5.16 plus the Clawdapus runtime patches). `claw-api`, `clawdash`, `claw-wall`, and `claw-mcp-stdio` move in lockstep to `v0.17.4`. cllama stays at `v0.6.7`.
+
+## v0.17.3 {#v0-17-3}
 
 *2026-05-18*
 
