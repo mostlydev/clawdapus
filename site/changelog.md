@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Hermes silent-final behavior is default for managed messaging agents** — Hermes Discord and Slack agents now set `HERMES_ALLOW_SILENT_FINAL=1` by default so tool-delivered replies can intentionally end without an extra final message. This avoids noisy "empty after tool calls" nudges when `send_message` already delivered the visible response, while preserving an escape hatch via `HERMES_ALLOW_SILENT_FINAL=0`. Closes [#251](https://github.com/mostlydev/clawdapus/issues/251).
 
 ## v0.17.3 <Badge type="tip" text="Latest" /> {#v0-17-3}
 

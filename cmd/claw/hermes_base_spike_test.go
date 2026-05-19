@@ -38,8 +38,13 @@ import os
 os.environ["HERMES_DEFAULT_AGENT_IDENTITY"] = "Clawdapus identity probe"
 os.environ["CLAWDAPUS_DISABLED_TOOLS"] = "text_to_speech"
 os.environ["CLLAMA_CONSUMER_SESSION_EPOCH"] = "epoch-contract"
+os.environ["HERMES_GATEWAY_LOCK_DIR"] = "/tmp/hermes-gateway-locks"
+os.environ["XDG_STATE_HOME"] = "/tmp/xdg-state"
 assert importlib.util.find_spec("minisweagent_path") is not None
 import tools.terminal_tool
+
+from gateway.status import _get_lock_dir
+assert str(_get_lock_dir()) == "/tmp/hermes-gateway-locks"
 
 from toolsets import _HERMES_CORE_TOOLS, TOOLSETS
 assert "text_to_speech" not in _HERMES_CORE_TOOLS
@@ -74,8 +79,9 @@ source = inspect.getsource(run_agent.AIAgent)
 assert "_already_used_tools_this_turn" in source
 assert "api_messages[_last_user_index + 1 :]" in source
 assert "HERMES_ALLOW_SILENT_FINAL" in source
-assert "Silent final enabled; treating empty-after-think response as completed no-op" in source
+assert "Silent final enabled; treating empty visible response as completed no-op" in source
 assert '"completed": True' in source
+assert source.index('os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1"') < source.index("Model returned empty after tool calls")
 assert "X-Claw-Consumer-Session-Epoch" in source
 assert "CLLAMA_CONSUMER_SESSION_EPOCH" in source
 

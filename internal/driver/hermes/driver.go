@@ -173,17 +173,30 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		shared.PortableMemoryEnv:      shared.PortableMemoryDir,
 		"HOME":                        "/root",
 		"HERMES_HOME":                 hermesHomeDir,
+		hermesGatewayLockDirEnv:       hermesDefaultGatewayLockDir,
 		hermesDefaultAgentIdentityEnv: managedDefaultAgentIdentity,
 		"MESSAGING_CWD":               hermesWorkspaceDir,
 		"TERMINAL_CWD":                hermesWorkspaceDir,
+		"XDG_STATE_HOME":              hermesDefaultXDGStateHome,
 		"DISCORD_REQUIRE_MENTION":     "true",
 		"DISCORD_AUTO_THREAD":         "false",
+	}
+
+	for _, key := range []string{hermesGatewayLockDirEnv, "XDG_STATE_HOME"} {
+		value, err := resolvedEnvValue(rc, key)
+		if err != nil {
+			return nil, fmt.Errorf("hermes driver: %w", err)
+		}
+		if value != "" {
+			env[key] = value
+		}
 	}
 
 	// Chat handles need deliberate communication behavior, and Clawdapus keeps
 	// runner-native tool progress silent by default so only real replies post.
 	if hasDiscordHandle(rc) || hasSlackHandle(rc) {
 		env["HERMES_TOOL_ONLY_MODE"] = "1"
+		env[hermesAllowSilentFinalEnv] = "1"
 		env[hermesToolProgressModeEnv] = "off"
 		if disabled := resolveDisabledHermesTools(rc); len(disabled) > 0 {
 			env[clawdapusDisabledToolsEnv] = strings.Join(disabled, ",")
@@ -195,6 +208,13 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		if value != "" {
 			env[hermesToolProgressModeEnv] = value
 		}
+	}
+	value, err := resolvedEnvValue(rc, hermesAllowSilentFinalEnv)
+	if err != nil {
+		return nil, fmt.Errorf("hermes driver: %w", err)
+	}
+	if value != "" {
+		env[hermesAllowSilentFinalEnv] = value
 	}
 	if hasSlackHandle(rc) {
 		value, err := resolvedEnvOrDefault(rc, "SLACK_REQUIRE_MENTION", "true")

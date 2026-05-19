@@ -19,11 +19,14 @@ const (
 	hermesWorkspaceDir            = "/workspace"
 	hermesPersonaDir              = "/persona"
 	hermesDefaultAgentIdentityEnv = "HERMES_DEFAULT_AGENT_IDENTITY"
+	hermesGatewayLockDirEnv       = "HERMES_GATEWAY_LOCK_DIR"
 	hermesAllowSilentFinalEnv     = "HERMES_ALLOW_SILENT_FINAL"
 	hermesToolProgressModeEnv     = "HERMES_TOOL_PROGRESS_MODE"
 	hermesDiscordReplyMentionEnv  = "DISCORD_ALLOW_MENTION_REPLIED_USER"
 	clawdapusDisabledToolsEnv     = "CLAWDAPUS_DISABLED_TOOLS"
 	hermesTextToSpeechTool        = "text_to_speech"
+	hermesDefaultGatewayLockDir   = "/tmp/hermes-gateway-locks"
+	hermesDefaultXDGStateHome     = "/tmp/xdg-state"
 	managedDefaultAgentIdentity   = "You are a Clawdapus-managed agent. Your identity, authority, communication policy, memory policy, and tool-use rules are defined by the Clawdapus project context loaded below: AGENTS.md, CLAWDAPUS.md, SOUL.md, mounted skills, feeds, and managed-tool policy. Do not identify as Hermes or as a generic assistant. Follow the Clawdapus contract when it is more specific than runner defaults; otherwise retain the Hermes runtime guidance below, including persistent memory behavior."
 )
 
@@ -73,10 +76,13 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 		env[key] = value
 	}
 	env["HERMES_HOME"] = hermesHomeDir
+	env[hermesGatewayLockDirEnv] = hermesDefaultGatewayLockDir
 	env["MESSAGING_CWD"] = hermesWorkspaceDir
 	env["TERMINAL_CWD"] = hermesWorkspaceDir
+	env["XDG_STATE_HOME"] = hermesDefaultXDGStateHome
 	env[hermesDefaultAgentIdentityEnv] = managedDefaultAgentIdentity
 	if hasDiscordHandle(rc) || hasSlackHandle(rc) {
+		env[hermesAllowSilentFinalEnv] = "1"
 		env[hermesToolProgressModeEnv] = "off"
 	}
 	if hasDiscordHandle(rc) {
@@ -314,6 +320,7 @@ func allowedEnvPassthroughKeys() []string {
 		"DISCORD_REQUIRE_MENTION",
 		"GATEWAY_ALLOWED_USERS",
 		"GATEWAY_ALLOW_ALL_USERS",
+		hermesGatewayLockDirEnv,
 		hermesAllowSilentFinalEnv,
 		hermesToolProgressModeEnv,
 		"OPENAI_API_KEY",
@@ -332,6 +339,7 @@ func allowedEnvPassthroughKeys() []string {
 		"TELEGRAM_BOT_TOKEN",
 		"TELEGRAM_HOME_CHANNEL",
 		"TELEGRAM_HOME_CHANNEL_NAME",
+		"XDG_STATE_HOME",
 	}
 }
 
