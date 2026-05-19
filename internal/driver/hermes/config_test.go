@@ -247,6 +247,50 @@ func TestGenerateEnvFileSetsManagedDefaultIdentity(t *testing.T) {
 	}
 }
 
+func TestGenerateEnvFileDefaultsWritableGatewayState(t *testing.T) {
+	rc := &driver.ResolvedClaw{}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	for _, expected := range []string{
+		hermesGatewayLockDirEnv + "=" + hermesDefaultGatewayLockDir + "\n",
+		"XDG_STATE_HOME=" + hermesDefaultXDGStateHome + "\n",
+	} {
+		if !strings.Contains(env, expected) {
+			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
+		}
+	}
+	if strings.Contains(env, "/root/.local") {
+		t.Fatalf("Hermes gateway state must not default under read-only /root/.local, got:\n%s", env)
+	}
+}
+
+func TestGenerateEnvFileAllowsGatewayStateOverride(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Environment: map[string]string{
+			hermesGatewayLockDirEnv: "/custom/locks",
+			"XDG_STATE_HOME":        "/custom/state",
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	for _, expected := range []string{
+		hermesGatewayLockDirEnv + "=/custom/locks\n",
+		"XDG_STATE_HOME=/custom/state\n",
+	} {
+		if !strings.Contains(env, expected) {
+			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
+		}
+	}
+}
+
 func TestGenerateEnvFileDefaultsToolProgressOffForDiscord(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Handles: map[string]*driver.HandleInfo{"discord": {}},

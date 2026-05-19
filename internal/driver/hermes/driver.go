@@ -173,11 +173,23 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		shared.PortableMemoryEnv:      shared.PortableMemoryDir,
 		"HOME":                        "/root",
 		"HERMES_HOME":                 hermesHomeDir,
+		hermesGatewayLockDirEnv:       hermesDefaultGatewayLockDir,
 		hermesDefaultAgentIdentityEnv: managedDefaultAgentIdentity,
 		"MESSAGING_CWD":               hermesWorkspaceDir,
 		"TERMINAL_CWD":                hermesWorkspaceDir,
+		"XDG_STATE_HOME":              hermesDefaultXDGStateHome,
 		"DISCORD_REQUIRE_MENTION":     "true",
 		"DISCORD_AUTO_THREAD":         "false",
+	}
+
+	for _, key := range []string{hermesGatewayLockDirEnv, "XDG_STATE_HOME"} {
+		value, err := resolvedEnvValue(rc, key)
+		if err != nil {
+			return nil, fmt.Errorf("hermes driver: %w", err)
+		}
+		if value != "" {
+			env[key] = value
+		}
 	}
 
 	// Chat handles need deliberate communication behavior, and Clawdapus keeps

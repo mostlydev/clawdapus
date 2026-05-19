@@ -38,8 +38,13 @@ import os
 os.environ["HERMES_DEFAULT_AGENT_IDENTITY"] = "Clawdapus identity probe"
 os.environ["CLAWDAPUS_DISABLED_TOOLS"] = "text_to_speech"
 os.environ["CLLAMA_CONSUMER_SESSION_EPOCH"] = "epoch-contract"
+os.environ["HERMES_GATEWAY_LOCK_DIR"] = "/tmp/hermes-gateway-locks"
+os.environ["XDG_STATE_HOME"] = "/tmp/xdg-state"
 assert importlib.util.find_spec("minisweagent_path") is not None
 import tools.terminal_tool
+
+from gateway.status import _get_lock_dir
+assert str(_get_lock_dir()) == "/tmp/hermes-gateway-locks"
 
 from toolsets import _HERMES_CORE_TOOLS, TOOLSETS
 assert "text_to_speech" not in _HERMES_CORE_TOOLS

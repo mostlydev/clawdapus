@@ -197,6 +197,12 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	if result.Environment["HERMES_HOME"] != hermesHomeDir {
 		t.Fatalf("unexpected HERMES_HOME: %q", result.Environment["HERMES_HOME"])
 	}
+	if got := result.Environment[hermesGatewayLockDirEnv]; got != hermesDefaultGatewayLockDir {
+		t.Fatalf("expected %s=%s, got %q", hermesGatewayLockDirEnv, hermesDefaultGatewayLockDir, got)
+	}
+	if got := result.Environment["XDG_STATE_HOME"]; got != hermesDefaultXDGStateHome {
+		t.Fatalf("expected XDG_STATE_HOME=%s, got %q", hermesDefaultXDGStateHome, got)
+	}
 	if got := result.Environment[hermesDefaultAgentIdentityEnv]; got != managedDefaultAgentIdentity {
 		t.Fatalf("unexpected %s: %q", hermesDefaultAgentIdentityEnv, got)
 	}
@@ -256,6 +262,84 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	}
 	if strings.Contains(soulStr, "Nous Research") {
 		t.Fatal("default SOUL.md should not contain Hermes runner identity")
+	}
+}
+
+func TestMaterializeGatewayLocksStayWritableWithReadOnlyRootfs(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if result.ReadOnly != true {
+		t.Fatal("test requires Hermes to run with read-only rootfs")
+	}
+	for key, want := range map[string]string{
+		hermesGatewayLockDirEnv: hermesDefaultGatewayLockDir,
+		"XDG_STATE_HOME":        hermesDefaultXDGStateHome,
+	} {
+		if got := result.Environment[key]; got != want {
+			t.Fatalf("expected container env %s=%s, got %q", key, want, got)
+		}
+	}
+
+	envData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", ".env"))
+	if err != nil {
+		t.Fatalf("read .env: %v", err)
+	}
+	env := string(envData)
+	for _, expected := range []string{
+		hermesGatewayLockDirEnv + "=" + hermesDefaultGatewayLockDir + "\n",
+		"XDG_STATE_HOME=" + hermesDefaultXDGStateHome + "\n",
+	} {
+		if !strings.Contains(env, expected) {
+			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
+		}
+	}
+	if strings.Contains(env, "/root/.local") {
+		t.Fatalf("Hermes gateway state must not default under read-only /root/.local, got:\n%s", env)
+	}
+}
+
+func TestMaterializeAllowsGatewayStateOverrides(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	rc.Environment[hermesGatewayLockDirEnv] = "/custom/locks"
+	rc.Environment["XDG_STATE_HOME"] = "/custom/state"
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if got := result.Environment[hermesGatewayLockDirEnv]; got != "/custom/locks" {
+		t.Fatalf("expected %s override, got %q", hermesGatewayLockDirEnv, got)
+	}
+	if got := result.Environment["XDG_STATE_HOME"]; got != "/custom/state" {
+		t.Fatalf("expected XDG_STATE_HOME override, got %q", got)
+	}
+
+	envData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", ".env"))
+	if err != nil {
+		t.Fatalf("read .env: %v", err)
+	}
+	env := string(envData)
+	for _, expected := range []string{
+		hermesGatewayLockDirEnv + "=/custom/locks\n",
+		"XDG_STATE_HOME=/custom/state\n",
+	} {
+		if !strings.Contains(env, expected) {
+			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
+		}
 	}
 }
 
