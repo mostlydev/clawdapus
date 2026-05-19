@@ -141,6 +141,71 @@ text += (
 )
 toolsets_py.write_text(text)
 
+cron_scheduler = purelib / "cron" / "scheduler.py"
+text = cron_scheduler.read_text()
+
+# Cron transient-failure delivery: provider/cllama outages are already logged
+# and recorded on the job run. They should not be posted into user channels as
+# actionable cron responses, while real operator-actionable cron failures still
+# surface normally.
+text = replace_once(
+    text,
+    "def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Optional[str]:\n",
+    "def _claw_should_deliver_cron_failure(error: str | None) -> bool:\n"
+    "    if os.getenv(\"HERMES_CRON_DELIVER_TRANSIENT_FAILURES\") == \"1\":\n"
+    "        return True\n"
+    "    text = str(error or \"\").lower()\n"
+    "    if not text:\n"
+    "        return True\n"
+    "    transient_markers = (\n"
+    "        \"upstream request failed\",\n"
+    "        \"internal server error\",\n"
+    "        \"bad gateway\",\n"
+    "        \"service unavailable\",\n"
+    "        \"gateway timeout\",\n"
+    "        \"temporarily unavailable\",\n"
+    "        \"rate limit\",\n"
+    "        \"rate_limit\",\n"
+    "        \"timeout\",\n"
+    "        \"timed out\",\n"
+    "        \"connection reset\",\n"
+    "        \"connection aborted\",\n"
+    "        \"econnreset\",\n"
+    "        \"429\",\n"
+    "        \"502\",\n"
+    "        \"503\",\n"
+    "        \"504\",\n"
+    "    )\n"
+    "    return not any(marker in text for marker in transient_markers)\n"
+    "\n"
+    "\n"
+    "def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Optional[str]:\n",
+    "cron scheduler transient failure delivery classifier",
+)
+text = replace_once(
+    text,
+    "                # Deliver the final response to the origin/target chat.\n"
+    "                # If the agent responded with [SILENT], skip delivery (but\n"
+    "                # output is already saved above).  Failed jobs always deliver.\n"
+    "                deliver_content = final_response if success else f\"⚠️ Cron job '{job.get('name', job['id'])}' failed:\\n{error}\"\n"
+    "                should_deliver = bool(deliver_content)\n",
+    "                # Deliver the final response to the origin/target chat.\n"
+    "                # If the agent responded with [SILENT], skip delivery (but\n"
+    "                # output is already saved above).  Failed jobs deliver unless\n"
+    "                # the failure is a transient provider/cllama outage; those are\n"
+    "                # recorded in job state/logs without becoming channel noise.\n"
+    "                if success:\n"
+    "                    deliver_content = final_response\n"
+    "                elif _claw_should_deliver_cron_failure(error):\n"
+    "                    deliver_content = f\"⚠️ Cron job '{job.get('name', job['id'])}' failed:\\n{error}\"\n"
+    "                else:\n"
+    "                    logger.warning(\"Job '%s': suppressing transient cron failure delivery: %s\", job[\"id\"], error)\n"
+    "                    deliver_content = None\n"
+    "                should_deliver = bool(deliver_content)\n",
+    "cron scheduler suppress transient failure delivery",
+)
+cron_scheduler.write_text(text)
+
 run_agent = purelib / "run_agent.py"
 text = run_agent.read_text()
 
@@ -287,6 +352,28 @@ run_agent.write_text(text)
 
 gateway_run = purelib / "gateway" / "run.py"
 text = gateway_run.read_text()
+
+# The run_agent.py patch above marks empty visible final responses as
+# successful completed no-op turns when HERMES_ALLOW_SILENT_FINAL=1.  The
+# gateway has a second empty-response normalizer that otherwise rewrites that
+# completed no-op into a visible "no response was generated" warning.
+text = replace_once(
+    text,
+    '    if agent_result.get("failed"):\n',
+    '    if (\n'
+    '        os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1"\n'
+    '        and agent_result.get("completed")\n'
+    '        and not agent_result.get("failed")\n'
+    '        and not agent_result.get("partial")\n'
+    '        and not agent_result.get("interrupted")\n'
+    '    ):\n'
+    '        logger.debug("Silent final enabled; suppressing empty-response warning")\n'
+    '        return response\n'
+    '\n'
+    '    if agent_result.get("failed"):\n',
+    "gateway run silent final empty-response normalization",
+)
+
 text = replace_once(
     text,
     '    async def _handle_message(self, event: MessageEvent) -> Optional[str]:\n'
