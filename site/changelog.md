@@ -29,14 +29,20 @@ outline: deep
 
 ## Unreleased
 
-- **Fix: Hermes silent-final no-op turns stay silent through gateway delivery** — The
-  Hermes agent loop already marked empty visible responses as completed no-op
-  turns when `HERMES_ALLOW_SILENT_FINAL=1`, but the gateway empty-response
-  formatter still converted those completed no-ops into visible "no response
-  was generated" alerts. The gateway now preserves completed silent-final
-  no-ops while still warning on failed or partial turns.
+<!-- Nothing yet -->
 
-## v0.17.4 <Badge type="tip" text="Latest" /> {#v0-17-4}
+## v0.18.0 <Badge type="tip" text="Latest" /> {#v0-18-0}
+
+*2026-05-19*
+
+- **Hermes native tool presets are compiled explicitly** — Clawdapus now emits explicit Hermes `platform_toolsets` for every active Discord, Slack, and Telegram handle instead of relying on Hermes upstream fallback behavior to decide which native web/terminal/file tools a messaging agent receives. Runner-native tool availability is now a compiled, inspectable part of the generated Hermes config rather than an implicit upstream default. Closes [#156](https://github.com/mostlydev/clawdapus/issues/156).
+- **Firecrawl credentials reach Hermes tool execution** — `FIRECRAWL_API_KEY` and `FIRECRAWL_API_URL` are now passed through to the generated Hermes `.env`, so configured Firecrawl access actually reaches the Hermes tool runtime instead of being dropped at the container boundary.
+- **Hermes defaults to a sane local no-proxy list** — Hermes now defaults `NO_PROXY`/`no_proxy` to `localhost,127.0.0.1,cllama` so a Docker-injected host proxy (including a malformed unbracketed IPv6 entry) can no longer break local cllama traffic before the agent initializes its client. Explicit operator `NO_PROXY` overrides are preserved.
+- **Fix: Hermes silent-final no-op turns stay silent through gateway delivery** — The Hermes agent loop already marked empty visible responses as completed no-op turns when `HERMES_ALLOW_SILENT_FINAL=1`, but the gateway empty-response formatter still converted those completed no-ops into visible "no response was generated" alerts. The gateway now preserves completed silent-final no-ops while still warning on failed or partial turns. Closes [#253](https://github.com/mostlydev/clawdapus/issues/253).
+- **Fix: transient Hermes cron upstream failures no longer spam the user channel** — When a scheduled Hermes cron run failed with a transient provider/cllama upstream error, the failure text was posted into the user channel. Transient cron upstream failures are now logged and recorded as failed runs without user-facing delivery by default; set `HERMES_CRON_DELIVER_TRANSIENT_FAILURES=1` to restore the old delivery behavior. Closes [#255](https://github.com/mostlydev/clawdapus/issues/255).
+- **Pins infra images** — `hermes-base` moves to `v2026.5.16-claw.2` (upstream Hermes v2026.5.16 plus the updated Clawdapus runtime patches, including the gateway silent-final fix). `claw-api`, `clawdash`, `claw-wall`, and `claw-mcp-stdio` move in lockstep to `v0.18.0`. cllama stays at `v0.6.7`.
+
+## v0.17.4 {#v0-17-4}
 
 *2026-05-19*
 

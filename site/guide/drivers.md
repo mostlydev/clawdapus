@@ -57,12 +57,24 @@ Container env vars from compose `environment:` are not available in Hermes agent
 
 For Discord handles, the Hermes driver disables the upstream `text_to_speech` tool by default so agents reply in text instead of model-selected voice attachments. A service can opt back in with `x-claw.hermes.allow-tools: [text_to_speech]`.
 
+For Discord, Slack, and Telegram handles, the driver compiles explicit Hermes
+`platform_toolsets` so the runner's native web, terminal, and file tools are an
+inspectable part of the generated config instead of an implicit upstream
+fallback. `FIRECRAWL_API_KEY` and `FIRECRAWL_API_URL` are passed through to the
+Hermes `.env` when set, so configured Firecrawl access reaches tool execution.
+Hermes also defaults `NO_PROXY`/`no_proxy` to `localhost,127.0.0.1,cllama` so a
+Docker-injected host proxy cannot break local cllama traffic; explicit operator
+`NO_PROXY` overrides are preserved.
+
 Hermes Discord and Slack services default to silent-final handling because the
 visible reply often goes through the `send_message` tool. Empty visible final
 responses after tool calls complete as no-op turns instead of surfacing retry
 or nudge warnings to the channel. Operators can disable this per service with
 `HERMES_ALLOW_SILENT_FINAL=0`, or enable it explicitly for other Hermes
-surfaces with `x-claw.hermes.allow-silent: true`.
+surfaces with `x-claw.hermes.allow-silent: true`. Transient cron upstream
+failures are logged and recorded as failed runs without user-channel delivery
+by default; set `HERMES_CRON_DELIVER_TRANSIENT_FAILURES=1` to restore the old
+delivery behavior.
 
 ### nanoclaw
 
