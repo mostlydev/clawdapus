@@ -839,6 +839,56 @@ func spikeBuildImage(t *testing.T, contextDir, tag, dockerfile string) {
 	if err != nil {
 		t.Fatalf("docker build %s: %v\n%s", tag, err, out)
 	}
+	spikeTagRunnerBaseImage(t, tag)
+}
+
+func spikeTagRunnerBaseImage(t *testing.T, tag string) {
+	t.Helper()
+	if !spikeIsRunnerBaseTag(tag) {
+		return
+	}
+
+	out, err := exec.Command("docker", "image", "inspect", "--format", "{{.Id}}", tag).Output()
+	if err != nil {
+		t.Fatalf("inspect runner base image %s: %v", tag, err)
+	}
+	imageID := strings.TrimPrefix(strings.TrimSpace(string(out)), "sha256:")
+	if len(imageID) > 12 {
+		imageID = imageID[:12]
+	}
+	if imageID == "" {
+		imageID = "unknown"
+	}
+
+	versioned := spikeImageRepo(tag) + ":built-" + time.Now().UTC().Format("20060102") + "-" + imageID
+	t.Logf("tagging runner base %s as %s", tag, versioned)
+	if out, err := exec.Command("docker", "tag", tag, versioned).CombinedOutput(); err != nil {
+		t.Fatalf("tag runner base %s as %s: %v\n%s", tag, versioned, err, out)
+	}
+}
+
+func spikeIsRunnerBaseTag(tag string) bool {
+	switch tag {
+	case "openclaw:latest",
+		"nullclaw:latest",
+		"microclaw:latest",
+		"nanoclaw-orchestrator:latest",
+		"nanobot:latest",
+		"picoclaw:latest":
+		return true
+	default:
+		return false
+	}
+}
+
+func spikeImageRepo(imageRef string) string {
+	imageRef = strings.TrimSpace(imageRef)
+	slash := strings.LastIndex(imageRef, "/")
+	colon := strings.LastIndex(imageRef, ":")
+	if colon > slash {
+		return imageRef[:colon]
+	}
+	return imageRef
 }
 
 func spikeEnsureRepoInfraImages(t *testing.T, repoRoot string, components ...string) {

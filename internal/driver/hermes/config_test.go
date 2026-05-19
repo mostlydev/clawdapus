@@ -225,6 +225,88 @@ func TestGenerateConfigIncludesCllamaRouting(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigIncludesPlatformToolsetsForActiveHandles(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {},
+			"Slack":   {},
+		},
+		Environment: map[string]string{
+			"DISCORD_BOT_TOKEN":  "discord-token",
+			"SLACK_BOT_TOKEN":    "slack-bot",
+			"SLACK_APP_TOKEN":    "slack-app",
+			"OPENROUTER_API_KEY": "or-key",
+		},
+	}
+
+	mc, err := resolveModelConfig(rc)
+	if err != nil {
+		t.Fatalf("resolveModelConfig returned error: %v", err)
+	}
+	data, err := GenerateConfig(rc, mc)
+	if err != nil {
+		t.Fatalf("GenerateConfig returned error: %v", err)
+	}
+
+	var cfg struct {
+		PlatformToolsets map[string][]string `yaml:"platform_toolsets"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("parse generated yaml: %v", err)
+	}
+
+	for platform, want := range map[string]string{
+		"discord": "hermes-discord",
+		"slack":   "hermes-slack",
+	} {
+		got := cfg.PlatformToolsets[platform]
+		if len(got) != 1 || got[0] != want {
+			t.Fatalf("expected %s platform_toolsets to be [%s], got %#v", platform, want, got)
+		}
+	}
+	if _, exists := cfg.PlatformToolsets["telegram"]; exists {
+		t.Fatalf("did not expect telegram platform_toolsets entry, got %#v", cfg.PlatformToolsets["telegram"])
+	}
+}
+
+func TestGenerateConfigAllowsPlatformToolsetsOverride(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {},
+		},
+		Configures: []string{
+			`hermes config set --json platform_toolsets.discord ["custom-discord"]`,
+		},
+		Environment: map[string]string{
+			"DISCORD_BOT_TOKEN":  "discord-token",
+			"OPENROUTER_API_KEY": "or-key",
+		},
+	}
+
+	mc, err := resolveModelConfig(rc)
+	if err != nil {
+		t.Fatalf("resolveModelConfig returned error: %v", err)
+	}
+	data, err := GenerateConfig(rc, mc)
+	if err != nil {
+		t.Fatalf("GenerateConfig returned error: %v", err)
+	}
+
+	var cfg struct {
+		PlatformToolsets map[string][]string `yaml:"platform_toolsets"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("parse generated yaml: %v", err)
+	}
+
+	got := cfg.PlatformToolsets["discord"]
+	if len(got) != 1 || got[0] != "custom-discord" {
+		t.Fatalf("expected CONFIGURE override for discord platform_toolsets, got %#v", got)
+	}
+}
+
 func TestGenerateEnvFileSetsManagedDefaultIdentity(t *testing.T) {
 	rc := &driver.ResolvedClaw{}
 	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
@@ -257,7 +339,9 @@ func TestGenerateEnvFileDefaultsWritableGatewayState(t *testing.T) {
 	env := string(data)
 	for _, expected := range []string{
 		hermesGatewayLockDirEnv + "=" + hermesDefaultGatewayLockDir + "\n",
+		"NO_PROXY=" + hermesDefaultNoProxy + "\n",
 		"XDG_STATE_HOME=" + hermesDefaultXDGStateHome + "\n",
+		"no_proxy=" + hermesDefaultNoProxy + "\n",
 	} {
 		if !strings.Contains(env, expected) {
 			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
@@ -284,6 +368,29 @@ func TestGenerateEnvFileAllowsGatewayStateOverride(t *testing.T) {
 	for _, expected := range []string{
 		hermesGatewayLockDirEnv + "=/custom/locks\n",
 		"XDG_STATE_HOME=/custom/state\n",
+	} {
+		if !strings.Contains(env, expected) {
+			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
+		}
+	}
+}
+
+func TestGenerateEnvFileAllowsNoProxyOverride(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Environment: map[string]string{
+			"NO_PROXY": "localhost,cllama,internal",
+			"no_proxy": "localhost,cllama,internal",
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	for _, expected := range []string{
+		"NO_PROXY=localhost,cllama,internal\n",
+		"no_proxy=localhost,cllama,internal\n",
 	} {
 		if !strings.Contains(env, expected) {
 			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
@@ -439,6 +546,29 @@ func TestGenerateEnvFilePassesThroughSlackRuntimeKnobs(t *testing.T) {
 	} {
 		if !strings.Contains(env, expected) {
 			t.Fatalf("expected %q in .env, got:\n%s", expected, env)
+		}
+	}
+}
+
+func TestGenerateEnvFileIncludesFirecrawlVars(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Environment: map[string]string{
+			"FIRECRAWL_API_KEY": "fc-key",
+			"FIRECRAWL_API_URL": "https://firecrawl.internal",
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	for _, want := range []string{
+		"FIRECRAWL_API_KEY=fc-key\n",
+		"FIRECRAWL_API_URL=https://firecrawl.internal\n",
+	} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("expected env output to contain %q, got:\n%s", want, env)
 		}
 	}
 }
