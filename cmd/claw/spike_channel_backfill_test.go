@@ -152,6 +152,10 @@ func TestSpikeChannelBackfill(t *testing.T) {
 	if !strings.Contains(body, wantAvailable) {
 		t.Fatalf("expected %q in header, got body:\n%s", wantAvailable, body)
 	}
+	wantSource := "source=" + channelID + "/1000000000000359"
+	if !strings.Contains(body, wantSource) {
+		t.Fatalf("expected newest message source handle %q in body, got body:\n%s", wantSource, body)
+	}
 	// Buffer range should start near 24h ago (the oldest in-window message
 	// is at now-24h, since messages are 6min apart and index 120 = -24h
 	// exactly). Allow some clock skew.
@@ -161,11 +165,11 @@ func TestSpikeChannelBackfill(t *testing.T) {
 }
 
 type fakeDiscordMessage struct {
-	ID        string             `json:"id"`
-	Content   string             `json:"content"`
-	Timestamp string             `json:"timestamp"`
-	Author    fakeDiscordAuthor  `json:"author"`
-	ChannelID string             `json:"channel_id,omitempty"`
+	ID        string            `json:"id"`
+	Content   string            `json:"content"`
+	Timestamp string            `json:"timestamp"`
+	Author    fakeDiscordAuthor `json:"author"`
+	ChannelID string            `json:"channel_id,omitempty"`
 }
 
 type fakeDiscordAuthor struct {
@@ -308,4 +312,3 @@ func waitForBackfillComplete(ctx context.Context, url string) (string, error) {
 		time.Sleep(250 * time.Millisecond)
 	}
 }
-

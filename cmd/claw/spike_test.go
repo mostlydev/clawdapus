@@ -691,6 +691,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	// trading-api posts its own startup message to Discord via webhook — this
 	// proves non-claw services receive env vars (DISCORD_TRADING_API_WEBHOOK).
 	spikeVerifyDiscordGreeting(t, env["TIVERTON_BOT_TOKEN"], channelID, "trading-api online", 15*time.Second)
+	spikeVerifyChannelAwarenessSourceHandle(t, channelID, 60*time.Second)
 
 	// The startup message must contain Discord mentions for openclaw agents.
 	// CLAW_HANDLE_* vars are broadcast to all pod services by claw, so trading-api
@@ -1061,6 +1062,29 @@ func spikeVerifyDiscordGreeting(t *testing.T, botToken, channelID, expectedSubst
 		time.Sleep(3 * time.Second)
 	}
 	t.Errorf("Discord greeting %q not found in channel %s after %v", expectedSubstr, channelID, timeout)
+}
+
+func spikeVerifyChannelAwarenessSourceHandle(t *testing.T, channelID string, timeout time.Duration) {
+	t.Helper()
+	spikeVerifyContainerChannelAwarenessSourceHandle(t, spikeContainerName("claw-wall"), channelID, timeout)
+}
+
+func spikeVerifyContainerChannelAwarenessSourceHandle(t *testing.T, containerName, channelID string, timeout time.Duration) {
+	t.Helper()
+	url := fmt.Sprintf("http://127.0.0.1:8080/channel-awareness?channels=%s&since=24h&limit=50&max_chars=200000", channelID)
+	want := "source=" + channelID + "/"
+	deadline := time.Now().Add(timeout)
+	var lastBody string
+	for time.Now().Before(deadline) {
+		out, err := exec.Command("docker", "exec", containerName, "wget", "-qO-", url).CombinedOutput()
+		lastBody = string(out)
+		if err == nil && strings.Contains(lastBody, want) {
+			t.Logf("found channel-awareness source handle for channel %s", channelID)
+			return
+		}
+		time.Sleep(3 * time.Second)
+	}
+	t.Errorf("channel-awareness source handle %q not found after %v; last body:\n%s", want, timeout, lastBody)
 }
 
 func spikeImageExists(tag string) bool {
