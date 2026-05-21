@@ -30,8 +30,8 @@ in this plan depends on it but does not own it.
 Complete Clawdapus issue #232 Phase 2 by adding a reusable, source-backed
 rolling digest for Discord channel awareness.
 
-This is not a Tiverton-only compactor and not a new sibling feed. The existing
-Clawdapus contract already has the right surface:
+This is not a deployment-specific compactor and not a new sibling feed. The
+existing Clawdapus contract already has the right surface:
 
 - `channel-awareness` is the room-awareness feed.
 - `channel-context` is the cursorized live-continuity feed.
@@ -190,15 +190,15 @@ Draft `/ingest` payload:
 
 ```json
 {
-  "channel_id": "1464509330731696213",
+  "channel_id": "1234567890123456789",
   "message": {
-    "id": "1507122322425909433",
-    "author_id": "1464508146579148851",
-    "author_name": "Weston",
+    "id": "2234567890123456789",
+    "author_id": "3234567890123456789",
+    "author_name": "analyst-a",
     "created_at": "2026-05-21T16:23:22Z",
     "edited_at": null,
     "deleted": false,
-    "content": "[PROPOSED] weston-... SELL ANET ...",
+    "content": "[PROPOSED] signal-123 SELL ACME ...",
     "content_hash": "sha256:..."
   },
   "source": {
@@ -296,14 +296,14 @@ Example sparse block:
 {
   "kind": "sequence_rollup",
   "sparse": true,
-  "text": "Weston and Gerrard rejected chasing ANET after RS faded; Dundas treated the related broad NVDA recap as non-actionable.",
-  "source_channel": "1464509330731696213",
-  "source_messages": ["1507122322425909433", "1507122441228849221", "1507122500083397120"],
+  "text": "Analyst A and analyst B rejected chasing ACME after the signal faded; router C treated the related broad market recap as non-actionable.",
+  "source_channel": "1234567890123456789",
+  "source_messages": ["2234567890123456789", "2234567890123456790", "2234567890123456791"],
   "source_window": {
     "from": "2026-05-21T16:23:22Z",
     "to": "2026-05-21T16:27:10Z"
   },
-  "participants": ["Weston", "Gerrard", "Dundas"],
+  "participants": ["analyst-a", "analyst-b", "router-c"],
   "score": 0.73
 }
 ```
@@ -322,7 +322,7 @@ Draft `/digest` request:
 
 ```json
 {
-  "channel_ids": ["1464509330731696213"],
+  "channel_ids": ["1234567890123456789"],
   "since": "24h",
   "raw_recent": {
     "max_messages": 50,
@@ -332,7 +332,7 @@ Draft `/digest` request:
     "max_digest_bytes": 8192,
     "max_blocks": 32
   },
-  "agent_id": "logan",
+  "agent_id": "agent-0",
   "allowlist_hash": "sha256:..."
 }
 ```
@@ -355,9 +355,9 @@ Draft `/digest` response:
     {
       "kind": "hard_event",
       "event_type": "trade_proposal",
-      "text": "[16:23] Leviathan proposed SELL ANET weston-1779380602-8cf5d9a7; reason RS QQQ 1h -0.3.",
-      "source_channel": "1464509330731696213",
-      "source_messages": ["1507122322425909433"],
+      "text": "[16:23] analyst-a proposed SELL ACME signal-123; reason momentum faded.",
+      "source_channel": "1234567890123456789",
+      "source_messages": ["2234567890123456789"],
       "source_window": {
         "from": "2026-05-21T16:23:22Z",
         "to": "2026-05-21T16:23:22Z"
@@ -421,8 +421,8 @@ For `hard_event`, use a typed `event_type`, such as:
 - `trade_confirmation`
 - `trade_fill`
 - `stop_or_target_change`
-- `dundas_route`
-- `dundas_no_route`
+- `route_decision`
+- `no_route_decision`
 - `held_position_news`
 - `watchlist_news`
 - `thesis_update`
@@ -439,23 +439,23 @@ metadata, not the conceptual surface.
 Example header:
 
 ```text
-[channel-awareness] kind=raw_window+digest since=24h channels=1464509330731696213 raw_messages=50 digest_messages=150 retained=200/since-24h omitted=0 digest=ok digest_generated_at=2026-05-21T21:55:00Z digest_bytes=6812
+[channel-awareness] kind=raw_window+digest since=24h channels=1234567890123456789 raw_messages=50 digest_messages=150 retained=200/since-24h omitted=0 digest=ok digest_generated_at=2026-05-21T21:55:00Z digest_bytes=6812
 ```
 
 Example body:
 
 ```text
 ## Raw Recent Window
-[16:23] Leviathan: [PROPOSED] weston-... SELL ANET ...
+[16:23] analyst-a: [PROPOSED] signal-123 SELL ACME ...
 
 ## Digest: Hard Events
-- [16:23] Leviathan proposed SELL ANET weston-...; source=146.../150...
+- [16:23] analyst-a proposed SELL ACME signal-123; source=123.../223...
 
 ## Digest: Topic Rollups
-- ANET: entry invalidated and exited after RS faded from +4.3 to negative; sources=...
+- ACME: entry invalidated and exited after signal faded from strong to weak; sources=...
 
 ## Digest: Telemetry Elisions
-- [15:45-15:46] provider retry/status noise elided: Weston x4, Boulton x4, Gerrard x4.
+- [15:45-15:46] provider retry/status noise elided: agent-0 x4, agent-1 x4, agent-2 x4.
 
 ## Digest Coverage
 - coverage=ok from=... to=... generated_at=...
@@ -599,21 +599,22 @@ Telemetry should expose:
 - LLM calls/cost estimate
 - deterministic-only fallback count
 
-## Tiverton Evidence And Acceptance Input
+## Production Evidence And Acceptance Input
 
-The Tiverton incident evidence should drive the upstream acceptance suite:
+The motivating production evidence should drive the upstream acceptance suite
+without encoding a deployment identity in public Clawdapus docs:
 
-- Logan baseline: `channel-awareness` 89,934 chars, 200 Discord messages, 61
-  runtime/status lines, 15 cron lines, model
-  `openrouter/moonshotai/kimi-k2.6`.
-- Weston 2026-05-21T19:34Z timeout: feed fetches completed quickly; provider
-  request hit the roughly 120 second envelope. Raw 24h `channel-awareness` was
-  the size driver, not feed latency.
+- A raw 24h `channel-awareness` feed can reach roughly 90k characters across
+  200 Discord messages, including dozens of runtime/status lines and recurring
+  cron/status lines.
+- A provider request can hit the roughly 120 second envelope even when feed
+  fetches complete quickly. Raw 24h `channel-awareness` size was the driver,
+  not feed latency.
 - Telemetry stripping alone is not enough; long agent decision reports dominate
   bytes.
 - Hard events that must be preserved include trade proposal, approval,
   confirmation, fill, stop/target changes, held-position news, watchlist news,
-  Dundas route/no-route decisions, thesis updates, and action-changing
+  route/no-route decisions, thesis updates, and action-changing
   disagreements.
 - Provider-visible side channels have been verified for structured trade
   reasoning, watchlist/position state, scaffold, chronicle, and agent memory.
@@ -625,7 +626,7 @@ Acceptance for the upstream implementation:
 - source messages and derived sparse blocks are stored in an indexed database
 - deterministic mode works with no LLM key
 - exact source retrieval works from digest provenance
-- hard events are preserved in the Tiverton sample
+- hard events are preserved in the sanitized production fixture
 - coverage gaps and stale digest states are explicit
 - provider-visible capture shows meaningful byte reduction after LLM rollup
 - `channel_context_op` telemetry distinguishes raw-only, digest, stale, and
@@ -650,7 +651,7 @@ D3. Land #232 Phase 1 follow-up for Discord message ID exposure (see
 5. Add exact message ID provenance to feed output and retrieval tools (if
    not already landed via the Phase 1 follow-up).
 6. Add async LLM worker and cost caps.
-7. Add sanitized Tiverton fixture for hard-event preservation and byte
+7. Add a sanitized production fixture for hard-event preservation and byte
    measurement.
 8. Only after the example proves out, decide whether to promote it to a
    published `cmd/claw-channel-memory` image.
@@ -674,6 +675,6 @@ D3. Land #232 Phase 1 follow-up for Discord message ID exposure (see
 ## Next Step
 
 Open a Clawdapus implementation issue from the design tasks above, starting
-with the stable Discord message ID follow-up. Keep Tiverton's local plan as
-incident evidence, acceptance criteria, and a later deployment checklist rather
-than building a Tiverton-only compactor.
+with the stable Discord message ID follow-up. Keep deployment-local plans as
+private incident evidence, acceptance criteria, and later deployment checklists
+rather than building a deployment-specific compactor.
