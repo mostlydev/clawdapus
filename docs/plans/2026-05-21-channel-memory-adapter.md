@@ -256,7 +256,9 @@ Recommended minimal schema shape:
 - `source_messages`: one retained source event per Discord message, keyed by
   `(source_kind, channel_id, message_id, content_hash)` with indexed
   `timestamp`, `channel_id`, `author_id`, edit/delete state, and visibility
-  scope.
+  scope. Edits create new rows because `content_hash` changes; recall and feed
+  serving select the current non-deleted version unless the request explicitly
+  asks for historical versions.
 - `derived_blocks`: deterministic or LLM-produced recall blocks with `kind`,
   `sparse`, `source_window`, `generated_at`, `stale/dirty` state, and cost/
   processor metadata.
@@ -276,6 +278,12 @@ The recall view should be tiered:
 - older material returns sparse derived blocks
 - exact source retrieval remains available when a sparse block cites retained
   messages
+
+The `sparse` flag is about content fidelity, not age. `sparse=false` means the
+block reproduces source content faithfully, as with `hard_event` and
+`raw_excerpt` blocks. `sparse=true` means the block summarizes, elides, or
+otherwise omits source content, as with `topic_rollup`, `sequence_rollup`, and
+`telemetry_count`.
 
 Sparse blocks can cover one message or many messages. A short exchange in a
 Discord channel may become one `sequence_rollup` block with the gist of the

@@ -88,7 +88,11 @@ Negative:
 - Digest entries carry source message provenance sufficient for
   `search_channel_context` / `get_channel_messages` to retrieve exact source.
 - Sparse digest entries are derived artifacts over retained source-message
-  ranges, not a parallel primary message history.
+  ranges, not a parallel primary message history. `sparse=true` means the block
+  summarizes or omits source content; `sparse=false` means the block faithfully
+  reproduces source content.
+- Edited messages create a new retained source row keyed by the changed content
+  hash, and normal recall/serving paths select the current non-deleted version.
 - Hard events such as trade proposal, approval, confirmation, fill, stop/target
   change, explicit route/no-route decision, and risk-limit event are preserved
   verbatim or near-verbatim.
