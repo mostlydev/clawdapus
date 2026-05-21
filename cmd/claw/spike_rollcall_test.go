@@ -319,6 +319,7 @@ func TestSpikeRollCall(t *testing.T) {
 			agentContainerID := rollcallResolveContainerID(t, generatedPath, agent.name)
 			cllamaContainerID := rollcallResolveContainerID(t, generatedPath, "cllama")
 			clawdashContainerID := rollcallResolveContainerID(t, generatedPath, "clawdash")
+			clawWallContainerID := rollcallResolveContainerID(t, generatedPath, "claw-wall")
 
 			var teardownOnce sync.Once
 			teardown := func() {
@@ -326,6 +327,7 @@ func TestSpikeRollCall(t *testing.T) {
 					rollcallLogContainer(t, agentContainerID)
 					rollcallLogContainer(t, cllamaContainerID)
 					rollcallLogContainer(t, clawdashContainerID)
+					rollcallLogContainer(t, clawWallContainerID)
 					spikeCleanupProject(composeProject, generatedPath)
 					_ = os.Remove(generatedPath)
 					_ = os.RemoveAll(runtimeDir)
@@ -342,6 +344,7 @@ func TestSpikeRollCall(t *testing.T) {
 			})
 
 			spikeWaitHealthy(t, agentContainerID, 120*time.Second)
+			spikeWaitHealthy(t, clawWallContainerID, 60*time.Second)
 
 			auditWindowStart := time.Now()
 			triggerMsg := fmt.Sprintf("<@%s> Runtime check: introduce yourself and state what runtime you are running on.", botID)
@@ -357,6 +360,7 @@ func TestSpikeRollCall(t *testing.T) {
 				2*time.Minute,
 			)
 			t.Logf("found %s response: %q", agent.runtime, rollcallTruncate(response, 120))
+			spikeVerifyContainerChannelAwarenessSourceHandle(t, clawWallContainerID, channelID, 60*time.Second)
 
 			rollcallAssertAuditTelemetry(t, podPath, agent.name, agent.runtime, auditWindowStart)
 			rollcallAssertSessionHistory(t, sessionHistoryDir, agent.name)

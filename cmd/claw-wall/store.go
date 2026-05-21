@@ -29,11 +29,12 @@ const (
 )
 
 type wallMessage struct {
-	ID        string    `json:"id"`
-	ChannelID string    `json:"channel_id"`
-	Author    string    `json:"author"`
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
+	ID           string    `json:"id"`
+	ChannelID    string    `json:"channel_id"`
+	SourceHandle string    `json:"source_handle,omitempty"`
+	Author       string    `json:"author"`
+	Content      string    `json:"content"`
+	Timestamp    time.Time `json:"timestamp"`
 }
 
 type channelBuffer struct {
@@ -187,6 +188,7 @@ func (s *conversationStore) mergeAt(channelID string, messages []wallMessage, no
 		if _, exists := state.seenIDs[msg.ID]; exists {
 			continue
 		}
+		msg.SourceHandle = stableSourceHandle(msg)
 		state.seenIDs[msg.ID] = struct{}{}
 		state.messages = append(state.messages, msg)
 	}
@@ -840,7 +842,19 @@ func formatWallMessages(messages []wallMessage) string {
 }
 
 func formatWallMessage(msg wallMessage) string {
+	if handle := stableSourceHandle(msg); handle != "" {
+		return fmt.Sprintf("[%s source=%s] %s: %s", formatWallTimestamp(msg.Timestamp), handle, msg.Author, msg.Content)
+	}
 	return fmt.Sprintf("[%s] %s: %s", formatWallTimestamp(msg.Timestamp), msg.Author, msg.Content)
+}
+
+func stableSourceHandle(msg wallMessage) string {
+	channelID := strings.TrimSpace(msg.ChannelID)
+	messageID := strings.TrimSpace(msg.ID)
+	if channelID == "" || messageID == "" {
+		return ""
+	}
+	return channelID + "/" + messageID
 }
 
 func contextKindFromRequest(r *http.Request, result tailResult) string {

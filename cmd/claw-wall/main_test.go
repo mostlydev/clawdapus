@@ -265,6 +265,9 @@ func TestChannelAwarenessHandlerReturnsRawWindow(t *testing.T) {
 	if strings.Contains(text, "older signal") || !strings.Contains(text, "newer signal") {
 		t.Fatalf("expected newest bounded awareness body, got %q", text)
 	}
+	if !strings.Contains(text, "source=chan-1/101") {
+		t.Fatalf("expected stable source handle in awareness body, got %q", text)
+	}
 }
 
 func TestChannelAwarenessHeaderReportsBackfillStatus(t *testing.T) {
@@ -329,6 +332,32 @@ func TestToolSearchRequiresAuthAndChannelAllowlist(t *testing.T) {
 	}
 	if result.Status != "ok" || len(result.Messages) != 1 || result.Messages[0].ID != "100" {
 		t.Fatalf("unexpected search result: %+v", result)
+	}
+	if result.Messages[0].SourceHandle != "chan-1/100" {
+		t.Fatalf("expected source handle in search result, got %+v", result.Messages[0])
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/get_channel_messages", strings.NewReader(`{"channels":["chan-1"],"message_ids":["100"]}`))
+	if err != nil {
+		t.Fatalf("request exact message: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer tool-token")
+	req.Header.Set("X-Claw-ID", "trader-0")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST exact message: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 for exact message, got %d: %s", resp.StatusCode, string(body))
+	}
+	var exact retrievalResult
+	if err := json.NewDecoder(resp.Body).Decode(&exact); err != nil {
+		t.Fatalf("decode exact response: %v", err)
+	}
+	if exact.Status != "ok" || len(exact.Messages) != 1 || exact.Messages[0].SourceHandle != "chan-1/100" {
+		t.Fatalf("unexpected exact message result: %+v", exact)
 	}
 
 	req, err = http.NewRequest(http.MethodPost, server.URL+"/get_channel_messages", strings.NewReader(`{"channels":["chan-2"],"message_ids":["200"]}`))
