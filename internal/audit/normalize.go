@@ -74,6 +74,21 @@ func NormalizeLine(line []byte) (*Event, error) {
 	if value, ok := intField(raw, "omitted"); ok {
 		event.Omitted = &value
 	}
+	if value, ok := intField(raw, "raw_bytes"); ok {
+		event.RawBytes = &value
+	}
+	if value, ok := intField(raw, "digest_bytes"); ok {
+		event.DigestBytes = &value
+	}
+	if value, ok := intField(raw, "digest_blocks"); ok {
+		event.DigestBlocks = &value
+	}
+	if value, ok := intField(raw, "coverage_gaps"); ok {
+		event.CoverageGaps = &value
+	}
+	if value, ok := boolField(raw, "deterministic_only"); ok {
+		event.DeterministicOnly = &value
+	}
 	if value, ok := float64Field(raw, "cost_usd"); ok {
 		event.CostUSD = &value
 	}

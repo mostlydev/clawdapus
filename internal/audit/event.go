@@ -35,6 +35,11 @@ type Event struct {
 	Retained           *int      `json:"retained,omitempty"`
 	Returned           *int      `json:"returned,omitempty"`
 	Omitted            *int      `json:"omitted,omitempty"`
+	RawBytes           *int      `json:"raw_bytes,omitempty"`
+	DigestBytes        *int      `json:"digest_bytes,omitempty"`
+	DigestBlocks       *int      `json:"digest_blocks,omitempty"`
+	CoverageGaps       *int      `json:"coverage_gaps,omitempty"`
+	DeterministicOnly  *bool     `json:"deterministic_only,omitempty"`
 	Status             string    `json:"status,omitempty"`
 	// provider_pool event fields
 	Provider      string `json:"provider,omitempty"`
