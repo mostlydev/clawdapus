@@ -27,6 +27,7 @@ type config struct {
 	ToolToken              string
 	AgentChannelsPath      string
 	ChannelMemoryIngestURL string
+	ChannelMemoryDigestURL string
 	ChannelMemoryToken     string
 	ChannelMemoryTimeout   time.Duration
 }
@@ -58,7 +59,7 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("claw-wall: parse CLAW_WALL_TOKENS: %w", err)
 	}
-	channelMemory, err := newChannelMemoryClient(cfg.ChannelMemoryIngestURL, cfg.ChannelMemoryToken, cfg.ChannelMemoryTimeout)
+	channelMemory, err := newChannelMemoryClientWithDigest(cfg.ChannelMemoryIngestURL, cfg.ChannelMemoryDigestURL, cfg.ChannelMemoryToken, cfg.ChannelMemoryTimeout)
 	if err != nil {
 		return fmt.Errorf("claw-wall: configure channel-memory: %w", err)
 	}
@@ -168,6 +169,7 @@ func loadConfig() (config, error) {
 		ToolToken:              strings.TrimSpace(os.Getenv("CLAW_WALL_TOOL_TOKEN")),
 		AgentChannelsPath:      envOr("CLAW_WALL_AGENT_CHANNELS_FILE", "/etc/claw-wall/agent-channels.json"),
 		ChannelMemoryIngestURL: strings.TrimSpace(os.Getenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL")),
+		ChannelMemoryDigestURL: strings.TrimSpace(os.Getenv("CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL")),
 		ChannelMemoryToken:     strings.TrimSpace(os.Getenv("CLAW_WALL_CHANNEL_MEMORY_TOKEN")),
 		ChannelMemoryTimeout:   channelMemoryTimeout,
 	}, nil

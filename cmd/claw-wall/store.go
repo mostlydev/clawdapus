@@ -13,11 +13,13 @@ import (
 )
 
 const (
-	defaultResponseLimit  = 20
-	backgroundContextSize = 10
-	defaultTailLimit      = 40
-	defaultAwarenessLimit = 60
-	defaultTailMaxChars   = 32 * 1024
+	defaultResponseLimit   = 20
+	backgroundContextSize  = 10
+	defaultTailLimit       = 40
+	defaultAwarenessLimit  = 60
+	defaultTailMaxChars    = 32 * 1024
+	defaultDigestRawLimit  = 10
+	defaultDigestMaxBlocks = 32
 )
 
 const (
@@ -131,6 +133,18 @@ type channelMemoryReplayResponse struct {
 	Status   string `json:"status"`
 	Messages int    `json:"messages"`
 	Pushed   int    `json:"pushed"`
+}
+
+type channelAwarenessDigest struct {
+	Requested         bool
+	Status            string
+	GeneratedAt       string
+	SourceMessages    int
+	DigestMessages    int
+	RawRecentMessages int
+	CoverageGaps      int
+	DeterministicOnly bool
+	Blocks            []channelMemoryDigestBlock
 }
 
 func newConversationStore(limit int, retentions ...time.Duration) *conversationStore {
@@ -778,15 +792,24 @@ func newHandler(store *conversationStore, cfgs ...handlerConfig) http.Handler {
 			}
 			maxChars = parsed
 		}
+		digest := channelAwarenessDigest{}
+		contextKind := channelAwarenessContextKindFromRequest(r)
+		if contextKind == "raw_window+digest" {
+			digest = cfg.channelMemory.fetchAwarenessDigest(r.Context(), channelIDs, since)
+		}
+		rawLimit := limit
+		if contextKind == "raw_window+digest" && len(digest.Blocks) > 0 && defaultDigestRawLimit < rawLimit {
+			rawLimit = defaultDigestRawLimit
+		}
 		result := store.tail(tailRequest{
 			ChannelIDs: channelIDs,
 			Since:      since,
-			Limit:      limit,
+			Limit:      rawLimit,
 			MaxChars:   maxChars,
 			Now:        store.currentTime(),
 		})
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte(formatChannelAwareness(result, since)))
+		_, _ = w.Write([]byte(formatChannelAwareness(result, since, contextKind, digest)))
 	})
 	mux.HandleFunc("/search_channel_context", func(w http.ResponseWriter, r *http.Request) {
 		if !authorizeToolRequest(w, r, cfg) {
@@ -976,9 +999,28 @@ func formatTailContext(result tailResult, since time.Duration, kind string) stri
 	return b.String()
 }
 
-func formatChannelAwareness(result tailResult, since time.Duration) string {
+func channelAwarenessContextKindFromRequest(r *http.Request) string {
+	switch strings.TrimSpace(r.URL.Query().Get("context_kind")) {
+	case "raw_window+digest", "raw_window digest":
+		return "raw_window+digest"
+	default:
+		return "raw_window"
+	}
+}
+
+func formatChannelAwareness(result tailResult, since time.Duration, contextKind string, digest channelAwarenessDigest) string {
+	if contextKind != "raw_window+digest" {
+		contextKind = "raw_window"
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "[channel-awareness] kind=raw_window since=%s channels=%s messages=%d available=%d omitted=%d retained=%d/since-%s digest=unavailable",
+	rawBody := formatWallMessages(result.Messages)
+	digestBody := formatDigestBlocks(digest.Blocks)
+	digestStatus := "unavailable"
+	if digest.Requested {
+		digestStatus = normalizeDigestStatus(digest.Status)
+	}
+	fmt.Fprintf(&b, "[channel-awareness] kind=%s since=%s channels=%s messages=%d available=%d omitted=%d retained=%d/since-%s digest=%s",
+		contextKind,
 		formatDurationForHeader(since),
 		strings.Join(result.ChannelIDs, ","),
 		len(result.Messages),
@@ -986,7 +1028,20 @@ func formatChannelAwareness(result tailResult, since time.Duration) string {
 		result.Omitted,
 		result.Available,
 		formatDurationForHeader(since),
+		digestStatus,
 	)
+	fmt.Fprintf(&b, " raw_bytes=%d digest_bytes=%d", len(rawBody), len(digestBody))
+	if contextKind == "raw_window+digest" {
+		fmt.Fprintf(&b, " digest_blocks=%d digest_source_messages=%d coverage_gaps=%d deterministic_only=%t",
+			len(digest.Blocks),
+			digest.SourceMessages,
+			digest.CoverageGaps,
+			digest.DeterministicOnly,
+		)
+		if digest.GeneratedAt != "" {
+			fmt.Fprintf(&b, " digest_generated_at=%s", digest.GeneratedAt)
+		}
+	}
 	if result.CapReason != "" {
 		fmt.Fprintf(&b, " cap=%s", result.CapReason)
 	}
@@ -999,11 +1054,69 @@ func formatChannelAwareness(result tailResult, since time.Duration) string {
 		fmt.Fprintf(&b, "[omitted %d older retained messages due to %s; newest retained messages follow]\n",
 			result.Omitted, result.CapReason)
 	}
-	if len(result.Messages) > 0 {
+	if digestBody != "" {
 		b.WriteByte('\n')
-		b.WriteString(formatWallMessages(result.Messages))
+		b.WriteString("[digest]\n")
+		b.WriteString(digestBody)
+		b.WriteByte('\n')
+	}
+	if rawBody != "" {
+		b.WriteByte('\n')
+		b.WriteString("[raw recent]\n")
+		b.WriteString(rawBody)
 	}
 	return b.String()
+}
+
+func formatDigestBlocks(blocks []channelMemoryDigestBlock) string {
+	var b strings.Builder
+	for _, block := range blocks {
+		text := strings.TrimSpace(block.Text)
+		if text == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "[digest kind=%s source_channel=%s source_messages=%s window=%s..%s sparse=%t score=%.2f processor=%s] %s",
+			headerToken(block.Kind),
+			headerToken(block.SourceChannel),
+			headerToken(strings.Join(trimNonEmptyStrings(block.SourceMessages), ",")),
+			headerToken(block.SourceWindow.From),
+			headerToken(block.SourceWindow.To),
+			block.Sparse,
+			block.Score,
+			headerToken(block.Processor),
+			text,
+		)
+	}
+	return b.String()
+}
+
+func trimNonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func headerToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "none"
+	}
+	replacer := strings.NewReplacer(" ", "_", "\t", "_", "\n", "_", "\r", "_")
+	return replacer.Replace(value)
 }
 
 func parseDurationQuery(rawSince, rawWindow string) (time.Duration, error) {

@@ -81,12 +81,12 @@ func TestNormalizeLineParseFeedFetchEvent(t *testing.T) {
 }
 
 func TestNormalizeLineParseChannelContextOpEvent(t *testing.T) {
-	line := `{"ts":"2026-05-12T10:00:00Z","claw_id":"weston","type":"channel_context_op","kind":"raw_window","channels":["chan-1","chan-2"],"retained":60,"returned":40,"omitted":20,"source":"claw-wall","status":"ok","tool_name":"search_channel_context","status_code":200}`
+	line := `{"ts":"2026-05-12T10:00:00Z","claw_id":"weston","type":"channel_context_op","kind":"raw_window+digest","channels":["chan-1","chan-2"],"retained":60,"returned":40,"omitted":20,"raw_bytes":12000,"digest_bytes":800,"digest_blocks":3,"coverage_gaps":1,"deterministic_only":true,"source":"claw-wall","status":"coverage_gap","tool_name":"search_channel_context","status_code":200}`
 	event, err := NormalizeLine([]byte(line))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if event.Type != "channel_context_op" || event.ChannelKind != "raw_window" || event.SourceService != "claw-wall" || event.Status != "ok" {
+	if event.Type != "channel_context_op" || event.ChannelKind != "raw_window+digest" || event.SourceService != "claw-wall" || event.Status != "coverage_gap" {
 		t.Fatalf("unexpected event: %+v", event)
 	}
 	if len(event.Channels) != 2 || event.Channels[0] != "chan-1" || event.Channels[1] != "chan-2" {
@@ -94,6 +94,12 @@ func TestNormalizeLineParseChannelContextOpEvent(t *testing.T) {
 	}
 	if event.Retained == nil || *event.Retained != 60 || event.Returned == nil || *event.Returned != 40 || event.Omitted == nil || *event.Omitted != 20 {
 		t.Fatalf("unexpected counts: %+v", event)
+	}
+	if event.RawBytes == nil || *event.RawBytes != 12000 || event.DigestBytes == nil || *event.DigestBytes != 800 || event.DigestBlocks == nil || *event.DigestBlocks != 3 || event.CoverageGaps == nil || *event.CoverageGaps != 1 {
+		t.Fatalf("unexpected digest counts: %+v", event)
+	}
+	if event.DeterministicOnly == nil || !*event.DeterministicOnly {
+		t.Fatalf("expected deterministic_only=true: %+v", event)
 	}
 	if event.ToolName != "search_channel_context" {
 		t.Fatalf("unexpected tool name: %+v", event)

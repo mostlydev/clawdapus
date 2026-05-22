@@ -3880,6 +3880,7 @@ func testFeedByName(t *testing.T, feeds []pod.FeedEntry, name string) pod.FeedEn
 }
 
 func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
+	t.Setenv(conversationWallDiscordBaseEnv, "http://fake-discord:8090")
 	t.Setenv("CLAW_WALL_POLL_INTERVAL", "")
 	t.Setenv("CLAW_WALL_RETENTION", "")
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
@@ -3928,6 +3929,9 @@ func TestInjectConversationWallAddsServiceAndFeed(t *testing.T) {
 	}
 	if wall.Environment["CLAW_WALL_BACKFILL_MAX_PAGES"] != conversationWallBackfillPages {
 		t.Fatalf("unexpected CLAW_WALL_BACKFILL_MAX_PAGES: %q", wall.Environment["CLAW_WALL_BACKFILL_MAX_PAGES"])
+	}
+	if wall.Environment[conversationWallDiscordBaseEnv] != "http://fake-discord:8090" {
+		t.Fatalf("unexpected %s: %q", conversationWallDiscordBaseEnv, wall.Environment[conversationWallDiscordBaseEnv])
 	}
 
 	traderFeeds := p.Services["trader"].Claw.Feeds
@@ -4060,6 +4064,9 @@ func TestInjectConversationWallWiresChannelMemory(t *testing.T) {
 	if wall.Environment[conversationWallMemoryIngestEnv] != "http://channel-memory:8080/ingest" {
 		t.Fatalf("unexpected channel-memory ingest URL: %q", wall.Environment[conversationWallMemoryIngestEnv])
 	}
+	if wall.Environment[conversationWallMemoryDigestEnv] != "http://channel-memory:8080/digest" {
+		t.Fatalf("unexpected channel-memory digest URL: %q", wall.Environment[conversationWallMemoryDigestEnv])
+	}
 	if wall.Environment["CLAW_WALL_CHANNEL_MEMORY_TIMEOUT"] != conversationWallMemoryTimeout {
 		t.Fatalf("unexpected channel-memory timeout: %q", wall.Environment["CLAW_WALL_CHANNEL_MEMORY_TIMEOUT"])
 	}
@@ -4068,6 +4075,10 @@ func TestInjectConversationWallWiresChannelMemory(t *testing.T) {
 	}
 	if p.Services["channel-memory"].Environment["CHANNEL_MEMORY_TOKEN"] != wall.Environment["CLAW_WALL_CHANNEL_MEMORY_TOKEN"] {
 		t.Fatalf("expected channel-memory token to match claw-wall token")
+	}
+	awarenessFeed := testFeedByName(t, p.Services["trader"].Claw.Feeds, conversationWallAwarenessName)
+	if awarenessFeed.Path != "/channel-awareness?channels=chan-1&since=24h&limit=60&max_chars=32768&context_kind=raw_window%2Bdigest" {
+		t.Fatalf("unexpected digest-backed awareness feed path: %q", awarenessFeed.Path)
 	}
 	networks, ok := p.Services["channel-memory"].Compose["networks"].([]string)
 	if !ok || len(networks) != 1 || networks[0] != clawInternalNetworkName {

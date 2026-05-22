@@ -1,10 +1,11 @@
 # Channel Memory Adapter
 
-This is the first executable slice of the digest-backed channel-awareness design.
-It is a standalone HTTP service; `claw-wall` does not call it yet.
+This is the channel-memory adapter for digest-backed channel awareness.
+When a pod declares `x-claw.channel-memory.service`, `claw up` wires `claw-wall`
+to ingest retained channel messages and request digest blocks from this service.
 
 The adapter stores Discord-style channel messages in SQLite and keeps exact
-source provenance for later digest-backed `channel-awareness` work.
+source provenance for digest-backed `channel-awareness` work.
 
 ## Endpoints
 
@@ -62,9 +63,10 @@ docker build -f examples/channel-memory/Dockerfile -t channel-memory:latest .
 
 ## Pod Wiring
 
-Declare the adapter once at pod level. `claw up` injects the ingest URL and a
-bearer token into `claw-wall`, and injects the matching `CHANNEL_MEMORY_TOKEN`
-into the adapter service.
+Declare the adapter once at pod level. `claw up` injects ingest and digest URLs
+plus a bearer token into `claw-wall`, injects the matching
+`CHANNEL_MEMORY_TOKEN` into the adapter service, and changes generated
+`channel-awareness` feeds to request `context_kind=raw_window+digest`.
 
 ```yaml
 x-claw:

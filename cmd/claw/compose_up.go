@@ -56,9 +56,11 @@ const (
 	conversationWallBackfillPages   = "25"
 	conversationWallInternalPort    = "8080"
 	conversationWallDockerfile      = "dockerfiles/claw-wall/Dockerfile"
+	conversationWallDiscordBaseEnv  = "CLAW_WALL_DISCORD_BASE_URL"
 	conversationWallToolTokenEnv    = "CLAW_WALL_TOOL_TOKEN"
 	conversationWallAllowlistPath   = "/etc/claw-wall/agent-channels.json"
 	conversationWallMemoryIngestEnv = "CLAW_WALL_CHANNEL_MEMORY_INGEST_URL"
+	conversationWallMemoryDigestEnv = "CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL"
 	conversationWallMemoryTimeout   = "2s"
 	clawInternalNetworkName         = "claw-internal"
 	historyReplayAuthService        = "cllama-history"
@@ -1813,7 +1815,7 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 		}
 		settings := conversationWallChannelContext(p, svc)
 		awarenessSettings := conversationWallChannelAwarenessContext(p, svc)
-		svc.Claw.Feeds = appendConversationWallAwarenessFeed(svc.Claw.Feeds, channelIDs, awarenessSettings)
+		svc.Claw.Feeds = appendConversationWallAwarenessFeed(svc.Claw.Feeds, channelIDs, awarenessSettings, p.ChannelMemory != nil)
 		svc.Claw.Feeds = appendConversationWallFeed(svc.Claw.Feeds, channelIDs, settings)
 		svc.Claw.Tools = appendConversationWallToolPolicy(svc.Claw.Tools)
 	}
@@ -1824,6 +1826,9 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 		"CLAW_WALL_POLL_INTERVAL":      envOrDefault("CLAW_WALL_POLL_INTERVAL", conversationWallPollInterval),
 		"CLAW_WALL_RETENTION":          envOrDefault("CLAW_WALL_RETENTION", conversationWallRetention),
 		"CLAW_WALL_BACKFILL_MAX_PAGES": envOrDefault("CLAW_WALL_BACKFILL_MAX_PAGES", conversationWallBackfillPages),
+	}
+	if discordBaseURL := strings.TrimSpace(os.Getenv(conversationWallDiscordBaseEnv)); discordBaseURL != "" {
+		wallEnv[conversationWallDiscordBaseEnv] = discordBaseURL
 	}
 	if err := configureConversationWallChannelMemory(p, wallEnv); err != nil {
 		return err
@@ -1868,6 +1873,7 @@ func configureConversationWallChannelMemory(p *pod.Pod, wallEnv map[string]strin
 		return fmt.Errorf("channel-memory service %q: %w", serviceName, err)
 	}
 	wallEnv[conversationWallMemoryIngestEnv] = buildFeedURL(baseURL, "/ingest")
+	wallEnv[conversationWallMemoryDigestEnv] = buildFeedURL(baseURL, "/digest")
 	wallEnv["CLAW_WALL_CHANNEL_MEMORY_TIMEOUT"] = envOrDefault("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", conversationWallMemoryTimeout)
 	targetSvc := p.Services[serviceName]
 	if targetSvc.Environment == nil {
@@ -2007,13 +2013,19 @@ func appendConversationWallFeed(feeds []pod.FeedEntry, channelIDs []string, sett
 	})
 }
 
-func appendConversationWallAwarenessFeed(feeds []pod.FeedEntry, channelIDs []string, settings conversationWallContextSettings) []pod.FeedEntry {
+func appendConversationWallAwarenessFeed(feeds []pod.FeedEntry, channelIDs []string, settings conversationWallContextSettings, channelMemory bool) []pod.FeedEntry {
+	contextKind := "raw_window"
+	if channelMemory {
+		contextKind = "raw_window+digest"
+	}
+	escapedContextKind := strings.ReplaceAll(contextKind, "+", "%2B")
 	path := fmt.Sprintf(
-		"/channel-awareness?channels=%s&since=%s&limit=%d&max_chars=%d&context_kind=raw_window",
+		"/channel-awareness?channels=%s&since=%s&limit=%d&max_chars=%d&context_kind=%s",
 		strings.Join(channelIDs, ","),
 		settings.Since,
 		settings.Limit,
 		settings.MaxChars,
+		escapedContextKind,
 	)
 	for _, feed := range feeds {
 		if feed.Name == conversationWallAwarenessName && feed.Source == conversationWallServiceName && feed.Path == path {

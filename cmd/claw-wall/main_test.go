@@ -294,6 +294,217 @@ func TestChannelAwarenessHeaderReportsBackfillStatus(t *testing.T) {
 	}
 }
 
+func TestChannelAwarenessHandlerServesDigestWhenAvailable(t *testing.T) {
+	store := newConversationStore(50)
+	store.now = func() time.Time { return time.Unix(112, 0) }
+	for i := 0; i < 12; i++ {
+		store.merge("chan-1", []wallMessage{{
+			ID:        fmt.Sprintf("%d", 100+i),
+			Author:    "agent-status",
+			Content:   fmt.Sprintf("HEARTBEAT_OK message-%03d", i),
+			Timestamp: time.Unix(int64(100+i), 0),
+		}})
+	}
+
+	memory := newDigestChannelMemoryServer(t, channelMemoryDigestResponse{
+		Status:      "ok",
+		GeneratedAt: "2026-05-21T20:00:00Z",
+		Coverage: channelMemoryDigestCoverage{
+			SourceMessages: 12,
+			DigestMessages: 1,
+		},
+		Blocks: []channelMemoryDigestBlock{{
+			Kind:           "telemetry_count",
+			Text:           "[00:01-00:02] runtime/status noise elided: 2 messages.",
+			SourceChannel:  "chan-1",
+			SourceMessages: []string{"100", "101"},
+			SourceWindow: channelMemorySourceWindow{
+				From: "1970-01-01T00:01:40Z",
+				To:   "1970-01-01T00:01:41Z",
+			},
+			Sparse:      true,
+			Score:       0.25,
+			GeneratedAt: "2026-05-21T20:00:00Z",
+			Processor:   "deterministic",
+		}},
+		Cost: channelMemoryDigestCost{DeterministicOnly: true},
+	})
+	defer memory.Close()
+	client, err := newChannelMemoryClientWithDigest("", memory.URL+"/digest", "memory-token", time.Second)
+	if err != nil {
+		t.Fatalf("newChannelMemoryClientWithDigest: %v", err)
+	}
+
+	server := httptest.NewServer(newHandler(store, handlerConfig{
+		channelMemory: client,
+		toolToken:     "tool-token",
+		agentChannels: map[string]map[string]struct{}{
+			"trader-0": {"chan-1": {}},
+		},
+	}))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/channel-awareness?channels=chan-1&since=24h&limit=12&max_chars=4096&context_kind=raw_window%2Bdigest")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "kind=raw_window+digest") || !strings.Contains(text, "digest=ok") || !strings.Contains(text, "deterministic_only=true") {
+		t.Fatalf("expected digest awareness header, got %q", text)
+	}
+	if !strings.Contains(text, "digest_blocks=1") || !strings.Contains(text, "digest_source_messages=12") {
+		t.Fatalf("expected digest counts, got %q", text)
+	}
+	if !strings.Contains(text, "[digest kind=telemetry_count source_channel=chan-1 source_messages=100,101") {
+		t.Fatalf("expected digest block provenance, got %q", text)
+	}
+	if strings.Contains(text, "source=chan-1/100") || !strings.Contains(text, "source=chan-1/111") {
+		t.Fatalf("expected digest mode to keep only recent raw messages, got %q", text)
+	}
+	gotReqs := memory.requests()
+	if len(gotReqs) != 1 || gotReqs[0].SourceKind != channelMemorySourceKind || gotReqs[0].Since != "24h0m0s" || gotReqs[0].Budget.MaxBlocks != defaultDigestMaxBlocks {
+		t.Fatalf("unexpected digest request: %+v", gotReqs)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/get_channel_messages", strings.NewReader(`{"channels":["chan-1"],"message_ids":["100","101"]}`))
+	if err != nil {
+		t.Fatalf("build source retrieval request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer tool-token")
+	req.Header.Set("X-Claw-ID", "trader-0")
+	retrievalResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("source retrieval: %v", err)
+	}
+	defer retrievalResp.Body.Close()
+	if retrievalResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(retrievalResp.Body)
+		t.Fatalf("expected source retrieval 200, got %d: %s", retrievalResp.StatusCode, string(body))
+	}
+	var exact retrievalResult
+	if err := json.NewDecoder(retrievalResp.Body).Decode(&exact); err != nil {
+		t.Fatalf("decode source retrieval: %v", err)
+	}
+	if exact.Status != "ok" || len(exact.Messages) != 2 || exact.Messages[0].ID != "100" || exact.Messages[1].ID != "101" {
+		t.Fatalf("digest source provenance did not round-trip to exact messages: %+v", exact)
+	}
+}
+
+func TestChannelAwarenessDigestUnavailableFallsBackToRawWindow(t *testing.T) {
+	store := newConversationStore(50)
+	store.now = func() time.Time { return time.Unix(212, 0) }
+	for i := 0; i < 12; i++ {
+		store.merge("chan-1", []wallMessage{{
+			ID:        fmt.Sprintf("%d", 200+i),
+			Author:    "alice",
+			Content:   fmt.Sprintf("raw-message-%03d", i),
+			Timestamp: time.Unix(int64(200+i), 0),
+		}})
+	}
+
+	memory := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "digest unavailable", http.StatusBadGateway)
+	}))
+	defer memory.Close()
+	client, err := newChannelMemoryClientWithDigest("", memory.URL+"/digest", "", time.Second)
+	if err != nil {
+		t.Fatalf("newChannelMemoryClientWithDigest: %v", err)
+	}
+
+	server := httptest.NewServer(newHandler(store, handlerConfig{channelMemory: client}))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/channel-awareness?channels=chan-1&since=24h&limit=12&max_chars=4096&context_kind=raw_window%2Bdigest")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "digest=unavailable") || !strings.Contains(text, "raw-message-000") || !strings.Contains(text, "raw-message-011") {
+		t.Fatalf("expected full raw fallback on digest failure, got %q", text)
+	}
+}
+
+func TestChannelAwarenessDigestStaleAndCoverageGapStatuses(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "300", Author: "alice", Content: "raw fallback", Timestamp: time.Unix(300, 0)},
+	})
+
+	for _, tc := range []struct {
+		name     string
+		response channelMemoryDigestResponse
+		want     string
+	}{
+		{
+			name: "stale",
+			response: channelMemoryDigestResponse{
+				Status: "ok",
+				Blocks: []channelMemoryDigestBlock{{
+					Kind:           "raw_excerpt",
+					Text:           "stale digest",
+					SourceChannel:  "chan-1",
+					SourceMessages: []string{"299"},
+					Stale:          true,
+					Processor:      "deterministic",
+				}},
+				Cost: channelMemoryDigestCost{DeterministicOnly: true},
+			},
+			want: "digest=stale",
+		},
+		{
+			name: "coverage-gap",
+			response: channelMemoryDigestResponse{
+				Status: "coverage_gap",
+				Coverage: channelMemoryDigestCoverage{
+					Gaps: []channelMemoryCoverageGap{{ChannelID: "chan-1", From: "2026-05-21T19:00:00Z", To: "2026-05-21T19:15:00Z"}},
+				},
+				Blocks: []channelMemoryDigestBlock{{
+					Kind:           "raw_excerpt",
+					Text:           "partial digest",
+					SourceChannel:  "chan-1",
+					SourceMessages: []string{"299"},
+					Processor:      "deterministic",
+				}},
+				Cost: channelMemoryDigestCost{DeterministicOnly: true},
+			},
+			want: "digest=coverage_gap",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			memory := newDigestChannelMemoryServer(t, tc.response)
+			defer memory.Close()
+			client, err := newChannelMemoryClientWithDigest("", memory.URL+"/digest", "", time.Second)
+			if err != nil {
+				t.Fatalf("newChannelMemoryClientWithDigest: %v", err)
+			}
+			server := httptest.NewServer(newHandler(store, handlerConfig{channelMemory: client}))
+			defer server.Close()
+			resp, err := http.Get(server.URL + "/channel-awareness?channels=chan-1&context_kind=raw_window%2Bdigest")
+			if err != nil {
+				t.Fatalf("GET: %v", err)
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read response: %v", err)
+			}
+			if !strings.Contains(string(body), tc.want) {
+				t.Fatalf("expected %s in response, got %q", tc.want, string(body))
+			}
+		})
+	}
+}
+
 func TestToolSearchRequiresAuthAndChannelAllowlist(t *testing.T) {
 	store := newConversationStore(50)
 	store.merge("chan-1", []wallMessage{
@@ -530,6 +741,7 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
 	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TOKEN", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
@@ -553,7 +765,7 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	if cfg.DiscordBaseURL != "" {
 		t.Fatalf("expected empty discord base url by default, got %q", cfg.DiscordBaseURL)
 	}
-	if cfg.ChannelMemoryIngestURL != "" || cfg.ChannelMemoryToken != "" || cfg.ChannelMemoryTimeout != 2*time.Second {
+	if cfg.ChannelMemoryIngestURL != "" || cfg.ChannelMemoryDigestURL != "" || cfg.ChannelMemoryToken != "" || cfg.ChannelMemoryTimeout != 2*time.Second {
 		t.Fatalf("unexpected channel-memory defaults: %+v", cfg)
 	}
 }
@@ -565,6 +777,7 @@ func TestLoadConfigReadsDiscordBaseURLOverride(t *testing.T) {
 	t.Setenv("CLAW_WALL_RETENTION", "")
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
 	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "http://fake-discord:9000/api/v10")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
 
@@ -585,6 +798,7 @@ func TestLoadConfigReadsChannelMemoryConfig(t *testing.T) {
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
 	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL", "http://channel-memory:8080/ingest")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL", "http://channel-memory:8080/digest")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TOKEN", "memory-token")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "750ms")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
@@ -593,7 +807,7 @@ func TestLoadConfigReadsChannelMemoryConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
-	if cfg.ChannelMemoryIngestURL != "http://channel-memory:8080/ingest" || cfg.ChannelMemoryToken != "memory-token" || cfg.ChannelMemoryTimeout != 750*time.Millisecond {
+	if cfg.ChannelMemoryIngestURL != "http://channel-memory:8080/ingest" || cfg.ChannelMemoryDigestURL != "http://channel-memory:8080/digest" || cfg.ChannelMemoryToken != "memory-token" || cfg.ChannelMemoryTimeout != 750*time.Millisecond {
 		t.Fatalf("unexpected channel-memory config: %+v", cfg)
 	}
 }
@@ -604,6 +818,8 @@ func TestLoadConfigUsesPollIntervalOverride(t *testing.T) {
 	t.Setenv("CLAW_WALL_POLL_INTERVAL", "42")
 	t.Setenv("CLAW_WALL_RETENTION", "6h")
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "7")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
 
@@ -1179,6 +1395,44 @@ func (s *recordingChannelMemoryServer) requests() []channelMemoryIngestRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]channelMemoryIngestRequest, len(s.received))
+	copy(out, s.received)
+	return out
+}
+
+type digestChannelMemoryServer struct {
+	*httptest.Server
+	mu       sync.Mutex
+	received []channelMemoryDigestRequest
+}
+
+func newDigestChannelMemoryServer(t *testing.T, response channelMemoryDigestResponse) *digestChannelMemoryServer {
+	t.Helper()
+	srv := &digestChannelMemoryServer{}
+	srv.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/digest" {
+			http.Error(w, "unexpected request", http.StatusNotFound)
+			return
+		}
+		var payload channelMemoryDigestRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		srv.mu.Lock()
+		srv.received = append(srv.received, payload)
+		srv.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, "encode digest response", http.StatusInternalServerError)
+		}
+	}))
+	return srv
+}
+
+func (s *digestChannelMemoryServer) requests() []channelMemoryDigestRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]channelMemoryDigestRequest, len(s.received))
 	copy(out, s.received)
 	return out
 }
