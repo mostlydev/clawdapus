@@ -36,6 +36,8 @@ LLM worker tracked separately.
 
 State is stored under `CHANNEL_MEMORY_DIR` and defaults to
 `/data/channel-memory`. Set `CHANNEL_MEMORY_DB` to choose an exact SQLite file.
+Set `CHANNEL_MEMORY_TOKEN` to require bearer authentication on all data
+endpoints. `/health` remains unauthenticated.
 
 The schema includes:
 
@@ -56,4 +58,24 @@ uses the repository Go module:
 
 ```sh
 docker build -f examples/channel-memory/Dockerfile -t channel-memory:latest .
+```
+
+## Pod Wiring
+
+Declare the adapter once at pod level. `claw up` injects the ingest URL and a
+bearer token into `claw-wall`, and injects the matching `CHANNEL_MEMORY_TOKEN`
+into the adapter service.
+
+```yaml
+x-claw:
+  channel-memory:
+    service: channel-memory
+
+services:
+  channel-memory:
+    build:
+      context: .
+      dockerfile: examples/channel-memory/Dockerfile
+    expose:
+      - "8080"
 ```

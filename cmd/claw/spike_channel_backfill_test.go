@@ -87,6 +87,41 @@ func TestSpikeChannelBackfill(t *testing.T) {
 		t.Fatalf("split host port: %v", err)
 	}
 
+	var (
+		memoryMu sync.Mutex
+		ingested = make(map[string]fakeChannelMemoryIngest)
+	)
+	memoryHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/ingest" {
+			http.Error(w, "unexpected channel-memory request", http.StatusNotFound)
+			return
+		}
+		var payload fakeChannelMemoryIngest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		key := payload.ChannelID + "/" + payload.Message.ID
+		memoryMu.Lock()
+		ingested[key] = payload
+		memoryMu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	})
+	memoryTS := httptest.NewUnstartedServer(memoryHandler)
+	memoryTS.Listener.Close()
+	memoryLn, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatalf("listen channel-memory 0.0.0.0: %v", err)
+	}
+	memoryTS.Listener = memoryLn
+	memoryTS.Start()
+	defer memoryTS.Close()
+	_, memoryPort, err := net.SplitHostPort(memoryLn.Addr().String())
+	if err != nil {
+		t.Fatalf("split channel-memory host port: %v", err)
+	}
+
 	// ── Allocate a host port for the wall container ─────────────────────
 	wallPortL, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -110,6 +145,7 @@ func TestSpikeChannelBackfill(t *testing.T) {
 		"-e", "CLAW_WALL_POLL_INTERVAL=3600", // suppress forward poll noise during the test
 		"-e", "CLAW_WALL_LIMIT=5000",
 		"-e", "CLAW_WALL_ADDR=:8080",
+		"-e", "CLAW_WALL_CHANNEL_MEMORY_INGEST_URL=http://host.docker.internal:" + memoryPort + "/ingest",
 		imageTag,
 	}
 	if out, err := exec.Command("docker", runArgs...).CombinedOutput(); err != nil {
@@ -162,6 +198,30 @@ func TestSpikeChannelBackfill(t *testing.T) {
 	if !strings.Contains(body, "buffer_range=") {
 		t.Fatalf("missing buffer_range in header:\n%s", body)
 	}
+
+	if err := waitForCondition(ctx, func() bool {
+		memoryMu.Lock()
+		defer memoryMu.Unlock()
+		return len(ingested) >= expectedInWindow
+	}); err != nil {
+		memoryMu.Lock()
+		count := len(ingested)
+		memoryMu.Unlock()
+		t.Fatalf("channel-memory ingest count never reached %d, got %d: %v", expectedInWindow, count, err)
+	}
+	memoryMu.Lock()
+	newestIngest := ingested[channelID+"/1000000000000359"]
+	memoryCount := len(ingested)
+	memoryMu.Unlock()
+	if memoryCount != expectedInWindow {
+		t.Fatalf("expected %d unique channel-memory ingests, got %d", expectedInWindow, memoryCount)
+	}
+	if newestIngest.Message.ContentHash == "" || !strings.HasPrefix(newestIngest.Message.ContentHash, "sha256:") {
+		t.Fatalf("expected newest ingest to carry content hash, got %+v", newestIngest)
+	}
+	if newestIngest.Scope != "channel:"+channelID || newestIngest.Source.Service != "claw-wall" || newestIngest.Source.Surface != "discord" {
+		t.Fatalf("unexpected newest ingest scope/source: %+v", newestIngest)
+	}
 }
 
 type fakeDiscordMessage struct {
@@ -175,6 +235,23 @@ type fakeDiscordMessage struct {
 type fakeDiscordAuthor struct {
 	Username   string `json:"username"`
 	GlobalName string `json:"global_name,omitempty"`
+}
+
+type fakeChannelMemoryIngest struct {
+	ChannelID string `json:"channel_id"`
+	Message   struct {
+		ID          string `json:"id"`
+		AuthorName  string `json:"author_name"`
+		CreatedAt   string `json:"created_at"`
+		Content     string `json:"content"`
+		ContentHash string `json:"content_hash"`
+	} `json:"message"`
+	Source struct {
+		Kind    string `json:"kind"`
+		Service string `json:"service"`
+		Surface string `json:"surface"`
+	} `json:"source"`
+	Scope string `json:"scope"`
 }
 
 func makeFakeDiscordMessages(channelID string, start time.Time, count int, step time.Duration) []fakeDiscordMessage {
@@ -308,6 +385,27 @@ func waitForBackfillComplete(ctx context.Context, url string) (string, error) {
 		}
 		if time.Now().After(deadline.Add(-200 * time.Millisecond)) {
 			return lastBody, lastErr
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func waitForCondition(ctx context.Context, ok func() bool) error {
+	deadline, _ := ctx.Deadline()
+	for {
+		if ok() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if time.Now().After(deadline.Add(-200 * time.Millisecond)) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("deadline")
 		}
 		time.Sleep(250 * time.Millisecond)
 	}

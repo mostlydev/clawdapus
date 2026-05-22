@@ -214,6 +214,10 @@ type storedSourceMessage struct {
 	IsCurrent       bool
 }
 
+type handlerConfig struct {
+	token string
+}
+
 func main() {
 	store, err := openStoreFromEnv()
 	if err != nil {
@@ -229,7 +233,7 @@ func main() {
 	}
 
 	log.Printf("channel-memory listening on %s", addr)
-	if err := http.ListenAndServe(addr, newHandler(store)); err != nil {
+	if err := http.ListenAndServe(addr, newHandler(store, handlerConfig{token: strings.TrimSpace(os.Getenv("CHANNEL_MEMORY_TOKEN"))})); err != nil {
 		log.Fatalf("listen: %v", err)
 	}
 }
@@ -363,10 +367,17 @@ func (s *channelMemoryStore) initSchema(ctx context.Context) error {
 	return nil
 }
 
-func newHandler(store *channelMemoryStore) http.Handler {
+func newHandler(store *channelMemoryStore, cfgs ...handlerConfig) http.Handler {
+	cfg := handlerConfig{}
+	if len(cfgs) > 0 {
+		cfg = cfgs[0]
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ingest", func(w http.ResponseWriter, r *http.Request) {
 		if !requireMethod(w, r, http.MethodPost) {
+			return
+		}
+		if !authorizeRequest(w, r, cfg) {
 			return
 		}
 		var req ingestRequest
@@ -385,6 +396,9 @@ func newHandler(store *channelMemoryStore) http.Handler {
 		if !requireMethod(w, r, http.MethodPost) {
 			return
 		}
+		if !authorizeRequest(w, r, cfg) {
+			return
+		}
 		var req sourceMessagesRequest
 		if !decodeJSON(w, r, &req) {
 			return
@@ -399,6 +413,9 @@ func newHandler(store *channelMemoryStore) http.Handler {
 
 	mux.HandleFunc("/digest", func(w http.ResponseWriter, r *http.Request) {
 		if !requireMethod(w, r, http.MethodPost) {
+			return
+		}
+		if !authorizeRequest(w, r, cfg) {
 			return
 		}
 		var req digestRequest
@@ -417,6 +434,9 @@ func newHandler(store *channelMemoryStore) http.Handler {
 		if !requireMethod(w, r, http.MethodPost) {
 			return
 		}
+		if !authorizeRequest(w, r, cfg) {
+			return
+		}
 		var req coverageGapRequest
 		if !decodeJSON(w, r, &req) {
 			return
@@ -431,6 +451,9 @@ func newHandler(store *channelMemoryStore) http.Handler {
 
 	mux.HandleFunc("/forget", func(w http.ResponseWriter, r *http.Request) {
 		if !requireMethod(w, r, http.MethodPost) {
+			return
+		}
+		if !authorizeRequest(w, r, cfg) {
 			return
 		}
 		var req forgetRequest
@@ -1341,6 +1364,18 @@ func rollbackUnlessCommitted(tx *sql.Tx) {
 func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	if r.Method != method {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	return true
+}
+
+func authorizeRequest(w http.ResponseWriter, r *http.Request, cfg handlerConfig) bool {
+	token := strings.TrimSpace(cfg.token)
+	if token == "" {
+		return true
+	}
+	if strings.TrimSpace(r.Header.Get("Authorization")) != "Bearer "+token {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
 	return true

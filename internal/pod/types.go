@@ -15,6 +15,7 @@ type Pod struct {
 	ClawAPI               *ClawAPIConfig
 	Clawdash              *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
 	Context               *ContextConfig
+	ChannelMemory         *ChannelMemoryConfig
 	Principals            []PodPrincipal
 	AlertWebhooks         []string // pod-scoped Discord webhook URLs for pool-transition alerts
 	AlertMentions         []string // pod-scoped @-mention targets for alerts (e.g. "@wojtek", "@infra")
@@ -104,6 +105,10 @@ type ToolPolicyEntry struct {
 type MemoryEntry struct {
 	Service   string
 	TimeoutMS int
+}
+
+type ChannelMemoryConfig struct {
+	Service string
 }
 
 type ContextConfig struct {

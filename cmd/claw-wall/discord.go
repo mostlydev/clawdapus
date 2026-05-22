@@ -27,6 +27,7 @@ type discordPoller struct {
 	fetchLimit        int
 	backfillRetention time.Duration
 	backfillMaxPages  int
+	channelMemory     *channelMemoryClient
 	latestByPair      map[string]string
 	baseURL           string
 	cooldowns         *rateLimitTracker
@@ -34,16 +35,18 @@ type discordPoller struct {
 }
 
 type discordAPIMessage struct {
-	ID          string              `json:"id"`
-	Content     string              `json:"content"`
-	Timestamp   string              `json:"timestamp"`
-	Author      discordAPIAuthor    `json:"author"`
-	Member      *discordAPIMember   `json:"member,omitempty"`
-	Attachments []discordAttachment `json:"attachments,omitempty"`
-	Embeds      []discordEmbed      `json:"embeds,omitempty"`
+	ID              string              `json:"id"`
+	Content         string              `json:"content"`
+	Timestamp       string              `json:"timestamp"`
+	EditedTimestamp *string             `json:"edited_timestamp,omitempty"`
+	Author          discordAPIAuthor    `json:"author"`
+	Member          *discordAPIMember   `json:"member,omitempty"`
+	Attachments     []discordAttachment `json:"attachments,omitempty"`
+	Embeds          []discordEmbed      `json:"embeds,omitempty"`
 }
 
 type discordAPIAuthor struct {
+	ID         string `json:"id"`
 	Username   string `json:"username"`
 	GlobalName string `json:"global_name"`
 }
@@ -160,7 +163,8 @@ func (p *discordPoller) pollOnce(ctx context.Context, logWriter io.Writer) {
 			continue
 		}
 		if len(messages) > 0 {
-			p.store.mergeAt(target.ChannelID, messages, p.now())
+			retained := p.store.mergeAt(target.ChannelID, messages, p.now())
+			p.pushChannelMemory(ctx, target.ChannelID, retained, logWriter)
 			p.recoverGapIfNeeded(ctx, target, latestID, messages, logWriter)
 		}
 		if strings.TrimSpace(newestID) != "" {
@@ -251,7 +255,7 @@ func (p *discordPoller) backfillAll(ctx context.Context, logWriter io.Writer) {
 			continue
 		}
 		p.store.setBackfillStatus(target.ChannelID, backfillStatusInProgress)
-		status, newestID, err := p.backfillChannel(ctx, target, p.backfillRetention, p.backfillMaxPages)
+		status, newestID, err := p.backfillChannel(ctx, target, p.backfillRetention, p.backfillMaxPages, logWriter)
 		if err != nil {
 			var rateLimitErr *discordRateLimitError
 			if errors.As(err, &rateLimitErr) {
@@ -269,7 +273,7 @@ func (p *discordPoller) backfillAll(ctx context.Context, logWriter io.Writer) {
 	}
 }
 
-func (p *discordPoller) backfillChannel(ctx context.Context, target tokenPair, retention time.Duration, maxPages int) (string, string, error) {
+func (p *discordPoller) backfillChannel(ctx context.Context, target tokenPair, retention time.Duration, maxPages int, logWriter io.Writer) (string, string, error) {
 	if retention <= 0 || maxPages <= 0 {
 		return backfillStatusUnavailable, "", nil
 	}
@@ -294,7 +298,8 @@ func (p *discordPoller) backfillChannel(ctx context.Context, target tokenPair, r
 		if compareSnowflakes(pageNewestID, newestID) > 0 {
 			newestID = pageNewestID
 		}
-		p.store.mergeAt(target.ChannelID, messages, p.now())
+		retained := p.store.mergeAt(target.ChannelID, messages, p.now())
+		p.pushChannelMemory(ctx, target.ChannelID, retained, logWriter)
 
 		oldestID := messages[0].ID
 		beforeID = oldestID
@@ -313,7 +318,7 @@ func (p *discordPoller) recoverGapIfNeeded(ctx context.Context, target tokenPair
 		return
 	}
 	oldestReturnedID := newestBatch[0].ID
-	status, err := p.backfillGap(ctx, target, previousLatestID, oldestReturnedID, p.backfillMaxPages)
+	status, err := p.backfillGap(ctx, target, previousLatestID, oldestReturnedID, p.backfillMaxPages, logWriter)
 	if err != nil {
 		var rateLimitErr *discordRateLimitError
 		if errors.As(err, &rateLimitErr) {
@@ -329,7 +334,7 @@ func (p *discordPoller) recoverGapIfNeeded(ctx context.Context, target tokenPair
 	}
 }
 
-func (p *discordPoller) backfillGap(ctx context.Context, target tokenPair, afterID, beforeID string, maxPages int) (string, error) {
+func (p *discordPoller) backfillGap(ctx context.Context, target tokenPair, afterID, beforeID string, maxPages int, logWriter io.Writer) (string, error) {
 	for page := 0; page < maxPages; page++ {
 		messages, _, err := p.fetchMessagesBefore(ctx, target, beforeID)
 		if err != nil {
@@ -353,7 +358,8 @@ func (p *discordPoller) backfillGap(ctx context.Context, target tokenPair, after
 			filtered = append(filtered, msg)
 		}
 		if len(filtered) > 0 {
-			p.store.mergeAt(target.ChannelID, filtered, p.now())
+			retained := p.store.mergeAt(target.ChannelID, filtered, p.now())
+			p.pushChannelMemory(ctx, target.ChannelID, retained, logWriter)
 		}
 		if reachedBoundary || len(messages) < p.fetchLimit {
 			return backfillStatusComplete, nil
@@ -361,6 +367,19 @@ func (p *discordPoller) backfillGap(ctx context.Context, target tokenPair, after
 		beforeID = messages[0].ID
 	}
 	return backfillStatusPartial, nil
+}
+
+func (p *discordPoller) pushChannelMemory(ctx context.Context, channelID string, messages []wallMessage, logWriter io.Writer) {
+	if p.channelMemory == nil || len(messages) == 0 {
+		return
+	}
+	pushed, err := p.channelMemory.ingestMessages(ctx, messages)
+	if err == nil {
+		return
+	}
+	if logWriter != nil {
+		fmt.Fprintf(logWriter, "claw-wall: channel-memory ingest failed for channel %s after %d/%d messages: %v\n", channelID, pushed, len(messages), err)
+	}
 }
 
 func oldestMessageTime(messages []wallMessage) time.Time {
@@ -386,13 +405,21 @@ func convertDiscordMessage(channelID string, msg discordAPIMessage) (wallMessage
 	if err != nil {
 		timestamp = time.Time{}
 	}
+	var editedAt time.Time
+	if msg.EditedTimestamp != nil && strings.TrimSpace(*msg.EditedTimestamp) != "" {
+		if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(*msg.EditedTimestamp)); err == nil {
+			editedAt = parsed
+		}
+	}
 
 	return wallMessage{
 		ID:        messageID,
 		ChannelID: channelID,
+		AuthorID:  strings.TrimSpace(msg.Author.ID),
 		Author:    discordAuthorName(msg),
 		Content:   renderDiscordMessageContent(msg),
 		Timestamp: timestamp,
+		EditedAt:  editedAt,
 	}, true
 }
 

@@ -17,15 +17,18 @@ import (
 )
 
 type config struct {
-	Addr              string
-	TokenPairs        string
-	BufferLimit       int
-	PollInterval      time.Duration
-	Retention         time.Duration
-	BackfillMaxPages  int
-	DiscordBaseURL    string
-	ToolToken         string
-	AgentChannelsPath string
+	Addr                   string
+	TokenPairs             string
+	BufferLimit            int
+	PollInterval           time.Duration
+	Retention              time.Duration
+	BackfillMaxPages       int
+	DiscordBaseURL         string
+	ToolToken              string
+	AgentChannelsPath      string
+	ChannelMemoryIngestURL string
+	ChannelMemoryToken     string
+	ChannelMemoryTimeout   time.Duration
 }
 
 func main() {
@@ -55,6 +58,10 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("claw-wall: parse CLAW_WALL_TOKENS: %w", err)
 	}
+	channelMemory, err := newChannelMemoryClient(cfg.ChannelMemoryIngestURL, cfg.ChannelMemoryToken, cfg.ChannelMemoryTimeout)
+	if err != nil {
+		return fmt.Errorf("claw-wall: configure channel-memory: %w", err)
+	}
 	agentChannels, err := loadAgentChannels(cfg.AgentChannelsPath)
 	if err != nil {
 		return err
@@ -64,6 +71,7 @@ func run(args []string) error {
 	poller := newDiscordPoller(&http.Client{Timeout: 10 * time.Second}, store, targets, cfg.BufferLimit)
 	poller.backfillRetention = cfg.Retention
 	poller.backfillMaxPages = cfg.BackfillMaxPages
+	poller.channelMemory = channelMemory
 	if strings.TrimSpace(cfg.DiscordBaseURL) != "" {
 		poller.baseURL = strings.TrimRight(strings.TrimSpace(cfg.DiscordBaseURL), "/")
 	}
@@ -74,7 +82,7 @@ func run(args []string) error {
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           newHandler(store, handlerConfig{toolToken: cfg.ToolToken, agentChannels: agentChannels}),
+		Handler:           newHandler(store, handlerConfig{toolToken: cfg.ToolToken, agentChannels: agentChannels, channelMemory: channelMemory}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -136,21 +144,32 @@ func loadConfig() (config, error) {
 		return config{}, fmt.Errorf("claw-wall: CLAW_WALL_BACKFILL_MAX_PAGES must be non-negative")
 	}
 
+	channelMemoryTimeout, err := envDuration("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", 2*time.Second)
+	if err != nil {
+		return config{}, err
+	}
+	if channelMemoryTimeout <= 0 {
+		return config{}, fmt.Errorf("claw-wall: CLAW_WALL_CHANNEL_MEMORY_TIMEOUT must be positive")
+	}
+
 	tokenPairs := strings.TrimSpace(os.Getenv("CLAW_WALL_TOKENS"))
 	if tokenPairs == "" {
 		return config{}, fmt.Errorf("claw-wall: CLAW_WALL_TOKENS is required")
 	}
 
 	return config{
-		Addr:              envOr("CLAW_WALL_ADDR", ":8080"),
-		TokenPairs:        tokenPairs,
-		BufferLimit:       bufferLimit,
-		PollInterval:      time.Duration(pollSeconds) * time.Second,
-		Retention:         retention,
-		BackfillMaxPages:  backfillMaxPages,
-		DiscordBaseURL:    strings.TrimSpace(os.Getenv("CLAW_WALL_DISCORD_BASE_URL")),
-		ToolToken:         strings.TrimSpace(os.Getenv("CLAW_WALL_TOOL_TOKEN")),
-		AgentChannelsPath: envOr("CLAW_WALL_AGENT_CHANNELS_FILE", "/etc/claw-wall/agent-channels.json"),
+		Addr:                   envOr("CLAW_WALL_ADDR", ":8080"),
+		TokenPairs:             tokenPairs,
+		BufferLimit:            bufferLimit,
+		PollInterval:           time.Duration(pollSeconds) * time.Second,
+		Retention:              retention,
+		BackfillMaxPages:       backfillMaxPages,
+		DiscordBaseURL:         strings.TrimSpace(os.Getenv("CLAW_WALL_DISCORD_BASE_URL")),
+		ToolToken:              strings.TrimSpace(os.Getenv("CLAW_WALL_TOOL_TOKEN")),
+		AgentChannelsPath:      envOr("CLAW_WALL_AGENT_CHANNELS_FILE", "/etc/claw-wall/agent-channels.json"),
+		ChannelMemoryIngestURL: strings.TrimSpace(os.Getenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL")),
+		ChannelMemoryToken:     strings.TrimSpace(os.Getenv("CLAW_WALL_CHANNEL_MEMORY_TOKEN")),
+		ChannelMemoryTimeout:   channelMemoryTimeout,
 	}, nil
 }
 

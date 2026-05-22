@@ -529,6 +529,9 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	t.Setenv("CLAW_WALL_RETENTION", "")
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
 	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TOKEN", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
 
 	cfg, err := loadConfig()
@@ -550,6 +553,9 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	if cfg.DiscordBaseURL != "" {
 		t.Fatalf("expected empty discord base url by default, got %q", cfg.DiscordBaseURL)
 	}
+	if cfg.ChannelMemoryIngestURL != "" || cfg.ChannelMemoryToken != "" || cfg.ChannelMemoryTimeout != 2*time.Second {
+		t.Fatalf("unexpected channel-memory defaults: %+v", cfg)
+	}
 }
 
 func TestLoadConfigReadsDiscordBaseURLOverride(t *testing.T) {
@@ -559,6 +565,7 @@ func TestLoadConfigReadsDiscordBaseURLOverride(t *testing.T) {
 	t.Setenv("CLAW_WALL_RETENTION", "")
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
 	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "http://fake-discord:9000/api/v10")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
 
 	cfg, err := loadConfig()
@@ -570,12 +577,34 @@ func TestLoadConfigReadsDiscordBaseURLOverride(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsChannelMemoryConfig(t *testing.T) {
+	t.Setenv("CLAW_WALL_ADDR", "")
+	t.Setenv("CLAW_WALL_LIMIT", "")
+	t.Setenv("CLAW_WALL_POLL_INTERVAL", "")
+	t.Setenv("CLAW_WALL_RETENTION", "")
+	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
+	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL", "http://channel-memory:8080/ingest")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TOKEN", "memory-token")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "750ms")
+	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.ChannelMemoryIngestURL != "http://channel-memory:8080/ingest" || cfg.ChannelMemoryToken != "memory-token" || cfg.ChannelMemoryTimeout != 750*time.Millisecond {
+		t.Fatalf("unexpected channel-memory config: %+v", cfg)
+	}
+}
+
 func TestLoadConfigUsesPollIntervalOverride(t *testing.T) {
 	t.Setenv("CLAW_WALL_ADDR", "")
 	t.Setenv("CLAW_WALL_LIMIT", "")
 	t.Setenv("CLAW_WALL_POLL_INTERVAL", "42")
 	t.Setenv("CLAW_WALL_RETENTION", "6h")
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "7")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
 
 	cfg, err := loadConfig()
@@ -725,6 +754,160 @@ func TestDiscordPollerBackfillRespectsRateLimit(t *testing.T) {
 	}
 	if formatBackfillStatus(got.BackfillStatus) != backfillStatusRateLimited {
 		t.Fatalf("expected rate_limited backfill, got %+v", got.BackfillStatus)
+	}
+}
+
+func TestDiscordPollerPushesBackfillToChannelMemory(t *testing.T) {
+	now := time.Date(2026, 5, 21, 16, 0, 0, 0, time.UTC)
+	messages := makeDiscordMessages(now.Add(-3*time.Minute), 3, time.Minute)
+	messages[0].Author.ID = "user-1000"
+	memory := newRecordingChannelMemoryServer(t, http.StatusAccepted)
+	defer memory.Close()
+	client, err := newChannelMemoryClient(memory.URL+"/ingest", "", time.Second)
+	if err != nil {
+		t.Fatalf("newChannelMemoryClient: %v", err)
+	}
+	discord := newDiscordMessagesServer(t, messages, nil)
+	defer discord.Close()
+
+	store := newConversationStore(50, 24*time.Hour)
+	poller := newDiscordPoller(discord.Client(), store, []tokenPair{{ChannelID: "chan-1", Token: "token-a"}}, 50)
+	poller.baseURL = discord.URL
+	poller.now = func() time.Time { return now }
+	poller.backfillRetention = 24 * time.Hour
+	poller.backfillMaxPages = 1
+	poller.channelMemory = client
+
+	poller.backfillAll(context.Background(), io.Discard)
+
+	got := memory.requests()
+	if len(got) != 3 {
+		t.Fatalf("expected 3 channel-memory ingests, got %d: %+v", len(got), got)
+	}
+	if got[0].ChannelID != "chan-1" || got[0].Message.ID != "1000" || got[0].Message.AuthorID != "user-1000" {
+		t.Fatalf("unexpected first ingest payload: %+v", got[0])
+	}
+	if got[0].Message.ContentHash == "" || !strings.HasPrefix(got[0].Message.ContentHash, "sha256:") {
+		t.Fatalf("expected content hash in ingest payload: %+v", got[0].Message)
+	}
+	if got[0].Scope != "channel:chan-1" || got[0].Metadata["visibility_scope"] != "channel:chan-1" {
+		t.Fatalf("expected channel visibility scope, got %+v", got[0])
+	}
+}
+
+func TestDiscordPollerPushesForwardPollToChannelMemory(t *testing.T) {
+	now := time.Date(2026, 5, 21, 16, 0, 0, 0, time.UTC)
+	messages := makeDiscordMessages(now.Add(-3*time.Minute), 3, time.Minute)
+	memory := newRecordingChannelMemoryServer(t, http.StatusAccepted)
+	defer memory.Close()
+	client, err := newChannelMemoryClient(memory.URL+"/ingest", "", time.Second)
+	if err != nil {
+		t.Fatalf("newChannelMemoryClient: %v", err)
+	}
+	discord := newDiscordMessagesServer(t, messages, nil)
+	defer discord.Close()
+
+	store := newConversationStore(50, 24*time.Hour)
+	poller := newDiscordPoller(discord.Client(), store, []tokenPair{{ChannelID: "chan-1", Token: "token-a"}}, 50)
+	poller.baseURL = discord.URL
+	poller.now = func() time.Time { return now }
+	poller.latestByPair[pairKey(tokenPair{ChannelID: "chan-1", Token: "token-a"})] = "1000"
+	poller.channelMemory = client
+
+	poller.pollOnce(context.Background(), io.Discard)
+
+	got := memory.requests()
+	if len(got) != 2 || got[0].Message.ID != "1001" || got[1].Message.ID != "1002" {
+		t.Fatalf("expected forward poll messages 1001,1002, got %+v", got)
+	}
+}
+
+func TestDiscordPollerChannelMemoryFailureDoesNotBlockRawWindow(t *testing.T) {
+	now := time.Date(2026, 5, 21, 16, 0, 0, 0, time.UTC)
+	messages := makeDiscordMessages(now.Add(-time.Minute), 1, time.Minute)
+	memory := newRecordingChannelMemoryServer(t, http.StatusInternalServerError)
+	defer memory.Close()
+	client, err := newChannelMemoryClient(memory.URL+"/ingest", "", time.Second)
+	if err != nil {
+		t.Fatalf("newChannelMemoryClient: %v", err)
+	}
+	discord := newDiscordMessagesServer(t, messages, nil)
+	defer discord.Close()
+
+	store := newConversationStore(50, 24*time.Hour)
+	poller := newDiscordPoller(discord.Client(), store, []tokenPair{{ChannelID: "chan-1", Token: "token-a"}}, 50)
+	poller.baseURL = discord.URL
+	poller.now = func() time.Time { return now }
+	poller.channelMemory = client
+
+	var logs strings.Builder
+	poller.pollOnce(context.Background(), &logs)
+
+	if !strings.Contains(logs.String(), "channel-memory ingest failed") {
+		t.Fatalf("expected channel-memory failure log, got %q", logs.String())
+	}
+	got := store.tail(tailRequest{ChannelIDs: []string{"chan-1"}, Since: 24 * time.Hour, Limit: 10, Now: now})
+	if len(got.Messages) != 1 || got.Messages[0].ID != "1000" {
+		t.Fatalf("expected raw window to retain message despite ingest failure, got %+v", got.Messages)
+	}
+}
+
+func TestChannelMemoryReplayRequiresAllowedChannels(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{{ID: "100", Author: "alice", Content: "alpha", Timestamp: time.Unix(100, 0)}})
+	store.merge("chan-2", []wallMessage{{ID: "200", Author: "bob", Content: "beta", Timestamp: time.Unix(200, 0)}})
+	memory := newRecordingChannelMemoryServer(t, http.StatusAccepted)
+	defer memory.Close()
+	client, err := newChannelMemoryClient(memory.URL+"/ingest", "", time.Second)
+	if err != nil {
+		t.Fatalf("newChannelMemoryClient: %v", err)
+	}
+	server := httptest.NewServer(newHandler(store, handlerConfig{
+		toolToken:     "tool-token",
+		channelMemory: client,
+		agentChannels: map[string]map[string]struct{}{
+			"trader-0": {"chan-1": {}},
+		},
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/channel-memory/replay", strings.NewReader(`{"channels":["chan-2"]}`))
+	if err != nil {
+		t.Fatalf("request forbidden: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer tool-token")
+	req.Header.Set("X-Claw-ID", "trader-0")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST forbidden: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 403, got %d: %s", resp.StatusCode, string(body))
+	}
+	if got := memory.requests(); len(got) != 0 {
+		t.Fatalf("forbidden replay should not push messages, got %+v", got)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/channel-memory/replay", strings.NewReader(`{"channels":["chan-1"]}`))
+	if err != nil {
+		t.Fatalf("request replay: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer tool-token")
+	req.Header.Set("X-Claw-ID", "trader-0")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST replay: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
+	}
+	got := memory.requests()
+	if len(got) != 1 || got[0].ChannelID != "chan-1" || got[0].Message.ID != "100" {
+		t.Fatalf("expected allowed replay to push chan-1/100, got %+v", got)
 	}
 }
 
@@ -964,6 +1147,42 @@ func TestDiscordPollerResumesPollingAfterCooldownExpires(t *testing.T) {
 	}
 }
 
+type recordingChannelMemoryServer struct {
+	*httptest.Server
+	mu       sync.Mutex
+	received []channelMemoryIngestRequest
+}
+
+func newRecordingChannelMemoryServer(t *testing.T, status int) *recordingChannelMemoryServer {
+	t.Helper()
+	rec := &recordingChannelMemoryServer{}
+	rec.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/ingest" {
+			http.Error(w, "unexpected request", http.StatusNotFound)
+			return
+		}
+		var payload channelMemoryIngestRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		rec.mu.Lock()
+		rec.received = append(rec.received, payload)
+		rec.mu.Unlock()
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	return rec
+}
+
+func (s *recordingChannelMemoryServer) requests() []channelMemoryIngestRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]channelMemoryIngestRequest, len(s.received))
+	copy(out, s.received)
+	return out
+}
+
 func makeDiscordMessages(start time.Time, count int, step time.Duration) []discordAPIMessage {
 	messages := make([]discordAPIMessage, 0, count)
 	for i := 0; i < count; i++ {
@@ -972,6 +1191,7 @@ func makeDiscordMessages(start time.Time, count int, step time.Duration) []disco
 			Content:   fmt.Sprintf("message-%03d", i),
 			Timestamp: start.Add(time.Duration(i) * step).Format(time.RFC3339),
 			Author: discordAPIAuthor{
+				ID:       fmt.Sprintf("user-id-%03d", i),
 				Username: fmt.Sprintf("user-%03d", i),
 			},
 		})

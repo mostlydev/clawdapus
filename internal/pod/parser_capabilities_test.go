@@ -58,6 +58,33 @@ services:
 	}
 }
 
+func TestParsePodExtractsChannelMemory(t *testing.T) {
+	const yaml = `
+x-claw:
+  pod: channel-pod
+  channel-memory:
+    service: channel-memory
+
+services:
+  channel-memory:
+    image: channel-memory:latest
+    expose:
+      - "8080"
+  analyst:
+    image: analyst:latest
+    x-claw:
+      agent: ./AGENTS.md
+`
+
+	pod, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if pod.ChannelMemory == nil || pod.ChannelMemory.Service != "channel-memory" {
+		t.Fatalf("expected channel-memory service, got %+v", pod.ChannelMemory)
+	}
+}
+
 func TestParsePodDefaultsInheritAndReplaceCapabilityConfig(t *testing.T) {
 	const yaml = `
 x-claw:
@@ -177,6 +204,20 @@ services:
       agent: ./AGENTS.md
       tools:
         - ...
+`,
+		},
+		{
+			name: "channel memory unknown service",
+			yaml: `
+x-claw:
+  pod: invalid-pod
+  channel-memory:
+    service: missing-memory
+services:
+  analyst:
+    image: analyst:latest
+    x-claw:
+      agent: ./AGENTS.md
 `,
 		},
 	}

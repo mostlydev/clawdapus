@@ -1,6 +1,10 @@
 {
   "version": 2,
   "description": "Channel-memory adapter for source-backed Discord channel awareness digests",
+  "auth": {
+    "type": "bearer",
+    "env": "CHANNEL_MEMORY_TOKEN"
+  },
   "endpoints": [
     {
       "method": "POST",

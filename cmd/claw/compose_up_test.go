@@ -4026,6 +4026,55 @@ func TestInjectConversationWallHonorsChannelContextConfig(t *testing.T) {
 	}
 }
 
+func TestInjectConversationWallWiresChannelMemory(t *testing.T) {
+	t.Setenv("CLAW_WALL_RETENTION", "")
+	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
+
+	p := &pod.Pod{
+		Name:          "desk",
+		ChannelMemory: &pod.ChannelMemoryConfig{Service: "channel-memory"},
+		Services: map[string]*pod.Service{
+			"channel-memory": {
+				Image:  "channel-memory:latest",
+				Expose: []string{"8080"},
+				Compose: map[string]interface{}{
+					"restart": "on-failure",
+				},
+			},
+			"trader": testConversationWallService("${TRADER_DISCORD_BOT_TOKEN}", "chan-1"),
+		},
+	}
+	resolvedClaws := map[string]*driver.ResolvedClaw{
+		"trader": {ServiceName: "trader", Cllama: []string{"passthrough"}},
+	}
+
+	if err := injectConversationWall(p, resolvedClaws); err != nil {
+		t.Fatalf("injectConversationWall: %v", err)
+	}
+
+	wall := p.Services[conversationWallServiceName]
+	if wall == nil {
+		t.Fatal("expected claw-wall service")
+	}
+	if wall.Environment[conversationWallMemoryIngestEnv] != "http://channel-memory:8080/ingest" {
+		t.Fatalf("unexpected channel-memory ingest URL: %q", wall.Environment[conversationWallMemoryIngestEnv])
+	}
+	if wall.Environment["CLAW_WALL_CHANNEL_MEMORY_TIMEOUT"] != conversationWallMemoryTimeout {
+		t.Fatalf("unexpected channel-memory timeout: %q", wall.Environment["CLAW_WALL_CHANNEL_MEMORY_TIMEOUT"])
+	}
+	if wall.Environment["CLAW_WALL_CHANNEL_MEMORY_TOKEN"] == "" {
+		t.Fatal("expected claw-wall channel-memory token")
+	}
+	if p.Services["channel-memory"].Environment["CHANNEL_MEMORY_TOKEN"] != wall.Environment["CLAW_WALL_CHANNEL_MEMORY_TOKEN"] {
+		t.Fatalf("expected channel-memory token to match claw-wall token")
+	}
+	networks, ok := p.Services["channel-memory"].Compose["networks"].([]string)
+	if !ok || len(networks) != 1 || networks[0] != clawInternalNetworkName {
+		t.Fatalf("expected channel-memory on %s, got %#v", clawInternalNetworkName, p.Services["channel-memory"].Compose["networks"])
+	}
+}
+
 func TestPrepareConversationWallRuntimeWritesAllowlistAndServiceAuth(t *testing.T) {
 	runtimeDir := t.TempDir()
 	p := &pod.Pod{
