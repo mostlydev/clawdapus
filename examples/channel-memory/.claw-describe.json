@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "description": "Channel-memory adapter for source-backed Discord channel awareness digests",
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/ingest",
+      "description": "Retain one source channel message with stable message identity and content hash"
+    },
+    {
+      "method": "POST",
+      "path": "/source-messages",
+      "description": "Fetch exact retained source messages by channel and message id"
+    },
+    {
+      "method": "POST",
+      "path": "/digest",
+      "description": "Return deterministic digest blocks over retained source messages"
+    },
+    {
+      "method": "POST",
+      "path": "/coverage-gaps",
+      "description": "Record an explicit source coverage gap for a channel and time range"
+    },
+    {
+      "method": "POST",
+      "path": "/forget",
+      "description": "Suppress retained source messages and mark derived blocks dirty"
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "description": "Health check"
+    }
+  ]
+}
