@@ -225,6 +225,17 @@ func main() {
 	}
 	defer store.Close()
 
+	workerCfg := workerConfigFromEnv()
+	if workerCfg.Enabled {
+		client := httpLLMClientFromEnv(workerCfg)
+		if client == nil {
+			log.Printf("channel-memory digest worker enabled but CHANNEL_MEMORY_LLM_BASE_URL is unset; staying deterministic-only")
+		} else {
+			worker := newDigestWorker(store, client, workerCfg)
+			go worker.Run(context.Background())
+		}
+	}
+
 	addr := strings.TrimSpace(os.Getenv("PORT"))
 	if addr == "" {
 		addr = defaultListenAddress
@@ -358,6 +369,13 @@ func (s *channelMemoryStore) initSchema(ctx context.Context) error {
 			updated_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_processing_queue_status ON processing_queue(status, updated_at)`,
+		`CREATE TABLE IF NOT EXISTS llm_usage (
+			day TEXT NOT NULL,
+			scope TEXT NOT NULL,
+			calls INTEGER NOT NULL DEFAULT 0,
+			cost_usd REAL NOT NULL DEFAULT 0,
+			PRIMARY KEY(day, scope)
+		)`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -648,10 +666,19 @@ func (s *channelMemoryStore) Digest(ctx context.Context, req digestRequest) (dig
 	}
 
 	rawRecent := 0
+	deterministicOnly := true
 	for _, block := range blocks {
 		if block.Kind == "raw_excerpt" || block.Kind == "hard_event" || block.Kind == "tombstone" {
 			rawRecent++
 		}
+		if block.Processor == digestProcessorLLM {
+			deterministicOnly = false
+		}
+	}
+
+	llmCallsToday, err := s.dailyLLMCalls(ctx, s.now().UTC().Format("2006-01-02"), "pod")
+	if err != nil {
+		return digestResponse{}, err
 	}
 
 	return digestResponse{
@@ -667,8 +694,8 @@ func (s *channelMemoryStore) Digest(ctx context.Context, req digestRequest) (dig
 		},
 		Blocks: blocks,
 		Cost: digestCost{
-			DeterministicOnly: true,
-			LLMCallsToday:     0,
+			DeterministicOnly: deterministicOnly,
+			LLMCallsToday:     llmCallsToday,
 		},
 	}, nil
 }
