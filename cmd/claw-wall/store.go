@@ -32,9 +32,12 @@ type wallMessage struct {
 	ID           string    `json:"id"`
 	ChannelID    string    `json:"channel_id"`
 	SourceHandle string    `json:"source_handle,omitempty"`
+	AuthorID     string    `json:"author_id,omitempty"`
 	Author       string    `json:"author"`
 	Content      string    `json:"content"`
 	Timestamp    time.Time `json:"timestamp"`
+	EditedAt     time.Time `json:"edited_at,omitempty"`
+	Deleted      bool      `json:"deleted,omitempty"`
 }
 
 type channelBuffer struct {
@@ -78,6 +81,7 @@ type tailResult struct {
 type handlerConfig struct {
 	toolToken     string
 	agentChannels map[string]map[string]struct{}
+	channelMemory *channelMemoryClient
 }
 
 type agentChannelAllowlistFile struct {
@@ -118,6 +122,17 @@ type getChannelMessagesRequest struct {
 	Limit      int      `json:"limit"`
 }
 
+type channelMemoryReplayRequest struct {
+	Channels []string `json:"channels"`
+	Limit    int      `json:"limit"`
+}
+
+type channelMemoryReplayResponse struct {
+	Status   string `json:"status"`
+	Messages int    `json:"messages"`
+	Pushed   int    `json:"pushed"`
+}
+
 func newConversationStore(limit int, retentions ...time.Duration) *conversationStore {
 	var retention time.Duration
 	if len(retentions) > 0 {
@@ -149,18 +164,18 @@ func (s *conversationStore) effectiveTime(now time.Time) time.Time {
 	return now
 }
 
-func (s *conversationStore) merge(channelID string, messages []wallMessage) {
-	s.mergeAt(channelID, messages, s.currentTime())
+func (s *conversationStore) merge(channelID string, messages []wallMessage) []wallMessage {
+	return s.mergeAt(channelID, messages, s.currentTime())
 }
 
-func (s *conversationStore) mergeAt(channelID string, messages []wallMessage, now time.Time) {
+func (s *conversationStore) mergeAt(channelID string, messages []wallMessage, now time.Time) []wallMessage {
 	if len(messages) == 0 {
-		return
+		return nil
 	}
 	now = s.effectiveTime(now)
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return
+		return nil
 	}
 
 	s.mu.Lock()
@@ -172,6 +187,7 @@ func (s *conversationStore) mergeAt(channelID string, messages []wallMessage, no
 		s.channels[channelID] = state
 	}
 
+	retained := make([]wallMessage, 0, len(messages))
 	for _, msg := range messages {
 		if strings.TrimSpace(msg.ID) == "" {
 			continue
@@ -191,10 +207,12 @@ func (s *conversationStore) mergeAt(channelID string, messages []wallMessage, no
 		msg.SourceHandle = stableSourceHandle(msg)
 		state.seenIDs[msg.ID] = struct{}{}
 		state.messages = append(state.messages, msg)
+		retained = append(retained, msg)
 	}
 
 	sortWallMessages(state.messages)
 	s.trimChannelLocked(channelID, state, now)
+	return retained
 }
 
 func (s *conversationStore) setBackfillStatus(channelID, status string) {
@@ -604,6 +622,30 @@ func (s *conversationStore) scan(channelIDs []string, match func(wallMessage) bo
 	}
 }
 
+func (s *conversationStore) snapshot(channelIDs []string, limit int, now time.Time) []wallMessage {
+	channelIDs = normalizeChannelIDs(channelIDs)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now = s.effectiveTime(now)
+	s.trimChannelsLocked(channelIDs, now)
+
+	messages := make([]wallMessage, 0)
+	for _, channelID := range channelIDs {
+		state := s.channels[channelID]
+		if state == nil {
+			continue
+		}
+		messages = append(messages, state.messages...)
+	}
+	sortWallMessages(messages)
+	if limit > 0 && len(messages) > limit {
+		messages = messages[len(messages)-limit:]
+	}
+	out := make([]wallMessage, len(messages))
+	copy(out, messages)
+	return out
+}
+
 func (s *conversationStore) backfillStatusForChannelsLocked(channelIDs []string) map[string]string {
 	channelIDs = normalizeChannelIDs(channelIDs)
 	out := make(map[string]string, len(channelIDs))
@@ -773,6 +815,34 @@ func newHandler(store *conversationStore, cfgs ...handlerConfig) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, store.getMessages(req))
+	})
+	mux.HandleFunc("/channel-memory/replay", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizeToolRequest(w, r, cfg) {
+			return
+		}
+		if !cfg.channelMemory.enabled() {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "channel_memory_disabled"})
+			return
+		}
+		var req channelMemoryReplayRequest
+		if !decodeJSONRequest(w, r, &req) {
+			return
+		}
+		if len(normalizeChannelIDs(req.Channels)) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channels_required"})
+			return
+		}
+		if disallowed := firstDisallowedToolChannel(req.Channels, r.Header.Get("X-Claw-ID"), cfg.agentChannels); disallowed != "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "channel_not_allowed", "agent": r.Header.Get("X-Claw-ID"), "channel": disallowed})
+			return
+		}
+		messages := store.snapshot(req.Channels, req.Limit, store.currentTime())
+		pushed, err := cfg.channelMemory.ingestMessages(r.Context(), messages)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]interface{}{"error": "channel_memory_ingest_failed", "pushed": pushed})
+			return
+		}
+		writeJSON(w, http.StatusOK, channelMemoryReplayResponse{Status: "ok", Messages: len(messages), Pushed: pushed})
 	})
 	return mux
 }

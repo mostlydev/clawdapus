@@ -258,6 +258,61 @@ func TestChannelMemoryHTTPAPI(t *testing.T) {
 	}
 }
 
+func TestChannelMemoryHTTPAuthWhenConfigured(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	server := httptest.NewServer(newHandler(store, handlerConfig{token: "memory-token"}))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/ingest", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("unauthorized post: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+
+	reqBody, err := json.Marshal(ingestRequest{
+		ChannelID: "chan-auth",
+		Message: ingestMessage{
+			ID:          "401",
+			AuthorName:  "alice",
+			CreatedAt:   "2026-05-21T16:00:00Z",
+			Content:     "authorized content",
+			ContentHash: "sha256:auth",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal authorized request: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/ingest", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("authorized request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer memory-token")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authorized post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		var got bytes.Buffer
+		_, _ = got.ReadFrom(resp.Body)
+		t.Fatalf("expected 202, got %d body=%s", resp.StatusCode, got.String())
+	}
+
+	health, err := http.Get(server.URL + "/health")
+	if err != nil {
+		t.Fatalf("health: %v", err)
+	}
+	defer health.Body.Close()
+	if health.StatusCode != http.StatusOK {
+		t.Fatalf("expected health to remain unauthenticated, got %d", health.StatusCode)
+	}
+}
+
 func newTestStore(t *testing.T) *channelMemoryStore {
 	t.Helper()
 	store, err := openStore(filepath.Join(t.TempDir(), "channel-memory.sqlite"))

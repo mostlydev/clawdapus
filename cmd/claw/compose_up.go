@@ -42,25 +42,27 @@ var composeUpDiscoverTools bool
 var runtimePlaceholderPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 const (
-	conversationWallServiceName    = "claw-wall"
-	conversationWallFeedName       = "channel-context"
-	conversationWallAwarenessName  = "channel-awareness"
-	conversationWallFeedTTL        = 30
-	conversationWallFeedSince      = "24h"
-	conversationWallFeedLimit      = 40
-	conversationWallAwarenessLimit = 60
-	conversationWallFeedMaxChars   = 32 * 1024
-	conversationWallBufferLimit    = 5000
-	conversationWallPollInterval   = "30"
-	conversationWallRetention      = "24h"
-	conversationWallBackfillPages  = "25"
-	conversationWallInternalPort   = "8080"
-	conversationWallDockerfile     = "dockerfiles/claw-wall/Dockerfile"
-	conversationWallToolTokenEnv   = "CLAW_WALL_TOOL_TOKEN"
-	conversationWallAllowlistPath  = "/etc/claw-wall/agent-channels.json"
-	clawInternalNetworkName        = "claw-internal"
-	historyReplayAuthService       = "cllama-history"
-	historyReplayBaseURL           = "http://cllama:8080/history"
+	conversationWallServiceName     = "claw-wall"
+	conversationWallFeedName        = "channel-context"
+	conversationWallAwarenessName   = "channel-awareness"
+	conversationWallFeedTTL         = 30
+	conversationWallFeedSince       = "24h"
+	conversationWallFeedLimit       = 40
+	conversationWallAwarenessLimit  = 60
+	conversationWallFeedMaxChars    = 32 * 1024
+	conversationWallBufferLimit     = 5000
+	conversationWallPollInterval    = "30"
+	conversationWallRetention       = "24h"
+	conversationWallBackfillPages   = "25"
+	conversationWallInternalPort    = "8080"
+	conversationWallDockerfile      = "dockerfiles/claw-wall/Dockerfile"
+	conversationWallToolTokenEnv    = "CLAW_WALL_TOOL_TOKEN"
+	conversationWallAllowlistPath   = "/etc/claw-wall/agent-channels.json"
+	conversationWallMemoryIngestEnv = "CLAW_WALL_CHANNEL_MEMORY_INGEST_URL"
+	conversationWallMemoryTimeout   = "2s"
+	clawInternalNetworkName         = "claw-internal"
+	historyReplayAuthService        = "cllama-history"
+	historyReplayBaseURL            = "http://cllama:8080/history"
 )
 
 var (
@@ -1816,16 +1818,21 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 		svc.Claw.Tools = appendConversationWallToolPolicy(svc.Claw.Tools)
 	}
 
+	wallEnv := map[string]string{
+		"CLAW_WALL_TOKENS":             formatConversationWallTokenPairs(tokenPairs),
+		"CLAW_WALL_LIMIT":              strconv.Itoa(conversationWallBufferForPod(p, triggerServices)),
+		"CLAW_WALL_POLL_INTERVAL":      envOrDefault("CLAW_WALL_POLL_INTERVAL", conversationWallPollInterval),
+		"CLAW_WALL_RETENTION":          envOrDefault("CLAW_WALL_RETENTION", conversationWallRetention),
+		"CLAW_WALL_BACKFILL_MAX_PAGES": envOrDefault("CLAW_WALL_BACKFILL_MAX_PAGES", conversationWallBackfillPages),
+	}
+	if err := configureConversationWallChannelMemory(p, wallEnv); err != nil {
+		return err
+	}
+
 	p.Services[conversationWallServiceName] = &pod.Service{
-		Image: resolveConversationWallImageRef(),
-		Environment: map[string]string{
-			"CLAW_WALL_TOKENS":             formatConversationWallTokenPairs(tokenPairs),
-			"CLAW_WALL_LIMIT":              strconv.Itoa(conversationWallBufferForPod(p, triggerServices)),
-			"CLAW_WALL_POLL_INTERVAL":      envOrDefault("CLAW_WALL_POLL_INTERVAL", conversationWallPollInterval),
-			"CLAW_WALL_RETENTION":          envOrDefault("CLAW_WALL_RETENTION", conversationWallRetention),
-			"CLAW_WALL_BACKFILL_MAX_PAGES": envOrDefault("CLAW_WALL_BACKFILL_MAX_PAGES", conversationWallBackfillPages),
-		},
-		Expose: []string{conversationWallInternalPort},
+		Image:       resolveConversationWallImageRef(),
+		Environment: wallEnv,
+		Expose:      []string{conversationWallInternalPort},
 		Compose: map[string]interface{}{
 			"networks":  []string{"claw-internal"},
 			"restart":   "on-failure",
@@ -1841,6 +1848,39 @@ func injectConversationWall(p *pod.Pod, resolvedClaws map[string]*driver.Resolve
 				"claw.role": "conversation-wall",
 			},
 		},
+	}
+	return nil
+}
+
+func configureConversationWallChannelMemory(p *pod.Pod, wallEnv map[string]string) error {
+	if p == nil || p.ChannelMemory == nil {
+		return nil
+	}
+	serviceName := strings.TrimSpace(p.ChannelMemory.Service)
+	if serviceName == "" {
+		return nil
+	}
+	if _, ok := p.Services[serviceName]; !ok {
+		return fmt.Errorf("channel-memory service %q not found", serviceName)
+	}
+	baseURL, err := resolveServiceBaseURL(p, serviceName)
+	if err != nil {
+		return fmt.Errorf("channel-memory service %q: %w", serviceName, err)
+	}
+	wallEnv[conversationWallMemoryIngestEnv] = buildFeedURL(baseURL, "/ingest")
+	wallEnv["CLAW_WALL_CHANNEL_MEMORY_TIMEOUT"] = envOrDefault("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", conversationWallMemoryTimeout)
+	targetSvc := p.Services[serviceName]
+	if targetSvc.Environment == nil {
+		targetSvc.Environment = make(map[string]string)
+	}
+	token := strings.TrimSpace(targetSvc.Environment["CHANNEL_MEMORY_TOKEN"])
+	if token == "" {
+		token = cllama.GenerateToken(serviceName)
+		targetSvc.Environment["CHANNEL_MEMORY_TOKEN"] = token
+	}
+	wallEnv["CLAW_WALL_CHANNEL_MEMORY_TOKEN"] = token
+	if err := ensureServiceOnNetwork(targetSvc, clawInternalNetworkName); err != nil {
+		return fmt.Errorf("attach channel-memory service network: %w", err)
 	}
 	return nil
 }

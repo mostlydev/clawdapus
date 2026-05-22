@@ -28,6 +28,7 @@ type rawPodClaw struct {
 	SequentialConformance bool                   `yaml:"sequential-conformance"`
 	HandlesDefaults       map[string]interface{} `yaml:"handles-defaults"`
 	Context               *rawContextConfig      `yaml:"context"`
+	ChannelMemory         *rawChannelMemoryEntry `yaml:"channel-memory"`
 	Principals            []rawPrincipalEntry    `yaml:"principals"`
 	AlertWebhooks         []string               `yaml:"alert-webhooks"`
 	AlertMentions         []string               `yaml:"alert-mentions"`
@@ -120,6 +121,10 @@ type rawToolPolicyEntry struct {
 type rawMemoryEntry struct {
 	Service   string `yaml:"service"`
 	TimeoutMS *int   `yaml:"timeout-ms"`
+}
+
+type rawChannelMemoryEntry struct {
+	Service string `yaml:"service"`
 }
 
 type rawIncludeEntry struct {
@@ -328,6 +333,12 @@ func Parse(r io.Reader) (*Pod, error) {
 		}
 		pod.Services[name] = service
 	}
+
+	channelMemory, err := parseChannelMemory(raw.XClaw.ChannelMemory, pod.Services)
+	if err != nil {
+		return nil, fmt.Errorf("x-claw.channel-memory: %w", err)
+	}
+	pod.ChannelMemory = channelMemory
 
 	if pod.Master != "" {
 		svc, ok := pod.Services[pod.Master]
@@ -632,6 +643,23 @@ func parseMemory(raw *rawMemoryEntry) (*MemoryEntry, error) {
 		Service:   service,
 		TimeoutMS: timeoutMS,
 	}, nil
+}
+
+func parseChannelMemory(raw *rawChannelMemoryEntry, services map[string]*Service) (*ChannelMemoryConfig, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	service := strings.TrimSpace(raw.Service)
+	if service == "" {
+		return nil, fmt.Errorf("service is required")
+	}
+	if service == "claw-wall" {
+		return nil, fmt.Errorf("service %q is reserved for the conversation wall sidecar", service)
+	}
+	if _, ok := services[service]; !ok {
+		return nil, fmt.Errorf("service %q does not exist", service)
+	}
+	return &ChannelMemoryConfig{Service: service}, nil
 }
 
 func parseContextConfig(raw *rawContextConfig) (*ContextConfig, error) {
