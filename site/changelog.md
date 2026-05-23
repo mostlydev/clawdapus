@@ -31,7 +31,18 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.18.0 <Badge type="tip" text="Latest" /> {#v0-18-0}
+## v0.19.0 <Badge type="tip" text="Latest" /> {#v0-19-0}
+
+*2026-05-23*
+
+- **Digest-backed channel awareness is live** — Discord-channel-consuming agents can now receive `channel-awareness` as `raw_window+digest`: a compact digest section with exact `source_channel` / `source_messages` provenance plus a bounded raw-recent tail. claw-wall fetches processed blocks from channel-memory, fails open to raw-only context when digest lookup is unavailable, and exposes digest status, coverage gaps, raw bytes, digest bytes, and deterministic-only state in provider-visible feed headers and `channel_context_op` telemetry. Closes [#267](https://github.com/mostlydev/clawdapus/issues/267).
+- **channel-memory is a durable source-backed digest producer** — the new SQLite-backed adapter stores channel source messages by stable `(source_kind, channel_id, message_id, content_hash)` identity, preserves edit/delete/tombstone/forget semantics, records derived-block provenance, and can answer exact source-message lookups for retained messages. Deterministic processing keeps hard events faithful and works without provider credentials. Closes [#265](https://github.com/mostlydev/clawdapus/issues/265).
+- **claw-wall pushes channel messages into channel-memory** — optional channel-memory wiring lets claw-wall push backfilled and newly-polled channel messages into the adapter without blocking raw-window serving. Ingest is idempotent, service-token protected, scoped by the existing channel allowlist, and includes a replay path for retained messages. Closes [#266](https://github.com/mostlydev/clawdapus/issues/266).
+- **Async LLM digesting stays off the hot path** — channel-memory can optionally run a background worker that compresses verbose raw excerpts into sparse `topic_rollup` and `sequence_rollup` blocks. The worker requires structured JSON with full source-message provenance, caches by source ids plus content hashes, enforces per-channel and per-pod daily call and USD caps, and falls back to deterministic-only output when disabled, over budget, or failing. `/digest` remains LLM-free. Closes [#268](https://github.com/mostlydev/clawdapus/issues/268).
+- **Stable source handles round-trip from awareness to retrieval** — channel-awareness and retrieval results now expose compact channel/message source handles so digest provenance can be resolved back to exact retained source messages instead of ambiguous timestamp-only references. Closes [#263](https://github.com/mostlydev/clawdapus/issues/263).
+- **Pins infra images** — `claw-api`, `clawdash`, `claw-wall`, `claw-channel-memory`, and `claw-mcp-stdio` move in lockstep to `v0.19.0`. cllama moves to [v0.6.8](https://github.com/mostlydev/cllama/releases/tag/v0.6.8) for digest telemetry. `hermes-base` stays at `v2026.5.16-claw.2`.
+
+## v0.18.0 {#v0-18-0}
 
 *2026-05-19*
 
