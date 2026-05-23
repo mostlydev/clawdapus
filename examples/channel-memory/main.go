@@ -225,6 +225,17 @@ func main() {
 	}
 	defer store.Close()
 
+	workerCfg := workerConfigFromEnv()
+	if workerCfg.Enabled {
+		client := httpLLMClientFromEnv(workerCfg)
+		if client == nil {
+			log.Printf("channel-memory digest worker enabled but CHANNEL_MEMORY_LLM_BASE_URL or CHANNEL_MEMORY_LLM_MODEL is unset; staying deterministic-only")
+		} else {
+			worker := newDigestWorker(store, client, workerCfg)
+			go worker.Run(context.Background())
+		}
+	}
+
 	addr := strings.TrimSpace(os.Getenv("PORT"))
 	if addr == "" {
 		addr = defaultListenAddress
@@ -358,6 +369,13 @@ func (s *channelMemoryStore) initSchema(ctx context.Context) error {
 			updated_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_processing_queue_status ON processing_queue(status, updated_at)`,
+		`CREATE TABLE IF NOT EXISTS llm_usage (
+			day TEXT NOT NULL,
+			scope TEXT NOT NULL,
+			calls INTEGER NOT NULL DEFAULT 0,
+			cost_usd REAL NOT NULL DEFAULT 0,
+			PRIMARY KEY(day, scope)
+		)`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -648,10 +666,19 @@ func (s *channelMemoryStore) Digest(ctx context.Context, req digestRequest) (dig
 	}
 
 	rawRecent := 0
+	deterministicOnly := true
 	for _, block := range blocks {
 		if block.Kind == "raw_excerpt" || block.Kind == "hard_event" || block.Kind == "tombstone" {
 			rawRecent++
 		}
+		if block.Processor == digestProcessorLLM {
+			deterministicOnly = false
+		}
+	}
+
+	llmCallsToday, err := s.dailyLLMCalls(ctx, s.now().UTC().Format("2006-01-02"), "pod")
+	if err != nil {
+		return digestResponse{}, err
 	}
 
 	return digestResponse{
@@ -667,8 +694,8 @@ func (s *channelMemoryStore) Digest(ctx context.Context, req digestRequest) (dig
 		},
 		Blocks: blocks,
 		Cost: digestCost{
-			DeterministicOnly: true,
-			LLMCallsToday:     0,
+			DeterministicOnly: deterministicOnly,
+			LLMCallsToday:     llmCallsToday,
 		},
 	}, nil
 }
@@ -851,7 +878,47 @@ func markIdentityBlocksDirtyTx(ctx context.Context, tx *sql.Tx, sourceKind, chan
 		args = append(args, exceptContentHash)
 	}
 	query += `)`
-	_, err := tx.ExecContext(ctx, query, args...)
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return err
+	}
+	return restoreCurrentRawExcerptsForDirtyRollupsTx(ctx, tx, sourceKind, channelID, messageID)
+}
+
+func restoreCurrentRawExcerptsForDirtyRollupsTx(ctx context.Context, tx *sql.Tx, sourceKind, channelID, messageID string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE derived_blocks
+		SET stale = 0
+		WHERE processor = 'deterministic' AND kind = 'raw_excerpt' AND id IN (
+			SELECT raw.block_id
+			FROM derived_block_sources raw
+			JOIN source_messages current_source
+			  ON current_source.source_kind = raw.source_kind
+			 AND current_source.channel_id = raw.channel_id
+			 AND current_source.message_id = raw.message_id
+			 AND current_source.content_hash = raw.content_hash
+			 AND current_source.is_current = 1
+			 AND current_source.deleted = 0
+			 AND current_source.forgotten_at = ''
+			WHERE raw.source_kind = ? AND raw.channel_id = ?
+			  AND raw.message_id IN (
+				SELECT covered.message_id
+				FROM derived_blocks rollup
+				JOIN derived_block_sources trigger_source
+				  ON trigger_source.block_id = rollup.id
+				 AND trigger_source.source_kind = ?
+				 AND trigger_source.channel_id = ?
+				 AND trigger_source.message_id = ?
+				JOIN derived_block_sources covered
+				  ON covered.block_id = rollup.id
+				WHERE rollup.processor = ?
+				  AND rollup.kind IN (?, ?)
+				  AND rollup.dirty = 1
+			  )
+		)`,
+		sourceKind, channelID,
+		sourceKind, channelID, messageID,
+		digestProcessorLLM, rollupKindTopic, rollupKindSequence,
+	)
 	return err
 }
 
@@ -1054,6 +1121,10 @@ func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, c
 	if limit <= 0 {
 		return nil, nil
 	}
+	queryLimit := limit * 4
+	if queryLimit < limit {
+		queryLimit = limit
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, kind, event_type, text, source_channel, source_window_from, source_window_to,
 		       sparse, score, generated_at, stale, dirty, processor
@@ -1061,7 +1132,7 @@ func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, c
 		WHERE source_channel = ? AND source_window_to >= ? AND stale = 0 AND dirty = 0
 		ORDER BY source_window_from ASC, id ASC
 		LIMIT ?`,
-		channelID, cutoff, limit,
+		channelID, cutoff, queryLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -1097,7 +1168,48 @@ func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, c
 			return nil, err
 		}
 	}
-	return blocks, nil
+	return preferSparseRollups(blocks, limit), nil
+}
+
+func preferSparseRollups(blocks []digestBlock, limit int) []digestBlock {
+	coveredByRollup := make(map[string]struct{})
+	for _, block := range blocks {
+		if block.Processor != digestProcessorLLM {
+			continue
+		}
+		if block.Kind != rollupKindTopic && block.Kind != rollupKindSequence {
+			continue
+		}
+		for _, messageID := range block.SourceMessages {
+			coveredByRollup[block.SourceChannel+"\x00"+messageID] = struct{}{}
+		}
+	}
+	if len(coveredByRollup) == 0 {
+		if len(blocks) > limit {
+			return blocks[:limit]
+		}
+		return blocks
+	}
+	filtered := make([]digestBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Processor == "deterministic" && block.Kind == "raw_excerpt" {
+			skip := false
+			for _, messageID := range block.SourceMessages {
+				if _, ok := coveredByRollup[block.SourceChannel+"\x00"+messageID]; ok {
+					skip = true
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+		}
+		filtered = append(filtered, block)
+		if len(filtered) >= limit {
+			break
+		}
+	}
+	return filtered
 }
 
 func (s *channelMemoryStore) loadBlockSources(ctx context.Context, block *digestBlock) error {
