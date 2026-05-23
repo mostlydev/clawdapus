@@ -18,7 +18,7 @@ func ReleaseRefs(releaseTag string) []string {
 		fmt.Sprintf("ghcr.io/mostlydev/claw-api:%s", releaseTag),
 		fmt.Sprintf("ghcr.io/mostlydev/clawdash:%s", releaseTag),
 		fmt.Sprintf("ghcr.io/mostlydev/claw-wall:%s", releaseTag),
-		fmt.Sprintf("ghcr.io/mostlydev/claw-channel-memory:%s", releaseTag),
+		fmt.Sprintf("ghcr.io/mostlydev/clawdapus/claw-channel-memory:%s", releaseTag),
 		fmt.Sprintf("ghcr.io/mostlydev/claw-mcp-stdio:%s", releaseTag),
 		fmt.Sprintf("ghcr.io/mostlydev/cllama:%s", DefaultCllamaTag),
 		fmt.Sprintf("ghcr.io/mostlydev/hermes-base:%s", DefaultHermesBaseTag),
