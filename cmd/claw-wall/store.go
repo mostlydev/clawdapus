@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -92,10 +93,19 @@ type agentChannelAllowlistFile struct {
 }
 
 type retrievalResult struct {
-	Messages         []wallMessage `json:"messages"`
-	RetainedCoverage coverageInfo  `json:"retained_coverage"`
-	Status           string        `json:"status"`
-	Hint             string        `json:"hint,omitempty"`
+	Messages         []wallMessage              `json:"messages"`
+	DerivedBlocks    []channelMemoryDigestBlock `json:"derived_blocks,omitempty"`
+	RetainedCoverage coverageInfo               `json:"retained_coverage"`
+	Source           string                     `json:"source,omitempty"`
+	SourceCounts     *sourceCounts              `json:"source_counts,omitempty"`
+	Status           string                     `json:"status"`
+	Hint             string                     `json:"hint,omitempty"`
+}
+
+type sourceCounts struct {
+	Retained      int `json:"retained"`
+	DurableSource int `json:"durable_source"`
+	SparseBlock   int `json:"sparse_block"`
 }
 
 type coverageInfo struct {
@@ -116,12 +126,13 @@ type searchChannelContextRequest struct {
 }
 
 type getChannelMessagesRequest struct {
-	Channels   []string `json:"channels"`
-	MessageIDs []string `json:"message_ids"`
-	After      string   `json:"after"`
-	Before     string   `json:"before"`
-	Author     string   `json:"author"`
-	Limit      int      `json:"limit"`
+	Channels      []string `json:"channels"`
+	MessageIDs    []string `json:"message_ids"`
+	SourceHandles []string `json:"source_handles,omitempty"`
+	After         string   `json:"after"`
+	Before        string   `json:"before"`
+	Author        string   `json:"author"`
+	Limit         int      `json:"limit"`
 }
 
 type channelMemoryReplayRequest struct {
@@ -660,6 +671,236 @@ func (s *conversationStore) snapshot(channelIDs []string, limit int, now time.Ti
 	return out
 }
 
+func mergeChannelMemorySearch(ctx context.Context, result retrievalResult, client *channelMemoryClient, req searchChannelContextRequest) retrievalResult {
+	if !client.searchEnabled() {
+		return result
+	}
+	counts := &sourceCounts{Retained: len(result.Messages)}
+	result.SourceCounts = counts
+	result.Source = "claw-wall"
+
+	resp, err := client.search(ctx, channelMemorySearchRequest{
+		SourceKind: channelMemorySourceKind,
+		ChannelIDs: normalizeChannelIDs(req.Channels),
+		Query:      req.Query,
+		Since:      req.Since,
+		Author:     req.Author,
+		Limit:      effectiveRetrievalLimit(req.Limit),
+	})
+	if err != nil || resp == nil {
+		result.Hint = appendHint(result.Hint, "channel-memory search unavailable; returned claw-wall raw buffer only")
+		return result
+	}
+
+	counts.DurableSource = len(resp.SourceMessages)
+	counts.SparseBlock = len(resp.DerivedBlocks)
+	result.DerivedBlocks = append([]channelMemoryDigestBlock(nil), resp.DerivedBlocks...)
+
+	seen := messageKeySet(result.Messages)
+	for _, source := range resp.SourceMessages {
+		msg := wallMessageFromSource(source)
+		if strings.TrimSpace(msg.ID) == "" || strings.TrimSpace(msg.ChannelID) == "" {
+			continue
+		}
+		key := messageKey(msg)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result.Messages = append(result.Messages, msg)
+	}
+	sortWallMessages(result.Messages)
+	result.Messages = newestMessages(result.Messages, effectiveRetrievalLimit(req.Limit))
+	result.Source = retrievalSource(*counts)
+	if counts.DurableSource > 0 || counts.SparseBlock > 0 || len(result.Messages) > 0 {
+		result.Status = "ok"
+		if strings.Contains(result.Hint, "v2 digest") {
+			result.Hint = ""
+		}
+	} else if result.Status == "not_in_buffer" {
+		result.Status = "empty"
+		result.Hint = "No matches found in claw-wall raw buffer or channel-memory retention."
+	}
+	return result
+}
+
+func mergeChannelMemoryMessages(ctx context.Context, result retrievalResult, client *channelMemoryClient, req getChannelMessagesRequest) retrievalResult {
+	if !client.sourceMessagesEnabled() || len(req.MessageIDs) == 0 {
+		return result
+	}
+	counts := &sourceCounts{Retained: len(result.Messages)}
+	result.SourceCounts = counts
+	result.Source = "claw-wall"
+
+	seen := messageKeySet(result.Messages)
+	missingByChannel := missingMessageIDsByChannel(req, seen)
+	for channelID, messageIDs := range missingByChannel {
+		resp, err := client.sourceMessages(ctx, channelMemorySourceMessagesRequest{
+			SourceKind: channelMemorySourceKind,
+			ChannelID:  channelID,
+			MessageIDs: messageIDs,
+		})
+		if err != nil || resp == nil {
+			result.Hint = appendHint(result.Hint, "channel-memory source lookup unavailable; returned claw-wall raw buffer only")
+			return result
+		}
+		counts.DurableSource += len(resp.Messages)
+		for _, source := range resp.Messages {
+			msg := wallMessageFromSource(source)
+			if !messageMatchesGetRequest(msg, req) {
+				continue
+			}
+			key := messageKey(msg)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			result.Messages = append(result.Messages, msg)
+		}
+	}
+
+	sortWallMessages(result.Messages)
+	result.Messages = newestMessages(result.Messages, effectiveRetrievalLimit(req.Limit))
+	result.Source = retrievalSource(*counts)
+	if len(result.Messages) > 0 {
+		result.Status = "ok"
+		if result.Hint == "One or more requested message_ids are not retained in claw-wall's current buffer." {
+			result.Hint = ""
+		}
+	}
+	if len(req.MessageIDs) > 0 && !allRequestedMessageIDsFound(req, result.Messages) {
+		if len(result.Messages) == 0 {
+			result.Status = "not_found"
+		}
+		result.Hint = appendHint(result.Hint, "One or more requested message_ids were not found in claw-wall raw buffer or channel-memory.")
+	}
+	return result
+}
+
+func effectiveRetrievalLimit(limit int) int {
+	if limit <= 0 {
+		return defaultResponseLimit
+	}
+	return limit
+}
+
+func messageKeySet(messages []wallMessage) map[string]struct{} {
+	seen := make(map[string]struct{}, len(messages))
+	for _, msg := range messages {
+		seen[messageKey(msg)] = struct{}{}
+	}
+	return seen
+}
+
+func messageKey(msg wallMessage) string {
+	return strings.TrimSpace(msg.ChannelID) + "\x00" + strings.TrimSpace(msg.ID)
+}
+
+func newestMessages(messages []wallMessage, limit int) []wallMessage {
+	if limit <= 0 {
+		limit = defaultResponseLimit
+	}
+	if len(messages) <= limit {
+		return messages
+	}
+	return messages[len(messages)-limit:]
+}
+
+func retrievalSource(counts sourceCounts) string {
+	raw := counts.Retained > 0
+	memory := counts.DurableSource > 0 || counts.SparseBlock > 0
+	switch {
+	case raw && memory:
+		return "mixed"
+	case memory:
+		return "channel-memory"
+	default:
+		return "claw-wall"
+	}
+}
+
+func appendHint(existing, next string) string {
+	existing = strings.TrimSpace(existing)
+	next = strings.TrimSpace(next)
+	if existing == "" {
+		return next
+	}
+	if next == "" || strings.Contains(existing, next) {
+		return existing
+	}
+	return existing + " " + next
+}
+
+func wallMessageFromSource(source channelMemorySourceMessage) wallMessage {
+	createdAt, _ := time.Parse(time.RFC3339, strings.TrimSpace(source.CreatedAt))
+	editedAt, _ := time.Parse(time.RFC3339, strings.TrimSpace(source.EditedAt))
+	return wallMessage{
+		ID:           strings.TrimSpace(source.MessageID),
+		ChannelID:    strings.TrimSpace(source.ChannelID),
+		SourceHandle: firstNonEmptyString(source.SourceHandle, sourceHandleFor(source.ChannelID, source.MessageID)),
+		AuthorID:     strings.TrimSpace(source.AuthorID),
+		Author:       firstNonEmptyString(source.AuthorName, source.AuthorID, "unknown"),
+		Content:      source.Content,
+		Timestamp:    createdAt,
+		EditedAt:     editedAt,
+		Deleted:      source.Deleted,
+	}
+}
+
+func sourceHandleFor(channelID, messageID string) string {
+	channelID = strings.TrimSpace(channelID)
+	messageID = strings.TrimSpace(messageID)
+	if channelID == "" || messageID == "" {
+		return ""
+	}
+	return channelID + "/" + messageID
+}
+
+func missingMessageIDsByChannel(req getChannelMessagesRequest, seen map[string]struct{}) map[string][]string {
+	out := make(map[string][]string)
+	for _, channelID := range normalizeChannelIDs(req.Channels) {
+		for _, messageID := range trimNonEmptyStrings(req.MessageIDs) {
+			if _, ok := seen[channelID+"\x00"+messageID]; ok {
+				continue
+			}
+			if !containsString(out[channelID], messageID) {
+				out[channelID] = append(out[channelID], messageID)
+			}
+		}
+	}
+	return out
+}
+
+func messageMatchesGetRequest(msg wallMessage, req getChannelMessagesRequest) bool {
+	author := strings.ToLower(strings.TrimSpace(req.Author))
+	if author != "" && !strings.Contains(strings.ToLower(msg.Author), author) && !strings.Contains(strings.ToLower(msg.AuthorID), author) {
+		return false
+	}
+	if after := strings.TrimSpace(req.After); after != "" && !messageAfterBoundary(msg, after) {
+		return false
+	}
+	if before := strings.TrimSpace(req.Before); before != "" && !messageBeforeBoundary(msg, before) {
+		return false
+	}
+	return true
+}
+
+func allRequestedMessageIDsFound(req getChannelMessagesRequest, messages []wallMessage) bool {
+	if len(req.MessageIDs) == 0 {
+		return true
+	}
+	found := make(map[string]struct{})
+	for _, msg := range messages {
+		found[strings.TrimSpace(msg.ID)] = struct{}{}
+	}
+	for _, id := range trimNonEmptyStrings(req.MessageIDs) {
+		if _, ok := found[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *conversationStore) backfillStatusForChannelsLocked(channelIDs []string) map[string]string {
 	channelIDs = normalizeChannelIDs(channelIDs)
 	out := make(map[string]string, len(channelIDs))
@@ -819,11 +1060,19 @@ func newHandler(store *conversationStore, cfgs ...handlerConfig) http.Handler {
 		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
-		if disallowed := firstDisallowedToolChannel(req.Channels, r.Header.Get("X-Claw-ID"), cfg.agentChannels); disallowed != "" {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "channel_not_allowed", "agent": r.Header.Get("X-Claw-ID"), "channel": disallowed})
+		agentID := r.Header.Get("X-Claw-ID")
+		req.Channels = effectiveToolChannels(req.Channels, agentID, cfg.agentChannels)
+		if len(req.Channels) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channels_required"})
 			return
 		}
-		writeJSON(w, http.StatusOK, store.search(req, store.currentTime()))
+		if disallowed := firstDisallowedToolChannel(req.Channels, agentID, cfg.agentChannels); disallowed != "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "channel_not_allowed", "agent": agentID, "channel": disallowed})
+			return
+		}
+		result := store.search(req, store.currentTime())
+		result = mergeChannelMemorySearch(r.Context(), result, cfg.channelMemory, req)
+		writeJSON(w, http.StatusOK, result)
 	})
 	mux.HandleFunc("/get_channel_messages", func(w http.ResponseWriter, r *http.Request) {
 		if !authorizeToolRequest(w, r, cfg) {
@@ -833,11 +1082,20 @@ func newHandler(store *conversationStore, cfgs ...handlerConfig) http.Handler {
 		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
-		if disallowed := firstDisallowedToolChannel(req.Channels, r.Header.Get("X-Claw-ID"), cfg.agentChannels); disallowed != "" {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "channel_not_allowed", "agent": r.Header.Get("X-Claw-ID"), "channel": disallowed})
+		agentID := r.Header.Get("X-Claw-ID")
+		req = normalizeGetChannelMessagesRequest(req)
+		req.Channels = effectiveToolChannels(req.Channels, agentID, cfg.agentChannels)
+		if len(req.Channels) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channels_required"})
 			return
 		}
-		writeJSON(w, http.StatusOK, store.getMessages(req))
+		if disallowed := firstDisallowedToolChannel(req.Channels, agentID, cfg.agentChannels); disallowed != "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "channel_not_allowed", "agent": agentID, "channel": disallowed})
+			return
+		}
+		result := store.getMessages(req)
+		result = mergeChannelMemoryMessages(r.Context(), result, cfg.channelMemory, req)
+		writeJSON(w, http.StatusOK, result)
 	})
 	mux.HandleFunc("/channel-memory/replay", func(w http.ResponseWriter, r *http.Request) {
 		if !authorizeToolRequest(w, r, cfg) {
@@ -901,6 +1159,67 @@ func firstDisallowedToolChannel(channels []string, agentID string, allowlists ma
 		}
 	}
 	return ""
+}
+
+func effectiveToolChannels(requested []string, agentID string, allowlists map[string]map[string]struct{}) []string {
+	channels := normalizeChannelIDs(requested)
+	if len(channels) > 0 {
+		return channels
+	}
+	allowed := allowlists[strings.TrimSpace(agentID)]
+	if len(allowed) == 0 {
+		return nil
+	}
+	channels = make([]string, 0, len(allowed))
+	for channelID := range allowed {
+		if strings.TrimSpace(channelID) != "" {
+			channels = append(channels, channelID)
+		}
+	}
+	sort.Strings(channels)
+	return channels
+}
+
+func normalizeGetChannelMessagesRequest(req getChannelMessagesRequest) getChannelMessagesRequest {
+	channels := append([]string(nil), req.Channels...)
+	messageIDs := make([]string, 0, len(req.MessageIDs)+len(req.SourceHandles))
+	for _, raw := range req.MessageIDs {
+		if channelID, messageID, ok := splitSourceHandle(raw); ok {
+			channels = append(channels, channelID)
+			messageIDs = append(messageIDs, messageID)
+			continue
+		}
+		messageIDs = append(messageIDs, raw)
+	}
+	for _, raw := range req.SourceHandles {
+		if channelID, messageID, ok := splitSourceHandle(raw); ok {
+			channels = append(channels, channelID)
+			messageIDs = append(messageIDs, messageID)
+		}
+	}
+	req.Channels = normalizeChannelIDs(channels)
+	req.MessageIDs = trimNonEmptyStrings(messageIDs)
+	return req
+}
+
+func splitSourceHandle(raw string) (string, string, bool) {
+	left, right, ok := strings.Cut(strings.TrimSpace(raw), "/")
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if !ok || left == "" || right == "" {
+		return "", "", false
+	}
+	return left, right, true
+}
+
+func containsString(values []string, want string) bool {
+	want = strings.TrimSpace(want)
+	for _, value := range values {
+		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeJSONRequest(w http.ResponseWriter, r *http.Request, out any) bool {

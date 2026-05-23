@@ -28,6 +28,8 @@ type config struct {
 	AgentChannelsPath      string
 	ChannelMemoryIngestURL string
 	ChannelMemoryDigestURL string
+	ChannelMemorySearchURL string
+	ChannelMemorySourceURL string
 	ChannelMemoryToken     string
 	ChannelMemoryTimeout   time.Duration
 }
@@ -59,7 +61,7 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("claw-wall: parse CLAW_WALL_TOKENS: %w", err)
 	}
-	channelMemory, err := newChannelMemoryClientWithDigest(cfg.ChannelMemoryIngestURL, cfg.ChannelMemoryDigestURL, cfg.ChannelMemoryToken, cfg.ChannelMemoryTimeout)
+	channelMemory, err := newChannelMemoryClientWithEndpoints(cfg.ChannelMemoryIngestURL, cfg.ChannelMemoryDigestURL, cfg.ChannelMemorySearchURL, cfg.ChannelMemorySourceURL, cfg.ChannelMemoryToken, cfg.ChannelMemoryTimeout)
 	if err != nil {
 		return fmt.Errorf("claw-wall: configure channel-memory: %w", err)
 	}
@@ -170,6 +172,8 @@ func loadConfig() (config, error) {
 		AgentChannelsPath:      envOr("CLAW_WALL_AGENT_CHANNELS_FILE", "/etc/claw-wall/agent-channels.json"),
 		ChannelMemoryIngestURL: strings.TrimSpace(os.Getenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL")),
 		ChannelMemoryDigestURL: strings.TrimSpace(os.Getenv("CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL")),
+		ChannelMemorySearchURL: strings.TrimSpace(os.Getenv("CLAW_WALL_CHANNEL_MEMORY_SEARCH_URL")),
+		ChannelMemorySourceURL: strings.TrimSpace(os.Getenv("CLAW_WALL_CHANNEL_MEMORY_SOURCE_URL")),
 		ChannelMemoryToken:     strings.TrimSpace(os.Getenv("CLAW_WALL_CHANNEL_MEMORY_TOKEN")),
 		ChannelMemoryTimeout:   channelMemoryTimeout,
 	}, nil

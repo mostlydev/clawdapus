@@ -249,12 +249,90 @@ func TestChannelMemoryHTTPAPI(t *testing.T) {
 		t.Fatalf("unexpected source query response: %+v", sources)
 	}
 
+	search := postJSONDecode[searchResponse](t, server.URL+"/search", searchRequest{
+		ChannelIDs: []string{"chan-http"},
+		Query:      "relevant",
+		Since:      "24h",
+	}, http.StatusOK)
+	if search.Status != "ok" || len(search.SourceMessages) != 1 || search.SourceMessages[0].SourceHandle != "chan-http/301" {
+		t.Fatalf("unexpected search response: %+v", search)
+	}
+
 	digest := postJSONDecode[digestResponse](t, server.URL+"/digest", digestRequest{
 		ChannelIDs: []string{"chan-http"},
 		Since:      "24h",
 	}, http.StatusOK)
 	if len(digest.Blocks) != 1 || digest.Blocks[0].Kind != "raw_excerpt" {
 		t.Fatalf("unexpected digest response: %+v", digest)
+	}
+}
+
+func TestChannelMemorySearchSourceAndSparseBlocks(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	mustIngest := func(channelID, messageID, author, content string) {
+		t.Helper()
+		if _, err := store.Ingest(context.Background(), ingestRequest{
+			ChannelID: channelID,
+			Message: ingestMessage{
+				ID:          messageID,
+				AuthorName:  author,
+				CreatedAt:   "2026-05-21T19:00:00Z",
+				Content:     content,
+				ContentHash: "sha256:" + channelID + ":" + messageID,
+			},
+		}); err != nil {
+			t.Fatalf("ingest %s/%s: %v", channelID, messageID, err)
+		}
+	}
+
+	mustIngest("chan-search", "501", "Analyst Alpha", "ACME durable catalyst note")
+	mustIngest("chan-search", "502", "Ops Bot", "heartbeat_ok runtime status seq=502")
+	mustIngest("chan-search", "503", "Ops Bot", "heartbeat_ok runtime status seq=503")
+	mustIngest("chan-other", "601", "Analyst Alpha", "ACME must not leak across channels")
+
+	sourceResp, err := store.Search(context.Background(), searchRequest{
+		ChannelIDs: []string{"chan-search"},
+		Query:      "acme",
+		Author:     "alpha",
+		Since:      "24h",
+	})
+	if err != nil {
+		t.Fatalf("search source: %v", err)
+	}
+	if sourceResp.Status != "ok" || len(sourceResp.SourceMessages) != 1 || sourceResp.SourceMessages[0].SourceHandle != "chan-search/501" {
+		t.Fatalf("unexpected source search response: %+v", sourceResp)
+	}
+
+	blockResp, err := store.Search(context.Background(), searchRequest{
+		ChannelIDs: []string{"chan-search"},
+		Query:      "noise elided",
+		Since:      "24h",
+	})
+	if err != nil {
+		t.Fatalf("search derived block: %v", err)
+	}
+	if blockResp.Status != "ok" || len(blockResp.DerivedBlocks) != 1 {
+		t.Fatalf("unexpected derived search response: %+v", blockResp)
+	}
+	if got := blockResp.DerivedBlocks[0].SourceMessages; len(got) != 2 || got[0] != "502" || got[1] != "503" {
+		t.Fatalf("derived block source messages = %v", got)
+	}
+
+	if _, err := store.Forget(context.Background(), forgetRequest{ChannelID: "chan-search", MessageIDs: []string{"501"}, Reason: "test"}); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+	forgottenResp, err := store.Search(context.Background(), searchRequest{
+		ChannelIDs: []string{"chan-search"},
+		Query:      "acme",
+		Since:      "24h",
+	})
+	if err != nil {
+		t.Fatalf("search after forget: %v", err)
+	}
+	if forgottenResp.Status != "empty" || len(forgottenResp.SourceMessages) != 0 {
+		t.Fatalf("forgotten source should be excluded, got %+v", forgottenResp)
 	}
 }
 

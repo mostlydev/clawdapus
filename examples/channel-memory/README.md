@@ -14,6 +14,9 @@ source provenance for digest-backed `channel-awareness` work.
 - `POST /source-messages` fetches exact retained source messages by channel and
   message id. By default it returns the current non-deleted version; set
   `include_history: true` to inspect older content-hash versions.
+- `POST /search` searches current retained source messages and sparse derived
+  blocks within explicit channel ids, returning source handles for exact
+  follow-up retrieval.
 - `POST /digest` returns deterministic digest blocks over already-retained
   messages. It does not call an LLM.
 - `POST /coverage-gaps` records an explicit missing source range.
@@ -101,7 +104,8 @@ docker build -f examples/channel-memory/Dockerfile -t channel-memory:latest .
 ## Pod Wiring
 
 Declare the adapter once at pod level. `claw up` injects ingest and digest URLs
-plus a bearer token into `claw-wall`, injects the matching
+plus a bearer token into `claw-wall`; claw-wall derives search and exact-source
+retrieval URLs from the same service. It also injects the matching
 `CHANNEL_MEMORY_TOKEN` into the adapter service, and changes generated
 `channel-awareness` feeds to request `context_kind=raw_window+digest`.
 

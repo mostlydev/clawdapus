@@ -588,6 +588,217 @@ func TestToolSearchRequiresAuthAndChannelAllowlist(t *testing.T) {
 	}
 }
 
+func TestToolSearchMergesChannelMemoryAndUsesAllowlistForEmptyChannels(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "200", Author: "alice", Content: "recent alpha signal", Timestamp: time.Unix(200, 0)},
+	})
+
+	var captured channelMemorySearchRequest
+	memory := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode search request: %v", err)
+		}
+		writeJSON(w, http.StatusOK, channelMemorySearchResponse{
+			Status: "ok",
+			Coverage: channelMemorySearchCoverage{
+				SourceMessageHits: 1,
+				DerivedBlockHits:  1,
+			},
+			SourceMessages: []channelMemorySourceMessage{{
+				SourceKind:   "discord",
+				ChannelID:    "chan-1",
+				MessageID:    "100",
+				SourceHandle: "chan-1/100",
+				AuthorName:   "bob",
+				CreatedAt:    time.Unix(100, 0).UTC().Format(time.RFC3339),
+				Content:      "older alpha from durable store",
+				IsCurrent:    true,
+			}},
+			DerivedBlocks: []channelMemoryDigestBlock{{
+				Kind:           "topic_rollup",
+				Text:           "alpha appeared in an older sparse digest",
+				SourceChannel:  "chan-1",
+				SourceMessages: []string{"100", "101"},
+				SourceWindow: channelMemorySourceWindow{
+					From: time.Unix(100, 0).UTC().Format(time.RFC3339),
+					To:   time.Unix(101, 0).UTC().Format(time.RFC3339),
+				},
+				Sparse:      true,
+				Score:       0.9,
+				GeneratedAt: time.Unix(300, 0).UTC().Format(time.RFC3339),
+				Processor:   "llm",
+			}},
+		})
+	}))
+	defer memory.Close()
+	client, err := newChannelMemoryClientWithEndpoints("", "", memory.URL+"/search", memory.URL+"/source-messages", "", time.Second)
+	if err != nil {
+		t.Fatalf("newChannelMemoryClientWithEndpoints: %v", err)
+	}
+
+	server := httptest.NewServer(newHandler(store, handlerConfig{
+		toolToken: "tool-token",
+		agentChannels: map[string]map[string]struct{}{
+			"trader-0": {"chan-1": {}},
+		},
+		channelMemory: client,
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/search_channel_context", strings.NewReader(`{"query":"alpha"}`))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer tool-token")
+	req.Header.Set("X-Claw-ID", "trader-0")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
+	}
+	var result retrievalResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !slices.Equal(captured.ChannelIDs, []string{"chan-1"}) {
+		t.Fatalf("channel-memory search got channels %v, want explicit allowlist", captured.ChannelIDs)
+	}
+	if result.Status != "ok" || result.Source != "mixed" || len(result.Messages) != 2 || len(result.DerivedBlocks) != 1 {
+		t.Fatalf("unexpected merged search result: %+v", result)
+	}
+	if result.SourceCounts == nil || result.SourceCounts.Retained != 1 || result.SourceCounts.DurableSource != 1 || result.SourceCounts.SparseBlock != 1 {
+		t.Fatalf("unexpected source counts: %+v", result.SourceCounts)
+	}
+}
+
+func TestToolSearchChannelMemoryFailureFallsBackToRaw(t *testing.T) {
+	store := newConversationStore(50)
+	store.merge("chan-1", []wallMessage{
+		{ID: "200", Author: "alice", Content: "recent alpha signal", Timestamp: time.Unix(200, 0)},
+	})
+	memory := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusBadGateway)
+	}))
+	defer memory.Close()
+	client, err := newChannelMemoryClientWithEndpoints("", "", memory.URL+"/search", "", "", time.Second)
+	if err != nil {
+		t.Fatalf("newChannelMemoryClientWithEndpoints: %v", err)
+	}
+	server := httptest.NewServer(newHandler(store, handlerConfig{
+		toolToken: "tool-token",
+		agentChannels: map[string]map[string]struct{}{
+			"trader-0": {"chan-1": {}},
+		},
+		channelMemory: client,
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/search_channel_context", strings.NewReader(`{"channels":["chan-1"],"query":"alpha"}`))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer tool-token")
+	req.Header.Set("X-Claw-ID", "trader-0")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	var result retrievalResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.Status != "ok" || len(result.Messages) != 1 || !strings.Contains(result.Hint, "channel-memory search unavailable") {
+		t.Fatalf("expected raw fallback with hint, got %+v", result)
+	}
+}
+
+func TestGetChannelMessagesFallsBackToChannelMemorySourceMessages(t *testing.T) {
+	store := newConversationStore(50)
+	var captured channelMemorySourceMessagesRequest
+	memory := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/source-messages" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode source-messages request: %v", err)
+		}
+		writeJSON(w, http.StatusOK, channelMemorySourceMessagesResponse{
+			Messages: []channelMemorySourceMessage{{
+				SourceKind:   "discord",
+				ChannelID:    "chan-1",
+				MessageID:    "100",
+				SourceHandle: "chan-1/100",
+				AuthorName:   "bob",
+				CreatedAt:    time.Unix(100, 0).UTC().Format(time.RFC3339),
+				Content:      "older exact source message",
+				IsCurrent:    true,
+			}},
+		})
+	}))
+	defer memory.Close()
+	client, err := newChannelMemoryClientWithEndpoints("", "", "", memory.URL+"/source-messages", "", time.Second)
+	if err != nil {
+		t.Fatalf("newChannelMemoryClientWithEndpoints: %v", err)
+	}
+	server := httptest.NewServer(newHandler(store, handlerConfig{
+		toolToken: "tool-token",
+		agentChannels: map[string]map[string]struct{}{
+			"trader-0": {"chan-1": {}},
+		},
+		channelMemory: client,
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/get_channel_messages", strings.NewReader(`{"message_ids":["chan-1/100"]}`))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer tool-token")
+	req.Header.Set("X-Claw-ID", "trader-0")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	var result retrievalResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if captured.ChannelID != "chan-1" || !slices.Equal(captured.MessageIDs, []string{"100"}) {
+		t.Fatalf("unexpected source-messages request: %+v", captured)
+	}
+	if result.Status != "ok" || result.Source != "channel-memory" || len(result.Messages) != 1 || result.Messages[0].SourceHandle != "chan-1/100" {
+		t.Fatalf("unexpected source fallback result: %+v", result)
+	}
+
+	forbidden, err := http.NewRequest(http.MethodPost, server.URL+"/get_channel_messages", strings.NewReader(`{"message_ids":["chan-2/200"]}`))
+	if err != nil {
+		t.Fatalf("forbidden request: %v", err)
+	}
+	forbidden.Header.Set("Authorization", "Bearer tool-token")
+	forbidden.Header.Set("X-Claw-ID", "trader-0")
+	resp, err = http.DefaultClient.Do(forbidden)
+	if err != nil {
+		t.Fatalf("POST forbidden: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected forbidden source handle, got %d: %s", resp.StatusCode, string(body))
+	}
+}
+
 func TestGetChannelMessagesSupportsTimestampRange(t *testing.T) {
 	store := newConversationStore(50)
 	store.merge("chan-1", []wallMessage{
@@ -742,6 +953,8 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_SEARCH_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_SOURCE_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TOKEN", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
@@ -765,7 +978,7 @@ func TestLoadConfigDefaultsPollIntervalToThirtySeconds(t *testing.T) {
 	if cfg.DiscordBaseURL != "" {
 		t.Fatalf("expected empty discord base url by default, got %q", cfg.DiscordBaseURL)
 	}
-	if cfg.ChannelMemoryIngestURL != "" || cfg.ChannelMemoryDigestURL != "" || cfg.ChannelMemoryToken != "" || cfg.ChannelMemoryTimeout != 2*time.Second {
+	if cfg.ChannelMemoryIngestURL != "" || cfg.ChannelMemoryDigestURL != "" || cfg.ChannelMemorySearchURL != "" || cfg.ChannelMemorySourceURL != "" || cfg.ChannelMemoryToken != "" || cfg.ChannelMemoryTimeout != 2*time.Second {
 		t.Fatalf("unexpected channel-memory defaults: %+v", cfg)
 	}
 }
@@ -778,6 +991,8 @@ func TestLoadConfigReadsDiscordBaseURLOverride(t *testing.T) {
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
 	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "http://fake-discord:9000/api/v10")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_SEARCH_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_SOURCE_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
 
@@ -799,6 +1014,8 @@ func TestLoadConfigReadsChannelMemoryConfig(t *testing.T) {
 	t.Setenv("CLAW_WALL_DISCORD_BASE_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL", "http://channel-memory:8080/ingest")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL", "http://channel-memory:8080/digest")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_SEARCH_URL", "http://channel-memory:8080/search")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_SOURCE_URL", "http://channel-memory:8080/source-messages")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TOKEN", "memory-token")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "750ms")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
@@ -807,8 +1024,18 @@ func TestLoadConfigReadsChannelMemoryConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
-	if cfg.ChannelMemoryIngestURL != "http://channel-memory:8080/ingest" || cfg.ChannelMemoryDigestURL != "http://channel-memory:8080/digest" || cfg.ChannelMemoryToken != "memory-token" || cfg.ChannelMemoryTimeout != 750*time.Millisecond {
+	if cfg.ChannelMemoryIngestURL != "http://channel-memory:8080/ingest" || cfg.ChannelMemoryDigestURL != "http://channel-memory:8080/digest" || cfg.ChannelMemorySearchURL != "http://channel-memory:8080/search" || cfg.ChannelMemorySourceURL != "http://channel-memory:8080/source-messages" || cfg.ChannelMemoryToken != "memory-token" || cfg.ChannelMemoryTimeout != 750*time.Millisecond {
 		t.Fatalf("unexpected channel-memory config: %+v", cfg)
+	}
+}
+
+func TestChannelMemoryClientDerivesSearchAndSourceURLs(t *testing.T) {
+	client, err := newChannelMemoryClientWithDigest("http://channel-memory:8080/ingest", "", "", time.Second)
+	if err != nil {
+		t.Fatalf("newChannelMemoryClientWithDigest: %v", err)
+	}
+	if client.digestURL != "http://channel-memory:8080/digest" || client.searchURL != "http://channel-memory:8080/search" || client.sourceURL != "http://channel-memory:8080/source-messages" {
+		t.Fatalf("unexpected derived channel-memory URLs: %+v", client)
 	}
 }
 
@@ -820,6 +1047,8 @@ func TestLoadConfigUsesPollIntervalOverride(t *testing.T) {
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "7")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_INGEST_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_SEARCH_URL", "")
+	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_SOURCE_URL", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
 	t.Setenv("CLAW_WALL_TOKENS", "chan-1:token-a")
 

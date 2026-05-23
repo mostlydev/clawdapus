@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -74,6 +75,29 @@ type sourceMessagesRequest struct {
 type sourceMessagesResponse struct {
 	Messages []sourceMessageRecord `json:"messages"`
 	NotFound []sourceRef           `json:"not_found,omitempty"`
+}
+
+type searchRequest struct {
+	SourceKind string   `json:"source_kind,omitempty"`
+	ChannelIDs []string `json:"channel_ids,omitempty"`
+	Query      string   `json:"query,omitempty"`
+	Since      string   `json:"since,omitempty"`
+	Author     string   `json:"author,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
+}
+
+type searchResponse struct {
+	Status         string                `json:"status"`
+	Coverage       searchCoverage        `json:"coverage"`
+	SourceMessages []sourceMessageRecord `json:"source_messages,omitempty"`
+	DerivedBlocks  []digestBlock         `json:"derived_blocks,omitempty"`
+}
+
+type searchCoverage struct {
+	From              string `json:"from,omitempty"`
+	To                string `json:"to,omitempty"`
+	SourceMessageHits int    `json:"source_message_hits"`
+	DerivedBlockHits  int    `json:"derived_block_hits"`
 }
 
 type sourceRef struct {
@@ -429,6 +453,25 @@ func newHandler(store *channelMemoryStore, cfgs ...handlerConfig) http.Handler {
 		writeJSON(w, http.StatusOK, resp)
 	})
 
+	mux.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
+		if !requireMethod(w, r, http.MethodPost) {
+			return
+		}
+		if !authorizeRequest(w, r, cfg) {
+			return
+		}
+		var req searchRequest
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		resp, err := store.Search(r.Context(), req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	})
+
 	mux.HandleFunc("/digest", func(w http.ResponseWriter, r *http.Request) {
 		if !requireMethod(w, r, http.MethodPost) {
 			return
@@ -616,6 +659,47 @@ func (s *channelMemoryStore) SourceMessages(ctx context.Context, req sourceMessa
 		resp.Messages = append(resp.Messages, records...)
 	}
 	return resp, nil
+}
+
+func (s *channelMemoryStore) Search(ctx context.Context, req searchRequest) (searchResponse, error) {
+	sourceKind := normalizeSourceKind(req.SourceKind, "")
+	cutoff, cutoffText, err := parseSince(req.Since, s.now())
+	if err != nil {
+		return searchResponse{}, err
+	}
+	channels := trimNonEmpty(req.ChannelIDs)
+	if len(channels) == 0 {
+		return searchResponse{}, errors.New("channel_ids is required")
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	sourceMessages, err := s.searchSourceMessages(ctx, sourceKind, channels, cutoff.Format(time.RFC3339), req.Query, req.Author, limit)
+	if err != nil {
+		return searchResponse{}, err
+	}
+	derivedBlocks, err := s.searchDerivedBlocks(ctx, sourceKind, channels, cutoff.Format(time.RFC3339), req.Query, limit)
+	if err != nil {
+		return searchResponse{}, err
+	}
+
+	status := "ok"
+	if len(sourceMessages) == 0 && len(derivedBlocks) == 0 {
+		status = "empty"
+	}
+	return searchResponse{
+		Status: status,
+		Coverage: searchCoverage{
+			From:              cutoffText,
+			To:                s.now().UTC().Format(time.RFC3339),
+			SourceMessageHits: len(sourceMessages),
+			DerivedBlockHits:  len(derivedBlocks),
+		},
+		SourceMessages: sourceMessages,
+		DerivedBlocks:  derivedBlocks,
+	}, nil
 }
 
 func (s *channelMemoryStore) Digest(ctx context.Context, req digestRequest) (digestResponse, error) {
@@ -1117,6 +1201,136 @@ func (s *channelMemoryStore) querySourceMessages(ctx context.Context, sourceKind
 	return records, rows.Err()
 }
 
+func (s *channelMemoryStore) searchSourceMessages(ctx context.Context, sourceKind string, channelIDs []string, cutoff, queryText, author string, limit int) ([]sourceMessageRecord, error) {
+	queryText = strings.ToLower(strings.TrimSpace(queryText))
+	author = strings.ToLower(strings.TrimSpace(author))
+	records := make([]sourceMessageRecord, 0)
+	for _, channelID := range channelIDs {
+		sqlText := `
+			SELECT id, source_kind, channel_id, message_id, content_hash, author_id, author_name,
+			       created_at, edited_at, deleted, content, service, surface, guild_id, visibility_scope,
+			       observed_seq, observed_at, is_current, superseded_by, forgotten_at, forget_reason
+			FROM source_messages
+			WHERE source_kind = ? AND channel_id = ? AND is_current = 1 AND deleted = 0 AND forgotten_at = '' AND created_at >= ?`
+		args := []any{sourceKind, channelID, cutoff}
+		if queryText != "" {
+			sqlText += ` AND instr(lower(content), ?) > 0`
+			args = append(args, queryText)
+		}
+		if author != "" {
+			sqlText += ` AND (instr(lower(author_name), ?) > 0 OR instr(lower(author_id), ?) > 0)`
+			args = append(args, author, author)
+		}
+		sqlText += ` ORDER BY created_at DESC, observed_seq DESC LIMIT ?`
+		args = append(args, limit)
+
+		rows, err := s.db.QueryContext(ctx, sqlText, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			record, err := scanSourceMessageRecord(rows)
+			if err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			records = append(records, record)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].CreatedAt == records[j].CreatedAt {
+			return records[i].ObservedSeq < records[j].ObservedSeq
+		}
+		return records[i].CreatedAt < records[j].CreatedAt
+	})
+	if len(records) > limit {
+		records = records[len(records)-limit:]
+	}
+	return records, nil
+}
+
+func scanSourceMessageRecord(row rowScanner) (sourceMessageRecord, error) {
+	var record sourceMessageRecord
+	var id int64
+	var deleted, current int
+	var supersededBy sql.NullInt64
+	if err := row.Scan(
+		&id, &record.SourceKind, &record.ChannelID, &record.MessageID, &record.ContentHash,
+		&record.AuthorID, &record.AuthorName, &record.CreatedAt, &record.EditedAt, &deleted, &record.Content,
+		&record.Service, &record.Surface, &record.GuildID, &record.VisibilityScope,
+		&record.ObservedSeq, &record.ObservedAt, &current, &supersededBy, &record.ForgottenAt, &record.ForgetReason,
+	); err != nil {
+		return sourceMessageRecord{}, err
+	}
+	if supersededBy.Valid {
+		value := supersededBy.Int64
+		record.SupersededBy = &value
+	}
+	record.Deleted = deleted != 0
+	record.IsCurrent = current != 0
+	record.SourceHandle = sourceHandle(record.ChannelID, record.MessageID)
+	return record, nil
+}
+
+func (s *channelMemoryStore) searchDerivedBlocks(ctx context.Context, sourceKind string, channelIDs []string, cutoff, queryText string, limit int) ([]digestBlock, error) {
+	queryText = strings.ToLower(strings.TrimSpace(queryText))
+	blocks := make([]digestBlock, 0)
+	for _, channelID := range channelIDs {
+		sqlText := `
+			SELECT id, kind, event_type, text, source_channel, source_window_from, source_window_to,
+			       sparse, score, generated_at, stale, dirty, processor
+			FROM derived_blocks
+			WHERE source_channel = ? AND source_window_to >= ? AND stale = 0 AND dirty = 0 AND sparse = 1
+			  AND EXISTS (
+				SELECT 1 FROM derived_block_sources
+				WHERE block_id = derived_blocks.id AND source_kind = ? AND channel_id = ?
+			  )`
+		args := []any{channelID, cutoff, sourceKind, channelID}
+		if queryText != "" {
+			sqlText += ` AND (instr(lower(text), ?) > 0 OR instr(lower(kind), ?) > 0 OR instr(lower(event_type), ?) > 0)`
+			args = append(args, queryText, queryText, queryText)
+		}
+		sqlText += ` ORDER BY source_window_to DESC, score DESC, id DESC LIMIT ?`
+		args = append(args, limit*4)
+		rows, err := s.db.QueryContext(ctx, sqlText, args...)
+		if err != nil {
+			return nil, err
+		}
+		channelBlocks, err := scanDigestBlockRows(rows)
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, channelBlocks...)
+	}
+
+	sort.Slice(blocks, func(i, j int) bool {
+		if blocks[i].SourceWindow.To == blocks[j].SourceWindow.To {
+			return blocks[i].ID < blocks[j].ID
+		}
+		return blocks[i].SourceWindow.To < blocks[j].SourceWindow.To
+	})
+	if len(blocks) > limit*4 {
+		blocks = blocks[len(blocks)-limit*4:]
+	}
+	for i := range blocks {
+		if err := s.loadBlockSources(ctx, &blocks[i]); err != nil {
+			return nil, err
+		}
+	}
+	return preferSparseRollups(blocks, limit), nil
+}
+
 func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, cutoff string, limit int) ([]digestBlock, error) {
 	if limit <= 0 {
 		return nil, nil
@@ -1139,6 +1353,23 @@ func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, c
 	}
 	defer rows.Close()
 
+	blocks, err := scanDigestBlockRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	for i := range blocks {
+		if err := s.loadBlockSources(ctx, &blocks[i]); err != nil {
+			return nil, err
+		}
+	}
+	return preferSparseRollups(blocks, limit), nil
+}
+
+func scanDigestBlockRows(rows *sql.Rows) ([]digestBlock, error) {
 	blocks := make([]digestBlock, 0)
 	for rows.Next() {
 		var block digestBlock
@@ -1156,19 +1387,7 @@ func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, c
 		block.Dirty = dirty != 0
 		blocks = append(blocks, block)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-
-	for i := range blocks {
-		if err := s.loadBlockSources(ctx, &blocks[i]); err != nil {
-			return nil, err
-		}
-	}
-	return preferSparseRollups(blocks, limit), nil
+	return blocks, rows.Err()
 }
 
 func preferSparseRollups(blocks []digestBlock, limit int) []digestBlock {

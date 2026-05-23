@@ -4034,6 +4034,8 @@ func TestInjectConversationWallWiresChannelMemory(t *testing.T) {
 	t.Setenv("CLAW_WALL_RETENTION", "")
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "")
 	t.Setenv("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", "")
+	t.Setenv(conversationWallMemorySearchEnv, "")
+	t.Setenv(conversationWallMemorySourceEnv, "")
 
 	p := &pod.Pod{
 		Name:          "desk",

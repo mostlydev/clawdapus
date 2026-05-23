@@ -97,7 +97,7 @@ services:
     command: ["python", "/app/fake_discord.py"]
     environment:
       CHANNEL_ID: "%s"
-      MESSAGE_COUNT: "30"
+      MESSAGE_COUNT: "80"
     volumes:
       - ./fake_discord.py:/app/fake_discord.py:ro
     expose:
@@ -145,6 +145,7 @@ services:
 `, pythonImage, channelID, pythonImage, channelMemoryImage, agentImage, channelID))
 
 	t.Setenv(conversationWallDiscordBaseEnv, "http://fake-discord:8090")
+	t.Setenv("CLAW_WALL_LIMIT", "40")
 	t.Setenv("CLAW_WALL_RETENTION", "24h")
 	t.Setenv("CLAW_WALL_BACKFILL_MAX_PAGES", "2")
 	t.Setenv("CLAW_WALL_POLL_INTERVAL", "1")
@@ -164,6 +165,7 @@ services:
 	if !strings.Contains(composeText, conversationWallMemoryDigestEnv+": http://channel-memory:8080/digest") {
 		t.Fatalf("compose did not wire claw-wall digest URL:\n%s", composeText)
 	}
+	wallToken := spikeComposeEnvValue(t, composeText, conversationWallToolTokenEnv)
 	if !strings.Contains(composeText, conversationWallDiscordBaseEnv+": http://fake-discord:8090") {
 		t.Fatalf("compose did not forward fake Discord base URL:\n%s", composeText)
 	}
@@ -196,8 +198,11 @@ services:
 		}
 		lastProbe = digestBody
 		messages, hasMessages := spikeHeaderInt(digestBody, "messages")
+		rawBytes, hasRawBytes := spikeHeaderInt(rawBody, "raw_bytes")
 		return hasMessages &&
 			messages > 0 &&
+			hasRawBytes &&
+			rawBytes > 0 &&
 			strings.Contains(digestBody, "digest=ok") &&
 			!strings.Contains(digestBody, "digest_blocks=0")
 	}); err != nil {
@@ -226,6 +231,13 @@ services:
 		if !strings.Contains(digestBody, want) {
 			t.Fatalf("digest awareness missing %q:\n%s", want, digestBody)
 		}
+	}
+	searchOut, err := spikeDockerProbe(networkName, pythonImage, probePostClawWallSearchScript, wallToken, channelID)
+	if err != nil {
+		t.Fatalf("claw-wall search failed: %v\n%s", err, searchOut)
+	}
+	if !strings.Contains(searchOut, `"source":"channel-memory"`) || !strings.Contains(searchOut, `"sparse_block":`) || strings.Contains(searchOut, `"sparse_block":0`) || !strings.Contains(searchOut, `"derived_blocks"`) || !strings.Contains(searchOut, "runtime/status noise elided") {
+		t.Fatalf("digest-visible sparse term was not retrievable from channel-memory search:\n%s", searchOut)
 	}
 
 	token := spikeReadAgentToken(t, filepath.Join(workDir, ".claw-runtime", "context", "digest-agent", "metadata.json"))
@@ -270,6 +282,19 @@ with urllib.request.urlopen(req, timeout=15) as resp:
     sys.stdout.write(resp.read().decode("utf-8"))
 `
 
+const probePostClawWallSearchScript = `
+import json, sys, urllib.request
+payload = {"channels":[sys.argv[2]],"query":"runtime/status noise elided","since":"24h","limit":5}
+body = json.dumps(payload).encode("utf-8")
+req = urllib.request.Request(
+    "http://claw-wall:8080/search_channel_context",
+    data=body,
+    headers={"Content-Type":"application/json","Authorization":"Bearer " + sys.argv[1],"X-Claw-ID":"digest-agent"},
+)
+with urllib.request.urlopen(req, timeout=15) as resp:
+    sys.stdout.write(resp.read().decode("utf-8"))
+`
+
 func spikeDockerProbe(networkName, image, script string, args ...string) (string, error) {
 	cmdArgs := []string{"run", "--rm", "--network", networkName, image, "python", "-c", script}
 	cmdArgs = append(cmdArgs, args...)
@@ -279,6 +304,25 @@ func spikeDockerProbe(networkName, image, script string, args ...string) (string
 		return string(out), fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+func spikeComposeEnvValue(t *testing.T, composeText, key string) string {
+	t.Helper()
+	for _, line := range strings.Split(composeText, "\n") {
+		line = strings.TrimSpace(line)
+		for _, prefix := range []string{key + ":", "- " + key + "="} {
+			raw, ok := strings.CutPrefix(line, prefix)
+			if !ok {
+				continue
+			}
+			value := strings.Trim(strings.TrimSpace(raw), `"'`)
+			if value != "" {
+				return value
+			}
+		}
+	}
+	t.Fatalf("compose.generated.yml did not contain %s:\n%s", key, composeText)
+	return ""
 }
 
 func spikeWriteFile(t *testing.T, path, content string) {
