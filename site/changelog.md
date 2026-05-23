@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.19.0 <Badge type="tip" text="Latest" /> {#v0-19-0}
+## v0.19.1 <Badge type="tip" text="Latest" /> {#v0-19-1}
+
+*2026-05-23*
+
+- **Fix: channel-memory LLM rollups tolerate OpenRouter JSON drift** — the async digest worker now preserves large numeric `source_messages` ids losslessly, extracts JSON objects from fenced or prose-wrapped model output, and uses a configurable 90-second provider timeout so slow structured rollups can finish without blocking raw-window serving. Deterministic digest output and provenance validation remain intact.
+- **Pins infra images** — `claw-api`, `clawdash`, `claw-wall`, `claw-channel-memory`, and `claw-mcp-stdio` move in lockstep to `v0.19.1`. cllama stays at [v0.6.8](https://github.com/mostlydev/cllama/releases/tag/v0.6.8). `hermes-base` stays at `v2026.5.16-claw.2`.
+
+## v0.19.0 {#v0-19-0}
 
 *2026-05-23*
 
