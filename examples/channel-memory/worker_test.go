@@ -557,4 +557,58 @@ func TestDigestWorkerEditAndForgetMarkRollupStaleOrDirty(t *testing.T) {
 			t.Fatalf("expected current raw fallback for 701 and 703 after forget, got %v", got)
 		}
 	})
+
+	t.Run("delete dirties rollup", func(t *testing.T) {
+		store := newTestStore(t)
+		defer store.Close()
+		base := time.Date(2026, 5, 21, 18, 0, 0, 0, time.UTC)
+		ingestRaw(t, store, "chan-1", "801", "idle one", base, "sha256:r801")
+		ingestRaw(t, store, "chan-1", "802", "idle two", base.Add(time.Minute), "sha256:r802")
+		ingestRaw(t, store, "chan-1", "803", "idle three", base.Add(2*time.Minute), "sha256:r803")
+		worker := testWorker(store, &fakeLLMClient{respond: citeAllTopicRollup}, nil)
+		if _, err := worker.processOnce(context.Background()); err != nil {
+			t.Fatalf("processOnce: %v", err)
+		}
+		if _, err := store.Ingest(context.Background(), ingestRequest{
+			ChannelID: "chan-1",
+			Message: ingestMessage{
+				ID:          "802",
+				AuthorName:  "member-802",
+				CreatedAt:   base.Add(time.Minute).Format(time.RFC3339),
+				EditedAt:    base.Add(10 * time.Minute).Format(time.RFC3339),
+				Deleted:     true,
+				ContentHash: "sha256:r802-deleted",
+			},
+		}); err != nil {
+			t.Fatalf("delete ingest: %v", err)
+		}
+		found, _, _, dirty, _ := llmBlockState(t, store)
+		if !found || !dirty {
+			t.Fatalf("expected rollup dirtied after delete, found=%v dirty=%v", found, dirty)
+		}
+		gotRaw := make(map[string]bool)
+		gotTombstone := false
+		for _, b := range digestFor(t, store, "chan-1").Blocks {
+			if b.Processor == digestProcessorLLM {
+				t.Fatal("dirty rollup must not be served after delete")
+			}
+			if len(b.SourceMessages) != 1 {
+				continue
+			}
+			switch b.Kind {
+			case "raw_excerpt":
+				gotRaw[b.SourceMessages[0]] = true
+			case "tombstone":
+				if b.SourceMessages[0] == "802" {
+					gotTombstone = true
+				}
+			}
+		}
+		if !gotRaw["801"] || !gotRaw["803"] || len(gotRaw) != 2 {
+			t.Fatalf("expected current raw fallback for 801 and 803 after delete, got %v", gotRaw)
+		}
+		if !gotTombstone {
+			t.Fatal("expected tombstone fallback for deleted source 802")
+		}
+	})
 }

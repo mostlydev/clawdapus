@@ -8,6 +8,7 @@ func TestReleaseRefs(t *testing.T) {
 		"ghcr.io/mostlydev/claw-api:v1.2.3",
 		"ghcr.io/mostlydev/clawdash:v1.2.3",
 		"ghcr.io/mostlydev/claw-wall:v1.2.3",
+		"ghcr.io/mostlydev/claw-channel-memory:v1.2.3",
 		"ghcr.io/mostlydev/claw-mcp-stdio:v1.2.3",
 		"ghcr.io/mostlydev/cllama:" + DefaultCllamaTag,
 		"ghcr.io/mostlydev/hermes-base:" + DefaultHermesBaseTag,
