@@ -38,7 +38,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/claw-channel-memory
+          images: ghcr.io/${{ github.repository_owner }}/claw-channel-memory
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
