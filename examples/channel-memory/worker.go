@@ -40,7 +40,7 @@ const (
 	defaultWorkerPerPodCost       = 2.00
 	defaultWorkerCostPerCall      = 0.002
 	defaultWorkerIntervalSeconds  = 60
-	defaultWorkerLLMTimeoutSecond = 30
+	defaultWorkerLLMTimeoutSecond = 90
 )
 
 type llmPromptMessage struct {
@@ -63,6 +63,74 @@ type llmDigestResult struct {
 	SourceMessages []string `json:"source_messages"`
 	Score          float64  `json:"score"`
 	CostUSD        float64  `json:"cost_usd"`
+}
+
+func (result *llmDigestResult) UnmarshalJSON(raw []byte) error {
+	var aux struct {
+		Kind           string       `json:"kind"`
+		Text           string       `json:"text"`
+		SourceMessages sourceIDList `json:"source_messages"`
+		Score          float64      `json:"score"`
+		CostUSD        float64      `json:"cost_usd"`
+	}
+	if err := json.Unmarshal(raw, &aux); err != nil {
+		return err
+	}
+	result.Kind = aux.Kind
+	result.Text = aux.Text
+	result.SourceMessages = []string(aux.SourceMessages)
+	result.Score = aux.Score
+	result.CostUSD = aux.CostUSD
+	return nil
+}
+
+// sourceIDList accepts provider output that encodes Discord snowflakes as
+// either strings or bare JSON integers. Bare integers are common from models,
+// but the raw JSON token is the only safe source of truth because snowflakes can
+// exceed JavaScript's safe integer range.
+type sourceIDList []string
+
+func (ids *sourceIDList) UnmarshalJSON(raw []byte) error {
+	var values []json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return err
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(string(value))
+		if trimmed == "" || trimmed == "null" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, `"`) {
+			var id string
+			if err := json.Unmarshal(value, &id); err != nil {
+				return err
+			}
+			out = append(out, id)
+			continue
+		}
+		if !isJSONIntegerLiteral(trimmed) {
+			return fmt.Errorf("source_messages entry %q must be a string or integer literal", trimmed)
+		}
+		out = append(out, trimmed)
+	}
+	*ids = out
+	return nil
+}
+
+func isJSONIntegerLiteral(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i, r := range value {
+		if i == 0 && r == '-' {
+			return len(value) > 1
+		}
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 type llmDigestClient interface {
@@ -642,7 +710,7 @@ func httpLLMClientFromEnv(cfg workerConfig) llmDigestClient {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  strings.TrimSpace(os.Getenv("CHANNEL_MEMORY_LLM_API_KEY")),
 		model:   cfg.Model,
-		client:  &http.Client{Timeout: defaultWorkerLLMTimeoutSecond * time.Second},
+		client:  &http.Client{Timeout: time.Duration(intEnv("CHANNEL_MEMORY_LLM_TIMEOUT_SECONDS", defaultWorkerLLMTimeoutSecond)) * time.Second},
 	}
 }
 
@@ -652,8 +720,8 @@ func (c *httpLLMClient) Summarize(ctx context.Context, prompt llmDigestPrompt) (
 		fmt.Fprintf(&transcript, "[%s] (id=%s) %s: %s\n", m.CreatedAt, m.MessageID, m.Author, m.Content)
 	}
 	system := "You compress Discord channel transcripts into one compact digest block. " +
-		"Respond ONLY with a JSON object: {\"kind\":\"topic_rollup\"|\"sequence_rollup\",\"text\":string,\"source_messages\":[message ids you summarized],\"score\":0..1}. " +
-		"source_messages MUST list the exact message ids you used. Do not invent ids."
+		"Respond ONLY with a JSON object: {\"kind\":\"topic_rollup\"|\"sequence_rollup\",\"text\":string,\"source_messages\":[message id strings you summarized],\"score\":0..1}. " +
+		"source_messages MUST list the exact message ids you used as JSON strings, because Discord ids can be too large for safe JSON numbers. Do not invent ids."
 	payload := map[string]any{
 		"model": c.model,
 		"messages": []map[string]string{
@@ -700,11 +768,62 @@ func (c *httpLLMClient) Summarize(ctx context.Context, prompt llmDigestPrompt) (
 	if len(completion.Choices) == 0 {
 		return llmDigestResult{}, errors.New("llm endpoint returned no choices")
 	}
+	return decodeLLMDigestContent(completion.Choices[0].Message.Content)
+}
+
+func decodeLLMDigestContent(content string) (llmDigestResult, error) {
 	var result llmDigestResult
-	if err := json.Unmarshal([]byte(completion.Choices[0].Message.Content), &result); err != nil {
+	trimmed := strings.TrimSpace(content)
+	if err := json.Unmarshal([]byte(trimmed), &result); err == nil {
+		return result, nil
+	} else if candidate, ok := firstJSONObject(trimmed); ok {
+		if err := json.Unmarshal([]byte(candidate), &result); err == nil {
+			return result, nil
+		}
+		return llmDigestResult{}, fmt.Errorf("decode rollup json: %w", err)
+	} else {
 		return llmDigestResult{}, fmt.Errorf("decode rollup json: %w", err)
 	}
-	return result, nil
+}
+
+func firstJSONObject(content string) (string, bool) {
+	start := -1
+	depth := 0
+	inString := false
+	escaped := false
+	for i := 0; i < len(content); i++ {
+		b := content[i]
+		if start == -1 {
+			if b == '{' {
+				start = i
+				depth = 1
+			}
+			continue
+		}
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case b == '\\':
+				escaped = true
+			case b == '"':
+				inString = false
+			}
+			continue
+		}
+		switch b {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return content[start : i+1], true
+			}
+		}
+	}
+	return "", false
 }
 
 func boolEnv(name string, fallback bool) bool {
