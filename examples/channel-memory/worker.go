@@ -36,6 +36,9 @@ const (
 	defaultWorkerMinWindow        = 3
 	defaultWorkerPerChannelCalls  = 24
 	defaultWorkerPerPodCalls      = 96
+	defaultWorkerPerChannelCost   = 0.50
+	defaultWorkerPerPodCost       = 2.00
+	defaultWorkerCostPerCall      = 0.002
 	defaultWorkerIntervalSeconds  = 60
 	defaultWorkerLLMTimeoutSecond = 30
 )
@@ -75,6 +78,9 @@ type workerConfig struct {
 	MinWindow            int
 	PerChannelDailyCalls int
 	PerPodDailyCalls     int
+	PerChannelDailyCost  float64
+	PerPodDailyCost      float64
+	CostPerCall          float64
 	Interval             time.Duration
 }
 
@@ -96,6 +102,9 @@ func workerConfigFromEnv() workerConfig {
 		MinWindow:            intEnv("CHANNEL_MEMORY_LLM_MIN_WINDOW", defaultWorkerMinWindow),
 		PerChannelDailyCalls: intEnv("CHANNEL_MEMORY_LLM_PER_CHANNEL_DAILY", defaultWorkerPerChannelCalls),
 		PerPodDailyCalls:     intEnv("CHANNEL_MEMORY_LLM_PER_POD_DAILY", defaultWorkerPerPodCalls),
+		PerChannelDailyCost:  floatEnv("CHANNEL_MEMORY_LLM_PER_CHANNEL_DAILY_USD", defaultWorkerPerChannelCost),
+		PerPodDailyCost:      floatEnv("CHANNEL_MEMORY_LLM_PER_POD_DAILY_USD", defaultWorkerPerPodCost),
+		CostPerCall:          floatEnv("CHANNEL_MEMORY_LLM_COST_PER_CALL_USD", defaultWorkerCostPerCall),
 		Interval:             time.Duration(intEnv("CHANNEL_MEMORY_LLM_INTERVAL_SECONDS", defaultWorkerIntervalSeconds)) * time.Second,
 	}
 	if cfg.Provider == "" {
@@ -119,6 +128,9 @@ func newDigestWorker(store *channelMemoryStore, client llmDigestClient, cfg work
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = defaultWorkerIntervalSeconds * time.Second
+	}
+	if cfg.CostPerCall < 0 {
+		cfg.CostPerCall = 0
 	}
 	return &digestWorker{
 		store:  store,
@@ -171,19 +183,18 @@ func (w *digestWorker) processOnce(ctx context.Context) (int, error) {
 	day := w.now().UTC().Format("2006-01-02")
 	generated := 0
 	for _, channelID := range channels {
-		podCalls, err := w.store.dailyLLMCalls(ctx, day, "pod")
+		podOK, err := w.podBudgetAvailable(ctx, day)
 		if err != nil {
 			return generated, err
 		}
-		if podCalls >= w.cfg.PerPodDailyCalls {
-			w.logf("channel-memory digest worker: per-pod daily cap %d reached", w.cfg.PerPodDailyCalls)
+		if !podOK {
 			break
 		}
-		channelCalls, err := w.store.dailyLLMCalls(ctx, day, "channel:"+channelID)
+		channelOK, err := w.channelBudgetAvailable(ctx, day, channelID)
 		if err != nil {
 			return generated, err
 		}
-		if channelCalls >= w.cfg.PerChannelDailyCalls {
+		if !channelOK {
 			continue
 		}
 
@@ -192,18 +203,18 @@ func (w *digestWorker) processOnce(ctx context.Context) (int, error) {
 			return generated, err
 		}
 		for _, window := range windows {
-			podCalls, err = w.store.dailyLLMCalls(ctx, day, "pod")
+			podOK, err = w.podBudgetAvailable(ctx, day)
 			if err != nil {
 				return generated, err
 			}
-			if podCalls >= w.cfg.PerPodDailyCalls {
+			if !podOK {
 				break
 			}
-			channelCalls, err = w.store.dailyLLMCalls(ctx, day, "channel:"+channelID)
+			channelOK, err = w.channelBudgetAvailable(ctx, day, channelID)
 			if err != nil {
 				return generated, err
 			}
-			if channelCalls >= w.cfg.PerChannelDailyCalls {
+			if !channelOK {
 				break
 			}
 
@@ -218,11 +229,21 @@ func (w *digestWorker) processOnce(ctx context.Context) (int, error) {
 				continue
 			}
 
+			if err := w.store.recordLLMUsage(ctx, day, channelID, 0); err != nil {
+				return generated, err
+			}
 			result, err := w.client.Summarize(ctx, promptForWindow(channelID, window))
 			if err != nil {
 				w.logf("channel-memory digest worker: summarize channel %s: %v", channelID, err)
 				_ = w.store.recordQueueFailure(ctx, sourceKind, channelID, window, err.Error())
 				continue
+			}
+			costUSD := w.costForResult(result)
+			result.CostUSD = costUSD
+			if costUSD != 0 {
+				if err := w.store.recordLLMCost(ctx, day, channelID, costUSD); err != nil {
+					return generated, err
+				}
 			}
 			if err := validateRollup(result, window); err != nil {
 				w.logf("channel-memory digest worker: rejected rollup for channel %s: %v", channelID, err)
@@ -238,13 +259,67 @@ func (w *digestWorker) processOnce(ctx context.Context) (int, error) {
 			if err := w.store.writeSparseRollup(ctx, key, sourceKind, channelID, window, result, meta, w.now()); err != nil {
 				return generated, err
 			}
-			if err := w.store.recordLLMUsage(ctx, day, channelID, result.CostUSD); err != nil {
-				return generated, err
-			}
 			generated++
 		}
 	}
 	return generated, nil
+}
+
+func (w *digestWorker) podBudgetAvailable(ctx context.Context, day string) (bool, error) {
+	calls, err := w.store.dailyLLMCalls(ctx, day, "pod")
+	if err != nil {
+		return false, err
+	}
+	if calls >= w.cfg.PerPodDailyCalls {
+		w.logf("channel-memory digest worker: per-pod daily call cap %d reached", w.cfg.PerPodDailyCalls)
+		return false, nil
+	}
+	cost, err := w.store.dailyLLMCost(ctx, day, "pod")
+	if err != nil {
+		return false, err
+	}
+	if w.costWouldExceed(cost, w.cfg.PerPodDailyCost) {
+		w.logf("channel-memory digest worker: per-pod daily cost cap %.4f reached", w.cfg.PerPodDailyCost)
+		return false, nil
+	}
+	return true, nil
+}
+
+func (w *digestWorker) channelBudgetAvailable(ctx context.Context, day, channelID string) (bool, error) {
+	scope := "channel:" + channelID
+	calls, err := w.store.dailyLLMCalls(ctx, day, scope)
+	if err != nil {
+		return false, err
+	}
+	if calls >= w.cfg.PerChannelDailyCalls {
+		return false, nil
+	}
+	cost, err := w.store.dailyLLMCost(ctx, day, scope)
+	if err != nil {
+		return false, err
+	}
+	if w.costWouldExceed(cost, w.cfg.PerChannelDailyCost) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (w *digestWorker) costWouldExceed(current, cap float64) bool {
+	if cap <= 0 {
+		return false
+	}
+	projected := current
+	if w.cfg.CostPerCall > 0 {
+		projected += w.cfg.CostPerCall
+	}
+	return projected > cap
+}
+
+func (w *digestWorker) costForResult(result llmDigestResult) float64 {
+	if result.CostUSD > 0 {
+		return result.CostUSD
+	}
+	return w.cfg.CostPerCall
 }
 
 type rollupWindow struct {
@@ -294,10 +369,23 @@ func validateRollup(result llmDigestResult, window rollupWindow) error {
 		return errors.New("rollup is provenance-free (no source_messages)")
 	}
 	allowed := window.idSet()
+	seen := make(map[string]struct{}, len(cited))
 	for _, id := range cited {
 		if _, ok := allowed[id]; !ok {
 			return fmt.Errorf("rollup cites source %q outside its window", id)
 		}
+		if _, ok := seen[id]; ok {
+			return fmt.Errorf("rollup cites source %q more than once", id)
+		}
+		seen[id] = struct{}{}
+	}
+	if len(seen) != len(allowed) {
+		for id := range allowed {
+			if _, ok := seen[id]; !ok {
+				return fmt.Errorf("rollup omits source %q from its window", id)
+			}
+		}
+		return fmt.Errorf("rollup cites %d sources, expected %d", len(seen), len(allowed))
 	}
 	return nil
 }
@@ -387,8 +475,9 @@ func (s *channelMemoryStore) freshBlockExists(ctx context.Context, blockKey stri
 }
 
 // writeSparseRollup persists the LLM rollup block with full source provenance
-// and stales the per-message raw_excerpt blocks it subsumes, so /digest serves
-// the compact rollup instead of the verbose lines.
+// for /digest to prefer over the verbose per-message raw_excerpt blocks while
+// it remains fresh. The deterministic raw blocks are left intact so they become
+// the immediate fallback if the rollup is later dirtied or staled.
 func (s *channelMemoryStore) writeSparseRollup(ctx context.Context, blockKey, sourceKind, channelID string, window rollupWindow, result llmDigestResult, meta blockMetadata, now time.Time) error {
 	if len(window.Sources) == 0 {
 		return errors.New("empty rollup window")
@@ -446,19 +535,6 @@ func (s *channelMemoryStore) writeSparseRollup(ctx context.Context, blockKey, so
 		); err != nil {
 			return err
 		}
-		// Stale the verbose deterministic raw_excerpt block this rollup
-		// subsumes. Hard events / tombstones / telemetry blocks are untouched.
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE derived_blocks
-			SET stale = 1
-			WHERE processor = 'deterministic' AND kind = 'raw_excerpt' AND id IN (
-				SELECT block_id FROM derived_block_sources
-				WHERE source_kind = ? AND channel_id = ? AND message_id = ? AND content_hash = ?
-			) AND id <> ?`,
-			src.SourceKind, src.ChannelID, src.MessageID, src.ContentHash, blockID,
-		); err != nil {
-			return err
-		}
 	}
 	return tx.Commit()
 }
@@ -478,6 +554,21 @@ func (s *channelMemoryStore) dailyLLMCalls(ctx context.Context, day, scope strin
 	return calls, nil
 }
 
+func (s *channelMemoryStore) dailyLLMCost(ctx context.Context, day, scope string) (float64, error) {
+	var cost float64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT cost_usd FROM llm_usage WHERE day = ? AND scope = ?`,
+		day, scope,
+	).Scan(&cost)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return cost, nil
+}
+
 func (s *channelMemoryStore) recordLLMUsage(ctx context.Context, day, channelID string, costUSD float64) error {
 	for _, scope := range []string{"pod", "channel:" + channelID} {
 		if _, err := s.db.ExecContext(ctx, `
@@ -485,6 +576,21 @@ func (s *channelMemoryStore) recordLLMUsage(ctx context.Context, day, channelID 
 			VALUES (?, ?, 1, ?)
 			ON CONFLICT(day, scope) DO UPDATE SET
 				calls = calls + 1,
+				cost_usd = cost_usd + excluded.cost_usd`,
+			day, scope, costUSD,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *channelMemoryStore) recordLLMCost(ctx context.Context, day, channelID string, costUSD float64) error {
+	for _, scope := range []string{"pod", "channel:" + channelID} {
+		if _, err := s.db.ExecContext(ctx, `
+			INSERT INTO llm_usage(day, scope, calls, cost_usd)
+			VALUES (?, ?, 0, ?)
+			ON CONFLICT(day, scope) DO UPDATE SET
 				cost_usd = cost_usd + excluded.cost_usd`,
 			day, scope, costUSD,
 		); err != nil {
@@ -529,7 +635,7 @@ type httpLLMClient struct {
 
 func httpLLMClientFromEnv(cfg workerConfig) llmDigestClient {
 	baseURL := strings.TrimSpace(os.Getenv("CHANNEL_MEMORY_LLM_BASE_URL"))
-	if baseURL == "" {
+	if baseURL == "" || strings.TrimSpace(cfg.Model) == "" {
 		return nil
 	}
 	return &httpLLMClient{
@@ -555,7 +661,7 @@ func (c *httpLLMClient) Summarize(ctx context.Context, prompt llmDigestPrompt) (
 			{"role": "user", "content": "Channel " + prompt.Channel + " transcript:\n" + transcript.String()},
 		},
 		"response_format": map[string]string{"type": "json_object"},
-		"temperature":     "0",
+		"temperature":     0,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -620,6 +726,18 @@ func intEnv(name string, fallback int) int {
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func floatEnv(name string, fallback float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value < 0 {
 		return fallback
 	}
 	return value

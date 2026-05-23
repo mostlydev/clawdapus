@@ -207,6 +207,9 @@ func TestDigestWorkerRejectsMalformedAndProvenanceFreeOutput(t *testing.T) {
 		{"provenance free", func(p llmDigestPrompt) (llmDigestResult, error) {
 			return llmDigestResult{Kind: rollupKindTopic, Text: "summary", SourceMessages: nil}, nil
 		}},
+		{"partial provenance", func(p llmDigestPrompt) (llmDigestResult, error) {
+			return llmDigestResult{Kind: rollupKindTopic, Text: "summary", SourceMessages: []string{p.Messages[0].MessageID}}, nil
+		}},
 		{"hallucinated source", func(p llmDigestPrompt) (llmDigestResult, error) {
 			return llmDigestResult{Kind: rollupKindTopic, Text: "summary", SourceMessages: []string{"999999"}}, nil
 		}},
@@ -338,6 +341,49 @@ func TestDigestWorkerEnforcesDailyCostCaps(t *testing.T) {
 	}
 }
 
+// TestDigestWorkerEnforcesDailyUSDCaps proves the USD cap is separate from the
+// call cap and can stop a second window even when more calls are allowed.
+func TestDigestWorkerEnforcesDailyUSDCaps(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	base := time.Date(2026, 5, 21, 18, 0, 0, 0, time.UTC)
+	for i := 0; i < 6; i++ {
+		id := fmt.Sprintf("45%d", i)
+		ingestRaw(t, store, "chan-1", id, "idle chatter "+id, base.Add(time.Duration(i)*time.Minute), "sha256:r"+id)
+	}
+
+	client := &fakeLLMClient{respond: func(p llmDigestPrompt) (llmDigestResult, error) {
+		result, err := citeAllTopicRollup(p)
+		result.CostUSD = 0.30
+		return result, err
+	}}
+	worker := testWorker(store, client, func(c *workerConfig) {
+		c.PerPodDailyCalls = 100
+		c.PerChannelDailyCalls = 100
+		c.PerPodDailyCost = 0.50
+		c.PerChannelDailyCost = 0.50
+		c.CostPerCall = 0.30
+	})
+
+	generated, err := worker.processOnce(context.Background())
+	if err != nil {
+		t.Fatalf("processOnce: %v", err)
+	}
+	if generated != 1 {
+		t.Fatalf("expected USD cap to allow exactly 1 block, got %d", generated)
+	}
+	if client.callCount() != 1 {
+		t.Fatalf("expected USD cap to allow exactly 1 LLM call, got %d", client.callCount())
+	}
+	cost, err := store.dailyLLMCost(context.Background(), worker.now().UTC().Format("2006-01-02"), "pod")
+	if err != nil {
+		t.Fatalf("daily cost: %v", err)
+	}
+	if cost < 0.2999 || cost > 0.3001 {
+		t.Fatalf("expected estimated cost 0.30, got %.4f", cost)
+	}
+}
+
 // TestDigestWorkerDeterministicFallbackWhenDisabledOrFailing proves the worker
 // is inert when disabled and harmless when the model errors.
 func TestDigestWorkerDeterministicFallbackWhenDisabledOrFailing(t *testing.T) {
@@ -396,6 +442,47 @@ func TestDigestWorkerDeterministicFallbackWhenDisabledOrFailing(t *testing.T) {
 	})
 }
 
+// TestDigestWorkerCountsRejectedCallsAgainstDailyCaps proves invalid or failing
+// model calls still consume the call budget. Otherwise a bad provider response
+// can be retried every worker interval without tripping the cap.
+func TestDigestWorkerCountsRejectedCallsAgainstDailyCaps(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	base := time.Date(2026, 5, 21, 18, 0, 0, 0, time.UTC)
+	ingestRaw(t, store, "chan-1", "551", "idle one", base, "sha256:r551")
+	ingestRaw(t, store, "chan-1", "552", "idle two", base.Add(time.Minute), "sha256:r552")
+	ingestRaw(t, store, "chan-1", "553", "idle three", base.Add(2*time.Minute), "sha256:r553")
+
+	client := &fakeLLMClient{respond: func(p llmDigestPrompt) (llmDigestResult, error) {
+		return llmDigestResult{Kind: rollupKindTopic, Text: "summary", SourceMessages: nil}, nil
+	}}
+	worker := testWorker(store, client, func(c *workerConfig) {
+		c.PerPodDailyCalls = 1
+		c.PerChannelDailyCalls = 1
+	})
+
+	if generated, err := worker.processOnce(context.Background()); err != nil || generated != 0 {
+		t.Fatalf("first processOnce generated=%d err=%v", generated, err)
+	}
+	if client.callCount() != 1 {
+		t.Fatalf("expected first rejected output to call model once, got %d", client.callCount())
+	}
+	resp := digestFor(t, store, "chan-1")
+	if resp.Cost.LLMCallsToday != 1 {
+		t.Fatalf("expected rejected call to count against daily cap, got %d", resp.Cost.LLMCallsToday)
+	}
+	if !resp.Cost.DeterministicOnly {
+		t.Fatal("rejected output must leave digest deterministic-only")
+	}
+
+	if generated, err := worker.processOnce(context.Background()); err != nil || generated != 0 {
+		t.Fatalf("second processOnce generated=%d err=%v", generated, err)
+	}
+	if client.callCount() != 1 {
+		t.Fatalf("expected daily cap to prevent retry after rejection, got %d calls", client.callCount())
+	}
+}
+
 // TestDigestWorkerEditAndForgetMarkRollupStaleOrDirty proves provenance-driven
 // invalidation: editing or forgetting a covered source dirties the rollup so it
 // stops serving until regenerated. Uses synthetic source events because
@@ -422,10 +509,17 @@ func TestDigestWorkerEditAndForgetMarkRollupStaleOrDirty(t *testing.T) {
 			t.Fatalf("expected rollup dirtied after edit, found=%v dirty=%v", found, dirty)
 		}
 		// Dirty blocks are not served.
+		rawCount := 0
 		for _, b := range digestFor(t, store, "chan-1").Blocks {
 			if b.Processor == digestProcessorLLM {
 				t.Fatal("dirty rollup must not be served")
 			}
+			if b.Kind == "raw_excerpt" {
+				rawCount++
+			}
+		}
+		if rawCount != 3 {
+			t.Fatalf("expected deterministic raw_excerpt fallback after edit, got %d", rawCount)
 		}
 	})
 
@@ -446,6 +540,21 @@ func TestDigestWorkerEditAndForgetMarkRollupStaleOrDirty(t *testing.T) {
 		found, _, _, dirty, _ := llmBlockState(t, store)
 		if !found || !dirty {
 			t.Fatalf("expected rollup dirtied after forget, found=%v dirty=%v", found, dirty)
+		}
+		got := make(map[string]bool)
+		for _, b := range digestFor(t, store, "chan-1").Blocks {
+			if b.Processor == digestProcessorLLM {
+				t.Fatal("dirty rollup must not be served after forget")
+			}
+			if b.Kind == "raw_excerpt" && len(b.SourceMessages) == 1 {
+				got[b.SourceMessages[0]] = true
+			}
+		}
+		if got["702"] {
+			t.Fatalf("forgotten source 702 must not return in fallback: %v", got)
+		}
+		if !got["701"] || !got["703"] || len(got) != 2 {
+			t.Fatalf("expected current raw fallback for 701 and 703 after forget, got %v", got)
 		}
 	})
 }
