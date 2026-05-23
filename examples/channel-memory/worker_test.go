@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -44,6 +45,64 @@ func citeAllTopicRollup(prompt llmDigestPrompt) (llmDigestResult, error) {
 		Score:          0.7,
 		CostUSD:        0.002,
 	}, nil
+}
+
+func TestLLMDigestResultAcceptsNumericSourceMessageIDsLosslessly(t *testing.T) {
+	raw := []byte(`{"kind":"topic_rollup","text":"summary","source_messages":[1507458107071270996,"1507458143121309849"],"score":0.7}`)
+	var result llmDigestResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	want := []string{"1507458107071270996", "1507458143121309849"}
+	if fmt.Sprint(result.SourceMessages) != fmt.Sprint(want) {
+		t.Fatalf("source_messages = %v, want %v", result.SourceMessages, want)
+	}
+	window := rollupWindow{Sources: []storedSourceMessage{
+		{MessageID: "1507458107071270996", ContentHash: "sha256:a"},
+		{MessageID: "1507458143121309849", ContentHash: "sha256:b"},
+	}}
+	if err := validateRollup(result, window); err != nil {
+		t.Fatalf("validateRollup rejected numeric-source result: %v", err)
+	}
+}
+
+func TestLLMDigestResultRejectsNonIntegerNumericSourceIDs(t *testing.T) {
+	raw := []byte(`{"kind":"topic_rollup","text":"summary","source_messages":[1.5],"score":0.7}`)
+	var result llmDigestResult
+	if err := json.Unmarshal(raw, &result); err == nil {
+		t.Fatal("expected fractional numeric source id to be rejected")
+	}
+}
+
+func TestHTTPLLMClientFromEnvUsesConfigurableTimeout(t *testing.T) {
+	t.Setenv("CHANNEL_MEMORY_LLM_BASE_URL", "https://openrouter.example/v1")
+	t.Setenv("CHANNEL_MEMORY_LLM_TIMEOUT_SECONDS", "75")
+	client := httpLLMClientFromEnv(workerConfig{Model: "moonshotai/kimi-k2.6"})
+	httpClient, ok := client.(*httpLLMClient)
+	if !ok {
+		t.Fatalf("expected *httpLLMClient, got %T", client)
+	}
+	if httpClient.client.Timeout != 75*time.Second {
+		t.Fatalf("timeout = %s, want 75s", httpClient.client.Timeout)
+	}
+}
+
+func TestDecodeLLMDigestContentExtractsFencedJSONObject(t *testing.T) {
+	content := "Here is the digest:\n```json\n{\"kind\":\"sequence_rollup\",\"text\":\"Two messages reached a decision.\",\"source_messages\":[1507458107071270996,1507458143121309849],\"score\":0.82}\n```"
+	result, err := decodeLLMDigestContent(content)
+	if err != nil {
+		t.Fatalf("decodeLLMDigestContent: %v", err)
+	}
+	window := rollupWindow{Sources: []storedSourceMessage{
+		{MessageID: "1507458107071270996", ContentHash: "sha256:a"},
+		{MessageID: "1507458143121309849", ContentHash: "sha256:b"},
+	}}
+	if err := validateRollup(result, window); err != nil {
+		t.Fatalf("validateRollup rejected fenced numeric-source result: %v", err)
+	}
+	if result.Kind != rollupKindSequence || result.Score != 0.82 {
+		t.Fatalf("unexpected decoded result: %+v", result)
+	}
 }
 
 func testWorker(store *channelMemoryStore, client llmDigestClient, mutate func(*workerConfig)) *digestWorker {
