@@ -61,6 +61,8 @@ const (
 	conversationWallAllowlistPath   = "/etc/claw-wall/agent-channels.json"
 	conversationWallMemoryIngestEnv = "CLAW_WALL_CHANNEL_MEMORY_INGEST_URL"
 	conversationWallMemoryDigestEnv = "CLAW_WALL_CHANNEL_MEMORY_DIGEST_URL"
+	conversationWallMemorySearchEnv = "CLAW_WALL_CHANNEL_MEMORY_SEARCH_URL"
+	conversationWallMemorySourceEnv = "CLAW_WALL_CHANNEL_MEMORY_SOURCE_URL"
 	conversationWallMemoryTimeout   = "2s"
 	clawInternalNetworkName         = "claw-internal"
 	historyReplayAuthService        = "cllama-history"
@@ -1874,6 +1876,12 @@ func configureConversationWallChannelMemory(p *pod.Pod, wallEnv map[string]strin
 	}
 	wallEnv[conversationWallMemoryIngestEnv] = buildFeedURL(baseURL, "/ingest")
 	wallEnv[conversationWallMemoryDigestEnv] = buildFeedURL(baseURL, "/digest")
+	if searchURL := strings.TrimSpace(os.Getenv(conversationWallMemorySearchEnv)); searchURL != "" {
+		wallEnv[conversationWallMemorySearchEnv] = searchURL
+	}
+	if sourceURL := strings.TrimSpace(os.Getenv(conversationWallMemorySourceEnv)); sourceURL != "" {
+		wallEnv[conversationWallMemorySourceEnv] = sourceURL
+	}
 	wallEnv["CLAW_WALL_CHANNEL_MEMORY_TIMEOUT"] = envOrDefault("CLAW_WALL_CHANNEL_MEMORY_TIMEOUT", conversationWallMemoryTimeout)
 	targetSvc := p.Services[serviceName]
 	if targetSvc.Environment == nil {
@@ -4320,7 +4328,7 @@ func builtinClawWallDescriptor() *describe.ServiceDescriptor {
 		Tools: []describe.ToolDescriptor{
 			{
 				Name:        "search_channel_context",
-				Description: "Search this agent's recent channel buffer for messages matching a query.",
+				Description: "Search this agent's recent raw channel buffer and durable channel-memory results when configured.",
 				InputSchema: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -4352,7 +4360,7 @@ func builtinClawWallDescriptor() *describe.ServiceDescriptor {
 			},
 			{
 				Name:        "get_channel_messages",
-				Description: "Fetch exact channel messages by message ID, ID range, or author/time window.",
+				Description: "Fetch exact channel messages by message ID, source handle, ID range, or author/time window.",
 				InputSchema: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -4361,6 +4369,10 @@ func builtinClawWallDescriptor() *describe.ServiceDescriptor {
 							"items": map[string]interface{}{"type": "string"},
 						},
 						"message_ids": map[string]interface{}{
+							"type":  "array",
+							"items": map[string]interface{}{"type": "string"},
+						},
+						"source_handles": map[string]interface{}{
 							"type":  "array",
 							"items": map[string]interface{}{"type": "string"},
 						},

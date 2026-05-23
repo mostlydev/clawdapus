@@ -18,6 +18,11 @@
     },
     {
       "method": "POST",
+      "path": "/search",
+      "description": "Search retained source messages and sparse derived blocks by channel, query, author, and time window"
+    },
+    {
+      "method": "POST",
       "path": "/digest",
       "description": "Return deterministic digest blocks over retained source messages"
     },

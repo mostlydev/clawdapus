@@ -23,6 +23,8 @@ const (
 type channelMemoryClient struct {
 	ingestURL string
 	digestURL string
+	searchURL string
+	sourceURL string
 	token     string
 	client    *http.Client
 }
@@ -117,18 +119,94 @@ type channelMemorySourceWindow struct {
 	To   string `json:"to"`
 }
 
+type channelMemorySearchRequest struct {
+	SourceKind string   `json:"source_kind,omitempty"`
+	ChannelIDs []string `json:"channel_ids,omitempty"`
+	Query      string   `json:"query,omitempty"`
+	Since      string   `json:"since,omitempty"`
+	Author     string   `json:"author,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
+}
+
+type channelMemorySearchResponse struct {
+	Status         string                       `json:"status"`
+	Coverage       channelMemorySearchCoverage  `json:"coverage"`
+	SourceMessages []channelMemorySourceMessage `json:"source_messages,omitempty"`
+	DerivedBlocks  []channelMemoryDigestBlock   `json:"derived_blocks,omitempty"`
+}
+
+type channelMemorySearchCoverage struct {
+	From              string `json:"from,omitempty"`
+	To                string `json:"to,omitempty"`
+	SourceMessageHits int    `json:"source_message_hits"`
+	DerivedBlockHits  int    `json:"derived_block_hits"`
+}
+
+type channelMemorySourceMessagesRequest struct {
+	SourceKind     string   `json:"source_kind,omitempty"`
+	ChannelID      string   `json:"channel_id"`
+	MessageIDs     []string `json:"message_ids"`
+	IncludeHistory bool     `json:"include_history,omitempty"`
+}
+
+type channelMemorySourceMessagesResponse struct {
+	Messages []channelMemorySourceMessage `json:"messages"`
+	NotFound []channelMemorySourceRef     `json:"not_found,omitempty"`
+}
+
+type channelMemorySourceRef struct {
+	SourceKind string `json:"source_kind"`
+	ChannelID  string `json:"channel_id"`
+	MessageID  string `json:"message_id"`
+}
+
+type channelMemorySourceMessage struct {
+	SourceKind      string `json:"source_kind"`
+	ChannelID       string `json:"channel_id"`
+	MessageID       string `json:"message_id"`
+	SourceHandle    string `json:"source_handle"`
+	ContentHash     string `json:"content_hash"`
+	AuthorID        string `json:"author_id,omitempty"`
+	AuthorName      string `json:"author_name,omitempty"`
+	CreatedAt       string `json:"created_at"`
+	EditedAt        string `json:"edited_at,omitempty"`
+	Deleted         bool   `json:"deleted,omitempty"`
+	Content         string `json:"content,omitempty"`
+	Service         string `json:"service,omitempty"`
+	Surface         string `json:"surface,omitempty"`
+	GuildID         string `json:"guild_id,omitempty"`
+	VisibilityScope string `json:"visibility_scope,omitempty"`
+	ObservedSeq     int64  `json:"observed_seq"`
+	ObservedAt      string `json:"observed_at"`
+	IsCurrent       bool   `json:"is_current"`
+	ForgottenAt     string `json:"forgotten_at,omitempty"`
+	ForgetReason    string `json:"forget_reason,omitempty"`
+}
+
 func newChannelMemoryClient(rawURL, token string, timeout time.Duration) (*channelMemoryClient, error) {
 	return newChannelMemoryClientWithDigest(rawURL, "", token, timeout)
 }
 
 func newChannelMemoryClientWithDigest(rawIngestURL, rawDigestURL, token string, timeout time.Duration) (*channelMemoryClient, error) {
+	return newChannelMemoryClientWithEndpoints(rawIngestURL, rawDigestURL, "", "", token, timeout)
+}
+
+func newChannelMemoryClientWithEndpoints(rawIngestURL, rawDigestURL, rawSearchURL, rawSourceURL, token string, timeout time.Duration) (*channelMemoryClient, error) {
 	rawIngestURL = strings.TrimSpace(rawIngestURL)
 	rawDigestURL = strings.TrimSpace(rawDigestURL)
-	if rawIngestURL == "" && rawDigestURL == "" {
+	rawSearchURL = strings.TrimSpace(rawSearchURL)
+	rawSourceURL = strings.TrimSpace(rawSourceURL)
+	if rawIngestURL == "" && rawDigestURL == "" && rawSearchURL == "" && rawSourceURL == "" {
 		return nil, nil
 	}
 	if rawDigestURL == "" {
 		rawDigestURL = deriveChannelMemoryDigestURL(rawIngestURL)
+	}
+	if rawSearchURL == "" {
+		rawSearchURL = deriveChannelMemorySearchURL(firstNonEmptyString(rawDigestURL, rawIngestURL))
+	}
+	if rawSourceURL == "" {
+		rawSourceURL = deriveChannelMemorySourceURL(firstNonEmptyString(rawDigestURL, rawIngestURL))
 	}
 	if rawIngestURL != "" {
 		if err := validateChannelMemoryURL(rawIngestURL, "ingest"); err != nil {
@@ -140,12 +218,24 @@ func newChannelMemoryClientWithDigest(rawIngestURL, rawDigestURL, token string, 
 			return nil, err
 		}
 	}
+	if rawSearchURL != "" {
+		if err := validateChannelMemoryURL(rawSearchURL, "search"); err != nil {
+			return nil, err
+		}
+	}
+	if rawSourceURL != "" {
+		if err := validateChannelMemoryURL(rawSourceURL, "source-messages"); err != nil {
+			return nil, err
+		}
+	}
 	if timeout <= 0 {
 		timeout = 2 * time.Second
 	}
 	return &channelMemoryClient{
 		ingestURL: rawIngestURL,
 		digestURL: rawDigestURL,
+		searchURL: rawSearchURL,
+		sourceURL: rawSourceURL,
 		token:     strings.TrimSpace(token),
 		client:    &http.Client{Timeout: timeout},
 	}, nil
@@ -166,14 +256,40 @@ func validateChannelMemoryURL(rawURL, name string) error {
 }
 
 func deriveChannelMemoryDigestURL(rawIngestURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(rawIngestURL))
+	return deriveChannelMemoryEndpointURL(rawIngestURL, "/digest")
+}
+
+func deriveChannelMemorySearchURL(rawURL string) string {
+	return deriveChannelMemoryEndpointURL(rawURL, "/search")
+}
+
+func deriveChannelMemorySourceURL(rawURL string) string {
+	return deriveChannelMemoryEndpointURL(rawURL, "/source-messages")
+}
+
+func deriveChannelMemoryEndpointURL(rawURL, endpoint string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return ""
 	}
 	path := strings.TrimRight(parsed.Path, "/")
 	if strings.HasSuffix(path, "/ingest") {
-		parsed.Path = strings.TrimSuffix(path, "/ingest") + "/digest"
+		parsed.Path = strings.TrimSuffix(path, "/ingest") + endpoint
 		return parsed.String()
+	}
+	if strings.HasSuffix(path, "/digest") {
+		parsed.Path = strings.TrimSuffix(path, "/digest") + endpoint
+		return parsed.String()
+	}
+	return ""
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
 	}
 	return ""
 }
@@ -184,6 +300,14 @@ func (c *channelMemoryClient) enabled() bool {
 
 func (c *channelMemoryClient) digestEnabled() bool {
 	return c != nil && strings.TrimSpace(c.digestURL) != ""
+}
+
+func (c *channelMemoryClient) searchEnabled() bool {
+	return c != nil && strings.TrimSpace(c.searchURL) != ""
+}
+
+func (c *channelMemoryClient) sourceMessagesEnabled() bool {
+	return c != nil && strings.TrimSpace(c.sourceURL) != ""
 }
 
 func (c *channelMemoryClient) ingestMessages(ctx context.Context, messages []wallMessage) (int, error) {
@@ -235,13 +359,43 @@ func (c *channelMemoryClient) digest(ctx context.Context, req channelMemoryDiges
 	if !c.digestEnabled() {
 		return nil, nil
 	}
-	body, err := json.Marshal(req)
-	if err != nil {
+	var parsed channelMemoryDigestResponse
+	if err := c.postJSON(ctx, c.digestURL, req, &parsed, "digest"); err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.digestURL, bytes.NewReader(body))
-	if err != nil {
+	return &parsed, nil
+}
+
+func (c *channelMemoryClient) search(ctx context.Context, req channelMemorySearchRequest) (*channelMemorySearchResponse, error) {
+	if !c.searchEnabled() {
+		return nil, nil
+	}
+	var parsed channelMemorySearchResponse
+	if err := c.postJSON(ctx, c.searchURL, req, &parsed, "search"); err != nil {
 		return nil, err
+	}
+	return &parsed, nil
+}
+
+func (c *channelMemoryClient) sourceMessages(ctx context.Context, req channelMemorySourceMessagesRequest) (*channelMemorySourceMessagesResponse, error) {
+	if !c.sourceMessagesEnabled() {
+		return nil, nil
+	}
+	var parsed channelMemorySourceMessagesResponse
+	if err := c.postJSON(ctx, c.sourceURL, req, &parsed, "source-messages"); err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
+func (c *channelMemoryClient) postJSON(ctx context.Context, rawURL string, payload any, out any, name string) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
+	if err != nil {
+		return err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
@@ -250,21 +404,20 @@ func (c *channelMemoryClient) digest(ctx context.Context, req channelMemoryDiges
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("channel-memory digest returned %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
+		return fmt.Errorf("channel-memory %s returned %s: %s", name, resp.Status, strings.TrimSpace(string(respBody)))
 	}
-	var parsed channelMemoryDigestResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return nil, fmt.Errorf("decode channel-memory digest: %w", err)
+	if err := json.Unmarshal(respBody, out); err != nil {
+		return fmt.Errorf("decode channel-memory %s: %w", name, err)
 	}
-	return &parsed, nil
+	return nil
 }
 
 func (c *channelMemoryClient) fetchAwarenessDigest(ctx context.Context, channelIDs []string, since time.Duration) channelAwarenessDigest {
