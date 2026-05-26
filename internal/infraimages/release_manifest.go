@@ -3,7 +3,7 @@ package infraimages
 import "fmt"
 
 const (
-	DefaultClawInfraTag         = "v0.20.0"
+	DefaultClawInfraTag         = "v0.21.0"
 	DefaultClawAPITag           = DefaultClawInfraTag
 	DefaultClawdashTag          = DefaultClawInfraTag
 	DefaultClawWallTag          = DefaultClawInfraTag
