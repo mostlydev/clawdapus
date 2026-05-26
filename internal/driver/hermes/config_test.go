@@ -307,6 +307,111 @@ func TestGenerateConfigAllowsPlatformToolsetsOverride(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigDefaultsManagedGatewayUXQuiet(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {},
+		},
+		Environment: map[string]string{
+			"DISCORD_BOT_TOKEN":  "discord-token",
+			"OPENROUTER_API_KEY": "or-key",
+		},
+	}
+
+	mc, err := resolveModelConfig(rc)
+	if err != nil {
+		t.Fatalf("resolveModelConfig returned error: %v", err)
+	}
+	data, err := GenerateConfig(rc, mc)
+	if err != nil {
+		t.Fatalf("GenerateConfig returned error: %v", err)
+	}
+
+	var cfg map[string]any
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("parse generated yaml: %v", err)
+	}
+
+	approvals, _ := cfg["approvals"].(map[string]any)
+	if got := approvals["mode"]; got != "off" {
+		t.Fatalf("expected approvals.mode=off, got %#v", got)
+	}
+	if got := approvals["cron_mode"]; got != "approve" {
+		t.Fatalf("expected approvals.cron_mode=approve, got %#v", got)
+	}
+
+	display, _ := cfg["display"].(map[string]any)
+	if got := display["busy_input_mode"]; got != hermesDefaultBusyInputMode {
+		t.Fatalf("expected display.busy_input_mode=%s, got %#v", hermesDefaultBusyInputMode, got)
+	}
+	if got := display["busy_ack_enabled"]; got != false {
+		t.Fatalf("expected display.busy_ack_enabled=false, got %#v", got)
+	}
+
+	onboarding, _ := cfg["onboarding"].(map[string]any)
+	seen, _ := onboarding["seen"].(map[string]any)
+	for _, flag := range []string{"busy_input_prompt", "tool_progress_prompt", "openclaw_residue_cleanup"} {
+		if got := seen[flag]; got != true {
+			t.Fatalf("expected onboarding.seen.%s=true, got %#v", flag, got)
+		}
+	}
+}
+
+func TestGenerateConfigAllowsManagedGatewayUXOptIn(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},
+		Handles: map[string]*driver.HandleInfo{
+			"discord": {},
+		},
+		Configures: []string{
+			`hermes config set approvals.mode manual`,
+			`hermes config set approvals.cron_mode deny`,
+			`hermes config set display.busy_input_mode interrupt`,
+			`hermes config set --json display.busy_ack_enabled true`,
+			`hermes config set --json onboarding.seen.busy_input_prompt false`,
+		},
+		Environment: map[string]string{
+			"DISCORD_BOT_TOKEN":  "discord-token",
+			"OPENROUTER_API_KEY": "or-key",
+		},
+	}
+
+	mc, err := resolveModelConfig(rc)
+	if err != nil {
+		t.Fatalf("resolveModelConfig returned error: %v", err)
+	}
+	data, err := GenerateConfig(rc, mc)
+	if err != nil {
+		t.Fatalf("GenerateConfig returned error: %v", err)
+	}
+
+	var cfg map[string]any
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("parse generated yaml: %v", err)
+	}
+
+	approvals, _ := cfg["approvals"].(map[string]any)
+	if got := approvals["mode"]; got != "manual" {
+		t.Fatalf("expected approvals.mode override, got %#v", got)
+	}
+	if got := approvals["cron_mode"]; got != "deny" {
+		t.Fatalf("expected approvals.cron_mode override, got %#v", got)
+	}
+	display, _ := cfg["display"].(map[string]any)
+	if got := display["busy_input_mode"]; got != "interrupt" {
+		t.Fatalf("expected display.busy_input_mode override, got %#v", got)
+	}
+	if got := display["busy_ack_enabled"]; got != true {
+		t.Fatalf("expected display.busy_ack_enabled override, got %#v", got)
+	}
+	onboarding, _ := cfg["onboarding"].(map[string]any)
+	seen, _ := onboarding["seen"].(map[string]any)
+	if got := seen["busy_input_prompt"]; got != false {
+		t.Fatalf("expected onboarding.seen.busy_input_prompt override, got %#v", got)
+	}
+}
+
 func TestGenerateEnvFileSetsManagedDefaultIdentity(t *testing.T) {
 	rc := &driver.ResolvedClaw{}
 	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})

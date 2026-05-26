@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Hermes managed pods default to non-interactive gateway UX** — generated Hermes config now disables interactive command-approval prompts while preserving hardline command blocks, queues busy follow-up messages instead of interrupting in-flight work, suppresses busy acknowledgments, and pre-seeds first-touch onboarding flags so pod recreation does not repost setup and tip chatter. Operators can opt back into the personal-assistant UX with explicit Hermes `CONFIGURE` overrides. Closes [#276](https://github.com/mostlydev/clawdapus/issues/276).
 
 ## v0.20.0 <Badge type="tip" text="Latest" /> {#v0-20-0}
 
