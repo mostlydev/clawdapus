@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.19.1 <Badge type="tip" text="Latest" /> {#v0-19-1}
+## v0.20.0 <Badge type="tip" text="Latest" /> {#v0-20-0}
+
+*2026-05-25*
+
+- **Channel retrieval tools read durable channel-memory, not just the raw buffer** — when a pod wires `x-claw.channel-memory`, the managed `search_channel_context` and `get_channel_messages` tools now fall through from claw-wall's bounded raw buffer into channel-memory. Searches match durable `source_messages` and sparse digest blocks (returning stable source handles), so a term an agent can see in `raw_window+digest` channel awareness stays retrievable even after the raw buffer has rolled forward, and `get_channel_messages` can resolve message IDs or source handles that have left the buffer. Responses carry `source` (`claw-wall` / `channel-memory` / `mixed`) and `source_counts` provenance so callers can tell retained, durable-source, and sparse-block hits apart. claw-wall remains the ACL gate — effective channels resolve from the request or the agent allowlist before any durable-memory query — and raw-buffer-only pods are unchanged.
+- **Pins infra images** — `claw-api`, `clawdash`, `claw-wall`, `claw-channel-memory`, and `claw-mcp-stdio` move in lockstep to `v0.20.0`. cllama stays at [v0.6.8](https://github.com/mostlydev/cllama/releases/tag/v0.6.8). `hermes-base` stays at `v2026.5.16-claw.2`.
+
+## v0.19.1 {#v0-19-1}
 
 *2026-05-23*
 
