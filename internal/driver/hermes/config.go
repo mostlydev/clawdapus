@@ -26,6 +26,7 @@ const (
 	clawdapusDisabledToolsEnv     = "CLAWDAPUS_DISABLED_TOOLS"
 	hermesTextToSpeechTool        = "text_to_speech"
 	hermesDefaultGatewayLockDir   = "/tmp/hermes-gateway-locks"
+	hermesDefaultBusyInputMode    = "queue"
 	hermesDefaultXDGStateHome     = "/tmp/xdg-state"
 	hermesDefaultNoProxy          = "localhost,127.0.0.1,cllama"
 	managedDefaultAgentIdentity   = "You are a Clawdapus-managed agent. Your identity, authority, communication policy, memory policy, and tool-use rules are defined by the Clawdapus project context loaded below: AGENTS.md, CLAWDAPUS.md, SOUL.md, mounted skills, feeds, and managed-tool policy. Do not identify as Hermes or as a generic assistant. Follow the Clawdapus contract when it is more specific than runner defaults; otherwise retain the Hermes runtime guidance below, including persistent memory behavior."
@@ -44,8 +45,25 @@ func GenerateConfig(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, err
 	if modelCfg.APIKey != "" {
 		modelBlock["api_key"] = modelCfg.APIKey
 	}
+	// The gateway bridges display config into env at boot, so keep these UX
+	// defaults in config.yaml and let operators override them with CONFIGURE.
 	config := map[string]any{
+		"approvals": map[string]any{
+			"mode":      "off",
+			"cron_mode": "approve",
+		},
+		"display": map[string]any{
+			"busy_input_mode":  hermesDefaultBusyInputMode,
+			"busy_ack_enabled": false,
+		},
 		"model": modelBlock,
+		"onboarding": map[string]any{
+			"seen": map[string]any{
+				"busy_input_prompt":        true,
+				"tool_progress_prompt":     true,
+				"openclaw_residue_cleanup": true,
+			},
+		},
 		"terminal": map[string]any{
 			"backend": "local",
 			"cwd":     hermesWorkspaceDir,
