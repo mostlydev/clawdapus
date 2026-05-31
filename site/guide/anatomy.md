@@ -6,9 +6,9 @@ A running Claw splits cognition into two independent layers: **internal executio
 block-beta
   columns 1
   contract["Behavioral Contract\nread-only bind mount\nAGENTS.md — purpose, on the host\nSurvives full container compromise"]
-  runner["Runner\nOpenClaw · NanoClaw · Claude Code · custom"]
-  persona["Persona\nMemory · history · style · knowledge"]
-  proxy["cllama — governance proxy\nIntercepts prompts outbound + responses inbound\nRunner never knows it's there"]
+  runner["Runner\nOpenClaw · Hermes · NanoClaw · custom"]
+  persona["Persona\nStyle · knowledge · workspace state"]
+  proxy["cllama — governance proxy\nRoutes model calls, injects context, mediates tools\nRunner never sees provider keys"]
 
   style contract fill:#1a1a2e,stroke:#22d3ee,color:#eee
   style runner fill:#1a1a2e,stroke:#f0a500,color:#eee
@@ -26,7 +26,7 @@ Supported runners today:
 |--------|---------|
 | `openclaw` | [OpenClaw](https://openclaw.ai) |
 | `hermes` | [Hermes](https://github.com/NousResearch/hermes-agent) |
-| `nanoclaw` | [Claude Agent SDK](https://github.com/anthropics/claude-code) |
+| `nanoclaw` | NanoClaw / Claude Code-compatible orchestrator |
 | `nanobot` | [Nanobot](https://github.com/HKUDS/nanobot) |
 | `picoclaw` | [PicoClaw](https://github.com/sipeed/picoclaw) |
 | `nullclaw` | [NullClaw](https://github.com/nullclaw/nullclaw) |
@@ -69,8 +69,8 @@ A persona is a complete, portable, forkable workspace package that encapsulates 
 
 Personas are the content layer. They grow during operation and can be snapshotted.
 
-::: tip Swap the runner, keep the mind
-Because the memory and history are canonically managed by Clawdapus, you can swap the agent's runtime driver (`CLAW_TYPE` in the Clawfile) without losing its identity. You can migrate an agent from OpenClaw to PicoClaw, and its memories will automatically follow it into the new runtime's expected layout.
+::: tip Swap the runner, keep durable state
+Clawdapus keeps infrastructure-owned session history outside the runtime and preserves runner-owned portable memory under `.claw-memory/`. That makes driver migrations possible without throwing away the retained record or the runner's scratch memory. Persona materialization is a separate local/OCI import path layered into the runtime when configured.
 :::
 
 ::: tip Personas are Portable

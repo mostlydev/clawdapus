@@ -48,7 +48,7 @@ A service advertises callable tools in its `claw.describe` descriptor (version 2
 
 Tool schemas use MCP's vocabulary (`name`, `description`, `inputSchema`, `annotations`). The `http` field is Clawdapus-only execution metadata — the LLM never sees it.
 
-The `readOnly` annotation distinguishes safe queries from side-effecting operations. This distinction surfaces in `claw audit` output and can be used by future tool policy.
+The `readOnly` annotation distinguishes safe queries from side-effecting operations in the compiled schema. It is available to future tool policy and custom proxies. Today `claw audit` reports managed tool calls and failures, not a per-call `readOnly` column.
 
 ## Subscribing in Pod YAML
 
@@ -169,7 +169,7 @@ Many MCP servers are distributed as stdio commands instead of HTTP services. Use
 ```yaml
 services:
   perplexity:
-    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.21.0
     environment:
       PERPLEXITY_API_KEY: ${PERPLEXITY_KEY}
     expose:

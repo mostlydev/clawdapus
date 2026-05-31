@@ -276,8 +276,8 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 | `SKILL` | Operator policy files mounted read-only |
 | `INCLUDE` | Pod-level contract composition — `enforce`, `guide`, or `reference` mode |
 | `CONFIGURE` | Runner-specific config mutations at init |
-| `TRACK` | Wraps package managers to log mutations |
-| `PRIVILEGE` | Drops container privileges |
+| `TRACK` | Emits metadata for planned mutation tracking / recipe promotion |
+| `PRIVILEGE` | Declares driver-specific privilege metadata |
 
 ---
 
@@ -287,15 +287,15 @@ Pick a driver based on what you need. All drivers support `MODEL`, `AGENT`, `CLL
 
 | | `openclaw` | `hermes` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Runtime** | [OpenClaw](https://openclaw.ai) | [Hermes](https://github.com/NousResearch/hermes-agent) | [Claude Agent SDK](https://github.com/anthropics/claude-code) | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [NullClaw](https://github.com/nullclaw/nullclaw) | [MicroClaw](https://github.com/microclaw/microclaw) |
+| **Runtime** | [OpenClaw](https://openclaw.ai) | [Hermes](https://github.com/NousResearch/hermes-agent) | NanoClaw / Claude Code-compatible orchestrator | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [NullClaw](https://github.com/nullclaw/nullclaw) | [MicroClaw](https://github.com/microclaw/microclaw) |
 | `claw init` scaffold | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | HANDLE: Discord | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
-| HANDLE: Telegram | — | ✅ | — | ✅ | ✅ | ✅ | ✅ |
-| HANDLE: Slack | — | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| HANDLE: Telegram | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| HANDLE: Slack | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
 | HANDLE: long-tail ¹ | — | — | — | — | ✅ | — | — |
 | INVOKE (cron) | ✅ | ✅ | — | ✅ | ✅ | ✅ | — |
-| Structured health | ✅ | ✅ | — | — | ✅ | ✅ | — |
-| Read-only rootfs | ✅ | ✅ | — | ✅ | ✅ | ✅ | — |
+| Structured health | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Read-only rootfs | ✅ | ✅ | no | ✅ | ✅ | ✅ | no |
 | Non-root container | — | — | — | — | ✅ | — | — |
 
 ¹ PicoClaw long-tail: WhatsApp, Feishu, LINE, QQ, DingTalk, OneBot, WeCom, WeCom App, Pico, MaixCam.
@@ -418,7 +418,7 @@ Stdio MCP packages can be wrapped without hand-written glue. Declare the command
 ```yaml
 services:
   perplexity:
-    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.21.0
     environment:
       PERPLEXITY_API_KEY: ${PERPLEXITY_KEY}
     expose:
@@ -470,7 +470,7 @@ claw memory backfill mem-svc
 claw memory backfill mem-svc --after 2026-03-01T00:00:00Z
 
 # Tombstone a retained entry (does not mutate session history)
-claw memory forget mem-svc --entry-id hist1_abc123 --reason "operator request"
+claw memory forget mem-svc --agent analyst-0 --entry-id hist1_abc123 --reason "operator request"
 ```
 
 A runnable reference adapter lives at [`examples/reference-memory/`](./examples/reference-memory/) — file-backed, idempotent on `entry.id`, tombstone-aware.
@@ -551,10 +551,10 @@ inline the service's advertised tools and the mount path:
 Clawdapus is designed for autonomous fleet governance. The operator writes the `Clawfile` and sets the budgets, but day-to-day oversight can be delegated to a **Master Claw** — an AI governor.
 
 **The Governance Proxy is its Sensory Organ:**
-The `cllama` proxy is the programmatic choke point. It sits on the network, enforces the hard rules (rate limits, budgets), and emits structured telemetry (cost, interventions, tool rounds). It doesn't "think" about management; it is a passive sensor and firewall.
+The `cllama` proxy is the programmatic choke point. It sits on the network, holds provider credentials, applies compiled model/tool/context policy, and emits structured telemetry (cost, interventions, tool rounds). It doesn't "think" about management; it is a passive sensor and firewall.
 
 **The Master Claw is the Brain:**
-The Master Claw is an actual LLM-powered agent running in the pod, reading proxy telemetry and acting on it. `x-claw.master` wires this today: it auto-injects a `claw-api` service and hands the governor a scoped bearer token and `CLAW_API_URL`, so it can read fleet telemetry and act through an authenticated, scope-checked API. The executive policy it runs — shifting budgets, quarantining a drifting agent, promoting a recipe — is operator-defined (recipe promotion is still on the roadmap), not built-in enforcement.
+The Master Claw is an actual LLM-powered agent running in the pod, reading proxy telemetry and acting on it. `x-claw.master` wires this today: it auto-injects a `claw-api` service and hands the governor a scoped bearer token and `CLAW_API_URL`, so it can read fleet telemetry and act through an authenticated, scope-checked API. The executive policy it runs — shifting budgets, quarantining a high-cost or off-policy agent, promoting a recipe — is operator-defined (recipe promotion is still on the roadmap), not built-in enforcement.
 
 In enterprise deployments, this naturally forms a **Hub-and-Spoke Governance Model**: multiple pods across zones run their own `cllama` proxies as local firewalls, while a single Master Claw ingests telemetry from them all to oversee the fleet.
 
@@ -573,7 +573,7 @@ CLAW        REQ  RESP  ERR  INT  TOOLS  TOOL_ERR  TOK_IN  TOK_OUT  COST_USD  MOD
 analyst     142  142   0    3    18     0         284011  39402    1.8742    anthropic/claude-sonnet-4
 researcher  88   87    1    0    5      0         151233  20118    0.9931    anthropic/claude-sonnet-4
 
-Totals: req=230 resp=229 err=1 int=3 tools=23/23 tokens=435244/59520 cost=$2.8673
+Totals: req=230 resp=229 err=1 int=3 tools=23/0 tokens=435244/59520 cost=$2.8673
 ```
 
 Filter with `--claw <id>`, `--type <event>`, or `--since <duration>`; add `--json` for machine-readable output. **Drift scoring is deliberately not built in** — defining behavioral drift is organization-specific, so Clawdapus ships the raw telemetry (the open metric) and leaves scoring to a swappable proxy implementation or a Master Claw policy. There is no `drift_score` in the reference proxy and no `DRIFT` column in `claw audit`.

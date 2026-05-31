@@ -18,7 +18,7 @@ When you run `claw up`, the compiler:
 2. Inspects every service image, extracting `claw.describe` labels
 3. Builds a feed registry from service descriptors
 4. Resolves feed subscriptions against the registry
-5. Generates per-agent context files (`CLAWDAPUS.md`, `AGENTS.generated.md`)
+5. Generates per-agent context files (`AGENTS.generated.md`, `CLAWDAPUS.md`, `metadata.json`, feed/tool/memory manifests)
 6. Emits `compose.generated.yml`
 
 Every artifact is written to disk before `docker compose up` runs. Nothing is deferred to container boot.
@@ -127,8 +127,11 @@ During `claw up`, the compiler extracts this descriptor and projects it into:
 
 - **CLAWDAPUS.md** -- service descriptions inlined into surface sections
 - **Feed manifests** -- feed name, path, TTL, auth requirements
+- **Tool manifests** -- callable schemas, execution metadata, auth, and mediation budgets
+- **Memory manifests** -- recall/retain/forget endpoints and auth
 - **Effective agent contracts** -- guide content in `AGENTS.generated.md`
-- **Skill map** -- the `claw skillmap` output for operator visibility
+- **Mounted skill material** -- service skill files and operator reference material in the runner skill directory
+- **Descriptor snapshots** -- deterministic `.claw-discovered/` snapshots for stdio MCP sidecars
 
 One declaration, multiple projections. Add a service to the pod, and every downstream artifact updates automatically.
 
@@ -161,7 +164,7 @@ The `claw.describe` label points to a JSON file inside the image:
 
 The descriptor does not contain a service name -- deployment identity comes from the pod YAML, not the image. One image can back multiple compose services.
 
-Framework adapters like RailsTrail can generate descriptors from code introspection: routes become endpoints, state machines become documented workflows, manual actions become skill entries. The developer writes Rails code; the adapter produces the descriptor; `claw up` compiles it into the pod.
+Framework adapters like the planned RailsTrail pattern can generate descriptors from code introspection: routes become endpoints, state machines become documented workflows, manual actions become skill entries. The developer writes framework code; the adapter produces the descriptor; `claw up` compiles it into the pod.
 
 ### What it prevents
 
@@ -179,6 +182,7 @@ The compilation pipeline runs in two phases because some artifacts depend on inf
 
 **Pass 2 -- Materialize:**
 - Resolve feed subscriptions against the registry
+- Compile tool, memory, service-auth, channel-allowlist, and model-policy manifests
 - Generate per-agent `CLAWDAPUS.md` with inlined service descriptions
 - Run driver `Materialize()` for each service (configs, personas, skill files)
 - Emit `compose.generated.yml`
