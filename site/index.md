@@ -34,7 +34,7 @@ features:
     details: "HANDLE declares platform identity. Every agent's Discord/Telegram/Slack IDs are broadcast pod-wide. Services can @mention bots without hardcoding."
   - icon: "\U0001F9E0"
     title: Master Claw
-    details: Delegate fleet oversight to an AI governor. It reads proxy telemetry and autonomously manages budgets, quarantines, and recipe promotions.
+    details: "Delegate fleet oversight to an in-pod AI governor. x-claw.master auto-wires a claw-api service and a scoped bearer token, so the governor reads proxy telemetry and acts through an authenticated, scope-checked API."
 ---
 
 ## What It Looks Like
@@ -76,16 +76,16 @@ x-claw:
     - "volume://shared-research read-write"
 
 services:
-  tiverton:
-    image: trading-desk-tiverton:latest
+  analyst:
+    image: trading-desk-analyst:latest
     build:
-      context: ./agents/tiverton
+      context: ./agents/analyst
     x-claw:
-      agent: ./agents/tiverton/AGENTS.md
+      agent: ./agents/analyst/AGENTS.md
       handles:
         discord:
-          id: "${TIVERTON_DISCORD_ID}"
-          username: "tiverton"
+          id: "${ANALYST_DISCORD_ID}"
+          username: "analyst"
 ```
 
 ### Five Minutes to Running
