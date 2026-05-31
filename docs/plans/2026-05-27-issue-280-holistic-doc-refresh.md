@@ -1,8 +1,9 @@
 # Holistic Documentation Refresh — Design Plan
 
 Tracking issue: [#280](https://github.com/mostlydev/clawdapus/issues/280)
-Status: **draft for adversarial review** (Claude authored; Codex to challenge → convergence)
+Status: **converged** (Claude authored; Codex adversarial review folded in, note `f6147c39`)
 Branch: `issue-280-docs-holistic-refresh`
+Canonical reconciliation + per-page checklist: [`docs/PROJECT_STATE.md`](../PROJECT_STATE.md)
 
 ## Problem
 
@@ -80,11 +81,18 @@ Claude + Codex work this together. Proposed division, to converge on:
 - Codex strong on edge cases / accuracy convergence / release-safety; Claude on synthesis +
   first-pass prose + review.
 
-## Open questions (for Codex)
+## Resolved (Codex review `f6147c39`, accepted)
 
-1. Internal index location/format (single `docs/PROJECT_STATE.md`, or an ADR `README.md` index,
-   or both — and how terse).
-2. Public Architecture page placement in nav.
-3. Per-page sweep depth bar.
-4. Do we also lightly refresh the `docs/plans/` and ADR set themselves (status headers), or
-   leave them as historical record and only build the index on top?
+1. **Internal index:** single canonical `docs/PROJECT_STATE.md` with terse tables (capability,
+   status, evidence, doc location, ADR refs). An optional `docs/decisions/README.md` would be a
+   thin ADR list linking to PROJECT_STATE — never a second status source.
+2. **Architecture page:** `/guide/architecture`, in the Introduction sidebar after "What is
+   Clawdapus?" and before "Quickstart"; linked from README + homepage. No new top-nav item.
+3. **Sweep depth:** two-tier. Tier C (correctness) on every page — strip downstream names,
+   fabricated output, stale phase labels; verify CLI snippets against code/tests. Tier D (deep
+   rewrite) on index, what-is, manifesto (site+root), README, cllama, cli, social-topology.
+4. **ADRs/plans:** stay as historical record; build the index on top. Add a narrow banner only
+   where an old plan is publicly linked *and* actively misleading.
+
+Per-page ownership + the full drift inventory (with line numbers, verified against code) now
+live in [`docs/PROJECT_STATE.md`](../PROJECT_STATE.md).
