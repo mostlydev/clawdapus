@@ -101,25 +101,31 @@ Tier D = deep rewrite (mental model stale/weak).
 
 | Page | Tier | Owner | Status | Notes |
 |------|------|-------|--------|-------|
-| docs/PROJECT_STATE.md | — | Claude | drafting | this file |
-| site/guide/architecture.md (new) | D | Claude | todo | capabilities ↔ ADRs |
-| site/index.md | D | Claude | todo | leak + drift + phases |
-| site/guide/what-is-clawdapus.md | D | Claude | todo | audit/drift/phase |
-| site/manifesto.md | D | Claude | todo | drift lines |
-| MANIFESTO.md (root) | D | Claude | todo | :152/:161 + sync w/ site |
-| README.md | D | Claude | todo | leak + drift + surface |
-| site/guide/cllama.md | D | Codex | todo | drift @123/@359; ingress matrix |
-| site/guide/cli.md | D | Codex | todo | audit columns @210/@491; full command set |
-| site/guide/social-topology.md | D | Codex | todo | leak @71-77 |
-| site/guide/pod-yaml.md | C | Codex | todo | leak @24; defaults/spread depth |
+| docs/PROJECT_STATE.md | — | Claude | **done** | this file (living) |
+| site/guide/architecture.md (new) | D | Claude | **done** | capabilities ↔ ADRs; commit 71227a6 |
+| site/index.md | D | Claude | **done** | leak + Master Claw card; commit ada159b |
+| site/guide/what-is-clawdapus.md | D | Claude | **done** | real audit output, drift honest, de-phased; ada159b |
+| site/manifesto.md | D | Claude | **done** | recipe→roadmap, drift clarifier, link fix; 45cb05c |
+| MANIFESTO.md (root) | D | Claude | **done** | same as site manifesto; 45cb05c |
+| README.md | D | Claude | **done** | leak + audit + retired v0.3.2/phase table; b4080d6 |
+| site/.vitepress/config.mts | C | Claude | **done** | architecture in Introduction sidebar; 71227a6 |
+| site/guide/cllama.md | D | Codex | todo | drift @123/@356-363; spec-vs-reference split; telemetry fields; "private SSH" line |
+| site/guide/cli.md | D | Codex | todo | audit columns (add TOOLS/TOOL_ERR) + invalid `--last` example; missing commands (discover/history export/skill install/update); remove DRIFT `claw ps` sample; `memory forget --agent` required; skillmap/recipe/bake not registered |
+| site/guide/social-topology.md | D | Codex | todo | leak @71-77; stale platform matrix (omits nanoclaw; OpenClaw has discord/telegram/slack) |
+| site/guide/pod-yaml.md | C | Codex | todo | leak @24-33; incomplete service-field list (feeds/tools/memory/context/mcp-stdio/describe-file/claw-api self); channel-context tuning wording |
 | site/guide/anatomy.md | C | Codex | todo | verify vs current compile flow |
 | site/guide/clawfile.md | C | Codex | todo | verify directives |
 | site/guide/tools.md | C | Codex | todo | native vs mediated modes |
-| site/guide/memory.md | C | Codex | todo | session history + recall + `claw history` |
+| site/guide/memory.md | C | Codex | todo | session history + recall + `claw history`/`claw memory` |
 | site/guide/surfaces-and-skills.md | C | Codex | todo | feeds coverage |
 | site/guide/compilation-principles.md | C | Codex | todo | verify vs ADR-017 |
-| site/guide/drivers.md | C | Codex | todo | 7-driver matrix vs `internal/driver/*` |
-| site/.vitepress/config.mts | C | Claude | todo | add architecture to Introduction sidebar |
+| site/guide/drivers.md | C | Codex | todo | 7-driver matrix + per-driver platform support vs `internal/driver/*` |
+
+**Out-of-scope leak found (needs its own decision):** `examples/trading-desk/` itself uses named
+claws as service names (`tiverton`, `westin`, `allen`, `logan`, `micro`) and agent files
+(`TIVERTON.md`, …) — a public-artifact leak larger than the doc pages. Renaming ripples into
+agent paths, env vars, and possibly spike fixtures, so it is **not** included in this docs PR;
+flag to the maintainer as a follow-up issue.
 
 **Release guardrails:** no changes to `release_manifest.go` pins, changelog `Latest` badge, nav
 version dropdown, or cllama submodule pointer. A `## Unreleased` changelog note is allowed.
