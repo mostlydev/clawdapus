@@ -210,16 +210,16 @@ x-claw:
     - "volume://shared-research read-write"
   feeds-defaults: [market-context]    # resolved from trading-api's claw.describe
 services:
-  tiverton:
-    image: trading-desk-tiverton:latest
+  analyst:
+    image: trading-desk-analyst:latest
     build:
-      context: ./agents/tiverton
+      context: ./agents/analyst
     x-claw:
-      agent: ./agents/tiverton/AGENTS.md
+      agent: ./agents/analyst/AGENTS.md
       handles:
         discord:
-          id: "${TIVERTON_DISCORD_ID}"
-          username: "tiverton"
+          id: "${ANALYST_DISCORD_ID}"
+          username: "analyst"
       invoke:
         - schedule: "15 8 * * 1-5"
           name: "Pre-market synthesis"
@@ -513,16 +513,20 @@ When many services share the same Discord guild/channel topology, put that share
 
 Every Claw receives a generated `CLAWDAPUS.md` — the single context document listing surfaces, mount paths, peer handles, feeds, and available skills. Service descriptions from `claw.describe` labels or `claw.skill.emit` are inlined directly into CLAWDAPUS.md surface sections, so workflow-critical API docs are always in prompt context without extra pod YAML. Add a service, the skill map updates. No code changes.
 
-```bash
-$ claw skillmap crypto-crusher-0
+For example, an agent that declares a `service://market-scanner` surface and a
+`volume://shared-cache` surface receives a generated `CLAWDAPUS.md` whose surface sections
+inline the service's advertised tools and the mount path:
 
-  FROM market-scanner (service://market-scanner):
-    get_price            Current and historical token price data
-    get_whale_activity   Large wallet movements in last N hours
-    [discovered via OpenAPI → skills/surface-market-scanner.md]
+```markdown
+## Surfaces
 
-  FROM shared-cache (volume://shared-cache):
-    read-write at /mnt/shared-cache
+### market-scanner (service://market-scanner)
+- get_price — current and historical token price data
+- get_whale_activity — large wallet movements in the last N hours
+  (discovered via claw.describe)
+
+### shared-cache (volume://shared-cache)
+- read-write at /mnt/shared-cache
 ```
 
 ---
@@ -547,48 +551,40 @@ $ claw skillmap crypto-crusher-0
 Clawdapus is designed for autonomous fleet governance. The operator writes the `Clawfile` and sets the budgets, but day-to-day oversight can be delegated to a **Master Claw** — an AI governor.
 
 **The Governance Proxy is its Sensory Organ:**
-The `cllama` proxy is the programmatic choke point. It sits on the network, enforces the hard rules (rate limits, budgets, PII blocking), and emits structured telemetry logs (drift, cost, interventions). It doesn't "think" about management; it is a passive sensor and firewall.
+The `cllama` proxy is the programmatic choke point. It sits on the network, enforces the hard rules (rate limits, budgets), and emits structured telemetry (cost, interventions, tool rounds). It doesn't "think" about management; it is a passive sensor and firewall.
 
 **The Master Claw is the Brain:**
-The Master Claw is an actual LLM-powered agent running in the pod, tasked with reading proxy telemetry. If a proxy reports an agent drifting, burning budget, or failing policy checks, the Master Claw makes an executive decision to dynamically shift budgets, promote recipes, or quarantine the drifting agent.
+The Master Claw is an actual LLM-powered agent running in the pod, reading proxy telemetry and acting on it. `x-claw.master` wires this today: it auto-injects a `claw-api` service and hands the governor a scoped bearer token and `CLAW_API_URL`, so it can read fleet telemetry and act through an authenticated, scope-checked API. The executive policy it runs — shifting budgets, quarantining a drifting agent, promoting a recipe — is operator-defined (recipe promotion is still on the roadmap), not built-in enforcement.
 
-In enterprise deployments, this naturally forms a **Hub-and-Spoke Governance Model**. Multiple pods across different zones have their own `cllama` proxies acting as local firewalls, while a single Master Claw ingests telemetry from them all to autonomously manage the entire neural fleet.
-
----
-
-## Fleet Visibility (Design — Phase 5)
-
-```bash
-$ claw ps
-
-TENTACLE          STATUS    CLLAMA    DRIFT
-crypto-crusher-0  running   healthy   0.02
-crypto-crusher-1  running   healthy   0.04
-crypto-crusher-2  running   WARNING   0.31
-
-$ claw audit crypto-crusher-2 --last 24h
-
-14:32  tweet-cycle       OUTPUT MODIFIED by cllama:policy  (financial advice detected)
-18:01  engagement-sweep  OUTPUT DROPPED by cllama:purpose  (off-strategy)
-```
-
-Drift is independently scored — not self-reported. The structured logs from `cllama` provide the raw telemetry today; the `claw audit` command and drift scoring are Phase 5.
+In enterprise deployments, this naturally forms a **Hub-and-Spoke Governance Model**: multiple pods across zones run their own `cllama` proxies as local firewalls, while a single Master Claw ingests telemetry from them all to oversee the fleet.
 
 ---
 
-## Recipe Promotion (Planned — Phase 6)
+## Fleet Visibility
+
+`cllama` emits normalized telemetry for every turn it proxies. **`claw audit`** aggregates that ledger into a per-claw summary for the current pod — an independent record of what each bot did, what it cost, and where the proxy intervened. Because the provider keys live with the proxy, this record is authoritative, not self-reported.
 
 ```bash
-$ claw recipe crypto-crusher-0 --since 7d
+$ claw audit --since 24h
 
-  pip: tiktoken==0.7.0, trafilatura>=0.9
-  apt: jq
-  files: scripts/scraper.py
+Pod: research-pod
+Events: 460
+CLAW        REQ  RESP  ERR  INT  TOOLS  TOOL_ERR  TOK_IN  TOK_OUT  COST_USD  MODELS
+analyst     142  142   0    3    18     0         284011  39402    1.8742    anthropic/claude-sonnet-4
+researcher  88   87    1    0    5      0         151233  20118    0.9931    anthropic/claude-sonnet-4
 
-Apply?  claw bake crypto-crusher --from-recipe latest
+Totals: req=230 resp=229 err=1 int=3 tools=23/23 tokens=435244/59520 cost=$2.8673
 ```
 
-Bots install things. That's how real work gets done. Tracked mutation is evolution. Untracked is drift. Ad hoc capability-building becomes permanent infrastructure through a human gate.
+Filter with `--claw <id>`, `--type <event>`, or `--since <duration>`; add `--json` for machine-readable output. **Drift scoring is deliberately not built in** — defining behavioral drift is organization-specific, so Clawdapus ships the raw telemetry (the open metric) and leaves scoring to a swappable proxy implementation or a Master Claw policy. There is no `drift_score` in the reference proxy and no `DRIFT` column in `claw audit`.
+
+---
+
+## Recipe Promotion (roadmap)
+
+Bots install things — that's how real work gets done. The planned recipe-promotion loop turns ad hoc mutation into permanent infrastructure through a human gate: a `TRACK` directive logs every package-manager mutation, `claw recipe` reviews the accumulated changes, and `claw bake` promotes the approved ones into the base image. Tracked mutation is evolution; untracked is drift.
+
+This loop is **designed but not yet implemented** — the `TRACK`/`recipe`/`bake` surface does not ship today.
 
 ---
 
@@ -608,33 +604,25 @@ Bots install things. That's how real work gets done. Tracked mutation is evoluti
 
 ## Status
 
-**v0.3.2 released** — [download](https://github.com/mostlydev/clawdapus/releases/tag/v0.3.2)
+Clawdapus is in active development and released regularly — see the
+[latest release](https://github.com/mostlydev/clawdapus/releases) and the
+[changelog](https://clawdapus.dev/changelog). The build pipeline, the seven runner drivers, the
+cllama governance proxy (credential starvation, compiled tool mediation, normalized telemetry +
+`claw audit`), the memory plane (session history, portable memory, ambient recall), context
+feeds and channel-memory, social topology, and `claw-api`/Master Claw wiring all ship today.
+Recipe promotion (`TRACK`/`recipe`/`bake`) and a built-in drift score are on the roadmap.
 
-| Phase | Status |
-|-------|--------|
-| Phase 1 — Clawfile parser + build | Done |
-| Phase 2 — Driver framework + pod runtime + OpenClaw + volume surfaces | Done |
-| Phase 3 — Surface manifests, service skills, CLAWDAPUS.md | Done |
-| Phase 3.5 — HANDLE directive + social topology (Discord, Telegram, Slack) | Done |
-| Phase 3.6 — INVOKE scheduling + Discord config wiring | Done |
-| Phase 3.7 — Social topology: mentionPatterns, allowBots, peer handle users | Done |
-| Phase 3.8 — Channel surface bindings | Done |
-| Phase 4 — Shared governance proxy integration + credential starvation | Done |
-| Phase 4.5 — Interactive claw init & claw agent add (canonical layout) | Done |
-| Phase 4.7 — Nanobot + PicoClaw + NullClaw + MicroClaw drivers | Done |
-| Phase 4.8 — Hermes driver + shared helper extraction | Done |
-| Phase 4.9 — Peer handles, mention safety, healthcheck passthrough | Done |
-| Phase 4.10 — Capability evolution wave: compiled tools + memory plane | Done (ADRs 020–021) |
-| Phase 4.6 — Unified worker architecture (config, provision, diagnostic) | Design |
-| Phase 5 -- Fleet Governance: Master Claw, telemetry, context feeds | Done (ADRs 012-015) |
-| Phase 6 — Recipe promotion + worker mode | Planned |
+For the capability-by-capability picture — what ships versus what is planned, and the ADR behind
+each — see **[How It Fits Together](https://clawdapus.dev/guide/architecture)** and the canonical
+[`docs/PROJECT_STATE.md`](./docs/PROJECT_STATE.md).
 
 ---
 
 ## Documentation
 
+- [How It Fits Together](https://clawdapus.dev/guide/architecture) — the systems map: lifecycle, planes, and shipped-vs-roadmap
+- [`docs/PROJECT_STATE.md`](./docs/PROJECT_STATE.md) — canonical shipped-vs-planned reconciliation and ADR status index
 - [`MANIFESTO.md`](./MANIFESTO.md) — vision, principles, full architecture
-- [`docs/plans/2026-02-18-clawdapus-architecture.md`](./docs/plans/2026-02-18-clawdapus-architecture.md) — implementation plan
 - [`docs/CLLAMA_SPEC.md`](./docs/CLLAMA_SPEC.md) — Standardized Sidecar interface for policy and compute metering
 - [`docs/decisions/001-cllama-transport.md`](./docs/decisions/001-cllama-transport.md) — ADR: cllama as sidecar HTTP proxy
 - [`docs/decisions/002-runtime-authority.md`](./docs/decisions/002-runtime-authority.md) — ADR: compose-only lifecycle authority
