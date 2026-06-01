@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Hermes managed pods suppress gateway lifecycle notices** — generated Hermes config now disables upstream gateway restart and shutdown notifications for managed messaging handles, including the active-task interruption notice sent during pod recreation. Operators can opt back into upstream lifecycle pings with explicit Hermes `CONFIGURE` overrides. Closes [#278](https://github.com/mostlydev/clawdapus/issues/278).
 
 ## v0.21.0 <Badge type="tip" text="Latest" /> {#v0-21-0}
 

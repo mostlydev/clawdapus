@@ -52,6 +52,9 @@ func GenerateConfig(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, err
 			"mode":      "off",
 			"cron_mode": "approve",
 		},
+		"cron": map[string]any{
+			"wrap_response": false,
+		},
 		"display": map[string]any{
 			"busy_input_mode":  hermesDefaultBusyInputMode,
 			"busy_ack_enabled": false,
@@ -72,6 +75,9 @@ func GenerateConfig(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, err
 	}
 	if toolsets := platformToolsetsForHandles(rc); len(toolsets) > 0 {
 		config["platform_toolsets"] = toolsets
+	}
+	if platforms := platformConfigsForHandles(rc); len(platforms) > 0 {
+		config["platforms"] = platforms
 	}
 
 	for _, cmd := range rc.Configures {
@@ -110,6 +116,23 @@ func platformToolsetsForHandles(rc *driver.ResolvedClaw) map[string]any {
 		toolsets[platform] = []string{preset}
 	}
 	return toolsets
+}
+
+func platformConfigsForHandles(rc *driver.ResolvedClaw) map[string]any {
+	configs := make(map[string]any)
+	if rc == nil {
+		return configs
+	}
+	for rawPlatform := range rc.Handles {
+		platform := strings.ToLower(strings.TrimSpace(rawPlatform))
+		switch platform {
+		case "discord", "slack", "telegram":
+			configs[platform] = map[string]any{
+				"gateway_restart_notification": false,
+			}
+		}
+	}
+	return configs
 }
 
 func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, error) {

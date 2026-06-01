@@ -251,6 +251,9 @@ func TestGenerateConfigIncludesPlatformToolsetsForActiveHandles(t *testing.T) {
 
 	var cfg struct {
 		PlatformToolsets map[string][]string `yaml:"platform_toolsets"`
+		Platforms        map[string]struct {
+			GatewayRestartNotification bool `yaml:"gateway_restart_notification"`
+		} `yaml:"platforms"`
 	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		t.Fatalf("parse generated yaml: %v", err)
@@ -264,9 +267,19 @@ func TestGenerateConfigIncludesPlatformToolsetsForActiveHandles(t *testing.T) {
 		if len(got) != 1 || got[0] != want {
 			t.Fatalf("expected %s platform_toolsets to be [%s], got %#v", platform, want, got)
 		}
+		platformCfg, exists := cfg.Platforms[platform]
+		if !exists {
+			t.Fatalf("expected %s platforms entry", platform)
+		}
+		if got := platformCfg.GatewayRestartNotification; got != false {
+			t.Fatalf("expected %s gateway_restart_notification=false, got %#v", platform, got)
+		}
 	}
 	if _, exists := cfg.PlatformToolsets["telegram"]; exists {
 		t.Fatalf("did not expect telegram platform_toolsets entry, got %#v", cfg.PlatformToolsets["telegram"])
+	}
+	if _, exists := cfg.Platforms["telegram"]; exists {
+		t.Fatalf("did not expect telegram platforms entry, got %#v", cfg.Platforms["telegram"])
 	}
 }
 
@@ -341,6 +354,11 @@ func TestGenerateConfigDefaultsManagedGatewayUXQuiet(t *testing.T) {
 		t.Fatalf("expected approvals.cron_mode=approve, got %#v", got)
 	}
 
+	cron, _ := cfg["cron"].(map[string]any)
+	if got := cron["wrap_response"]; got != false {
+		t.Fatalf("expected cron.wrap_response=false, got %#v", got)
+	}
+
 	display, _ := cfg["display"].(map[string]any)
 	if got := display["busy_input_mode"]; got != hermesDefaultBusyInputMode {
 		t.Fatalf("expected display.busy_input_mode=%s, got %#v", hermesDefaultBusyInputMode, got)
@@ -356,6 +374,12 @@ func TestGenerateConfigDefaultsManagedGatewayUXQuiet(t *testing.T) {
 			t.Fatalf("expected onboarding.seen.%s=true, got %#v", flag, got)
 		}
 	}
+
+	platforms, _ := cfg["platforms"].(map[string]any)
+	discord, _ := platforms["discord"].(map[string]any)
+	if got := discord["gateway_restart_notification"]; got != false {
+		t.Fatalf("expected platforms.discord.gateway_restart_notification=false, got %#v", got)
+	}
 }
 
 func TestGenerateConfigAllowsManagedGatewayUXOptIn(t *testing.T) {
@@ -367,9 +391,11 @@ func TestGenerateConfigAllowsManagedGatewayUXOptIn(t *testing.T) {
 		Configures: []string{
 			`hermes config set approvals.mode manual`,
 			`hermes config set approvals.cron_mode deny`,
+			`hermes config set --json cron.wrap_response true`,
 			`hermes config set display.busy_input_mode interrupt`,
 			`hermes config set --json display.busy_ack_enabled true`,
 			`hermes config set --json onboarding.seen.busy_input_prompt false`,
+			`hermes config set --json platforms.discord.gateway_restart_notification true`,
 		},
 		Environment: map[string]string{
 			"DISCORD_BOT_TOKEN":  "discord-token",
@@ -398,6 +424,10 @@ func TestGenerateConfigAllowsManagedGatewayUXOptIn(t *testing.T) {
 	if got := approvals["cron_mode"]; got != "deny" {
 		t.Fatalf("expected approvals.cron_mode override, got %#v", got)
 	}
+	cron, _ := cfg["cron"].(map[string]any)
+	if got := cron["wrap_response"]; got != true {
+		t.Fatalf("expected cron.wrap_response override, got %#v", got)
+	}
 	display, _ := cfg["display"].(map[string]any)
 	if got := display["busy_input_mode"]; got != "interrupt" {
 		t.Fatalf("expected display.busy_input_mode override, got %#v", got)
@@ -409,6 +439,11 @@ func TestGenerateConfigAllowsManagedGatewayUXOptIn(t *testing.T) {
 	seen, _ := onboarding["seen"].(map[string]any)
 	if got := seen["busy_input_prompt"]; got != false {
 		t.Fatalf("expected onboarding.seen.busy_input_prompt override, got %#v", got)
+	}
+	platforms, _ := cfg["platforms"].(map[string]any)
+	discord, _ := platforms["discord"].(map[string]any)
+	if got := discord["gateway_restart_notification"]; got != true {
+		t.Fatalf("expected platforms.discord.gateway_restart_notification override, got %#v", got)
 	}
 }
 
