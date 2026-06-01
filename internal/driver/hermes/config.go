@@ -52,6 +52,9 @@ func GenerateConfig(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, err
 			"mode":      "off",
 			"cron_mode": "approve",
 		},
+		"cron": map[string]any{
+			"wrap_response": false,
+		},
 		"display": map[string]any{
 			"busy_input_mode":  hermesDefaultBusyInputMode,
 			"busy_ack_enabled": false,

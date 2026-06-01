@@ -341,6 +341,11 @@ func TestGenerateConfigDefaultsManagedGatewayUXQuiet(t *testing.T) {
 		t.Fatalf("expected approvals.cron_mode=approve, got %#v", got)
 	}
 
+	cron, _ := cfg["cron"].(map[string]any)
+	if got := cron["wrap_response"]; got != false {
+		t.Fatalf("expected cron.wrap_response=false, got %#v", got)
+	}
+
 	display, _ := cfg["display"].(map[string]any)
 	if got := display["busy_input_mode"]; got != hermesDefaultBusyInputMode {
 		t.Fatalf("expected display.busy_input_mode=%s, got %#v", hermesDefaultBusyInputMode, got)
@@ -367,6 +372,7 @@ func TestGenerateConfigAllowsManagedGatewayUXOptIn(t *testing.T) {
 		Configures: []string{
 			`hermes config set approvals.mode manual`,
 			`hermes config set approvals.cron_mode deny`,
+			`hermes config set --json cron.wrap_response true`,
 			`hermes config set display.busy_input_mode interrupt`,
 			`hermes config set --json display.busy_ack_enabled true`,
 			`hermes config set --json onboarding.seen.busy_input_prompt false`,
@@ -397,6 +403,10 @@ func TestGenerateConfigAllowsManagedGatewayUXOptIn(t *testing.T) {
 	}
 	if got := approvals["cron_mode"]; got != "deny" {
 		t.Fatalf("expected approvals.cron_mode override, got %#v", got)
+	}
+	cron, _ := cfg["cron"].(map[string]any)
+	if got := cron["wrap_response"]; got != true {
+		t.Fatalf("expected cron.wrap_response override, got %#v", got)
 	}
 	display, _ := cfg["display"].(map[string]any)
 	if got := display["busy_input_mode"]; got != "interrupt" {
