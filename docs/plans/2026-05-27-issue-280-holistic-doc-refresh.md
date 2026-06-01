@@ -17,7 +17,7 @@ not surfaced or linked where a reader can follow it.
 
 ### Concrete drift already confirmed
 
-- `site/index.md` example uses `tiverton:` / `TIVERTON_DISCORD_ID` — a **named-deployment
+- `site/index.md` example uses downstream-deployment service/env identifiers — a **named-deployment
   leak** (violates the "no downstream names in public artifacts" rule).
 - `site/guide/what-is-clawdapus.md` calls `claw audit` + drift scoring **"Phase 5 design"**,
   yet `claw audit` ships today (rollcall spike validates its telemetry). The same page shows
@@ -55,7 +55,7 @@ into the matrix.
    index vs both.*
 3. **Public Architecture page** — "How it fits together," capabilities ↔ ADRs. *Open: under
    Introduction vs new top-level nav entry.*
-4. **Narrative rewrite** (present-tense, de-phased, Tiverton-free): `site/index.md`,
+4. **Narrative rewrite** (present-tense, de-phased, downstream-name-free): `site/index.md`,
    `site/guide/what-is-clawdapus.md`, `site/manifesto.md` (+ root `MANIFESTO.md`), `README.md`.
 5. **Per-page accuracy sweep** of the remaining guide pages: anatomy, clawfile, pod-yaml,
    cllama, tools, memory, surfaces-and-skills, compilation-principles, social-topology, cli,

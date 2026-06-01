@@ -75,7 +75,8 @@ e.g. an org's Master Claw policy).
 ## Known drift inventory (fix sites)
 
 Confirmed against code. Historical changelog entries are **excluded** (incident record — leave
-alone): `site/changelog.md:123` (Logan), `:187` (tiverton-house/weston) stay untouched.
+alone): the downstream-deployment references in older `site/changelog.md` entries (e.g.
+`:123`, `:187`) stay untouched.
 
 **Named-deployment leaks (scrub → generic):**
 - `site/index.md:79-88` — fixed by Claude in #280 lane
@@ -121,9 +122,9 @@ Tier D = deep rewrite (mental model stale/weak).
 | site/guide/compilation-principles.md | C | Codex | **done** | actual projections/manifests; RailsTrail framed as planned pattern |
 | site/guide/drivers.md | C | Codex | **done** | 7-driver matrix refreshed against `internal/driver/*` |
 
-**Out-of-scope leak found (needs its own decision):** `examples/trading-desk/` itself uses named
-claws as service names (`tiverton`, `westin`, `allen`, `logan`, `micro`) and agent files
-(`TIVERTON.md`, …) — a public-artifact leak larger than the doc pages. Renaming ripples into
+**Out-of-scope leak found (needs its own decision):** `examples/trading-desk/` itself uses
+named-deployment service names and agent files — a public-artifact leak larger than the doc
+pages. Renaming ripples into
 agent paths, env vars, and possibly spike fixtures, so it is **not** included in this docs PR;
 flag to the maintainer as a follow-up issue.
 
