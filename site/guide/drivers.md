@@ -6,15 +6,15 @@ Clawdapus drivers adapt the generic governance model to specific agent runtimes.
 
 | | `openclaw` | `hermes` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Runtime** | [OpenClaw](https://openclaw.ai) | [Hermes](https://github.com/NousResearch/hermes-agent) | [Claude Agent SDK](https://github.com/anthropics/claude-code) | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [NullClaw](https://github.com/nullclaw/nullclaw) | [MicroClaw](https://github.com/microclaw/microclaw) |
+| **Runtime** | [OpenClaw](https://openclaw.ai) | [Hermes](https://github.com/NousResearch/hermes-agent) | NanoClaw / Claude Code-compatible orchestrator | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [NullClaw](https://github.com/nullclaw/nullclaw) | [MicroClaw](https://github.com/microclaw/microclaw) |
 | `claw init` scaffold | yes | yes | yes | yes | yes | yes | yes |
 | HANDLE: Discord | yes | yes | -- | yes | yes | yes | yes |
-| HANDLE: Telegram | -- | yes | -- | yes | yes | yes | yes |
-| HANDLE: Slack | -- | yes | -- | yes | yes | yes | yes |
+| HANDLE: Telegram | yes | yes | -- | yes | yes | yes | yes |
+| HANDLE: Slack | yes | yes | -- | yes | yes | yes | yes |
 | HANDLE: long-tail | -- | -- | -- | -- | yes | -- | -- |
 | INVOKE (cron) | yes | yes | -- | yes | yes | yes | -- |
-| Structured health | yes | yes | -- | -- | yes | yes | -- |
-| Read-only rootfs | yes | yes | -- | yes | yes | yes | -- |
+| Structured health | yes | yes | yes | yes | yes | yes | yes |
+| Read-only rootfs | yes | yes | no | yes | yes | yes | no |
 | Non-root container | -- | -- | -- | -- | yes | -- | -- |
 
 **PicoClaw long-tail platforms:** WhatsApp, Feishu, LINE, QQ, DingTalk, OneBot, WeCom, WeCom App, Pico, MaixCam.
@@ -25,7 +25,7 @@ Clawdapus drivers adapt the generic governance model to specific agent runtimes.
 
 ### All Drivers
 
-- All drivers set `mention_only` (or the driver's equivalent) for Discord channels to prevent feedback loops in multi-agent pods.
+- Chat-capable drivers that configure Discord handles set `mention_only` (or the driver's equivalent) for Discord channels to prevent feedback loops in multi-agent pods.
 - All drivers explicitly set `HOME` in the container env to match their config mount path.
 - Runtime directories use `0o777` permissions so container users with different UIDs can write.
 
@@ -78,7 +78,7 @@ delivery behavior.
 
 ### nanoclaw
 
-Claude Agent SDK-based driver. Does not currently support HANDLE, INVOKE, or structured health probes.
+NanoClaw / Claude Code-compatible orchestrator driver. It does not currently support HANDLE or INVOKE, and it requires `PRIVILEGE docker-socket true` because the runtime spawns agent containers through Docker. It has a structured health probe and uses a writable root filesystem.
 
 ### nanobot
 
@@ -94,12 +94,12 @@ NullClaw supports CONFIGURE for fine-grained runtime config mutations. Use `CONF
 
 ### microclaw
 
-Minimal driver supporting Discord, Telegram, and Slack handles. Does not support INVOKE scheduling or structured health probes.
+Minimal driver supporting Discord, Telegram, and Slack handles. Does not support INVOKE scheduling. It has a structured health probe and uses a writable root filesystem.
 
 ## Choosing a Driver
 
 - **Need Discord routing controls?** `openclaw` has the richest Discord config support.
-- **Need Telegram or Slack?** `hermes`, `nanobot`, `picoclaw`, `nullclaw`, or `microclaw`.
+- **Need Telegram or Slack?** `openclaw`, `hermes`, `nanobot`, `picoclaw`, `nullclaw`, or `microclaw`.
 - **Need WhatsApp, LINE, or other platforms?** `picoclaw` is the only option.
 - **Need non-root containers?** `picoclaw`.
 - **Need fine-grained runtime config?** `nullclaw` with `CONFIGURE`.

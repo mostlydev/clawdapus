@@ -119,10 +119,8 @@ The Clawfile is an extended Dockerfile. Any valid Dockerfile is a valid Clawfile
 - **`CONFIGURE`** -- Shell commands that run at container init to mutate base defaults (e.g., using `jq` to alter runner JSON configs).
 - **`PRIVILEGE`** -- Drops container privileges to standard users, or locks down the filesystem/network.
 
-**Self-Modification and Recipe Promotion (`TRACK` & `ACT`):**
-The bot runs. It installs things. It `pip install`s. That's how real work gets done. The `TRACK` directive wraps package managers (apt, pip, npm) to log every mutation. `ACT` directives are used to trigger installations during a worker-mode setup.
-
-These logs become a redeployment recipe. The operator reviews the recipe (`claw recipe`) and decides what to promote to the permanent base image (`claw bake`). Tracked mutation is evolution; untracked mutation is drift.
+**Self-Modification and Recipe Promotion (`TRACK` & `ACT`) — roadmap:**
+The bot runs. It installs things. It `pip install`s. That's how real work gets done. The planned `TRACK` directive wraps package managers (apt, pip, npm) to log every mutation; `ACT` directives trigger installations during a worker-mode setup. Those logs become a redeployment recipe that the operator reviews (`claw recipe`) and promotes to the permanent base image (`claw bake`). Tracked mutation is evolution; untracked mutation is drift. This loop is designed but **not yet implemented** — the `TRACK`/`recipe`/`bake` surface does not ship today.
 
 ### IX. The claw-pod.yml: Running the Fleet
 
@@ -159,7 +157,7 @@ We do not trust a bot's self-report, which means any measure of behavioral drift
 
 Because Clawdapus delegates LLM interception to a swappable governance proxy, it does not need to define drift itself. Instead, it relies on the proxy to emit structured telemetry logs whenever it intercepts a request, drops a tool call, or amends a response.
 
-These logs (`claw audit`) provide the raw data -- a verifiable history of exactly what the bot *tried* to do versus what it was *allowed* to do. It is up to the specific proxy implementation (and the Master Claw) to parse these logs and synthesize them into a meaningful drift score to trigger administrative actions like capability restriction or quarantine.
+These logs (`claw audit`) provide the raw data -- a verifiable history of exactly what the bot *tried* to do versus what it was *allowed* to do. It is up to the specific proxy implementation (and the Master Claw) to parse these logs and synthesize them into a meaningful drift score to trigger administrative actions like capability restriction or quarantine. Today the reference proxy ships the telemetry and `claw audit`, but **no built-in drift score** -- the metric stays open, owned by whatever proxy or policy an operator plugs in.
 
 ### XII. The Master Claw and Hub-and-Spoke Governance
 
@@ -168,7 +166,7 @@ Clawdapus is designed for autonomous fleet governance. The operator writes the C
 The Master Claw is an autonomous AI governor managing a fleet of subordinate agents.
 
 - **The Governance Proxy is its Sensory Organ:** The shared `cllama` proxy is a passive firewall. It enforces the hard rules (rate limits, budgets) and emits the telemetry logs. It does not "think" about fleet management.
-- **The Master Claw is the Brain:** The Master Claw reads the telemetry emitted by the proxy. If a proxy reports that a subordinate agent has a high drift score or is burning through its budget, the Master Claw makes an executive decision to autonomously quarantine the agent, shift budgets, or promote a recipe.
+- **The Master Claw is the Brain:** The Master Claw reads the telemetry emitted by the proxy. `x-claw.master` wires it today -- an auto-injected `claw-api` service plus a scoped bearer token give the governor an authenticated, scope-checked surface to read fleet telemetry and act. The executive policy it runs (shift budgets, quarantine a high-cost or off-policy agent, promote a recipe) is operator-defined; recipe promotion is roadmap.
 
 In large enterprise deployments, this forms a **Hub-and-Spoke Governance Model**. Multiple pods across different infrastructure zones run their own local `cllama` proxies acting as firewalls. Sitting above them all is a single Master Claw, continuously ingesting telemetry from all those proxies, dynamically managing the entire neural fleet autonomously.
 
@@ -197,6 +195,7 @@ Because governance is not proportional to complexity. A 400-line Python script w
 
 Architecture decisions and implementation plans live alongside this manifesto:
 
-- [Architecture Plan](/guide/quickstart) -- phased implementation, invariants, CLI surface
+- [How It Fits Together](/guide/architecture) -- the systems map: lifecycle, planes, and shipped-vs-roadmap
+- [Project State](https://github.com/mostlydev/clawdapus/blob/master/docs/PROJECT_STATE.md) -- canonical shipped-vs-planned reconciliation and ADR status index
 - [cllama Specification](https://github.com/mostlydev/clawdapus/blob/master/docs/CLLAMA_SPEC.md) -- the technical specification for the proxy standard
 - [Architecture Decision Records](https://github.com/mostlydev/clawdapus/tree/master/docs/decisions) -- all ADRs on GitHub

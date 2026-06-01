@@ -155,7 +155,7 @@ Retain is best-effort:
 Operators can tombstone retained entries without mutating the immutable session ledger:
 
 ```bash
-claw memory forget mem-svc --entry-id hist1_abc123 --reason "operator request"
+claw memory forget mem-svc --agent analyst-0 --entry-id hist1_abc123 --reason "operator request"
 ```
 
 This dispatches the service's `forget` endpoint when declared and also records infra-owned tombstones locally so later backfill does not resurrect forgotten entries by accident.
@@ -179,6 +179,16 @@ Useful flags:
 | `--auth-token <token>` | Override the bearer token used for retain |
 
 Backfill uses the same stable session-history `entry.id` values as live retain, and it honors local forget tombstones. Indexed `--after` reads avoid rescanning the ledger from byte zero on every replay.
+
+### Session History Export
+
+Session history is useful even without a memory backend. Export one agent's retained ledger as NDJSON with:
+
+```bash
+claw history export analyst-0 --limit 200
+```
+
+`--after <RFC3339>` filters by timestamp and `--limit <n>` caps the emitted entries. The export path streams large JSONL entries with a buffered reader, so it is appropriate for real retained turns, not only small test fixtures.
 
 ## Dedupe Contract for Memory Backends
 
@@ -209,6 +219,15 @@ It is intentionally boring:
 - recall returns a few recent or token-matching summaries
 
 The rollcall example and the capability-wave spike both build this adapter, so the shipped example path exercises the same contract described above.
+
+## Channel Memory and Awareness
+
+Channel context is a memory-adjacent surface for chat rooms. When Discord handles are present, `claw up` injects `claw-wall` and serves two built-in feeds:
+
+- `channel-context` -- the cursored mention/turn tail used to answer "what just happened?"
+- `channel-awareness` -- an uncursored room-awareness window used to preserve broader local context
+
+Pods can also declare `x-claw.channel-memory` to attach a durable channel-memory service. In that configuration, the channel retrieval tools can combine the raw `claw-wall` buffer with retained channel-memory results, so an agent can search beyond the current raw window while still respecting its channel allowlist.
 
 ## Telemetry
 

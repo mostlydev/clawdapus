@@ -6,8 +6,8 @@ Just as the Clawfile extends the Dockerfile, `claw-pod.yml` extends `docker-comp
 
 ```yaml
 x-claw:
-  pod: trading-desk
-  master: octopus
+  pod: operations-room
+  master: coordinator
   cllama-defaults:
     proxy: [passthrough]
     env:
@@ -17,28 +17,28 @@ x-claw:
     primary: openrouter/anthropic/claude-sonnet-4
     fallback: anthropic/claude-haiku-4-5
   surfaces-defaults:
-    - "service://trading-api"
-    - "volume://shared-research read-write"
-  feeds-defaults: [market-context]    # resolved from trading-api's claw.describe
+    - "service://operations-api"
+    - "volume://shared-work read-write"
+  feeds-defaults: [ops-context]    # resolved from operations-api's claw.describe
 services:
-  tiverton:
-    image: trading-desk-tiverton:latest
+  analyst:
+    image: operations-analyst:latest
     build:
-      context: ./agents/tiverton
+      context: ./agents/analyst
     x-claw:
-      agent: ./agents/tiverton/AGENTS.md
+      agent: ./agents/analyst/AGENTS.md
       handles:
         discord:
-          id: "${TIVERTON_DISCORD_ID}"
-          username: "tiverton"
+          id: "${ANALYST_DISCORD_ID}"
+          username: "analyst"
       invoke:
         - schedule: "15 8 * * 1-5"
-          name: "Pre-market synthesis"
-          message: "Run pre-market synthesis and post the floor briefing."
-          to: trading-floor
+          name: "Morning brief"
+          message: "Summarize overnight activity and post the operations brief."
+          to: ops-floor
 ```
 
-This declares a pod called `trading-desk` with a master claw, shared proxy config, shared model slots, shared surfaces, and a service that inherits all of it while adding its own Discord identity and scheduled invocations.
+This declares a pod called `operations-room` with a master claw, shared proxy config, shared model slots, shared surfaces, and a service that inherits all of it while adding its own Discord identity and scheduled invocations.
 
 ## Pod-Level Configuration
 
@@ -52,8 +52,15 @@ The top-level `x-claw` block declares shared configuration that all services inh
 | `models-defaults` | Shared compile-time model slots inherited by all claw-managed services |
 | `surfaces-defaults` | Surfaces available to all services (volumes, services, channels) |
 | `feeds-defaults` | Context feeds subscribed by all services |
+| `tools-defaults` | Managed tool allowlists inherited by all services |
+| `memory-defaults` | Memory service subscription inherited by all services |
+| `skills-defaults` | Operator skill files inherited by all services |
 | `handles-defaults` | Shared chat topology (guild IDs, channel IDs) inherited by all services |
 | `context` | Tunes auto-injected runtime context feeds (currently the `channel-context` tail served by `claw-wall`) |
+| `channel-memory` | Optional durable channel-memory sidecar integration for channel retrieval |
+| `principals` | Explicit `claw-api` principals, verbs, scopes, and injection targets |
+| `alert-webhooks` / `alert-mentions` | Pod-scoped fleet alert delivery settings |
+| `sequential-conformance` | Allows shared Discord handle IDs for sequential conformance spikes |
 
 ::: warning Provider Keys Are Pod-Level
 Provider API keys for cllama-managed services belong in `x-claw.cllama-defaults.env`, not in individual service `environment:` blocks. Use YAML anchors if you need keys at the service level too.
@@ -87,13 +94,13 @@ services:
           message: "Run morning market analysis."
 ```
 
-Service-level fields include `agent`, `persona`, `cllama`, `cllama-env`, `models`, `handles`, `surfaces`, `skills`, `invoke`, `include`, and `count`.
+Service-level fields include `agent`, `persona`, `describe-file`, `cllama`, `cllama-env`, `models`, `handles`, `feeds`, `tools`, `memory`, `include`, `surfaces`, `skills`, `invoke`, `context`, `claw-api`, `mcp-stdio`, `hermes`, and `count`.
 
 ## Defaults and Overrides
 
 The Clawfile bakes defaults into the image. The pod YAML overrides them per-deployment. This follows a consistent pattern:
 
-- **Inherit by default.** Services receive pod-level `cllama-defaults`, `models-defaults`, `surfaces-defaults`, `feeds-defaults`, and `handles-defaults` automatically.
+- **Inherit by default.** Services receive pod-level `cllama-defaults`, `models-defaults`, `surfaces-defaults`, `feeds-defaults`, `tools-defaults`, `memory-defaults`, `skills-defaults`, and `handles-defaults` automatically.
 - **Override to replace.** Setting a field at the service level replaces the pod default entirely, except `models`, which merges additively per slot.
 - **Spread to extend.** Use `...` to inherit the pod default and add to it:
 
@@ -195,7 +202,7 @@ Use `x-claw.mcp-stdio` on a sidecar service to run a stdio MCP command behind th
 ```yaml
 services:
   search:
-    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.12.0
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.21.0
     environment:
       PERPLEXITY_API_KEY: ${PERPLEXITY_KEY}
     expose:
@@ -211,11 +218,11 @@ services:
 
 ## Channel Context Tuning
 
-When any cllama-enabled service has Discord channels in its handles, `claw up` auto-injects the `claw-wall` sidecar plus two feeds for each consuming agent: `channel-context` (cursored delta tail, mention/turn context) and `channel-awareness` (uncursored last-24h raw window, always-on memory of the room). Both feeds share the same tuning knob — see [Social Topology · Channel Context Feed](/guide/social-topology#channel-context-feed-claw-wall). Tune them with `x-claw.context.channel`:
+When any cllama-enabled service has Discord channels in its handles, `claw up` auto-injects the `claw-wall` sidecar plus two feeds for each consuming agent: `channel-context` (cursored delta tail, mention/turn context) and `channel-awareness` (uncursored last-24h raw window, always-on memory of the room). They are tuned through the same `x-claw.context.channel` block, but each feed still has its own default caps where noted. See [Social Topology · Channel Context Feed](/guide/social-topology#channel-context-feed-claw-wall).
 
 ```yaml
 x-claw:
-  pod: trading-desk
+  pod: operations-room
   context:
     channel:
       since: 24h          # window covered by the feeds (default 24h)

@@ -14,6 +14,7 @@ Surfaces define the infrastructure boundaries an agent can reach. They are decla
 | **Host** | `host://./data/models read-only` | Bind mount from the host filesystem into the container. |
 | **Service** | `service://trading-api` | Pod-internal API or MCP server. The agent can call this service over the pod network. |
 | **Channel** | `channel://discord`, `channel://telegram`, `channel://slack` | Chat platform presence. Declares which platforms the agent operates on. |
+| **Egress** | `egress://internet` | Explicit outbound-network intent for services that need external API reachability. |
 
 ### Declaring Surfaces
 
@@ -70,7 +71,7 @@ Every Claw receives a generated `CLAWDAPUS.md` file injected into its workspace.
 - **Skill index** -- paths to all mounted skill files
 
 ::: info Generated, Not Authored
-`CLAWDAPUS.md` is a generated artifact, produced fresh on every `claw up`. Do not hand-edit it. The source of truth is the pod YAML and the service descriptors. When you add a service to the pod, the skill map updates automatically. No code changes needed.
+`CLAWDAPUS.md` is a generated artifact, produced fresh on every `claw up`. Do not hand-edit it. The source of truth is the pod YAML and the service descriptors. When you add a service to the pod, the generated context and mounted skill material update automatically. No code changes needed.
 :::
 
 ### How Service Descriptions Get There
@@ -122,15 +123,15 @@ Skills discovery is the mechanism by which agents learn what pod services can do
 
 ### Framework Adapters
 
-Services do not have to manually author descriptors. Framework adapters generate them from code introspection:
+Services do not have to manually author descriptors forever. Framework adapters are the intended pattern for generating descriptors from code introspection:
 
-- **RailsTrail** -- Introspects Rails routes, state machines, and manual actions to produce a `claw.describe` descriptor automatically. The developer writes Rails code; the adapter produces the descriptor; `claw up` compiles it into the pod.
+- **RailsTrail** -- A planned adapter pattern for introspecting Rails routes, state machines, and manual actions to produce a `claw.describe` descriptor automatically. The developer writes Rails code; the adapter produces the descriptor; `claw up` compiles it into the pod.
 
 Future adapters can follow the same pattern for any framework that exposes its capabilities through introspectable metadata.
 
-### `claw skillmap`
+### Planned Skill Map Diagnostics
 
-The `claw skillmap` command gives operators a complete view of what skills an agent has access to and where they came from:
+There is no `claw skillmap` command in the current CLI. The planned diagnostic would give operators a complete view of what skills an agent has access to and where they came from:
 
 ```bash
 $ claw skillmap crypto-crusher-0
@@ -144,7 +145,7 @@ $ claw skillmap crypto-crusher-0
     read-write at /mnt/shared-cache
 ```
 
-Every entry traces back to its source -- a service descriptor, a volume declaration, or an operator-authored skill file. Add a service to the pod, and `claw skillmap` reflects the change after the next `claw up`.
+Every entry would trace back to its source -- a service descriptor, a volume declaration, or an operator-authored skill file. Today the closest ground truth is the generated `CLAWDAPUS.md` and the files mounted under the runner's skill directory after `claw up`.
 
 ## Feed Manifests
 
@@ -193,6 +194,6 @@ The context and discovery layer forms a closed loop:
 3. **`claw up` compiles** descriptors into CLAWDAPUS.md, feed manifests, and skill mounts
 4. **Agent receives CLAWDAPUS.md** and knows exactly what it can do, who its peers are, and how to reach every service
 
-Add a service to the pod. The next `claw up` extracts its descriptor, updates every agent's CLAWDAPUS.md, and refreshes the skill map. Remove a service, and the references disappear. The agent's view of the world is always consistent with what is actually deployed.
+Add a service to the pod. The next `claw up` extracts its descriptor, updates every agent's CLAWDAPUS.md, and refreshes mounted skill material. Remove a service, and the references disappear. The agent's view of the world is always consistent with what is actually deployed.
 
 This is the compile-time guarantee: the agent's context matches reality because both are generated from the same source.

@@ -54,8 +54,8 @@ This declares an OpenClaw agent that:
 | `SKILL` | Operator policy files mounted read-only into the runner |
 | `INCLUDE` | Contract composition -- `enforce`, `guide`, or `reference` mode |
 | `CONFIGURE` | Runner-specific config mutations at container init |
-| `TRACK` | Wraps package managers to log mutations for recipe promotion |
-| `PRIVILEGE` | Drops container privileges |
+| `TRACK` | Emits mutation-tracking metadata for planned recipe promotion |
+| `PRIVILEGE` | Declares driver-specific privilege metadata |
 
 ## AGENT
 
@@ -163,11 +163,11 @@ The `CLAW_TYPE` directive selects which runtime driver handles the agent. All dr
 | Capability | `openclaw` | `hermes` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | HANDLE: Discord | yes | yes | -- | yes | yes | yes | yes |
-| HANDLE: Telegram | -- | yes | -- | yes | yes | yes | yes |
-| HANDLE: Slack | -- | yes | -- | yes | yes | yes | yes |
+| HANDLE: Telegram | yes | yes | -- | yes | yes | yes | yes |
+| HANDLE: Slack | yes | yes | -- | yes | yes | yes | yes |
 | INVOKE (cron) | yes | yes | -- | yes | yes | yes | -- |
-| Structured health | yes | yes | -- | -- | yes | yes | -- |
-| Read-only rootfs | yes | yes | -- | yes | yes | yes | -- |
+| Structured health | yes | yes | yes | yes | yes | yes | yes |
+| Read-only rootfs | yes | yes | no | yes | yes | yes | no |
 
 ## MODEL Slots
 
@@ -203,9 +203,9 @@ CONFIGURE nullclaw config set channels.discord.accounts.main.require_mention tru
 `HANDLE` generates sensible driver defaults. `CONFIGURE` overrides specific fields after those defaults are applied. Use `HANDLE` for identity, `CONFIGURE` for policy details.
 :::
 
-## TRACK: Mutation Logging for Recipe Promotion
+## TRACK: Mutation Metadata for Recipe Promotion
 
-Bots install things. That is how real work gets done. The `TRACK` directive wraps package managers to log every mutation the agent performs at runtime:
+Bots install things. That is how real work gets done. Today the `TRACK` directive is parsed and emitted as image metadata. The runtime package-manager wrappers and `claw recipe` / `claw bake` promotion commands are planned, not shipped:
 
 ```dockerfile
 FROM openclaw:latest
@@ -218,21 +218,11 @@ TRACK pip
 TRACK npm
 ```
 
-When `TRACK` is declared, the wrapped package manager logs every install, upgrade, and removal. These logs become a redeployment recipe that the operator can review and promote:
+The planned philosophy is: tracked mutation is evolution; untracked mutation is drift. Ad hoc capability-building becomes permanent infrastructure through a human gate, but that loop does not execute in the current CLI.
 
-```bash
-# Review what the bot installed over the last week
-claw recipe my-agent --since 7d
+## PRIVILEGE: Driver-Specific Privilege Metadata
 
-# Promote tracked mutations to the permanent base image
-claw bake my-agent --from-recipe latest
-```
-
-The philosophy: tracked mutation is evolution; untracked mutation is drift. Ad hoc capability-building becomes permanent infrastructure through a human gate. The bot adapts freely within its container, but only the operator decides what becomes part of the permanent image.
-
-## PRIVILEGE: Dropping Container Privileges
-
-The `PRIVILEGE` directive drops container privileges to standard users and locks down filesystem and network access:
+The `PRIVILEGE` directive records a named privilege mode and value for drivers to consume:
 
 ```dockerfile
 FROM openclaw:latest
@@ -240,11 +230,19 @@ FROM openclaw:latest
 CLAW_TYPE openclaw
 AGENT AGENTS.md
 
-PRIVILEGE drop-root
-PRIVILEGE read-only-fs
+PRIVILEGE worker root
+PRIVILEGE runtime claw-user
 ```
 
-`PRIVILEGE` is the Clawfile's way of expressing the principle that compute is a privilege, not a right. The operator controls what the agent can access at the infrastructure level, independent of any prompt-level instructions.
+The syntax is `PRIVILEGE <mode> <user-spec>`. The compiler emits labels such as `claw.privilege.runtime=claw-user`; enforcement depends on the selected driver. NanoClaw currently requires an explicit Docker-socket grant because it spawns nested agent containers:
+
+```dockerfile
+CLAW_TYPE nanoclaw
+AGENT AGENTS.md
+PRIVILEGE docker-socket true
+```
+
+`PRIVILEGE` is the Clawfile's way of expressing the principle that compute is a privilege, not a right. Driver-specific validation turns that metadata into concrete runtime requirements.
 
 ## Building
 

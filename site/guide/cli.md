@@ -204,16 +204,7 @@ Wraps `docker compose ps` against `compose.generated.yml`. Subject to the [stale
 ```
 NAME                    IMAGE                           COMMAND   SERVICE     CREATED        STATUS
 trading-desk-analyst-1  trading-desk-analyst:latest      ...      analyst     2 hours ago    Up 2 hours (healthy)
-trading-desk-cllama-1   ghcr.io/mostlydev/cllama:v0.3.2  ...      cllama      2 hours ago    Up 2 hours (healthy)
-```
-
-**Future (Design -- Phase 5):** `claw ps` will include drift scoring from the governance proxy:
-
-```
-TENTACLE          STATUS    CLLAMA    DRIFT
-crypto-crusher-0  running   healthy   0.02
-crypto-crusher-1  running   healthy   0.04
-crypto-crusher-2  running   WARNING   0.31
+trading-desk-cllama-1   ghcr.io/mostlydev/cllama:v0.6.8  ...      cllama      2 hours ago    Up 2 hours (healthy)
 ```
 
 ---
@@ -455,7 +446,7 @@ Collects structured JSON logs from cllama proxy containers, normalizes them, and
 |------|-------------|
 | `--since <duration\|timestamp>` | Only include events since this duration (e.g. `1h`, `24h`) or RFC3339 timestamp (e.g. `2026-03-22T00:00:00Z`). |
 | `--claw <id>` | Filter events to one claw_id. |
-| `--type <type>` | Filter to one event type: `request`, `response`, `error`, or `intervention`. |
+| `--type <type>` | Filter to one event type, for example `request`, `response`, `error`, `intervention`, `feed_fetch`, `channel_context_op`, `provider_pool`, or `tool_call`. |
 | `--json` | Emit machine-readable JSON output. |
 
 **Example -- tabular output:**
@@ -465,11 +456,11 @@ $ claw audit --since 24h
 
 Pod: trading-desk
 Events: 847
-CLAW       REQ  RESP  ERR  INT  TOK_IN   TOK_OUT  COST_USD  MODELS
-analyst    312  310   2    0    482101   89402    1.2340    claude-sonnet-4(312)
-scanner    535  535   0    3    201440   45200    0.5120    claude-haiku-3-5(535)
+CLAW       REQ  RESP  ERR  INT  TOOLS  TOOL_ERR  TOK_IN  TOK_OUT  COST_USD  MODELS
+analyst    312  310   2    0    18     1         482101  89402    1.2340    claude-sonnet-4(312)
+scanner    535  535   0    3    0      0         201440  45200    0.5120    claude-haiku-3-5(535)
 
-Totals: req=847 resp=845 err=2 int=3 tokens=683541/134602 cost=$1.7460
+Totals: req=847 resp=845 err=2 int=3 tools=18/1 tokens=683541/134602 cost=$1.7460
 ```
 
 **Example -- filtered to one agent:**
@@ -488,13 +479,31 @@ The JSON output includes the pod name, skipped malformed lines count, per-agent 
 
 Each event in the JSON output carries `manifest_present` (bool) and `tools_count` (int) fields when the upstream request was mediated by a compiled managed-tool manifest. These fields let operators verify at runtime whether `tools.json` was actually loaded by cllama for a given agent — distinct from checking whether the file exists on disk. Events without managed tools omit both fields.
 
-**Future (Design -- Phase 5):** `claw audit` will include intervention detail with policy attribution:
+`claw audit` reports the normalized telemetry that exists today. The reference proxy does not emit a built-in drift score and there is no `DRIFT` column; policy attribution beyond the emitted `intervention` reason belongs to a swappable proxy or Master Claw policy.
 
+---
+
+## claw history
+
+Inspect persistent agent session history written by cllama.
+
+### claw history export
+
+Export one agent's session history as NDJSON:
+
+```bash
+claw history export <agent-id>
 ```
-$ claw audit crypto-crusher-2 --last 24h
 
-14:32  tweet-cycle       OUTPUT MODIFIED by cllama:policy  (financial advice detected)
-18:01  engagement-sweep  OUTPUT DROPPED by cllama:purpose  (off-strategy)
+| Flag | Description |
+|------|-------------|
+| `--after <RFC3339>` | Emit only entries after this timestamp |
+| `--limit <n>` | Maximum entries to emit (default 100, capped at 1000) |
+
+**Example:**
+
+```bash
+claw history export analyst-0 --limit 200
 ```
 
 ---
@@ -539,12 +548,15 @@ claw memory backfill mem-svc --agent analyst-0 --url http://localhost:9090/retai
 Tombstone a retained memory entry. Dispatches the service's `forget` endpoint (when declared) and writes infra-owned tombstones locally under `.claw-memory-tombstones/`. Later backfill runs honor tombstones and skip re-retain for forgotten entry IDs.
 
 ```bash
-claw memory forget <service> --entry-id <id>
+claw memory forget <service> --agent <agent-id> --entry-id <id>
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--entry-id <id>` | Stable session-history entry ID to tombstone (required) |
+| `--agent <id>` | Agent whose retained entry should be forgotten (required; repeatable) |
+| `--entry-id <id>` | Stable session-history entry ID to tombstone (required; repeatable) |
+| `--url <url>` | Override the forget endpoint URL |
+| `--auth-token <token>` | Override the bearer token for forget requests |
 | `--reason <text>` | Human-readable reason for audit records |
 
 Forget does not mutate the immutable `history.jsonl` ledger.
@@ -552,14 +564,14 @@ Forget does not mutate the immutable `history.jsonl` ledger.
 **Example:**
 
 ```bash
-claw memory forget mem-svc --entry-id hist1_abc123 --reason "operator request"
+claw memory forget mem-svc --agent analyst-0 --entry-id hist1_abc123 --reason "operator request"
 ```
 
 ---
 
-## claw skillmap (Planned)
+## Planned: Skill Map Diagnostics
 
-Display the compiled skill map for a specific agent -- showing which surfaces provide which capabilities, how they were discovered, and where the generated skill files live.
+The `claw skillmap` command is not registered today. It is a planned diagnostic for displaying the compiled skill map for a specific agent -- showing which surfaces provide which capabilities, how they were discovered, and where the generated skill files live.
 
 ```bash
 claw skillmap <agent-id>
@@ -579,17 +591,17 @@ $ claw skillmap crypto-crusher-0
     read-write at /mnt/shared-cache
 ```
 
-This command surfaces the same information that `claw up` compiles into each agent's `CLAWDAPUS.md`, but in a human-readable diagnostic format. Useful for verifying that service self-description (`claw.describe` labels) and surface declarations are wiring correctly.
+The planned command would surface the same information that `claw up` compiles into each agent's `CLAWDAPUS.md`, but in a human-readable diagnostic format. It would be useful for verifying that service self-description (`claw.describe` labels) and surface declarations are wiring correctly.
 
 ---
 
-## Recipe Promotion (Planned -- Phase 6)
+## Recipe Promotion (Planned)
 
-Two commands for the tracked mutation workflow. Agents install packages, write scripts, and adapt their environments at runtime. The `TRACK` directive logs these mutations. Recipe promotion turns tracked mutations into permanent image changes through a human gate.
+The `claw recipe` and `claw bake` commands are not registered today. They are planned commands for the tracked mutation workflow, where agents install packages, write scripts, and adapt their environments at runtime. The `TRACK` directive is parsed into image metadata; runtime package wrapping and recipe promotion remain roadmap work.
 
 ### claw recipe
 
-Show tracked mutations for a running agent since a given time.
+Planned behavior: show tracked mutations for a running agent since a given time.
 
 ```bash
 claw recipe <agent> --since <duration>
@@ -609,13 +621,13 @@ Apply?  claw bake crypto-crusher --from-recipe latest
 
 ### claw bake
 
-Promote a recipe to a permanent image layer. Takes the tracked mutations and bakes them into the agent's base image, so the next `claw build` includes them by default.
+Planned behavior: promote a recipe to a permanent image layer. It would take tracked mutations and bake them into the agent's base image, so the next `claw build` includes them by default.
 
 ```bash
 claw bake <agent> --from-recipe <version>
 ```
 
-Tracked mutation is evolution. Untracked mutation is drift. This command is the human gate between the two.
+Tracked mutation is evolution. Untracked mutation is drift. The planned command is the human gate between the two.
 
 ---
 
@@ -649,15 +661,20 @@ Error: claw-pod.yml is newer than compose.generated.yml — run 'claw up' to reg
 | `claw pull` | -- | No | Pinned infra + pod registry images + runner bases |
 | `claw build` | -- | No | Single-image or pod-aware build |
 | `claw up` | -- | No | Generates `compose.generated.yml`; strict by default |
+| `claw discover` | -- | No | Writes deterministic stdio MCP descriptor snapshots |
 | `claw down` | Exempt | Yes | Always allowed |
 | `claw ps` | Yes | Yes | |
 | `claw logs` | Yes | Yes | |
 | `claw health` | Yes | Yes | |
 | `claw audit` | Yes | Yes | Reads pod manifest from `.claw-runtime/` |
 | `claw compose` | Yes¹ | Yes | Passthrough to `docker compose` (¹ `claw compose build` warns instead of erroring; see [Staleness Guard](#staleness-guard)) |
+| `claw api schedule` | Yes | Yes | Tunnels schedule list/get/pause/resume/skip/fire through `claw-api` |
 | `claw inspect` | -- | No | Reads image labels directly |
 | `claw doctor` | -- | No | System prerequisite check |
 | `claw init` | -- | No | Project scaffolding |
 | `claw agent add` | -- | No | Modifies project files |
+| `claw history export` | -- | Yes | Streams one agent's `history.jsonl` as NDJSON |
 | `claw memory backfill` | -- | Yes | Replays session ledger into memory service |
-| `claw memory forget` | -- | Yes | Tombstones a retained entry |
+| `claw memory forget` | -- | Yes | Tombstones a retained entry for one or more `--agent` IDs |
+| `claw skill install` | -- | No | Installs the bundled Clawdapus CLI skill for coding agents |
+| `claw update` | -- | No | Re-runs the latest-release installer |

@@ -55,12 +55,12 @@ When many services share the same Discord guild and channel topology, declare th
 
 ```yaml
 x-claw:
-  pod: trading-desk
+  pod: operations-room
   handles-defaults:
     discord:
       guilds: ["${DISCORD_GUILD_ID}"]
       channels:
-        trading-floor: "${TRADING_FLOOR_CHANNEL_ID}"
+        ops-floor: "${OPS_FLOOR_CHANNEL_ID}"
         alerts: "${ALERTS_CHANNEL_ID}"
 ```
 
@@ -68,16 +68,16 @@ All services inherit this topology. Each service's `x-claw.handles` block then o
 
 ```yaml
 services:
-  tiverton:
-    image: trading-desk-tiverton:latest
+  coordinator:
+    image: operations-coordinator:latest
     x-claw:
       handles:
         discord:
-          id: "${TIVERTON_DISCORD_ID}"
-          username: "tiverton"
+          id: "${COORDINATOR_DISCORD_ID}"
+          username: "coordinator"
 
   analyst:
-    image: trading-desk-analyst:latest
+    image: operations-analyst:latest
     x-claw:
       handles:
         discord:
@@ -99,7 +99,7 @@ When `claw up` processes handle declarations, the driver automatically wires sev
 - **Guild `users[]` allowlist** -- Populated with every peer bot in the pod, so agents can communicate with each other.
 
 ::: warning Mention Safety
-All drivers set `requireMention` (or the driver-specific equivalent) for guild channels. Without this, multi-agent pods enter feedback loops where bots respond to each other's messages indefinitely. This is enforced at the driver level, not left to the agent's discretion.
+Chat-capable drivers that configure Discord handles set `requireMention` (or the driver-specific equivalent) for guild channels. Without this, multi-agent pods enter feedback loops where bots respond to each other's messages indefinitely. This is enforced at the driver level, not left to the agent's discretion.
 :::
 
 ## Per-Service Identity Overrides
@@ -122,11 +122,12 @@ services:
 
 An agent can have handles on multiple platforms simultaneously. Platform support varies by driver:
 
-| Platform | `openclaw` | `hermes` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
-|----------|:---:|:---:|:---:|:---:|:---:|:---:|
-| Discord | yes | yes | yes | yes | yes | yes |
-| Telegram | -- | yes | yes | yes | yes | yes |
-| Slack | -- | yes | yes | yes | yes | yes |
+| Platform | `openclaw` | `hermes` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
+|----------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Discord | yes | yes | -- | yes | yes | yes | yes |
+| Telegram | yes | yes | -- | yes | yes | yes | yes |
+| Slack | yes | yes | -- | yes | yes | yes | yes |
+| Long-tail chat | -- | -- | -- | -- | yes | -- | -- |
 
 PicoClaw additionally supports WhatsApp, Feishu, LINE, QQ, DingTalk, OneBot, WeCom, and other long-tail platforms.
 
