@@ -29,9 +29,17 @@ outline: deep
 
 ## Unreleased
 
-- **Hermes managed pods suppress gateway lifecycle notices** — generated Hermes config now disables upstream gateway restart and shutdown notifications for managed messaging handles, including the active-task interruption notice sent during pod recreation. Operators can opt back into upstream lifecycle pings with explicit Hermes `CONFIGURE` overrides. Closes [#278](https://github.com/mostlydev/clawdapus/issues/278).
+<!-- Nothing yet -->
 
-## v0.21.0 <Badge type="tip" text="Latest" /> {#v0-21-0}
+## v0.21.1 <Badge type="tip" text="Latest" /> {#v0-21-1}
+
+*2026-06-01*
+
+- **Hermes managed pods suppress gateway lifecycle notices** — generated Hermes config now disables upstream gateway restart and shutdown notifications for managed messaging handles, including the active-task interruption notice sent during pod recreation. Operators can opt back into upstream lifecycle pings with explicit Hermes `CONFIGURE` overrides. Closes [#278](https://github.com/mostlydev/clawdapus/issues/278).
+- **Hermes managed pods deliver unwrapped cron output** — generated Hermes config now defaults `cron.wrap_response` to `false`, so scheduled posts arrive without the personal-assistant header/footer and "stop reminder" hint that suited single-user reminders but read as noise on channel-delivered fleet posts. Operators can re-enable the wrapper with `CONFIGURE hermes config set --json cron.wrap_response true`. Closes [#282](https://github.com/mostlydev/clawdapus/issues/282).
+- **Documentation holistic refresh** — reconciled the site, vision/landing narrative, and README against the shipped code: added a `docs/PROJECT_STATE.md` source-of-truth (ADR status table, capability→doc-location map, drift inventory) and a public "How It Fits Together" architecture page, rewrote the narrative to present tense, and retired stale phase/version claims and orphaned context. Closes [#280](https://github.com/mostlydev/clawdapus/issues/280).
+
+## v0.21.0 {#v0-21-0}
 
 *2026-05-26*
 
