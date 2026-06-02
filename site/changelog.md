@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.21.1 <Badge type="tip" text="Latest" /> {#v0-21-1}
+## v0.21.2 <Badge type="tip" text="Latest" /> {#v0-21-2}
+
+*2026-06-02*
+
+- **Managed tool budgets force a final answer instead of dropping output** — cllama now converts managed-tool budget exhaustion into one final no-tool model turn. The proxy returns synthetic `tool_budget_exhausted` results for the requested tools, removes tool schemas from the finalization request, logs a `managed_tool_budget_finalization` intervention, and only fails closed if the model still tries to call tools again. This lets tool-heavy discovery agents commit their best no-go/watchlist/proposal output instead of losing the entire cron response at `max_rounds`.
+- **Pins infra images** — `claw-api`, `clawdash`, `claw-wall`, `claw-channel-memory`, and `claw-mcp-stdio` move in lockstep to `v0.21.2`. cllama moves to [v0.6.9](https://github.com/mostlydev/cllama/releases/tag/v0.6.9). `hermes-base` stays at `v2026.5.16-claw.2`.
+
+## v0.21.1 {#v0-21-1}
 
 *2026-06-01*
 
