@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Managed-tool mediation policy is now pod-configurable** — new `x-claw.tool-policy` (service level) and `x-claw.tool-policy-defaults` (pod level) tune `max-rounds`, `timeout-per-tool-ms`, and `total-timeout-ms` for cllama's managed-tool loop. Previously the policy was hardcoded (8 rounds / 30s per tool / 120s total), which made slow reasoning models fail entire mediated turns with 502 `context deadline exceeded` once they outgrew the 120s total budget. Omitted fields keep their defaults; a service-level block replaces the pod default. The merged policy compiles into each agent's `tools.json`. (#285)
 
 ## v0.21.2 <Badge type="tip" text="Latest" /> {#v0-21-2}
 

@@ -4743,3 +4743,29 @@ func TestPreMigratePortableMemoryCopiesServiceRuntimeState(t *testing.T) {
 		t.Fatalf("unexpected migrated memory: %q", string(data))
 	}
 }
+
+func TestAgentToolPolicyMergesServiceOverrides(t *testing.T) {
+	intp := func(v int) *int { return &v }
+	p := &pod.Pod{Services: map[string]*pod.Service{
+		"trader": {Claw: &pod.ClawBlock{ToolPolicy: &pod.ToolPolicyConfig{TotalTimeoutMS: intp(300000)}}},
+		"plain":  {Claw: &pod.ClawBlock{}},
+	}}
+
+	got := agentToolPolicy(p, "trader")
+	if got == nil {
+		t.Fatal("expected merged policy for trader")
+	}
+	if got.TotalTimeoutMS != 300000 {
+		t.Fatalf("unexpected total timeout: %+v", got)
+	}
+	if got.MaxRounds != cllama.DefaultToolPolicy.MaxRounds || got.TimeoutPerToolMS != cllama.DefaultToolPolicy.TimeoutPerToolMS {
+		t.Fatalf("unset fields must inherit defaults: %+v", got)
+	}
+
+	if agentToolPolicy(p, "plain") != nil {
+		t.Fatal("expected nil policy when service declares none")
+	}
+	if agentToolPolicy(p, "missing") != nil {
+		t.Fatal("expected nil policy for unknown service")
+	}
+}

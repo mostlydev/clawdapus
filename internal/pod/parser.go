@@ -71,6 +71,7 @@ type rawClawBlock struct {
 	Handles      map[string]interface{} `yaml:"handles"`
 	Feeds        []rawFeedEntry         `yaml:"feeds"`
 	Tools        []rawToolPolicyEntry   `yaml:"tools"`
+	ToolPolicy   *rawToolPolicyConfig   `yaml:"tool-policy"`
 	Memory       *rawMemoryEntry        `yaml:"memory"`
 	Include      []rawIncludeEntry      `yaml:"include"`
 	Surfaces     []interface{}          `yaml:"surfaces"`
@@ -116,6 +117,12 @@ type rawFeedEntry struct {
 type rawToolPolicyEntry struct {
 	Service string      `yaml:"service"`
 	Allow   interface{} `yaml:"allow"`
+}
+
+type rawToolPolicyConfig struct {
+	MaxRounds        *int `yaml:"max-rounds"`
+	TimeoutPerToolMS *int `yaml:"timeout-per-tool-ms"`
+	TotalTimeoutMS   *int `yaml:"total-timeout-ms"`
 }
 
 type rawMemoryEntry struct {
@@ -272,6 +279,10 @@ func Parse(r io.Reader) (*Pod, error) {
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse tools: %w", name, err)
 			}
+			toolPolicy, err := parseToolPolicy(svc.XClaw.ToolPolicy)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: parse tool-policy: %w", name, err)
+			}
 			memory, err := parseMemory(svc.XClaw.Memory)
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse memory: %w", name, err)
@@ -320,6 +331,7 @@ func Parse(r io.Reader) (*Pod, error) {
 				Handles:      handles,
 				Feeds:        feeds,
 				Tools:        tools,
+				ToolPolicy:   toolPolicy,
 				Memory:       memory,
 				Include:      include,
 				Surfaces:     parsedSurfaces,
@@ -621,6 +633,31 @@ func parseToolAllow(raw interface{}) ([]string, error) {
 	return normalized, nil
 }
 
+func parseToolPolicy(raw *rawToolPolicyConfig) (*ToolPolicyConfig, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	if raw.MaxRounds != nil && *raw.MaxRounds <= 0 {
+		return nil, fmt.Errorf("max-rounds must be > 0")
+	}
+	if raw.TimeoutPerToolMS != nil && *raw.TimeoutPerToolMS <= 0 {
+		return nil, fmt.Errorf("timeout-per-tool-ms must be > 0")
+	}
+	if raw.TotalTimeoutMS != nil && *raw.TotalTimeoutMS <= 0 {
+		return nil, fmt.Errorf("total-timeout-ms must be > 0")
+	}
+	if raw.TimeoutPerToolMS != nil && raw.TotalTimeoutMS != nil && *raw.TotalTimeoutMS < *raw.TimeoutPerToolMS {
+		return nil, fmt.Errorf("total-timeout-ms must be >= timeout-per-tool-ms")
+	}
+
+	return &ToolPolicyConfig{
+		MaxRounds:        raw.MaxRounds,
+		TimeoutPerToolMS: raw.TimeoutPerToolMS,
+		TotalTimeoutMS:   raw.TotalTimeoutMS,
+	}, nil
+}
+
 func parseMemory(raw *rawMemoryEntry) (*MemoryEntry, error) {
 	if raw == nil {
 		return nil, nil
@@ -834,6 +871,7 @@ func expandPodDefaults(root map[string]interface{}) error {
 		SurfacesDefaults: deepCopySliceOrNil(rawXClaw["surfaces-defaults"]),
 		FeedsDefaults:    deepCopySliceOrNil(rawXClaw["feeds-defaults"]),
 		ToolsDefaults:    deepCopySliceOrNil(rawXClaw["tools-defaults"]),
+		ToolPolicy:       deepCopyMapOrNil(rawXClaw["tool-policy-defaults"]),
 		MemoryDefaults:   deepCopyMapOrNil(rawXClaw["memory-defaults"]),
 		SkillsDefaults:   deepCopySliceOrNil(rawXClaw["skills-defaults"]),
 	}
@@ -884,6 +922,7 @@ type podDefaults struct {
 	SurfacesDefaults []interface{}
 	FeedsDefaults    []interface{}
 	ToolsDefaults    []interface{}
+	ToolPolicy       map[string]interface{}
 	MemoryDefaults   map[string]interface{}
 	SkillsDefaults   []interface{}
 }
@@ -902,6 +941,9 @@ func applyRawPodDefaults(raw map[string]interface{}, defaults podDefaults) error
 		return err
 	}
 	if err := applyRawListDefaults(raw, "tools", defaults.ToolsDefaults); err != nil {
+		return err
+	}
+	if err := applyRawObjectDefault(raw, "tool-policy", defaults.ToolPolicy); err != nil {
 		return err
 	}
 	if err := applyRawObjectDefault(raw, "memory", defaults.MemoryDefaults); err != nil {
