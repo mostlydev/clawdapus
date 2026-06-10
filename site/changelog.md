@@ -29,9 +29,25 @@ outline: deep
 
 ## Unreleased
 
-- **Managed-tool mediation policy is now pod-configurable** — new `x-claw.tool-policy` (service level) and `x-claw.tool-policy-defaults` (pod level) tune `max-rounds`, `timeout-per-tool-ms`, and `total-timeout-ms` for cllama's managed-tool loop. Previously the policy was hardcoded (8 rounds / 30s per tool / 120s total), which made slow reasoning models fail entire mediated turns with 502 `context deadline exceeded` once they outgrew the 120s total budget. Omitted fields keep their defaults; a service-level block replaces the pod default. The merged policy compiles into each agent's `tools.json`. (#285)
+<!-- Nothing yet -->
 
-## v0.21.2 <Badge type="tip" text="Latest" /> {#v0-21-2}
+## v0.22.0 <Badge type="tip" text="Latest" /> {#v0-22-0}
+
+*2026-06-09*
+
+- **Managed-tool mediation policy is now pod-configurable** — new `x-claw.tool-policy` (service level) and `x-claw.tool-policy-defaults` (pod level) tune `max-rounds`, `timeout-per-tool-ms`, and `total-timeout-ms` for cllama's managed-tool loop. Previously the policy was hardcoded (8 rounds / 30s per tool / 120s total), which made slow reasoning models fail entire mediated turns with 502 `context deadline exceeded` once they outgrew the 120s total budget. Omitted fields keep their defaults; a service-level block replaces the pod default. The merged policy compiles into each agent's `tools.json`. Closes [#285](https://github.com/mostlydev/clawdapus/issues/285).
+- **Pre-dispatch tool schema validation** — cllama now validates model-emitted managed tool arguments against the manifest `inputSchema` before calling the providing service. Invalid calls are rejected in-round with a structured `schema_validation` result naming exact violations and JSON paths, including a wrong-nesting hint when a required property exists elsewhere in the payload — turning multi-round guess-and-retry loops against validating providers into a single correction. Validation fails open on schema constructs it does not understand and never blocks a call the provider would accept; `CLLAMA_TOOL_SCHEMA_VALIDATION=off` is the emergency rollback. New `managed_tool_schema_rejected` intervention in `claw audit`. ([cllama v0.7.0](https://github.com/mostlydev/cllama/releases/tag/v0.7.0))
+- **Hash-free managed tool names** — tools are presented to models without the hex hash suffix when the sanitized name is unique within the agent's manifest. Some models consistently drop the suffix, which flooded the intervention stream with per-call recovery noise; the class is now eliminated for typical pods. Resolution still accepts canonical, current presented, and legacy hashed forms, so existing session histories keep replaying. ([cllama v0.7.0](https://github.com/mostlydev/cllama/releases/tag/v0.7.0))
+- **Configurable feed fetch timeout** — `CLLAMA_FEED_FETCH_TIMEOUT_MS` (default 3000, range 100–120000) joins the feed budget knobs. Slow feed providers no longer silently lose their context block at a hardcoded 3s. ([cllama v0.7.0](https://github.com/mostlydev/cllama/releases/tag/v0.7.0))
+- **Zero-credential quickstart** — new [`examples/ollama-quickstart/`](https://github.com/mostlydev/clawdapus/tree/master/examples/ollama-quickstart): a governed agent on a local Ollama sidecar with no API keys, no Discord, and an empty `.env`; the payoff is a governed completion in `claw audit` on turn one. `claw up` now seeds keyless providers (auth `none`) into providers.json when resolved models reference them.
+- **Hermes quickstart** — new [Hermes guide](https://clawdapus.dev/guide/hermes) and [`examples/hermes-quickstart/`](https://github.com/mostlydev/clawdapus/tree/master/examples/hermes-quickstart) covering the four real-world Hermes gotchas (identity layering, env passthrough allowlist, tool-only finals, `gateway.log`).
+- **Troubleshooting guide** — new [symptom-first guide](https://clawdapus.dev/guide/troubleshooting) mapping production failure modes to diagnoses and fixes, plus a `claw audit` event and intervention reference.
+- **Contributor on-ramp** — `CONTRIBUTING.md`, structured issue templates, and project-board links; a weekly CI canary builds `hermes-base` against upstream HEAD so patch-anchor breakage surfaces before an urgent pin bump needs it.
+- **Trading-desk example renamed to role-based agents** — `desk-manager`, `momentum-trader`, `value-trader`, `systems-monitor`, and friends replace person-style names; env vars and spike fixtures moved in lockstep.
+- Fix: AGENTS.md and TESTING.md doc drift (x-claw.master wiring, write-plane handlers, driver counts).
+- **Pins infra images** — cllama moves to [v0.7.0](https://github.com/mostlydev/cllama/releases/tag/v0.7.0). `claw-api`, `clawdash`, `claw-wall`, `claw-channel-memory`, and `claw-mcp-stdio` republish at `v0.22.0`; `hermes-base` stays at `v2026.5.16-claw.2`.
+
+## v0.21.2 {#v0-21-2}
 
 *2026-06-02*
 

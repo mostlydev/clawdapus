@@ -195,6 +195,8 @@ The cllama container receives its configuration through environment variables in
 | `CLAW_CONTEXT_LEDGER_DIR` | Path where per-agent channel cursors are persisted (defaults to `$CLAW_SESSION_HISTORY_DIR/context-ledger`). When unset, cursors fall back to in-memory and every restart re-bootstraps with a 24h tail. |
 | `CLLAMA_FEED_MAX_RESPONSE_BYTES` | Per-feed byte cap applied at fetch time before formatting. Default `32768`. Invalid or non-positive values fall back to the default. |
 | `CLLAMA_FEED_MAX_TOTAL_BYTES` | Aggregate cap across all formatted feed blocks injected into one request. Default `65536`. Invalid or non-positive values fall back to the default. |
+| `CLLAMA_FEED_FETCH_TIMEOUT_MS` | Per-fetch HTTP timeout for feed providers. Default `3000`, sanity range 100–120000; out-of-range values fall back to the default. Raise it when a feed provider computes synchronously under load. |
+| `CLLAMA_TOOL_SCHEMA_VALIDATION` | Set to `off` to disable pre-dispatch validation of managed tool arguments against the manifest `inputSchema`. On by default; validation fails open on schema constructs it does not understand. |
 | `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `AI_GATEWAY_API_KEY`, etc. |
 
 ### Where Provider Keys Go
