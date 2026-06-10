@@ -1,0 +1,55 @@
+name: hermes-base canary
+
+# Early warning for patch anchor breakage in dockerfiles/hermes-base/
+# patch-hermes-runtime.py. The patch script applies regex-anchored edits to
+# upstream hermes-agent source and fails the build loudly when an anchor
+# misses. Building weekly against upstream HEAD (and the latest upstream tag)
+# surfaces anchor drift when upstream refactors — instead of at the moment we
+# need an urgent pin bump. No images are published from this workflow.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: build vs upstream ${{ matrix.ref_kind }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ref_kind: [head, latest-tag]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve upstream ref
+        id: ref
+        run: |
+          if [ "${{ matrix.ref_kind }}" = "head" ]; then
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          else
+            tag=$(git ls-remote --tags --sort=-v:refname \
+              https://github.com/NousResearch/hermes-agent.git \
+              | grep -v '\^{}' | head -1 | sed 's|.*refs/tags/||')
+            if [ -z "$tag" ]; then
+              echo "could not resolve latest upstream tag" >&2
+              exit 1
+            fi
+            echo "ref=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build hermes-base against upstream ${{ steps.ref.outputs.ref }}
+        run: |
+          docker build \
+            --build-arg HERMES_UPSTREAM_TAG="${{ steps.ref.outputs.ref }}" \
+            dockerfiles/hermes-base/ 2>&1 | tee build.log
+
+      - name: Surface failed patch anchors
+        if: failure()
+        run: |
+          echo "::error::hermes-base patch anchors failed against upstream ${{ steps.ref.outputs.ref }} — see anchor names below"
+          grep -E "replace_once|anchor|PATCH" build.log | tail -40 || true
