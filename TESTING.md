@@ -149,10 +149,10 @@ workflow validation instrument for the richer `examples/trading-desk/` example.
 - `compose.generated.yml` contains the writable `/app/config` bind mount used for
   both `openclaw.json` and `cron/jobs.json`
 - Both agent containers start and serve mounted files at the expected paths
-- `openclaw health --json` reports healthy inside the tiverton container
-- Both agents post startup greetings to Discord (`tiverton online.`, `westin online.`)
+- `openclaw health --json` reports healthy inside the desk-manager container
+- Both agents post startup greetings to Discord (`desk-manager online.`, `momentum-trader online.`)
 - `trading-api` posts a webhook startup message mentioning both agent Discord IDs
-  (`<@TIVERTON_ID>` and `<@WESTIN_ID>`) — proves `CLAW_HANDLE_*` env vars are
+  (`<@DESK_MANAGER_ID>` and `<@MOMENTUM_TRADER_ID>`) — proves `CLAW_HANDLE_*` env vars are
   broadcast to non-claw pod services
 
 ### Prerequisites
@@ -160,7 +160,7 @@ workflow validation instrument for the richer `examples/trading-desk/` example.
 - Docker running
 - Go toolchain
 - A Discord server with:
-  - Distinct Discord application/user IDs for tiverton, westin, allen, logan, micro, and hermes
+  - Distinct Discord application/user IDs for desk-manager, momentum-trader, systems-monitor, value-trader, micro, and hermes
   - At least one bot token with permission to read and post in the target channel
   - A text channel the bots can read and post to
   - An incoming webhook URL for the `trading-api` startup announcement (optional —
@@ -176,19 +176,19 @@ cp .env.example .env
 
 | Variable | What it is |
 |----------|------------|
-| `TIVERTON_BOT_TOKEN` | Bot token for the tiverton Discord application |
-| `TIVERTON_DISCORD_ID` | Application/user ID for tiverton bot |
-| `WESTIN_BOT_TOKEN` | Bot token for the westin Discord application |
-| `WESTIN_DISCORD_ID` | Application/user ID for westin bot |
-| `ALLEN_DISCORD_ID` | Application/user ID declared for allen |
-| `LOGAN_DISCORD_ID` | Application/user ID declared for logan |
+| `DESK_MANAGER_BOT_TOKEN` | Bot token for the desk-manager Discord application |
+| `DESK_MANAGER_DISCORD_ID` | Application/user ID for desk-manager bot |
+| `MOMENTUM_TRADER_BOT_TOKEN` | Bot token for the momentum-trader Discord application |
+| `MOMENTUM_TRADER_DISCORD_ID` | Application/user ID for momentum-trader bot |
+| `SYSTEMS_MONITOR_DISCORD_ID` | Application/user ID declared for systems-monitor |
+| `VALUE_TRADER_DISCORD_ID` | Application/user ID declared for value-trader |
 | `MICRO_DISCORD_ID` | Application/user ID declared for micro |
 | `HERMES_DISCORD_ID` | Application/user ID declared for hermes |
 | `DISCORD_GUILD_ID` | Discord server (guild) ID |
 | `DISCORD_TRADING_FLOOR_CHANNEL` | Channel ID the bots post to |
 | `DISCORD_TRADING_API_WEBHOOK` | Incoming webhook URL (optional) |
 
-Only `TIVERTON_BOT_TOKEN` is strictly required for the local spike harness; the
+Only `DESK_MANAGER_BOT_TOKEN` is strictly required for the local spike harness; the
 other bot token env vars can reuse it if you just want one real Discord bot for
 the run. The Discord IDs are env-owned pod metadata and still need to be present
 for every managed service because the parser enforces unique concurrent handles.
@@ -212,7 +212,7 @@ The test logs:
 
 - Generated artifact paths and content excerpts
 - Container health state
-- `openclaw health --json` output from inside the tiverton container
+- `openclaw health --json` output from inside the desk-manager container
 - `trading-api` env var presence (no values) and early logs
 - Each Discord message found that matches a verification check
 
