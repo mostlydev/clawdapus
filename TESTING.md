@@ -33,13 +33,17 @@ go test -tags integration -v ./...
 Spike tests are the live end-to-end validation layer. They require real credentials,
 Docker, and a real Discord server. They are not CI tests.
 
-There are currently two spike paths:
+The two primary spike paths are:
 
-- `TestSpikeRollCall`: the broad driver-parity validation path. Boots all 6 driver
+- `TestSpikeRollCall`: the broad driver-parity validation path. Boots all 7 driver
   types plus `cllama` passthrough and `clawdash`, sends a Discord roll call, and
   verifies runtime-specific responses.
 - `TestSpikeComposeUp`: the deeper trading-desk validation path. Focuses on artifact
   generation, startup wiring, and Discord activity for the richer multi-service example.
+
+Further targeted spikes live alongside them in `cmd/claw/` (docs quickstart,
+MCP stdio wrapper/discovery, hermes-base build, channel backfill/digest, and
+others — see `grep -l 'go:build spike' cmd/claw/*_test.go` for the current set).
 
 Run a spike test when implementing or validating driver/runtime behavior end to end.
 
@@ -55,12 +59,13 @@ exercises:
 - `nanoclaw`
 - `nanobot`
 - `picoclaw`
+- `hermes`
 - `cllama` passthrough
 - `clawdash`
 
 ### What it validates
 
-- Base images build for all 6 driver families
+- Base images build for all 7 driver families
 - Agent images build from their `Clawfile`s
 - `claw up` succeeds on the rollcall pod
 - All agent containers converge to healthy/running state
