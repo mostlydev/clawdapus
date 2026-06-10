@@ -56,6 +56,8 @@ Releases are tag-driven and cut by the maintainer. These must **never** change i
 - **The `<Badge type="tip" text="Latest" />` badge or a new version section in `site/changelog.md`** — the site deploys on every master push, so this would publicly claim a release that doesn't exist. Add your notes under `## Unreleased` instead.
 - **The version dropdown in `site/.vitepress/config.mts`** — same reason.
 - **The `cllama` submodule pointer beyond the latest cllama tag** — if your fix needs new cllama code, a cllama release happens first; the pointer bump rides release prep.
+- **Building or pushing `hermes-base` or other infra images** — there is no auto-publish for `hermes-base`; image publication is coordinated by the maintainer.
+- **Rewriting identifying details in historical changelog entries** — old entries are part of the project's incident record. Edit only the entry you are adding.
 
 If a fix genuinely requires one of these to move, say so explicitly in the PR body so the maintainer can sequence the release — don't bake it silently into the diff.
 

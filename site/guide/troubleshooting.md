@@ -18,11 +18,11 @@ x-claw:
 claw up -d
 ```
 
-See [Managed Tools § Budget limits](/guide/tools#mediation-loop). Check which model is slow with `claw audit` (latency column).
+See [Managed Tools § Budget limits](/guide/tools#mediation-loop). Check which model is slow with `claw audit --json` — `latency_ms` is on each response event.
 
 ## A feed is missing from agent context / `feed_fetch` errors at ~3s
 
-**Cause:** the feed provider responded slower than the fetch timeout (default 3s). The block is skipped silently from the agent's perspective; only the proxy logs the failure.
+**Cause:** the feed provider responded slower than the fetch timeout (default 3s). The agent sees a `[Feed unavailable]` notice (or stale cached content) where fresh data should be; the proxy logs the underlying failure.
 
 **Fix:** raise the fetch timeout via cllama env:
 
@@ -118,17 +118,23 @@ Verify key state live: `curl -N -H "Authorization: Bearer <ui_token>" http://<ho
 | `intervention` | Governance event — see below |
 | `feed_fetch` / `feed_injection` | Feed provider fetch results and what was injected into context |
 | `tool_call` | Managed tool execution from session-history `tool_trace` |
+| `tool_manifest_loaded` | Whether a compiled tool manifest reached the proxy for a request (`manifest_present`, `tools_count`) |
+| `channel_context_op` | Channel-context feed and claw-wall tool activity |
+| `memory_op` | Memory plane recall/retain operations |
+| `provider_pool` | Provider key pool state changes (cooldowns, failover) |
 
 Intervention reasons you may see:
 
 | Intervention | Meaning |
 |--------------|---------|
 | `managed_tool_schema_rejected:<tool>` | Tool call rejected pre-dispatch for schema violations |
-| `duplicate_managed_tool_call` | Same tool, same args, same turn — skipped, structured error returned |
+| `duplicate_managed_tool_call:<tool>` | Same tool, same args, same turn — skipped, structured error returned |
 | `mixed_tool_order_internal_retry` | Model mixed native-first/managed-later tool order; cllama replanned internally |
+| `managed_prefix_native_suffix_serialized` | Managed prefix executed internally before a runner-native suffix in one response |
 | `managed_tool_budget_finalization` | Budget exhausted; cllama forced a final text turn instead of returning empty |
+| `bare_model_normalized` | Runner sent a bare model name; the proxy normalized it to the agent's declared slot |
 
-`manifest_present` and `tools_count` fields on each audit line confirm whether a compiled tool manifest actually reached cllama for that agent.
+In JSON output (`claw audit --json`), `tool_manifest_loaded` events carry `manifest_present` and `tools_count` — use them to confirm a compiled tool manifest actually reached cllama for an agent.
 
 ## Still stuck?
 
