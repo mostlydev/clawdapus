@@ -43,7 +43,9 @@ jobs:
           fi
 
       - name: Build hermes-base against upstream ${{ steps.ref.outputs.ref }}
+        shell: bash
         run: |
+          set -o pipefail
           docker build \
             --build-arg HERMES_UPSTREAM_TAG="${{ steps.ref.outputs.ref }}" \
             dockerfiles/hermes-base/ 2>&1 | tee build.log
@@ -52,4 +54,4 @@ jobs:
         if: failure()
         run: |
           echo "::error::hermes-base patch anchors failed against upstream ${{ steps.ref.outputs.ref }} — see anchor names below"
-          grep -E "replace_once|anchor|PATCH" build.log | tail -40 || true
+          grep -iE "expected to patch|replace_once|anchor|patch" build.log | tail -40 || true
