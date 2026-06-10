@@ -650,4 +650,6 @@ each — see **[How It Fits Together](https://clawdapus.dev/guide/architecture)*
 
 ## Contributing
 
-Start with [`MANIFESTO.md`](./MANIFESTO.md) before contributing.
+Start with [`MANIFESTO.md`](./MANIFESTO.md) for the why, then [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the how: dev setup, test tiers, the issue-first workflow, and the release-artifact rules.
+
+Priorities live on the [project board](https://github.com/users/mostlydev/projects/2) — column order is priority order. Bug reports and feature requests have [issue templates](https://github.com/mostlydev/clawdapus/issues/new/choose).

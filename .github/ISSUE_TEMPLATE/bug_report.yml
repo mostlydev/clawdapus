@@ -1,0 +1,53 @@
+name: Bug report
+description: Something broke — a command failed, an agent misbehaved, a pod won't come up
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: claw version
+      description: Output of `claw --version`
+      placeholder: v0.22.0
+    validations:
+      required: true
+  - type: dropdown
+    id: driver
+    attributes:
+      label: Driver type
+      description: Which runner driver is involved (if any)
+      options:
+        - openclaw
+        - hermes
+        - nanoclaw
+        - nanobot
+        - picoclaw
+        - nullclaw
+        - microclaw
+        - generic / none
+        - not driver-related
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got. Include the exact command and its output.
+    validations:
+      required: true
+  - type: textarea
+    id: pod-yaml
+    attributes:
+      label: Relevant pod YAML snippet
+      description: The smallest `claw-pod.yml` (or Clawfile) fragment that reproduces it. Redact tokens and IDs.
+      render: yaml
+  - type: textarea
+    id: doctor
+    attributes:
+      label: claw doctor output
+      render: shell
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`claw logs <service>`, `claw audit`, or container logs as relevant"
+      render: shell

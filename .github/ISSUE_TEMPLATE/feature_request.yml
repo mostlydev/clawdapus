@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a capability, improvement, or change in behavior
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What problem does this solve? What does it unblock? Concrete scenarios beat abstractions.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should happen, and where (CLI, pod YAML, Clawfile, cllama, a driver)? Sketch the UX if user-facing.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and open questions
+      description: Anything a future implementer should know — compatibility concerns, design alternatives you rejected, open questions.
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Compilation principles
+      description: Clawdapus resolves all wiring at compile time (`claw up`), not runtime. See AGENTS.md "Compilation Principles".
+      options:
+        - label: This proposal keeps wiring compile-time (or explains why it can't)
