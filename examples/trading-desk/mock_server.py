@@ -29,8 +29,8 @@ _DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # CLAW_HANDLE_* vars are broadcast to all pod services, including non-claw ones.
 # Format: CLAW_HANDLE_<SERVICE_UPPER>_DISCORD_ID
-_TIVERTON_DISCORD_ID = os.environ.get("CLAW_HANDLE_TIVERTON_DISCORD_ID", "")
-_WESTIN_DISCORD_ID = os.environ.get("CLAW_HANDLE_WESTIN_DISCORD_ID", "")
+_DESK_MANAGER_DISCORD_ID = os.environ.get("CLAW_HANDLE_DESK_MANAGER_DISCORD_ID", "")
+_MOMENTUM_TRADER_DISCORD_ID = os.environ.get("CLAW_HANDLE_MOMENTUM_TRADER_DISCORD_ID", "")
 
 
 def _post_webhook(content: str) -> None:
@@ -61,7 +61,7 @@ def _post_webhook(content: str) -> None:
 def announce_startup():
     """Post a startup message mentioning all known agent bots."""
     mentions = " ".join(
-        f"<@{id}>" for id in [_TIVERTON_DISCORD_ID, _WESTIN_DISCORD_ID] if id
+        f"<@{id}>" for id in [_DESK_MANAGER_DISCORD_ID, _MOMENTUM_TRADER_DISCORD_ID] if id
     )
     parts = ["trading-api online"]
     if mentions:
@@ -111,8 +111,8 @@ class Handler(BaseHTTPRequestHandler):
             # Report which key env vars are present — safe for logs (no values exposed)
             status, data = ok({
                 "DISCORD_TRADING_API_WEBHOOK": bool(_DISCORD_WEBHOOK),
-                "CLAW_HANDLE_TIVERTON_DISCORD_ID": bool(_TIVERTON_DISCORD_ID),
-                "CLAW_HANDLE_WESTIN_DISCORD_ID": bool(_WESTIN_DISCORD_ID),
+                "CLAW_HANDLE_DESK_MANAGER_DISCORD_ID": bool(_DESK_MANAGER_DISCORD_ID),
+                "CLAW_HANDLE_MOMENTUM_TRADER_DISCORD_ID": bool(_MOMENTUM_TRADER_DISCORD_ID),
                 "DATABASE_URL": bool(_DATABASE_URL),
             })
         elif self.path == "/ping":

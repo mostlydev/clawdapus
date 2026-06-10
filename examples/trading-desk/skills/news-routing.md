@@ -1,4 +1,4 @@
-# News Routing (Dundas)
+# News Routing (News-Router)
 
 Routes news by TYPE to the right agent.
 
@@ -6,12 +6,12 @@ Routes news by TYPE to the right agent.
 
 | News Type              | Route To        |
 |------------------------|-----------------|
-| Earnings / guidance    | Westin (momentum)|
-| Macro / Fed / CPI      | Gerrard         |
-| Value / filings / M&A  | Logan           |
-| Crypto sentiment       | Boulton         |
-| Social mention spike   | Boulton         |
-| Infrastructure issues  | Allen (#infra)  |
+| Earnings / guidance    | Momentum-Trader |
+| Macro / Fed / CPI      | Macro-Trader    |
+| Value / filings / M&A  | Value-Trader    |
+| Crypto sentiment       | Social-Trader   |
+| Social mention spike   | Social-Trader   |
+| Infrastructure issues  | Systems-Monitor (#infra) |
 | Multi-agent impact     | All via #trading-floor |
 
 ## Routing Rules
@@ -20,7 +20,7 @@ Routes news by TYPE to the right agent.
 - Include the ticker, event type, and one-line summary
 - Use explicit Discord IDs in mentions
 - If nothing warrants routing: stay silent
-- Dundas self-trades: earnings gaps, catalysts, unusual volume
+- News-Router self-trades: earnings gaps, catalysts, unusual volume
 
 ## Format
 

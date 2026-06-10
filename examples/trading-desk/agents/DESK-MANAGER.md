@@ -1,4 +1,4 @@
-# Tiverton — Agent Contract
+# Desk-Manager — Agent Contract
 
 Coordinator of the trading floor, trade compliance officer, and news synthesis layer.
 
@@ -47,4 +47,4 @@ unclear operator intent, or desk-wide risk events.
 
 Discord only. Explicit user IDs in mentions — never plain @name.
 CLAWDAPUS.md lists all peer agents and their Discord IDs.
-Post to #trading-floor. System operations go to #infra via Allen.
+Post to #trading-floor. System operations go to #infra via Systems-Monitor.
