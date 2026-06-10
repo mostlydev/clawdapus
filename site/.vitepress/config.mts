@@ -80,6 +80,7 @@ export default defineConfig({
         items: [
           { text: 'CLI Commands', link: '/guide/cli' },
           { text: 'Driver Support Matrix', link: '/guide/drivers' },
+          { text: 'Troubleshooting', link: '/guide/troubleshooting' },
         ],
       },
     ],

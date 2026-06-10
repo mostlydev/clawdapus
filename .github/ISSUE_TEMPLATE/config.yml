@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Project board (priorities)
+    url: https://github.com/users/mostlydev/projects/2
+    about: The prioritized roadmap — see what's planned, ready, and in progress.
+  - name: Documentation
+    url: https://clawdapus.dev
+    about: Guides, troubleshooting, and the CLI reference.
