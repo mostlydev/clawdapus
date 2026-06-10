@@ -159,8 +159,13 @@ curl -sSL "$SKILL_URL" >> .cursorrules
 
 This gives your coding agent full context on Clawfiles, pod configurations, and the full `claw` CLI surface. When installed via `claw skill install`, the skill auto-updates on every `claw` invocation.
 
+## No credentials yet?
+
+The [Ollama quickstart](https://github.com/mostlydev/clawdapus/tree/master/examples/ollama-quickstart) runs a governed agent against a local model with **zero secrets** — no provider key, no Discord bot. Docker plus the `claw` CLI is the entire prerequisite list, and `claw audit` shows the governance plane working on the first turn.
+
 ## Next Steps
 
+- [Hermes Quickstart](/guide/hermes) -- the same loop on the Hermes runner, with its Discord-native tooling.
 - [Anatomy of a Claw](/guide/anatomy) -- understand the four layers: runner, contract, persona, and governance proxy.
 - [Clawfile Reference](/guide/clawfile) -- the full directive reference for building agent images.
 - [cllama Governance Proxy](/guide/cllama) -- credential starvation, cost tracking, and the audit pipeline.

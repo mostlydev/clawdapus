@@ -1,0 +1,10 @@
+FROM ghcr.io/mostlydev/hermes-base:v2026.5.16-claw.2
+
+CLAW_TYPE hermes
+AGENT AGENTS.md
+
+MODEL primary anthropic/claude-haiku-4-5
+
+CLLAMA passthrough
+
+HANDLE discord

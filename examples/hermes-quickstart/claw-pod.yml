@@ -1,0 +1,23 @@
+x-claw:
+  pod: hermes-quickstart
+
+services:
+  assistant:
+    image: hermes-quickstart-assistant:latest
+    build:
+      context: .
+      dockerfile: Clawfile
+    x-claw:
+      agent: ./AGENTS.md
+      cllama: passthrough
+      cllama-env:
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      handles:
+        discord:
+          id: "${DISCORD_BOT_ID}"
+          username: "hermes-assistant"
+          guilds:
+            - id: "${DISCORD_GUILD_ID}"
+              name: "My Server"
+    environment:
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"

@@ -536,6 +536,8 @@ inline the service's advertised tools and the mount path:
 | Example | What it shows |
 |---------|---------------|
 | [`examples/quickstart/`](./examples/quickstart/) | **Start here** — single governed agent with Discord, cllama proxy, and dashboard |
+| [`examples/ollama-quickstart/`](./examples/ollama-quickstart/) | **Zero credentials** — governed agent on a local Ollama model; no API key, no Discord, empty `.env` |
+| [`examples/hermes-quickstart/`](./examples/hermes-quickstart/) | Minimal Hermes runner deployment — one agent, one Discord channel, cllama passthrough |
 | [`examples/openclaw/`](./examples/openclaw/) | Single OpenClaw agent with Discord handle, skill emit, and service surface |
 | [`examples/nanobot/`](./examples/nanobot/) | Minimal Nanobot driver project with generated config + Discord handle wiring |
 | [`examples/picoclaw/`](./examples/picoclaw/) | Minimal PicoClaw driver project with model-list config + Discord handle wiring |

@@ -661,7 +661,7 @@ func runComposeUp(podFile string) (err error) {
 		}
 
 		// Compile seed keys from all service CllamaEnv into providers.json.
-		if err := mergeProviderSeeds(authDir, p); err != nil {
+		if err := mergeProviderSeeds(authDir, p, resolvedClaws); err != nil {
 			return fmt.Errorf("write providers.json: %w", err)
 		}
 
@@ -3404,10 +3404,12 @@ var defaultBaseURLs = map[string]string{
 	"anthropic":  "https://api.anthropic.com/v1",
 	"openrouter": "https://openrouter.ai/api/v1",
 	"google":     "https://generativelanguage.googleapis.com/v1beta/openai",
+	"ollama":     "http://ollama:11434/v1",
 }
 
 var defaultAuths = map[string]string{
 	"anthropic": "x-api-key",
+	"ollama":    "none",
 }
 
 var defaultFormats = map[string]string{
@@ -3415,8 +3417,9 @@ var defaultFormats = map[string]string{
 }
 
 // mergeProviderSeeds loads any existing providers.json from authDir, merges
-// seed keys compiled from the pod's cllama-env, and writes the result atomically.
-func mergeProviderSeeds(authDir string, p *pod.Pod) error {
+// seed keys compiled from the pod's cllama-env, seeds keyless providers
+// referenced by resolved models, and writes the result atomically.
+func mergeProviderSeeds(authDir string, p *pod.Pod, claws map[string]*driver.ResolvedClaw) error {
 	// Collect deduplicated cllama-env from all services.
 	merged := make(map[string]string)
 	for _, svc := range p.Services {
@@ -3455,6 +3458,7 @@ func mergeProviderSeeds(authDir string, p *pod.Pod) error {
 		"ANTHROPIC_BASE_URL":  "anthropic",
 		"OPENROUTER_BASE_URL": "openrouter",
 		"GOOGLE_BASE_URL":     "google",
+		"OLLAMA_BASE_URL":     "ollama",
 	}
 	customBaseURLs := make(map[string]string)
 	for envKey, prov := range baseURLEnvMap {
@@ -3464,6 +3468,37 @@ func mergeProviderSeeds(authDir string, p *pod.Pod) error {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Seed keyless providers (auth "none", e.g. ollama) referenced by
+	// resolved models — image MODEL labels merged with pod overrides. They
+	// carry no key pool, so the key-based loop below never creates them —
+	// but without a provider entry, cllama rejects every request with
+	// "unknown provider".
+	for _, rc := range claws {
+		if rc == nil || len(rc.Cllama) == 0 {
+			continue
+		}
+		for _, provider := range shared.CollectProviders(rc.Models) {
+			if !shared.ProviderAllowsEmptyAPIKey(provider) {
+				continue
+			}
+			if _, exists := existing[provider]; exists {
+				continue
+			}
+			state := &v2ProviderState{
+				Auth:      defaultAuths[provider],
+				APIFormat: "openai",
+				Source:    "seed",
+				Keys:      []v2KeyEntry{},
+			}
+			if cu := customBaseURLs[provider]; cu != "" {
+				state.BaseURL = cu
+			} else {
+				state.BaseURL = defaultBaseURLs[provider]
+			}
+			existing[provider] = state
+		}
+	}
 
 	// Merge for each provider that has seeds.
 	for provName, seeds := range bySvc {

@@ -1,0 +1,8 @@
+compose.generated.yml
+.ollama-models/
+.claw-runtime*/
+.claw-session-history/
+.claw-memory/
+.claw-skills/
+.claw-auth/
+.claw-governance/

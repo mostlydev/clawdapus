@@ -2705,6 +2705,117 @@ func TestIsProviderKey(t *testing.T) {
 
 // -- mergeProviderSeeds -------------------------------------------------------
 
+func TestMergeProviderSeedsSeedsKeylessOllamaProvider(t *testing.T) {
+	dir := t.TempDir()
+	p := &pod.Pod{Services: map[string]*pod.Service{}}
+	claws := map[string]*driver.ResolvedClaw{
+		"assistant": {
+			Cllama: []string{"passthrough"},
+			Models: map[string]string{"primary": "ollama/qwen2.5:0.5b"},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p, claws); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+	var probe struct {
+		Providers map[string]struct {
+			BaseURL string `json:"base_url"`
+			Auth    string `json:"auth"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	ollama, ok := probe.Providers["ollama"]
+	if !ok {
+		t.Fatalf("ollama provider not seeded for ollama-prefixed model; got %v", probe.Providers)
+	}
+	if ollama.Auth != "none" {
+		t.Errorf("ollama auth = %q, want none", ollama.Auth)
+	}
+	if ollama.BaseURL != "http://ollama:11434/v1" {
+		t.Errorf("ollama base_url = %q, want sidecar default", ollama.BaseURL)
+	}
+}
+
+func TestMergeProviderSeedsOllamaBaseURLOverride(t *testing.T) {
+	dir := t.TempDir()
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"assistant": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OLLAMA_BASE_URL": "http://host.docker.internal:11434/v1",
+					},
+				},
+			},
+		},
+	}
+	claws := map[string]*driver.ResolvedClaw{
+		"assistant": {
+			Cllama: []string{"passthrough"},
+			Models: map[string]string{"primary": "ollama/llama3.2"},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p, claws); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+	var probe struct {
+		Providers map[string]struct {
+			BaseURL string `json:"base_url"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	if got := probe.Providers["ollama"].BaseURL; got != "http://host.docker.internal:11434/v1" {
+		t.Errorf("ollama base_url = %q, want host override", got)
+	}
+}
+
+func TestMergeProviderSeedsNoKeylessProviderWithoutModelRef(t *testing.T) {
+	dir := t.TempDir()
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{"OPENROUTER_API_KEY": "sk-or"},
+				},
+			},
+		},
+	}
+	claws := map[string]*driver.ResolvedClaw{
+		"analyst": {
+			Cllama: []string{"passthrough"},
+			Models: map[string]string{"primary": "openrouter/google/gemini-2.5-flash"},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p, claws); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+	var probe struct {
+		Providers map[string]json.RawMessage `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	if _, exists := probe.Providers["ollama"]; exists {
+		t.Error("ollama must not be seeded when no model references it")
+	}
+}
+
 func TestMergeProviderSeedsWritesV2File(t *testing.T) {
 	dir := t.TempDir()
 	p := &pod.Pod{
@@ -2718,7 +2829,7 @@ func TestMergeProviderSeedsWritesV2File(t *testing.T) {
 			},
 		},
 	}
-	if err := mergeProviderSeeds(dir, p); err != nil {
+	if err := mergeProviderSeeds(dir, p, nil); err != nil {
 		t.Fatalf("mergeProviderSeeds: %v", err)
 	}
 
@@ -2776,7 +2887,7 @@ func TestMergeProviderSeedsWritesXAIProvider(t *testing.T) {
 			},
 		},
 	}
-	if err := mergeProviderSeeds(dir, p); err != nil {
+	if err := mergeProviderSeeds(dir, p, nil); err != nil {
 		t.Fatalf("mergeProviderSeeds: %v", err)
 	}
 
@@ -2831,7 +2942,7 @@ func TestMergeProviderSeedsWritesGoogleProvider(t *testing.T) {
 			},
 		},
 	}
-	if err := mergeProviderSeeds(dir, p); err != nil {
+	if err := mergeProviderSeeds(dir, p, nil); err != nil {
 		t.Fatalf("mergeProviderSeeds: %v", err)
 	}
 
@@ -2888,7 +2999,7 @@ func TestMergeProviderSeedsUsesGoogleAliasWhenGeminiMissing(t *testing.T) {
 			},
 		},
 	}
-	if err := mergeProviderSeeds(dir, p); err != nil {
+	if err := mergeProviderSeeds(dir, p, nil); err != nil {
 		t.Fatalf("mergeProviderSeeds: %v", err)
 	}
 
@@ -2964,7 +3075,7 @@ func TestMergeProviderSeedsPreservesExistingRuntimeKeys(t *testing.T) {
 			},
 		},
 	}
-	if err := mergeProviderSeeds(dir, p); err != nil {
+	if err := mergeProviderSeeds(dir, p, nil); err != nil {
 		t.Fatalf("mergeProviderSeeds: %v", err)
 	}
 
@@ -3025,7 +3136,7 @@ func TestMergeProviderSeedsResetsStateWhenSecretChanges(t *testing.T) {
 			},
 		},
 	}
-	if err := mergeProviderSeeds(dir, p); err != nil {
+	if err := mergeProviderSeeds(dir, p, nil); err != nil {
 		t.Fatalf("mergeProviderSeeds: %v", err)
 	}
 
@@ -3087,7 +3198,7 @@ func TestMergeProviderSeedsPreservesStateWhenSecretUnchanged(t *testing.T) {
 			},
 		},
 	}
-	if err := mergeProviderSeeds(dir, p); err != nil {
+	if err := mergeProviderSeeds(dir, p, nil); err != nil {
 		t.Fatalf("mergeProviderSeeds: %v", err)
 	}
 
@@ -4361,7 +4472,7 @@ func TestMergeProviderSeedsPreservesRuntimeProviderSource(t *testing.T) {
 			},
 		},
 	}
-	if err := mergeProviderSeeds(dir, p); err != nil {
+	if err := mergeProviderSeeds(dir, p, nil); err != nil {
 		t.Fatalf("mergeProviderSeeds: %v", err)
 	}
 
@@ -4428,7 +4539,7 @@ func TestMergeProviderSeedsWarnOnSeedOverwritesRuntime(t *testing.T) {
 	}
 	// mergeProviderSeeds writes the warning to os.Stderr; we just verify it
 	// completes without error and that the seed key wins.
-	if err := mergeProviderSeeds(dir, p); err != nil {
+	if err := mergeProviderSeeds(dir, p, nil); err != nil {
 		t.Fatalf("mergeProviderSeeds: %v", err)
 	}
 

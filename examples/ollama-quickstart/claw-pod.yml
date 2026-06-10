@@ -1,0 +1,40 @@
+x-claw:
+  pod: ollama-quickstart
+
+services:
+  assistant:
+    image: ollama-quickstart-assistant:latest
+    build:
+      context: .
+      dockerfile: Clawfile
+    x-claw:
+      agent: ./AGENTS.md
+      cllama: passthrough
+      surfaces:
+        - service://ollama
+      cllama-env:
+        # Not a secret: ollama ignores auth, but the proxy's key pool needs an entry.
+        OPENAI_API_KEY: "local-ollama"
+        OPENAI_BASE_URL: "http://ollama:11434/v1"
+      invoke:
+        - schedule: "*/5 * * * *"
+          name: "Reflection"
+          message: "Reflect briefly: what is one interesting fact about octopuses? Answer in two sentences."
+    depends_on:
+      - ollama
+
+  # Self-contained local model server. The assistant's surfaces grant the
+  # proxy a network path to it. To use a host-side Ollama install instead,
+  # delete this service plus the surfaces block and point the proxy at the
+  # host in the assistant's cllama-env:
+  #   OPENAI_BASE_URL: "http://host.docker.internal:11434/v1"
+  ollama:
+    image: ollama/ollama:latest
+    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 3 && ollama pull qwen2.5:0.5b && ollama run qwen2.5:0.5b 'warmup' >/dev/null 2>&1; wait"]
+    environment:
+      # Keep the model loaded so agent turns never pay the cold-load cost.
+      OLLAMA_KEEP_ALIVE: "-1"
+    volumes:
+      - ./.ollama-models:/root/.ollama
+    expose:
+      - "11434"
