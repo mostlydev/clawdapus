@@ -2,6 +2,8 @@
 
 Clawdapus drivers adapt the generic governance model to specific agent runtimes. Pick a driver based on what your agent needs. All drivers support `MODEL`, `AGENT`, `CLLAMA`, and `CONFIGURE`.
 
+New to Hermes? Start with the dedicated [Hermes quickstart](/guide/hermes).
+
 ## Feature Matrix
 
 | | `openclaw` | `hermes` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |

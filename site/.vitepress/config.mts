@@ -58,6 +58,7 @@ export default defineConfig({
           { text: 'What is Clawdapus?', link: '/guide/what-is-clawdapus' },
           { text: 'How It Fits Together', link: '/guide/architecture' },
           { text: 'Quickstart', link: '/guide/quickstart' },
+          { text: 'Hermes Quickstart', link: '/guide/hermes' },
         ],
       },
       {

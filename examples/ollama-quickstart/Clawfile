@@ -1,0 +1,8 @@
+FROM openclaw:latest
+
+CLAW_TYPE openclaw
+AGENT AGENTS.md
+
+MODEL primary openai/qwen2.5:0.5b
+
+CLLAMA passthrough
