@@ -591,6 +591,7 @@ func runComposeUp(podFile string) (err error) {
 						ClawdapusMD:      md,
 						Feeds:            feeds,
 						Tools:            tools,
+						ToolPolicy:       agentToolPolicy(p, name),
 						Memory:           memory,
 						ServiceAuth:      ordinalAuth,
 						ChannelAllowlist: conversationWallAllowlists[ordinalName],
@@ -631,6 +632,7 @@ func runComposeUp(podFile string) (err error) {
 				ClawdapusMD:      md,
 				Feeds:            feeds,
 				Tools:            tools,
+				ToolPolicy:       agentToolPolicy(p, name),
 				Memory:           memory,
 				ServiceAuth:      svcAuth,
 				ChannelAllowlist: conversationWallAllowlists[name],
@@ -1479,6 +1481,19 @@ func buildFeedManifestEntries(p *pod.Pod, descriptors map[string]*describe.Servi
 		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+// agentToolPolicy resolves a service's x-claw.tool-policy overrides into the
+// effective cllama tool policy. Returns nil when the service declares no
+// overrides, so the context generator falls back to DefaultToolPolicy.
+func agentToolPolicy(p *pod.Pod, serviceName string) *cllama.ToolPolicy {
+	svc := p.Services[serviceName]
+	if svc == nil || svc.Claw == nil || svc.Claw.ToolPolicy == nil {
+		return nil
+	}
+	tp := svc.Claw.ToolPolicy
+	policy := cllama.EffectiveToolPolicy(tp.MaxRounds, tp.TimeoutPerToolMS, tp.TotalTimeoutMS)
+	return &policy
 }
 
 func buildToolManifestEntries(p *pod.Pod, descriptors map[string]*describe.ServiceDescriptor, runtimeEnv map[string]string, serviceName string, tools []describe.ToolSpec, serviceAuth []cllama.ServiceAuthEntry) ([]cllama.ToolManifestEntry, error) {

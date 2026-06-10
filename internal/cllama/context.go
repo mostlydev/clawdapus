@@ -14,6 +14,7 @@ type AgentContextInput struct {
 	Metadata         map[string]interface{}
 	Feeds            []FeedManifestEntry
 	Tools            []ToolManifestEntry
+	ToolPolicy       *ToolPolicy // nil means DefaultToolPolicy
 	Memory           *MemoryManifestEntry
 	ServiceAuth      []ServiceAuthEntry
 	ChannelAllowlist []string
@@ -97,6 +98,22 @@ var DefaultToolPolicy = ToolPolicy{
 	TotalTimeoutMS:   120000,
 }
 
+// EffectiveToolPolicy merges per-field overrides onto DefaultToolPolicy.
+// Nil fields keep the default value.
+func EffectiveToolPolicy(maxRounds, timeoutPerToolMS, totalTimeoutMS *int) ToolPolicy {
+	policy := DefaultToolPolicy
+	if maxRounds != nil {
+		policy.MaxRounds = *maxRounds
+	}
+	if timeoutPerToolMS != nil {
+		policy.TimeoutPerToolMS = *timeoutPerToolMS
+	}
+	if totalTimeoutMS != nil {
+		policy.TotalTimeoutMS = *totalTimeoutMS
+	}
+	return policy
+}
+
 // GenerateContextDir writes per-agent context files under:
 //
 //	<runtimeDir>/context/<agent-id>/{AGENTS.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,service-auth/...}
@@ -139,10 +156,14 @@ func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 		}
 
 		if len(agent.Tools) > 0 {
+			policy := DefaultToolPolicy
+			if agent.ToolPolicy != nil {
+				policy = *agent.ToolPolicy
+			}
 			toolsJSON, err := json.MarshalIndent(ToolManifest{
 				Version: 1,
 				Tools:   agent.Tools,
-				Policy:  DefaultToolPolicy,
+				Policy:  policy,
 			}, "", "  ")
 			if err != nil {
 				return fmt.Errorf("marshal tools for %q: %w", agent.AgentID, err)

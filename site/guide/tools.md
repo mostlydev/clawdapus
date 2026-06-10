@@ -242,7 +242,7 @@ Unknown managed tool names are rejected at validation time.
 
 Within a single mediated turn, cllama also detects repeated managed tool calls with the same canonical tool name and arguments. The first call executes normally; later duplicates are skipped and returned to the model as a structured `duplicate_tool_call` tool result, with `tool_trace` metadata showing the original round and duplicate count. This keeps retry loops from repeatedly burning MCP sidecar time for the same query.
 
-**Budget limits** (configurable in pod YAML, compiled into `tools.json`):
+**Budget limits** (compiled into `tools.json`):
 
 | Limit | Default |
 |-------|---------|
@@ -250,6 +250,23 @@ Within a single mediated turn, cllama also detects repeated managed tool calls w
 | `timeout_per_tool_ms` | 30,000ms |
 | `total_timeout_ms` | 120,000ms |
 | `max_tool_result_bytes` | 16,384 bytes |
+
+The first three are configurable from the pod YAML via `x-claw.tool-policy` (service level) or `x-claw.tool-policy-defaults` (pod level). Omitted fields keep their defaults. Slow reasoning models often need a larger `total-timeout-ms` — the whole mediated turn (every inference round plus every tool execution) shares that one budget, and a turn that exceeds it fails with a 502:
+
+```yaml
+x-claw:
+  tool-policy-defaults:
+    total-timeout-ms: 300000
+
+services:
+  fast-bot:
+    x-claw:
+      tool-policy:            # replaces the pod default entirely
+        max-rounds: 4
+        total-timeout-ms: 60000
+```
+
+See [Pod YAML — Managed-Tool Mediation Policy](./pod-yaml#managed-tool-mediation-policy).
 
 Tool results exceeding `max_tool_result_bytes` are truncated with an explicit `"truncated": true` flag so the LLM does not reason over partial data as complete.
 

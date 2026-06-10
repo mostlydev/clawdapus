@@ -245,3 +245,88 @@ func TestGenerateContextDirWritesMCPToolExecution(t *testing.T) {
 		t.Fatalf("MCP execution should not emit HTTP method: %v", execution)
 	}
 }
+
+func TestEffectiveToolPolicy(t *testing.T) {
+	intp := func(v int) *int { return &v }
+
+	got := EffectiveToolPolicy(nil, nil, nil)
+	if got != DefaultToolPolicy {
+		t.Fatalf("nil overrides should yield DefaultToolPolicy, got %+v", got)
+	}
+
+	got = EffectiveToolPolicy(nil, nil, intp(300000))
+	want := ToolPolicy{MaxRounds: 8, TimeoutPerToolMS: 30000, TotalTimeoutMS: 300000}
+	if got != want {
+		t.Fatalf("partial override: got %+v, want %+v", got, want)
+	}
+
+	got = EffectiveToolPolicy(intp(4), intp(60000), intp(240000))
+	want = ToolPolicy{MaxRounds: 4, TimeoutPerToolMS: 60000, TotalTimeoutMS: 240000}
+	if got != want {
+		t.Fatalf("full override: got %+v, want %+v", got, want)
+	}
+}
+
+func TestGenerateContextDirHonorsToolPolicyOverride(t *testing.T) {
+	dir := t.TempDir()
+	agents := []AgentContextInput{{
+		AgentID:     "octopus",
+		AgentsMD:    "# Contract",
+		ClawdapusMD: "# Infra",
+		Tools: []ToolManifestEntry{{
+			Name:        "trading-api.get_quote",
+			Description: "Get a quote",
+			InputSchema: map[string]interface{}{"type": "object"},
+			Execution:   ToolExecution{Transport: "http", Service: "trading-api", BaseURL: "http://trading-api:4000", Method: "GET", Path: "/quote"},
+		}},
+		ToolPolicy: &ToolPolicy{MaxRounds: 6, TimeoutPerToolMS: 45000, TotalTimeoutMS: 300000},
+	}}
+
+	if err := GenerateContextDir(dir, agents); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "tools.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest ToolManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	want := ToolPolicy{MaxRounds: 6, TimeoutPerToolMS: 45000, TotalTimeoutMS: 300000}
+	if manifest.Policy != want {
+		t.Fatalf("tools.json policy: got %+v, want %+v", manifest.Policy, want)
+	}
+}
+
+func TestGenerateContextDirNilToolPolicyUsesDefault(t *testing.T) {
+	dir := t.TempDir()
+	agents := []AgentContextInput{{
+		AgentID:     "octopus",
+		AgentsMD:    "# Contract",
+		ClawdapusMD: "# Infra",
+		Tools: []ToolManifestEntry{{
+			Name:        "trading-api.get_quote",
+			Description: "Get a quote",
+			InputSchema: map[string]interface{}{"type": "object"},
+			Execution:   ToolExecution{Transport: "http", Service: "trading-api", BaseURL: "http://trading-api:4000", Method: "GET", Path: "/quote"},
+		}},
+	}}
+
+	if err := GenerateContextDir(dir, agents); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "tools.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest ToolManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Policy != DefaultToolPolicy {
+		t.Fatalf("tools.json policy: got %+v, want default %+v", manifest.Policy, DefaultToolPolicy)
+	}
+}

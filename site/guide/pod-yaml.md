@@ -53,6 +53,7 @@ The top-level `x-claw` block declares shared configuration that all services inh
 | `surfaces-defaults` | Surfaces available to all services (volumes, services, channels) |
 | `feeds-defaults` | Context feeds subscribed by all services |
 | `tools-defaults` | Managed tool allowlists inherited by all services |
+| `tool-policy-defaults` | Managed-tool mediation policy (`max-rounds`, `timeout-per-tool-ms`, `total-timeout-ms`) inherited by all services |
 | `memory-defaults` | Memory service subscription inherited by all services |
 | `skills-defaults` | Operator skill files inherited by all services |
 | `handles-defaults` | Shared chat topology (guild IDs, channel IDs) inherited by all services |
@@ -94,7 +95,28 @@ services:
           message: "Run morning market analysis."
 ```
 
-Service-level fields include `agent`, `persona`, `describe-file`, `cllama`, `cllama-env`, `models`, `handles`, `feeds`, `tools`, `memory`, `include`, `surfaces`, `skills`, `invoke`, `context`, `claw-api`, `mcp-stdio`, `hermes`, and `count`.
+Service-level fields include `agent`, `persona`, `describe-file`, `cllama`, `cllama-env`, `models`, `handles`, `feeds`, `tools`, `tool-policy`, `memory`, `include`, `surfaces`, `skills`, `invoke`, `context`, `claw-api`, `mcp-stdio`, `hermes`, and `count`.
+
+### Managed-Tool Mediation Policy
+
+Services that subscribe to managed tools run their inference turns under a mediation budget: a maximum number of tool rounds, a per-tool execution timeout, and a total wall-clock budget for the whole mediated turn. The defaults (`max-rounds: 8`, `timeout-per-tool-ms: 30000`, `total-timeout-ms: 120000`) suit fast models, but slow reasoning models can exceed the 120s total budget on a single turn — the request fails with a 502 `context deadline exceeded`.
+
+Tune the policy at pod level (`tool-policy-defaults`) or per service (`tool-policy`). Fields you omit keep their defaults; a service-level declaration replaces the pod default entirely:
+
+```yaml
+x-claw:
+  tool-policy-defaults:
+    total-timeout-ms: 300000     # 5 minutes for slow reasoning models
+
+services:
+  fast-bot:
+    x-claw:
+      tool-policy:               # replaces the pod default
+        max-rounds: 4
+        total-timeout-ms: 60000
+```
+
+All values must be positive, and `total-timeout-ms` must be at least `timeout-per-tool-ms`. The merged policy is compiled into each agent's `tools.json` in the cllama context directory.
 
 ## Defaults and Overrides
 

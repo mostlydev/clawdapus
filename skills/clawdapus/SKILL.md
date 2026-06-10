@@ -331,6 +331,8 @@ When a service subscribes to tools via `x-claw.tools`, cllama performs bounded t
 }
 ```
 
+The policy is tunable from the pod YAML via `x-claw.tool-policy` (service level) or `x-claw.tool-policy-defaults` (pod level) with `max-rounds`, `timeout-per-tool-ms`, and `total-timeout-ms`. Omitted fields keep the defaults above; a service-level block replaces the pod default entirely. Slow reasoning models that exceed the 120s total budget fail the whole mediated turn with a 502 `context deadline exceeded` — raise `total-timeout-ms` for those services.
+
 ## Communication Tools Contract
 
 All 7 runtimes enforce private thinking + deliberate delivery — agent reasoning never reaches Discord automatically.

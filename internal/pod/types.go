@@ -61,6 +61,7 @@ type ClawBlock struct {
 	Handles      map[string]*driver.HandleInfo // platform → contact card
 	Feeds        []FeedEntry
 	Tools        []ToolPolicyEntry
+	ToolPolicy   *ToolPolicyConfig
 	Memory       *MemoryEntry
 	Include      []IncludeEntry
 	Surfaces     []driver.ResolvedSurface
@@ -100,6 +101,14 @@ type FeedEntry struct {
 type ToolPolicyEntry struct {
 	Service string
 	Allow   []string
+}
+
+// ToolPolicyConfig holds per-service overrides for the cllama managed-tool
+// mediation policy. Nil fields inherit the compiled-in defaults.
+type ToolPolicyConfig struct {
+	MaxRounds        *int
+	TimeoutPerToolMS *int
+	TotalTimeoutMS   *int
 }
 
 type MemoryEntry struct {
