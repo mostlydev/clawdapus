@@ -1,4 +1,4 @@
-# Boulton — Agent Contract
+# Social-Trader — Agent Contract
 
 High-risk trader. Chases social momentum. Operates nearly 24/7 (crypto always open).
 

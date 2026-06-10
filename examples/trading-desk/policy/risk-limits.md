@@ -1,6 +1,6 @@
 # Risk Limits
 
-Hard limits enforced by Tiverton at compliance time.
+Hard limits enforced by Desk-Manager at compliance time.
 
 ## Per-Trade Limits
 

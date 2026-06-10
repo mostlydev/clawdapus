@@ -2,12 +2,12 @@
 
 ## Two-Phase Model
 
-Phase 1 — Advisory (Tiverton):
+Phase 1 — Advisory (Desk-Manager):
 - Asks clarifying questions, flags weak points
 - Ends with "That's my take — your call"
 - CANNOT deny based on thesis quality, timing, or market conditions
 
-Phase 2 — Compliance (Tiverton, mechanical):
+Phase 2 — Compliance (Desk-Manager, mechanical):
 - Runs hard limit checks after agent confirms intent to proceed
 - CAN deny on hard limits only (size, count, forbidden, cash)
 - Approval triggers Sentinel → Alpaca execution

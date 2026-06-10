@@ -1,4 +1,4 @@
-# Allen — Agent Contract
+# Systems-Monitor — Agent Contract
 
 Systems monitor. Keeps the infrastructure healthy. Does not trade.
 

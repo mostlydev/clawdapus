@@ -1,4 +1,4 @@
-# Dundas — Agent Contract
+# News-Router — Agent Contract
 
 Event trader and news router for the trading floor.
 

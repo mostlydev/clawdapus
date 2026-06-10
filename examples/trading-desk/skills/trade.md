@@ -5,7 +5,7 @@
 **Base URL:** `http://trading-api:4000`
 
 All requests and responses are JSON. All trade actions require an `agent` field
-identifying the requesting agent (your username, e.g. `"westin"`).
+identifying the requesting agent (your username, e.g. `"momentum-trader"`).
 
 ---
 
@@ -16,13 +16,13 @@ Read `next` and follow it — do not skip phases.
 
 ```
 POST /trades/propose   →  status: "advisory"
-                              ↓  (Tiverton reviews and responds on Discord)
+                              ↓  (Desk-Manager reviews and responds on Discord)
 POST /trades/{id}/confirm  →  status: "approved"  (queued for execution)
    or
 POST /trades/{id}/cancel   →  status: "cancelled"
 ```
 
-Tiverton will mention you on Discord with advisory feedback after you propose.
+Desk-Manager will mention you on Discord with advisory feedback after you propose.
 Wait for that before confirming. If you decide to pass, cancel the trade.
 
 ---
@@ -41,7 +41,7 @@ GET /health
 ```
 POST /trades/propose
 {
-  "agent":       "westin",          // required — your username
+  "agent":       "momentum-trader", // required — your username
   "symbol":      "NVDA",            // required — ticker symbol, uppercased
   "side":        "buy",             // required — "buy" or "sell"
   "quantity":    50,                // required — number of shares / units
@@ -66,7 +66,7 @@ GET /trades
 → 200 [ { trade }, ... ]
 ```
 
-### Confirm a trade (after Tiverton advisory)
+### Confirm a trade (after Desk-Manager advisory)
 
 ```
 POST /trades/{id}/confirm
@@ -89,7 +89,7 @@ POST /trades/{id}/cancel
 
 | Status      | Meaning                                      |
 |-------------|----------------------------------------------|
-| `advisory`  | Proposed, awaiting Tiverton review           |
+| `advisory`  | Proposed, awaiting Desk-Manager review       |
 | `approved`  | Confirmed, queued for Alpaca execution       |
 | `rejected`  | Blocked by compliance (hard limit breached)  |
 | `cancelled` | Agent passed or explicitly cancelled         |
