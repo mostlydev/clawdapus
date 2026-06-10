@@ -3470,10 +3470,13 @@ func mergeProviderSeeds(authDir string, p *pod.Pod, claws map[string]*driver.Res
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Seed keyless providers (auth "none", e.g. ollama) referenced by
-	// resolved models — image MODEL labels merged with pod overrides. They
-	// carry no key pool, so the key-based loop below never creates them —
-	// but without a provider entry, cllama rejects every request with
-	// "unknown provider".
+	// resolved models — image MODEL labels merged with pod overrides. No
+	// cllama-env key exists for them, so the key-based loop below never
+	// creates them — but without a provider entry, cllama rejects every
+	// request with "unknown provider". A placeholder key is required even
+	// under auth "none": cllama's key selection demands an active key
+	// before dispatch, while the auth mode strips the header so the
+	// placeholder never goes on the wire.
 	for _, rc := range claws {
 		if rc == nil || len(rc.Cllama) == 0 {
 			continue
@@ -3482,14 +3485,33 @@ func mergeProviderSeeds(authDir string, p *pod.Pod, claws map[string]*driver.Res
 			if !shared.ProviderAllowsEmptyAPIKey(provider) {
 				continue
 			}
-			if _, exists := existing[provider]; exists {
+			state, exists := existing[provider]
+			if exists {
+				// Seed-owned entries refresh their base URL on re-up (the
+				// operator may have switched sidecar/host mode); runtime-
+				// owned entries are never touched.
+				if state.Source == "seed" {
+					if cu := customBaseURLs[provider]; cu != "" {
+						state.BaseURL = cu
+					} else if defaultBaseURLs[provider] != "" {
+						state.BaseURL = defaultBaseURLs[provider]
+					}
+				}
 				continue
 			}
-			state := &v2ProviderState{
-				Auth:      defaultAuths[provider],
-				APIFormat: "openai",
-				Source:    "seed",
-				Keys:      []v2KeyEntry{},
+			state = &v2ProviderState{
+				Auth:        defaultAuths[provider],
+				APIFormat:   "openai",
+				Source:      "seed",
+				ActiveKeyID: "seed:keyless",
+				Keys: []v2KeyEntry{{
+					ID:      "seed:keyless",
+					Label:   "keyless",
+					Secret:  "none",
+					Source:  "seed",
+					State:   "ready",
+					AddedAt: now,
+				}},
 			}
 			if cu := customBaseURLs[provider]; cu != "" {
 				state.BaseURL = cu

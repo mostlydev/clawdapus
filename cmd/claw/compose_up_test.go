@@ -2723,8 +2723,13 @@ func TestMergeProviderSeedsSeedsKeylessOllamaProvider(t *testing.T) {
 	}
 	var probe struct {
 		Providers map[string]struct {
-			BaseURL string `json:"base_url"`
-			Auth    string `json:"auth"`
+			BaseURL     string `json:"base_url"`
+			Auth        string `json:"auth"`
+			ActiveKeyID string `json:"active_key_id"`
+			Keys        []struct {
+				ID    string `json:"id"`
+				State string `json:"state"`
+			} `json:"keys"`
 		} `json:"providers"`
 	}
 	if err := json.Unmarshal(data, &probe); err != nil {
@@ -2739,6 +2744,92 @@ func TestMergeProviderSeedsSeedsKeylessOllamaProvider(t *testing.T) {
 	}
 	if ollama.BaseURL != "http://ollama:11434/v1" {
 		t.Errorf("ollama base_url = %q, want sidecar default", ollama.BaseURL)
+	}
+	// cllama's key selection requires an active key even for auth-none
+	// providers; a placeholder must be seeded or every dispatch fails with
+	// "no usable keys".
+	if len(ollama.Keys) != 1 || ollama.Keys[0].State != "ready" {
+		t.Fatalf("keyless provider must carry one ready placeholder key, got %+v", ollama.Keys)
+	}
+	if ollama.ActiveKeyID != ollama.Keys[0].ID {
+		t.Errorf("active_key_id = %q, want %q", ollama.ActiveKeyID, ollama.Keys[0].ID)
+	}
+}
+
+func TestMergeProviderSeedsKeylessBaseURLRefreshesOnReUp(t *testing.T) {
+	dir := t.TempDir()
+	stale := []byte(`{"version":2,"providers":{"ollama":{"base_url":"http://ollama:11434/v1","auth":"none","api_format":"openai","source":"seed","active_key_id":"seed:keyless","keys":[{"id":"seed:keyless","secret":"none","source":"seed","state":"ready"}]}}}`)
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), stale, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"assistant": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"OLLAMA_BASE_URL": "http://host.docker.internal:11434/v1",
+					},
+				},
+			},
+		},
+	}
+	claws := map[string]*driver.ResolvedClaw{
+		"assistant": {
+			Cllama: []string{"passthrough"},
+			Models: map[string]string{"primary": "ollama/llama3.2"},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p, claws); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var probe struct {
+		Providers map[string]struct {
+			BaseURL string `json:"base_url"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatal(err)
+	}
+	if got := probe.Providers["ollama"].BaseURL; got != "http://host.docker.internal:11434/v1" {
+		t.Errorf("seed-owned keyless base_url not refreshed on re-up: %q", got)
+	}
+}
+
+func TestMergeProviderSeedsKeylessLeavesRuntimeProvidersAlone(t *testing.T) {
+	dir := t.TempDir()
+	runtimeOwned := []byte(`{"version":2,"providers":{"ollama":{"base_url":"http://custom:9999/v1","auth":"none","api_format":"openai","source":"runtime","keys":[]}}}`)
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), runtimeOwned, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := &pod.Pod{Services: map[string]*pod.Service{}}
+	claws := map[string]*driver.ResolvedClaw{
+		"assistant": {
+			Cllama: []string{"passthrough"},
+			Models: map[string]string{"primary": "ollama/llama3.2"},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p, claws); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var probe struct {
+		Providers map[string]struct {
+			BaseURL string `json:"base_url"`
+			Source  string `json:"source"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatal(err)
+	}
+	if got := probe.Providers["ollama"]; got.Source != "runtime" || got.BaseURL != "http://custom:9999/v1" {
+		t.Errorf("runtime-owned provider must not be touched by keyless seeding: %+v", got)
 	}
 }
 
