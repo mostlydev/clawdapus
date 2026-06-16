@@ -240,7 +240,7 @@ When the LLM returns a response containing tool calls, cllama dispatches based o
 
 Unknown managed tool names are rejected at validation time.
 
-Within a single mediated turn, cllama also detects repeated managed tool calls with the same canonical tool name and arguments. The first call executes normally; later duplicates are skipped and returned to the model as a structured `duplicate_tool_call` tool result, with `tool_trace` metadata showing the original round and duplicate count. This keeps retry loops from repeatedly burning MCP sidecar time for the same query.
+Within a mediated turn, cllama also detects repeated managed tool calls with the same canonical tool name and arguments. The first call executes normally; later duplicates are **not re-executed** against the providing service. By default (`CLLAMA_MANAGED_DUPLICATE_POLICY=replay`) the model-facing result of the first call is replayed for the duplicate so the model receives the data it asked for and moves on; setting `reject` restores the legacy behavior of returning a data-less `duplicate_tool_call` 409. Either way, `tool_trace` records the original round, duplicate count, streak, and policy. If a model keeps re-issuing the identical call even after the replay, a streak cutoff (`CLLAMA_MANAGED_DUPLICATE_STREAK_CUTOFF`, default 3) disables tools and forces a final answer before the round budget is exhausted. This keeps retry loops from burning MCP sidecar time — or the whole turn — on the same query.
 
 **Budget limits** (compiled into `tools.json`):
 
@@ -276,7 +276,7 @@ Hidden tool rounds are preserved across turns. When the runner sends its next re
 
 ### Error Handling
 
-Tool execution errors are fed back to the LLM as structured results inside the mediated loop — the LLM decides how to communicate the failure to the runner. Duplicate managed tool calls are treated as structured tool errors rather than sidecar executions. If cllama itself encounters a fatal error (budget exhaustion, internal failure), it returns `502` to the runner.
+Tool execution errors are fed back to the LLM as structured results inside the mediated loop — the LLM decides how to communicate the failure to the runner. Duplicate managed tool calls are served from the cached first-call result (or, under `reject` policy, returned as a structured duplicate error) rather than re-executed against the sidecar. If cllama itself encounters a fatal error (budget exhaustion, internal failure), it returns `502` to the runner.
 
 ## Telemetry and Audit
 

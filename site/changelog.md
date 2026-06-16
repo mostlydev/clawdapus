@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.22.0 <Badge type="tip" text="Latest" /> {#v0-22-0}
+## v0.22.1 <Badge type="tip" text="Latest" /> {#v0-22-1}
+
+*2026-06-16*
+
+- **Managed-tool duplicate calls replay the cached result instead of dropping data** — when a model repeats an identical managed tool call, cllama now replays the earlier model-facing result for the new tool call ID instead of returning a data-less HTTP 409. Previously a model that never received the earlier data on the repeat could re-issue the same call until the managed-tool round budget was exhausted, burning the whole turn on one tool without ever finalizing — the trigger was the rejection payload, not the model, so it reproduced independent of model. A consecutive-duplicate streak cutoff (`CLLAMA_MANAGED_DUPLICATE_STREAK_CUTOFF`, default `3`) forces graceful finalization for models that loop even after receiving the replayed result, and `CLLAMA_MANAGED_DUPLICATE_POLICY=reject` restores the legacy 409 behavior. Both OpenAI-compatible and Anthropic mediation paths are covered; `claw audit` gains a `duplicate_managed_tool_call_finalization` intervention. ([cllama v0.7.1](https://github.com/mostlydev/cllama/releases/tag/v0.7.1))
+- **Pins infra images** — cllama moves to [v0.7.1](https://github.com/mostlydev/cllama/releases/tag/v0.7.1). `claw-api`, `clawdash`, `claw-wall`, `claw-channel-memory`, and `claw-mcp-stdio` republish at `v0.22.1`; `hermes-base` stays at `v2026.5.16-claw.2`.
+
+## v0.22.0 {#v0-22-0}
 
 *2026-06-09*
 

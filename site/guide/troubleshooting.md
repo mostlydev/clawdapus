@@ -128,7 +128,8 @@ Intervention reasons you may see:
 | Intervention | Meaning |
 |--------------|---------|
 | `managed_tool_schema_rejected:<tool>` | Tool call rejected pre-dispatch for schema violations |
-| `duplicate_managed_tool_call:<tool>` | Same tool, same args, same turn — skipped, structured error returned |
+| `duplicate_managed_tool_call:<tool>` | Same tool + args repeated in a turn; the earlier cached result is replayed (default `replay`), or the legacy data-less 409 is returned under `CLLAMA_MANAGED_DUPLICATE_POLICY=reject` |
+| `duplicate_managed_tool_call_finalization:<tool>` | After `CLLAMA_MANAGED_DUPLICATE_STREAK_CUTOFF` consecutive identical duplicate calls (default 3), cllama disabled tools and forced a final answer before the round budget ran out |
 | `mixed_tool_order_internal_retry` | Model mixed native-first/managed-later tool order; cllama replanned internally |
 | `managed_prefix_native_suffix_serialized` | Managed prefix executed internally before a runner-native suffix in one response |
 | `managed_tool_budget_finalization` | Budget exhausted; cllama forced a final text turn instead of returning empty |

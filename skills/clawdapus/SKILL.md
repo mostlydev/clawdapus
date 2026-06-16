@@ -311,7 +311,7 @@ When a service subscribes to tools via `x-claw.tools`, cllama performs bounded t
 
 - Tools are injected into the LLM request as available tool definitions
 - When the model calls a tool, cllama executes against the providing service. The execution path depends on the descriptor: HTTP-native services use the per-tool `http` metadata; MCP sidecars (descriptor declares a top-level `mcp` block, v0.11.0+) are reached via the Streamable HTTP `tools/call` endpoint with cached `initialize` sessions.
-- Repeated identical managed tool calls in one mediated turn are not re-executed; cllama returns a structured `duplicate_tool_call` result and records duplicate metadata in `tool_trace`
+- Repeated identical managed tool calls in a mediated turn are not re-executed; by default cllama replays the first call's cached result (`CLLAMA_MANAGED_DUPLICATE_POLICY=replay`; `reject` restores the legacy data-less `duplicate_tool_call` 409). After `CLLAMA_MANAGED_DUPLICATE_STREAK_CUTOFF` consecutive identical calls (default 3) it disables tools and forces a final answer. Duplicate metadata (round, count, streak, policy) is recorded in `tool_trace`
 - Tool results are fed back to the model for up to 8 rounds (configurable)
 - `tool_trace` entries appear in session history for auditability
 - Works with both OpenAI-compatible and Anthropic-format requests
