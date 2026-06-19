@@ -72,6 +72,7 @@ const (
 var (
 	extractServiceSkillFromImage = runtime.ExtractServiceSkill
 	writeRuntimeFile             = os.WriteFile
+	removePreviousRuntimeDir     = os.RemoveAll
 	inspectClawImage             = inspect.Inspect
 	imageExistsLocally           = build.ImageExistsLocally
 	generateClawDockerfile       = build.Generate
@@ -997,7 +998,16 @@ func (s *runtimeDirStage) Commit() error {
 	if s == nil || s.PreviousPath == "" {
 		return nil
 	}
-	return os.RemoveAll(s.PreviousPath)
+	if err := removePreviousRuntimeDir(s.PreviousPath); err != nil {
+		if os.IsPermission(err) {
+			if helperErr := removeRuntimeDirWithDocker(s.PreviousPath); helperErr != nil {
+				return fmt.Errorf("%w (docker helper cleanup failed: %v)", err, helperErr)
+			}
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func preMigratePortableMemory(runtimeDir, memoryRoot string, p *pod.Pod) error {
