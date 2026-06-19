@@ -323,7 +323,8 @@ When run interactively (no flags), prompts for project name, agent name, claw ty
 
 | Flag | Description |
 |------|-------------|
-| `--from <path>` | Migrate from an existing OpenClaw config directory. |
+| `--from <path>` | Import an existing OpenClaw or Hermes config into the same runtime. |
+| `--source <openclaw\|hermes>` | Source runtime override when `--from` autodetection is ambiguous. |
 | `--project <name>` | Project name (used for `x-claw.pod` and image prefix). |
 | `--agent <name>` | Primary agent name. |
 | `--type <type>` | Claw type (openclaw, hermes, nanoclaw, nanobot, picoclaw, nullclaw, microclaw, generic). |
@@ -341,8 +342,8 @@ claw init my-project
 # Non-interactive with all flags
 claw init --project trading-desk --type openclaw --platform discord
 
-# Migrate from existing OpenClaw setup
-claw init --from ~/existing-openclaw-config
+# Import an existing OpenClaw or Hermes setup into claw management
+claw init --from ~/existing-config
 ```
 
 After scaffolding:
