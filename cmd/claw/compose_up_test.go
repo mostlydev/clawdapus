@@ -3710,6 +3710,284 @@ func TestResolvePodCapabilitiesFixRefreshesAndRetriesUnknownTool(t *testing.T) {
 	}
 }
 
+func TestResolvePodCapabilitiesStrictHintsFixForBuildBackedMissingMemory(t *testing.T) {
+	prevFix := composeUpFix
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
+	composeUpFix = false
+	defer func() {
+		composeUpFix = prevFix
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
+	}()
+	imageExistsLocally = func(image string) bool { return image == "analyst:latest" }
+	inspectClawImage = func(string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{ClawType: "openclaw"}, nil
+	}
+	loadDescriptorFromImage = func(string, string) (*describe.ServiceDescriptor, error) {
+		return nil, os.ErrNotExist
+	}
+
+	podDir := t.TempDir()
+	serviceDir := filepath.Join(podDir, "services", "team-memory")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Image: "analyst:latest",
+				Claw: &pod.ClawBlock{
+					Memory: &pod.MemoryEntry{Service: "team-memory", TimeoutMS: 300},
+				},
+			},
+			"team-memory": {
+				Compose: map[string]interface{}{
+					"build": map[string]interface{}{
+						"context":    "./services/team-memory",
+						"dockerfile": "Dockerfile",
+					},
+				},
+			},
+		},
+	}
+
+	_, err := resolvePodCapabilities("claw-pod.yml", podDir, p, map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err == nil {
+		t.Fatal("expected strict mode remediation hint")
+	}
+	if !strings.Contains(err.Error(), "memory target \"team-memory\" has no descriptor") {
+		t.Fatalf("expected original memory error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "run: claw up --fix -d") {
+		t.Fatalf("expected claw up --fix remediation, got: %v", err)
+	}
+}
+
+func TestResolvePodCapabilitiesFixRefreshesAndRetriesMissingMemory(t *testing.T) {
+	prevFix := composeUpFix
+	prevRefresh := refreshRuntimeDescriptor
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
+	composeUpFix = true
+	defer func() {
+		composeUpFix = prevFix
+		refreshRuntimeDescriptor = prevRefresh
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
+	}()
+	imageExistsLocally = func(image string) bool { return image == "analyst:latest" }
+	inspectClawImage = func(string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{ClawType: "openclaw"}, nil
+	}
+	loadDescriptorFromImage = func(string, string) (*describe.ServiceDescriptor, error) {
+		return nil, os.ErrNotExist
+	}
+
+	podDir := t.TempDir()
+	serviceDir := filepath.Join(podDir, "services", "team-memory")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Image: "analyst:latest",
+				Claw: &pod.ClawBlock{
+					Memory: &pod.MemoryEntry{Service: "team-memory", TimeoutMS: 450},
+				},
+			},
+			"team-memory": {
+				Compose: map[string]interface{}{
+					"build": map[string]interface{}{
+						"context":    "./services/team-memory",
+						"dockerfile": "Dockerfile",
+					},
+				},
+			},
+		},
+	}
+
+	var refreshedService string
+	refreshRuntimeDescriptor = func(_ string, _ string, _ *pod.Pod, serviceName string, _ map[string]string, _ map[string]*inspect.ClawInfo, descriptors map[string]*describe.ServiceDescriptor) error {
+		refreshedService = serviceName
+		descriptors[serviceName] = &describe.ServiceDescriptor{
+			Version: 2,
+			Memory: &describe.MemoryDescriptor{
+				Recall: &describe.MemoryEndpoint{Path: "/recall"},
+				Retain: &describe.MemoryEndpoint{Path: "/retain"},
+			},
+		}
+		return nil
+	}
+
+	capabilities, err := resolvePodCapabilities("claw-pod.yml", podDir, p, map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err != nil {
+		t.Fatalf("resolvePodCapabilities: %v", err)
+	}
+	if refreshedService != "team-memory" {
+		t.Fatalf("expected team-memory refresh, got %q", refreshedService)
+	}
+	memory := capabilities.Memory["analyst"]
+	if memory == nil || memory.Service != "team-memory" || memory.Config.TimeoutMS != 450 {
+		t.Fatalf("expected refreshed memory subscription, got %+v", memory)
+	}
+}
+
+func TestResolvePodCapabilitiesStrictHintsFixForBuildBackedMissingFeed(t *testing.T) {
+	prevFix := composeUpFix
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
+	composeUpFix = false
+	defer func() {
+		composeUpFix = prevFix
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
+	}()
+	imageExistsLocally = func(image string) bool { return image == "analyst:latest" }
+	inspectClawImage = func(string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{ClawType: "openclaw"}, nil
+	}
+	loadDescriptorFromImage = func(string, string) (*describe.ServiceDescriptor, error) {
+		return nil, os.ErrNotExist
+	}
+
+	podDir := t.TempDir()
+	serviceDir := filepath.Join(podDir, "services", "market-api")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Image: "analyst:latest",
+				Claw: &pod.ClawBlock{
+					Feeds: []pod.FeedEntry{{Name: "market-context", Unresolved: true}},
+				},
+			},
+			"market-api": {
+				Compose: map[string]interface{}{
+					"build": map[string]interface{}{
+						"context":    "./services/market-api",
+						"dockerfile": "Dockerfile",
+					},
+				},
+			},
+		},
+	}
+
+	_, err := resolvePodCapabilities("claw-pod.yml", podDir, p, map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{})
+	if err == nil {
+		t.Fatal("expected strict mode remediation hint")
+	}
+	if !strings.Contains(err.Error(), "feed \"market-context\" was not found in the descriptor registry") {
+		t.Fatalf("expected original feed error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "run: claw up --fix -d") {
+		t.Fatalf("expected claw up --fix remediation, got: %v", err)
+	}
+}
+
+func TestResolvePodCapabilitiesFixRefreshesAndRetriesMissingFeed(t *testing.T) {
+	prevFix := composeUpFix
+	prevRefresh := refreshRuntimeDescriptor
+	prevExists := imageExistsLocally
+	prevInspect := inspectClawImage
+	prevLoadDescriptor := loadDescriptorFromImage
+	composeUpFix = true
+	defer func() {
+		composeUpFix = prevFix
+		refreshRuntimeDescriptor = prevRefresh
+		imageExistsLocally = prevExists
+		inspectClawImage = prevInspect
+		loadDescriptorFromImage = prevLoadDescriptor
+	}()
+	imageExistsLocally = func(image string) bool { return image == "analyst:latest" }
+	inspectClawImage = func(string) (*inspect.ClawInfo, error) {
+		return &inspect.ClawInfo{ClawType: "openclaw"}, nil
+	}
+	loadDescriptorFromImage = func(string, string) (*describe.ServiceDescriptor, error) {
+		return nil, os.ErrNotExist
+	}
+
+	podDir := t.TempDir()
+	serviceDir := filepath.Join(podDir, "services", "market-api")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pod.Pod{
+		Name: "test-pod",
+		Services: map[string]*pod.Service{
+			"analyst": {
+				Image: "analyst:latest",
+				Claw: &pod.ClawBlock{
+					Feeds: []pod.FeedEntry{{Name: "market-context", Unresolved: true}},
+				},
+			},
+			"market-api": {
+				Expose: []string{"4000"},
+				Compose: map[string]interface{}{
+					"build": map[string]interface{}{
+						"context":    "./services/market-api",
+						"dockerfile": "Dockerfile",
+					},
+				},
+			},
+		},
+	}
+
+	var refreshedService string
+	refreshRuntimeDescriptor = func(_ string, _ string, _ *pod.Pod, serviceName string, _ map[string]string, _ map[string]*inspect.ClawInfo, descriptors map[string]*describe.ServiceDescriptor) error {
+		refreshedService = serviceName
+		descriptors[serviceName] = &describe.ServiceDescriptor{
+			Version: 2,
+			Feeds: []describe.FeedDescriptor{{
+				Name:        "market-context",
+				Path:        "/context",
+				TTL:         120,
+				Description: "Market context.",
+			}},
+		}
+		return nil
+	}
+
+	if _, err := resolvePodCapabilities("claw-pod.yml", podDir, p, map[string]string{}, map[string]*inspect.ClawInfo{}, map[string]*describe.ServiceDescriptor{}); err != nil {
+		t.Fatalf("resolvePodCapabilities: %v", err)
+	}
+	if refreshedService != "market-api" {
+		t.Fatalf("expected market-api refresh, got %q", refreshedService)
+	}
+	feed := p.Services["analyst"].Claw.Feeds[0]
+	if feed.Unresolved || feed.Source != "market-api" || feed.Path != "/context" || feed.TTL != 120 {
+		t.Fatalf("expected refreshed feed resolution, got %+v", feed)
+	}
+}
+
 func TestResolveMemorySubscriptionsRejectsMissingCapability(t *testing.T) {
 	p := &pod.Pod{
 		Services: map[string]*pod.Service{
