@@ -4003,6 +4003,14 @@ func TestResolveMemorySubscriptionsRejectsMissingCapability(t *testing.T) {
 		"team-memory": {Version: 2},
 	}); err == nil {
 		t.Fatal("expected missing memory capability error")
+	} else {
+		var memoryErr *memoryResolutionError
+		if !errors.As(err, &memoryErr) {
+			t.Fatalf("expected memoryResolutionError, got %T: %v", err, err)
+		}
+		if memoryErr.MemoryService != "team-memory" {
+			t.Fatalf("unexpected memory error metadata: %+v", memoryErr)
+		}
 	}
 }
 
