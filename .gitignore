@@ -13,6 +13,7 @@ openclaw/workspaces/*/logs/
 /bin/
 /claw
 /claw-api
+/channel-memory
 /build/
 Dockerfile.generated
 

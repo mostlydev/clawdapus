@@ -42,7 +42,7 @@ It is the layer below the framework. The layer above the operating system.
 4. **Drift is an open metric** -- the governance proxy emits independent telemetry rather than trusting a bot's self-report. What counts as "drift" is operator-defined and computed outside the agent; Clawdapus ships the verifiable record, not a built-in score.
 5. **Surfaces are declared** -- topology for operators, capability discovery for bots. The proxy enforces cognitive boundaries.
 6. **Claws are users** -- standard credentials; the proxy governs intent, the service's own auth governs execution.
-7. **Compute is a privilege** -- the operator assigns models and schedules; the proxy enforces budgets and rate limits.
+7. **Compute is a privilege** -- the operator assigns models and schedules; the proxy meters usage and exposes the budget-control surface.
 8. **Think twice, act once** -- a reasoning model cannot be its own judge. Governance runs in a separate process.
 9. **Memory survives the container (and the runner)** -- session history is captured at the proxy boundary and persisted outside the runtime directory. Swap the runtime without losing the mind. The **ambient memory plane** is live: pluggable memory services declared via `claw.describe`, compiled by `claw up`, and orchestrated by cllama. Infrastructure recalls derived context before each inference turn and retains after each response. The agent does not manage its own long-term memory. Infrastructure does.
 

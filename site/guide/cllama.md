@@ -14,7 +14,7 @@ Agent → (bearer token) → cllama proxy → (real API key) → LLM Provider
                      audit log + dashboard
 ```
 
-A single proxy instance serves the entire pod. Bearer tokens resolve which agent is calling, so the proxy can apply per-agent policy, budgets, and logging.
+A single proxy instance serves the entire pod. Bearer tokens resolve which agent is calling, so the proxy can apply per-agent model policy, managed-tool budgets, and logging.
 
 ## Credential Starvation
 
@@ -32,7 +32,7 @@ Provider API keys belong in `x-claw.cllama-defaults.env` at the pod level. They 
 
 The proxy uses bearer tokens to resolve caller identity. Each token maps to a specific agent (or agent ordinal), which means the proxy can:
 
-- Apply per-agent policy and cost budgets
+- Apply per-agent model policy and record cost telemetry
 - Track per-agent token usage and spend
 - Log which agent made which request
 - Enforce different model access per agent
@@ -102,6 +102,15 @@ Feed headers no longer carry the volatile `refreshed <ts>` line in model-visible
 ### Managed Tool Mediation
 
 If `tools.json` is present for the calling agent, cllama injects the compiled managed tool schemas into the upstream request and executes matching tool calls itself. The runner sees only the terminal response. Runner-native tools still pass through to the runner when they are not part of a managed-tool round.
+
+Managed tools can execute through two provider-side transports:
+
+- **HTTP descriptors** use the per-tool `http` metadata from `claw.describe` and call the target service directly.
+- **MCP descriptors** use the descriptor's top-level `mcp` block. cllama performs the Streamable HTTP `initialize` / `notifications/initialized` handshake, caches MCP sessions per target, calls `tools/call`, and retries once when an MCP session expires.
+
+Within the mediation loop, cllama preserves the model-visible order that provider APIs require. If a model returns a managed-tool prefix mixed with runner-native tool calls, cllama serializes the managed prefix, logs a `mixed_tool_order_internal_retry` intervention, and retries internally instead of handing an invalid mixed transcript to the runner.
+
+Duplicate managed tool calls are handled without re-executing the provider service. The first call runs normally; later calls with the same canonical tool name and arguments receive the cached model-facing result by default. If a model keeps repeating the same duplicate call, a duplicate streak cutoff disables tools and forces a final answer before the round budget is exhausted. These paths are recorded in `tool_trace` and intervention telemetry.
 
 ### Channel Context Cursors
 
@@ -177,6 +186,15 @@ The mount path must include the `context/` directory segment. The proxy expects 
 
 The reference loader reads the compiled contract (`AGENTS.md`), infrastructure map (`CLAWDAPUS.md`), identity metadata, service auth, tool manifest, memory manifest, model policy, and channel allowlist. There is still no generic policy-decoration config or response-amendment hook in the context mount.
 
+### Internal Context Snapshots
+
+For operator visibility, cllama stores the most recent provider-visible context assembled for each agent. The read-only internal endpoints are:
+
+- `GET /internal/context`
+- `GET /internal/context/<agent-id>/snapshot`
+
+Clawdash reads these through claw-api so operators can inspect the effective system contract, late runtime context, feed blocks or skip notices, memory recall, tool schemas, model route, and redacted metadata for the last turn. Snapshots are diagnostic state only; they are not a control plane and do not mutate agent context.
+
 ### Scaled Services
 
 For services with `count > 1`, context is generated **per ordinal**. A service named `crypto-crusher` with `count: 3` produces three separate context directories: `crypto-crusher-0/`, `crypto-crusher-1/`, `crypto-crusher-2/`. Each ordinal gets its own bearer token, its own compiled contract, and its own audit trail.
@@ -196,6 +214,7 @@ The cllama container receives its configuration through environment variables in
 | `CLLAMA_FEED_MAX_RESPONSE_BYTES` | Per-feed byte cap applied at fetch time before formatting. Default `32768`. Invalid or non-positive values fall back to the default. |
 | `CLLAMA_FEED_MAX_TOTAL_BYTES` | Aggregate cap across all formatted feed blocks injected into one request. Default `65536`. Invalid or non-positive values fall back to the default. |
 | `CLLAMA_FEED_FETCH_TIMEOUT_MS` | Per-fetch HTTP timeout for feed providers. Default `3000`, sanity range 100–120000; out-of-range values fall back to the default. Raise it when a feed provider computes synchronously under load. |
+| `CLLAMA_DISPATCH_CANDIDATE_TIMEOUT_MS` | Per-candidate timeout for non-streaming upstream model dispatch before trying the next declared fallback. Default `60000`. Streaming responses are exempt so long-running streams are not cut off. |
 | `CLLAMA_TOOL_SCHEMA_VALIDATION` | Set to `off` to disable pre-dispatch validation of managed tool arguments against the manifest `inputSchema`. On by default; validation fails open on schema constructs it does not understand. |
 | `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `AI_GATEWAY_API_KEY`, etc. |
 
@@ -402,13 +421,13 @@ Event-specific fields may also be present depending on `type`:
 
 Every request/response pair produces two log events: one with `type: "request"` on ingress and one with `type: "response"` on egress. Error events use `type: "error"`. Intervention events use `type: "intervention"`. Token counts and cost estimates are extracted from the provider's response headers or body and attached to the response event.
 
-### Spec Divergences
+### Spec Notes
 
-The reference implementation has a few known divergences from the spec document:
+The formal spec follows the reference implementation's telemetry shape:
 
 - The `intervention` field is typed as `*string` with no `omitempty` tag. Every event emits `"intervention": null`, even when no intervention occurred. This is intentional -- it ensures log parsers can rely on the field always being present.
-- The implementation uses `ts` for the timestamp field. The spec (section 5) previously listed `timestamp`.
-- The spec (section 5) omits `error` from its type enum and uses `intervention_reason` where the reference logger uses `intervention`.
+- The implementation uses `ts` for the timestamp field.
+- Older docs and consumers may mention `intervention_reason`; the reference logger uses `intervention`.
 
 These divergences are documented here as practical guidance. The reference implementation is the source of truth for runtime behavior.
 
@@ -452,9 +471,9 @@ The reference image (`ghcr.io/mostlydev/cllama`) implements the v1 API contract 
 
 This image is used for testing and serves as the starting point for building custom policy engines.
 
-### Future: cllama-policy
+### Future: Policy Plane
 
-The next planned implementation is `cllama-policy`, which adds bidirectional policy interception -- prompt decoration from policy modules, policy blocking, response amendment, redaction, and organization-specific drift scoring. The passthrough reference establishes the transport, identity, context, tool, memory, and telemetry contracts; `cllama-policy` builds policy logic on top.
+The policy-plane milestone adds bidirectional policy interception -- prompt decoration from policy modules, policy blocking, response amendment, redaction, and organization-specific drift scoring. The passthrough reference establishes the transport, identity, context, tool, memory, and telemetry contracts; policy services build policy logic on top.
 
 ### Third-Party Engines
 
@@ -462,7 +481,7 @@ Any OpenAI-compatible proxy that consumes the Clawdapus context mount layout can
 
 ### ClawRouter
 
-[ClawRouter](https://github.com/BlockRunAI/ClawRouter) is a specialized cllama implementation focused on forced model routing, rate limiting, and compute metering. It intercepts model requests, evaluates them against organizational budgets or provider availability, and dynamically routes, downgrades, or rate-limits requests to contain costs across a fleet of untrusted agents.
+[ClawRouter](https://github.com/BlockRunAI/ClawRouter) is a specialized cllama implementation focused on forced model routing, rate limiting, and compute metering. The reference passthrough provides the routing and telemetry contract; stricter budget or rate-limit enforcement belongs to a policy/budget implementation layered on that contract.
 
 ## Security Model
 
@@ -521,9 +540,9 @@ The `cllama/` directory is a git submodule pointing to the cllama source reposit
 Current constraints to be aware of:
 
 - **Single proxy type only.** Multi-proxy is represented in the data model, but the runtime currently fails fast if more than one proxy type is declared per pod. Proxy chaining is future work.
-- **Passthrough only.** The `cllama-policy` proxy type (full bidirectional policy interception with prompt decoration, policy blocking, response amendment, and redaction) is future work. The reference implementation does identity, routing, compiled context injection, managed tools, memory orchestration, telemetry, and cost tracking.
+- **Passthrough only.** Full bidirectional policy interception with prompt decoration, policy blocking, response amendment, and redaction is future policy-plane work. The reference implementation does identity, routing, compiled context injection, managed tools, memory orchestration, telemetry, and cost tracking.
 - **No per-turn hooks.** The Clawdapus `Driver` interface has four methods (`Validate`, `Materialize`, `PostApply`, `HealthProbe`) -- all run once at deploy/startup. There is no per-turn or per-request hook. Any per-request context enrichment must go through cllama or a runner-native mechanism.
 - **Intervention field quirk.** The cllama logger emits `"intervention": null` on every event (the field has no `omitempty` tag). This is expected behavior, not a missing value.
-- **Spec divergences.** The specification uses `intervention_reason` where the reference implementation uses `intervention`, and omits `error` from its type enum. The `ts` timestamp field replaced `timestamp`. Consumers should handle both forms.
+- **Telemetry compatibility.** The reference implementation uses `intervention` and `ts`. Older logs or downstream consumers may still account for historical `intervention_reason` or `timestamp` names.
 
 See the full [cllama specification on GitHub](https://github.com/mostlydev/clawdapus/blob/master/docs/CLLAMA_SPEC.md) for the formal standard.

@@ -72,20 +72,20 @@ The proxy SHOULD execute the following pipeline:
 2. **Authentication:** The proxy MUST validate the `<secure-secret>` before processing the request.
 3. **Model Validation:** Ensure the requested `model` is within the `CLAW_ALLOWED_MODELS` list (parsed from `metadata.json`).
 
-### B. Outbound Interception (Decoration & Governance)
-1. **Context Aggregation:** The proxy parses the `enforce` rules from the agent-specific `AGENTS.md`.
-2. **Tool Scoping:** If the agent's request contains `tools`, the proxy evaluates the tools against the agent's identity and active policy modules. The proxy MAY drop tools the agent is not authorized to use.
-3. **Prompt Decoration (Pre-Prompting):** The proxy MAY modify the outbound `messages` array, injecting specific rules, priorities, or warnings based on the aggregated context.
-4. **Policy Blocking:** If the outbound prompt violates a loaded policy module, the proxy MAY short-circuit the request and return an error or a mock response.
-5. **Forced Model Routing & Rate Limiting (Compute Metering):** Even if the agent requests a specific model (e.g., `gpt-4o`), the proxy MAY seamlessly rewrite the request to use a different, operator-approved model (e.g., `claude-3-haiku-20240307`) or provider. The proxy MAY also enforce hard rate limits (returning `429 Too Many Requests`). This allows the proxy to enforce strict compute budgets, meter usage, and prevent runaway agents from burning tokens, all without the agent knowing its model was downgraded or throttled by infrastructure.
+### B. Outbound Interception (Context, Routing & Policy Slots)
+1. **Context Aggregation:** The proxy loads the agent-specific compiled context from `CLAW_CONTEXT_ROOT` and MAY inject infrastructure-owned runtime context such as feeds, memory recall, time context, and channel deltas.
+2. **Tool Scoping:** If the agent's request contains `tools`, the proxy evaluates the request against the compiled tool manifest for that agent. The reference implementation only exposes tools declared for that agent; policy-plane implementations MAY further filter or deny tools.
+3. **Prompt Decoration (Pre-Prompting):** Policy-plane implementations MAY modify the outbound `messages` array, injecting specific rules, priorities, or warnings based on the compiled context. The passthrough reference does not perform policy prompt decoration.
+4. **Policy Blocking:** If the outbound prompt violates a loaded policy module, a policy-plane implementation MAY short-circuit the request and return an error or a mock response. The passthrough reference does not perform policy blocking.
+5. **Forced Model Routing & Compute Metering:** Even if the agent requests a specific model (e.g., `gpt-4o`), the proxy MAY seamlessly rewrite the request to use a different, operator-approved model (e.g., `claude-3-haiku-20240307`) or provider. The reference implementation meters usage and records cost telemetry; hard budget and rate-limit enforcement (including `429 Too Many Requests`) is a policy/budget extension point rather than a required passthrough behavior.
 
 ### C. Provider Execution
 The proxy strips the dummy token, attaches the real `PROVIDER_API_KEY`, and forwards the decorated request to the upstream LLM provider.
 
-### D. Inbound Interception (Amendment & Drift Scoring)
-1. **Response Evaluation:** The proxy evaluates the provider's response against the `enforce` rules in `/claw/context/<agent-id>/AGENTS.md` and the active `CLAW_POLICY_MODULES`.
-2. **Amendment:** If the response contains restricted information (e.g., PII leakage) or violates the tone/instructions of the contract, the proxy MAY rewrite the content.
-3. **Drift Scoring:** The proxy analyzes how far the provider's raw response drifted from the agent's ideal behavior defined in the contract. It MUST emit a structured log of this drift score.
+### D. Inbound Interception (Policy Evaluation Slot)
+1. **Response Evaluation:** Policy-plane implementations MAY evaluate the provider's response against the compiled contract and active policy modules. The passthrough reference forwards provider responses without policy evaluation.
+2. **Amendment:** If the response contains restricted information (e.g., PII leakage) or violates the tone/instructions of the contract, a policy-plane implementation MAY rewrite the content. The passthrough reference does not amend responses.
+3. **Drift Scoring:** Behavioral drift is an organization-specific policy metric. A policy-plane implementation MAY emit drift or score telemetry, but the passthrough reference does not define or emit a built-in `drift_score`.
 
 ### E. Egress
 The (potentially amended) response is returned to the agent container.
@@ -97,12 +97,14 @@ The `cllama` proxy MUST emit structured JSON logs to `stdout`. Clawdapus collect
 Logs must contain the following fields:
 - `ts`: ISO-8601 UTC timestamp.
 - `claw_id`: The calling agent.
-- `type`: one of `request`, `response`, `error`, `intervention`, `feed_fetch`, `provider_pool`, or `memory_op`.
-- `intervention`: If the proxy modified a prompt or routing decision, it describes why.
+- `type`: one of `request`, `response`, `error`, `intervention`, `feed_fetch`, `feed_injection`, `memory_op`, `channel_context_op`, or `provider_pool`.
+- `intervention`: If the proxy modified routing, mediation, or other request handling, it describes why. In the reference logger this field is present on every event and is `null` when no intervention occurred.
 
 Event-specific fields may also be present:
 - `status_code`, `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd` for request/response/error events
 - `feed_name`, `feed_url` for feed fetch events
+- `feed_name`, `source`, `feed_status`, and byte-budget fields for feed injection events
+- `kind`, `channels`, `retained`, `returned`, `omitted`, byte counts, and source/status fields for channel context operations
 - `provider`, `key_id`, `action`, `reason`, `cooldown_until` for provider-pool events
 - `memory_service`, `memory_op`, `memory_status`, `memory_blocks`, `memory_bytes`, `memory_removed` for memory telemetry events
 
@@ -180,4 +182,4 @@ The passthrough reference:
 This image is used for testing network integration and serves as the boilerplate for operators to build proprietary `cllama` policy engines (e.g., incorporating advanced DLP, RAG-based context injection, or conversational configuration).
 
 ### Routing and Compute Metering
-Tools like **[ClawRouter](https://github.com/BlockRunAI/ClawRouter)** act as specialized instances of a `cllama` proxy focused entirely on forced model routing, rate limiting, and compute metering. A routing proxy seamlessly intercepts model requests, evaluates them against organizational budgets or provider availability, and dynamically routes, downgrades, or rate-limits the request to strictly contain costs across a fleet of untrusted agents.
+Tools like **[ClawRouter](https://github.com/BlockRunAI/ClawRouter)** act as specialized instances of a `cllama` proxy focused on forced model routing, provider availability, rate limiting, and compute metering. The reference passthrough establishes the identity, routing, and telemetry contract; stricter budget or rate-limit enforcement belongs to a policy/budget implementation layered on that contract.
