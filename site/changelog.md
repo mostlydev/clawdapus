@@ -31,7 +31,21 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.22.1 <Badge type="tip" text="Latest" /> {#v0-22-1}
+## v0.23.0 <Badge type="tip" text="Latest" /> {#v0-23-0}
+
+*2026-06-18*
+
+- **Provider dispatch fallback on transport timeout / 5xx** — when an upstream request times out or returns an eligible 5xx, cllama now advances to the next declared model candidate before any downstream bytes are written, instead of returning the error. A single slow or failing provider no longer burns the whole request when a fallback candidate is configured; on the terminal candidate the upstream response is forwarded unchanged (status and body preserved). The per-candidate request timeout is configurable via `CLLAMA_DISPATCH_CANDIDATE_TIMEOUT_MS` (default `60000`); streaming requests are exempt, and auth/quota/rate-limit handling is unchanged. ([cllama v0.7.2](https://github.com/mostlydev/cllama/releases/tag/v0.7.2)) Closes [#205](https://github.com/mostlydev/clawdapus/issues/205).
+- **Host-readable session history and context ledger** — per-agent channel-cursor and `context-ledger` directories are now created `0o777` with cursor files `0o666` so a non-root host operator can read them for `claw audit` and history export. They were previously created root-only (`0o700`/`0o600`), which blocked operator diagnostics on mounted history. ([cllama v0.7.2](https://github.com/mostlydev/cllama/releases/tag/v0.7.2)) Closes [#233](https://github.com/mostlydev/clawdapus/issues/233).
+- **`claw up --fix` repairs stale memory and feed descriptors** — the runtime descriptor auto-refresh that already covered managed-tool subscriptions now also triggers on memory and feed subscription resolution failures, so a stale build-backed descriptor is refreshed and retried for all three subscription kinds. Closes [#226](https://github.com/mostlydev/clawdapus/issues/226).
+- **Real repair for cross-UID runtime cleanup** — `claw up` rotation cleanup of `.claw-runtime.previous-*` now falls back to a privileged helper when a previous runtime directory holds container-written files owned by a foreign UID, instead of warning and leaving stale directories to accumulate as disk debt on long-running pods. Closes [#169](https://github.com/mostlydev/clawdapus/issues/169).
+- **Deduplicated skills in generated context** — `CLAWDAPUS.md` no longer lists the same skill twice when a service manual and a generic operator skill resolve to the same path; the service-manual label wins. Closes [#200](https://github.com/mostlydev/clawdapus/issues/200).
+- **CI test gate** — `go vet ./...` and `go test ./...` now run on every push to master and every pull request, with submodules checked out. Previously the suite only ran at release time. Closes [#311](https://github.com/mostlydev/clawdapus/issues/311).
+- **Documentation honesty pass** — the manifesto, site, and `CLLAMA_SPEC` now state that the proxy *meters* compute and is the enforcement *point* rather than claiming it already enforces hard compute budgets or rate limits (silent model downgrade remains a real, shipped capability). `CLLAMA_SPEC` drops the unimplemented `drift_score` requirement, reframes §4B–D as the policy-plane contract slot, and documents the `channel_context_op` log type; the cllama guide backfills current managed-tool mediation behavior. Closes [#303](https://github.com/mostlydev/clawdapus/issues/303), [#304](https://github.com/mostlydev/clawdapus/issues/304), [#203](https://github.com/mostlydev/clawdapus/issues/203).
+- **Repository hygiene** — removed a stray build binary from the repo root (now gitignored) and committed surviving design plans. Closes [#305](https://github.com/mostlydev/clawdapus/issues/305).
+- **Pins infra images** — cllama moves to [v0.7.2](https://github.com/mostlydev/cllama/releases/tag/v0.7.2). `claw-api`, `clawdash`, `claw-wall`, `claw-channel-memory`, and `claw-mcp-stdio` republish at `v0.23.0`; `hermes-base` stays at `v2026.5.16-claw.2`.
+
+## v0.22.1 {#v0-22-1}
 
 *2026-06-16*
 
