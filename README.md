@@ -598,7 +598,7 @@ This loop is **designed but not yet implemented** — the `TRACK`/`recipe`/`bake
 4. **Drift is an open metric** — independent audit via the governance proxy, not self-report
 5. **Surfaces are declared** — topology for operators; capability discovery for bots. The proxy enforces cognitive boundaries.
 6. **Claws are users** — standard credentials; the proxy governs intent, the service's own auth governs execution
-7. **Compute is a privilege** — operator assigns models and schedules; proxy enforces budgets and rate limits; bot doesn't choose
+7. **Compute is a privilege** — operator assigns models and schedules; proxy meters usage and exposes the budget-control surface; bot doesn't choose
 8. **Think twice, act once** — a reasoning model cannot be its own judge
 9. **Memory survives the container (and the runner)** — session history is captured at the proxy boundary and persisted outside the runtime directory. Bots don't start amnesia-fresh after every restart. Infrastructure owns the record; the runner owns the scratch space. Two surfaces, two owners, never merged. Because the architecture is the agent, you can swap the runtime (`CLAW_TYPE`) without losing the mind; knowledge seamlessly crosses driver boundaries. Retention is only half of memory. The **ambient memory plane** is live: pluggable memory services declared via `claw.describe`, compiled by `claw up`, and orchestrated by cllama — recalling derived context before each inference turn and retaining after each response. The agent does not manage its own long-term memory. Infrastructure does.
 

@@ -72,6 +72,7 @@ const (
 var (
 	extractServiceSkillFromImage = runtime.ExtractServiceSkill
 	writeRuntimeFile             = os.WriteFile
+	removePreviousRuntimeDir     = os.RemoveAll
 	inspectClawImage             = inspect.Inspect
 	imageExistsLocally           = build.ImageExistsLocally
 	generateClawDockerfile       = build.Generate
@@ -997,7 +998,16 @@ func (s *runtimeDirStage) Commit() error {
 	if s == nil || s.PreviousPath == "" {
 		return nil
 	}
-	return os.RemoveAll(s.PreviousPath)
+	if err := removePreviousRuntimeDir(s.PreviousPath); err != nil {
+		if os.IsPermission(err) {
+			if helperErr := removeRuntimeDirWithDocker(s.PreviousPath); helperErr != nil {
+				return fmt.Errorf("%w (docker helper cleanup failed: %v)", err, helperErr)
+			}
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func preMigratePortableMemory(runtimeDir, memoryRoot string, p *pod.Pod) error {
@@ -1249,7 +1259,7 @@ func resolvePodCapabilities(podFile, podDir string, p *pod.Pod, imageRefs map[st
 			return capabilities, nil
 		}
 
-		serviceName, canRefresh := runtimeDescriptorRefreshCandidate(err, p)
+		serviceName, canRefresh := runtimeDescriptorRefreshCandidate(err, p, descriptors, refreshed)
 		if !canRefresh {
 			return nil, err
 		}
@@ -1312,13 +1322,63 @@ func (e *toolResolutionError) Error() string {
 	return fmt.Sprintf("service %q: tool policy for %q references unknown tool %q", e.ConsumerService, e.ToolService, e.ToolName)
 }
 
-func runtimeDescriptorRefreshCandidate(err error, p *pod.Pod) (string, bool) {
-	var toolErr *toolResolutionError
-	if !errors.As(err, &toolErr) || toolErr == nil {
+type memoryResolutionError struct {
+	ConsumerService   string
+	MemoryService     string
+	MissingDescriptor bool
+}
+
+func (e *memoryResolutionError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.MissingDescriptor {
+		return fmt.Sprintf("service %q: memory target %q has no descriptor", e.ConsumerService, e.MemoryService)
+	}
+	return fmt.Sprintf("service %q: memory target %q does not declare a memory capability", e.ConsumerService, e.MemoryService)
+}
+
+type feedResolutionError struct {
+	ConsumerService string
+	FeedName        string
+}
+
+func (e *feedResolutionError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("service %q: feed %q was not found in the descriptor registry", e.ConsumerService, e.FeedName)
+}
+
+func runtimeDescriptorRefreshCandidate(err error, p *pod.Pod, descriptors map[string]*describe.ServiceDescriptor, refreshed map[string]struct{}) (string, bool) {
+	if p == nil {
 		return "", false
 	}
-	serviceName := strings.TrimSpace(toolErr.ToolService)
+
+	var toolErr *toolResolutionError
+	if errors.As(err, &toolErr) && toolErr != nil {
+		return buildBackedRefreshCandidate(toolErr.ToolService, p, refreshed)
+	}
+
+	var memoryErr *memoryResolutionError
+	if errors.As(err, &memoryErr) && memoryErr != nil {
+		return buildBackedRefreshCandidate(memoryErr.MemoryService, p, refreshed)
+	}
+
+	var feedErr *feedResolutionError
+	if errors.As(err, &feedErr) && feedErr != nil {
+		return feedRefreshCandidate(feedErr.FeedName, p, descriptors, refreshed)
+	}
+
+	return "", false
+}
+
+func buildBackedRefreshCandidate(serviceName string, p *pod.Pod, refreshed map[string]struct{}) (string, bool) {
+	serviceName = strings.TrimSpace(serviceName)
 	if serviceName == "" || p == nil {
+		return "", false
+	}
+	if _, already := refreshed[serviceName]; already {
 		return "", false
 	}
 	svc := p.Services[serviceName]
@@ -1326,6 +1386,44 @@ func runtimeDescriptorRefreshCandidate(err error, p *pod.Pod) (string, bool) {
 		return "", false
 	}
 	return serviceName, true
+}
+
+func feedRefreshCandidate(feedName string, p *pod.Pod, descriptors map[string]*describe.ServiceDescriptor, refreshed map[string]struct{}) (string, bool) {
+	feedName = strings.TrimSpace(feedName)
+	if feedName == "" || p == nil {
+		return "", false
+	}
+	serviceNames := make([]string, 0, len(p.Services))
+	for name := range p.Services {
+		serviceNames = append(serviceNames, name)
+	}
+	sort.Strings(serviceNames)
+	for _, serviceName := range serviceNames {
+		if _, already := refreshed[serviceName]; already {
+			continue
+		}
+		svc := p.Services[serviceName]
+		if !serviceHasBuildConfig(svc) {
+			continue
+		}
+		if descriptorDeclaresFeed(descriptors[serviceName], feedName) {
+			continue
+		}
+		return serviceName, true
+	}
+	return "", false
+}
+
+func descriptorDeclaresFeed(descriptor *describe.ServiceDescriptor, feedName string) bool {
+	if descriptor == nil {
+		return false
+	}
+	for _, feed := range descriptor.Feeds {
+		if feed.Name == feedName {
+			return true
+		}
+	}
+	return false
 }
 
 func serviceHasBuildConfig(svc *pod.Service) bool {
@@ -1421,10 +1519,17 @@ func resolveMemorySubscriptions(p *pod.Pod, descriptors map[string]*describe.Ser
 		target := svc.Claw.Memory.Service
 		descriptor := descriptors[target]
 		if descriptor == nil {
-			return nil, fmt.Errorf("service %q: memory target %q has no descriptor", serviceName, target)
+			return nil, &memoryResolutionError{
+				ConsumerService:   serviceName,
+				MemoryService:     target,
+				MissingDescriptor: true,
+			}
 		}
 		if descriptor.Memory == nil {
-			return nil, fmt.Errorf("service %q: memory target %q does not declare a memory capability", serviceName, target)
+			return nil, &memoryResolutionError{
+				ConsumerService: serviceName,
+				MemoryService:   target,
+			}
 		}
 		resolved[serviceName] = &resolvedMemorySubscription{
 			Service: target,
@@ -4272,7 +4377,10 @@ func resolveFeedSubscriptions(p *pod.Pod, registry map[string]describe.FeedSpec)
 			}
 			spec, ok := registry[feed.Name]
 			if !ok {
-				return fmt.Errorf("service %q: feed %q was not found in the descriptor registry", serviceName, feed.Name)
+				return &feedResolutionError{
+					ConsumerService: serviceName,
+					FeedName:        feed.Name,
+				}
 			}
 			feed.Source = spec.Source
 			feed.Path = spec.Path

@@ -179,7 +179,7 @@ MODEL fallback anthropic/claude-haiku-3-5
 MODEL summarizer openrouter/google/gemini-flash-2.0
 ```
 
-When cllama is enabled, the proxy can silently downgrade a requested model (e.g., from a primary to a fallback) or apply rate limits without the agent knowing its compute was throttled.
+When cllama is enabled, the proxy can silently downgrade a requested model (e.g., from a primary to a fallback) and meter usage without exposing provider credentials to the agent. Hard budget caps and proxy-level rate limits are tracked as future enforcement work.
 
 ::: tip Retarget Without Rebuilding
 Clawfile `MODEL` labels are the base slot map, but `claw-pod.yml` can retarget slots at deploy time via service-level `x-claw.models` or pod-level `x-claw.models-defaults`. Pod slots overlay image slots additively per key, so you can override `primary` without losing `fallback`. See [Model Slot Precedence](/guide/pod-yaml#model-slot-precedence) for the full rules.

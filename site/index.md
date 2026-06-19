@@ -112,6 +112,6 @@ The everyday operator loop is `claw pull`, `claw build`, `claw up`, `claw down`.
 4. **Drift is an open metric** — independent audit via the governance proxy, not self-report
 5. **Surfaces are declared** — topology for operators; capability discovery for bots. The proxy enforces cognitive boundaries.
 6. **Claws are users** — standard credentials; the proxy governs intent, the service's own auth governs execution
-7. **Compute is a privilege** — operator assigns models and schedules; proxy enforces budgets
+7. **Compute is a privilege** — operator assigns models and schedules; proxy meters usage
 8. **Think twice, act once** — a reasoning model cannot be its own judge
 9. **Memory survives the container (and the runner)** — session history is captured at the proxy boundary and persisted outside the runtime directory. Swap the runtime without losing the mind. The **ambient memory plane** is live: pluggable memory services declared via `claw.describe`, compiled by `claw up`, and orchestrated by cllama. Infrastructure recalls derived context before each inference turn and retains after each response — automatically, without the agent asking.

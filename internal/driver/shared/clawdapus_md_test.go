@@ -180,6 +180,38 @@ func TestGenerateClawdapusMDListsExplicitSkills(t *testing.T) {
 	}
 }
 
+func TestGenerateClawdapusMDDeduplicatesServiceManualSkills(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		ServiceName: "worker",
+		ClawType:    "openclaw",
+		Surfaces: []driver.ResolvedSurface{
+			{Scheme: "service", Target: "analytics-api", SkillName: "analytics.md"},
+		},
+		Skills: []driver.ResolvedSkill{
+			{Name: "analytics.md", HostPath: "/tmp/skills/analytics.md"},
+			{Name: "custom-workflow.md", HostPath: "/tmp/skills/custom-workflow.md"},
+		},
+	}
+
+	md := GenerateClawdapusMD(rc, "test-pod")
+	skillsSection := md
+	if idx := strings.Index(md, "## Skills"); idx >= 0 {
+		skillsSection = md[idx:]
+	}
+	if count := strings.Count(skillsSection, "`skills/analytics.md`"); count != 1 {
+		t.Fatalf("expected analytics.md once in Skills section, got %d occurrences:\n%s", count, skillsSection)
+	}
+	if !strings.Contains(skillsSection, "`skills/analytics.md` — analytics-api service manual") {
+		t.Fatal("expected service manual label to win over generic operator label")
+	}
+	if strings.Contains(skillsSection, "`skills/analytics.md` — operator-provided skill") {
+		t.Fatal("did not expect duplicate generic operator skill label")
+	}
+	if !strings.Contains(skillsSection, "`skills/custom-workflow.md` — operator-provided skill") {
+		t.Fatal("expected distinct operator skill to remain listed")
+	}
+}
+
 func TestGenerateClawdapusMDHandlesSection(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		ServiceName: "bot",

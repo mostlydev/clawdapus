@@ -247,12 +247,25 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 
 	// Skills index
 	b.WriteString("## Skills\n\n")
-	var skillEntries []string
+	skillEntriesByPath := make(map[string]string)
+	skillEntryOrder := make([]string, 0)
+	addSkillEntry := func(path, label string, replace bool) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		if _, exists := skillEntriesByPath[path]; !exists {
+			skillEntryOrder = append(skillEntryOrder, path)
+		} else if !replace {
+			return
+		}
+		skillEntriesByPath[path] = label
+	}
 
 	// Mounted service manuals
 	for _, s := range rc.Surfaces {
 		if s.Scheme == "service" && s.SkillName != "" {
-			skillEntries = append(skillEntries, fmt.Sprintf("- `skills/%s` — %s service manual", s.SkillName, s.Target))
+			addSkillEntry("skills/"+s.SkillName, fmt.Sprintf("%s service manual", s.Target), true)
 		}
 	}
 
@@ -261,14 +274,14 @@ func GenerateClawdapusMD(rc *driver.ResolvedClaw, podName string) string {
 		if strings.HasPrefix(sk.Name, "handle-") || strings.HasPrefix(sk.Name, "surface-") || strings.HasPrefix(sk.Name, "include-") {
 			continue
 		}
-		skillEntries = append(skillEntries, fmt.Sprintf("- `skills/%s` — operator-provided skill", sk.Name))
+		addSkillEntry("skills/"+sk.Name, "operator-provided skill", false)
 	}
 
-	if len(skillEntries) == 0 {
+	if len(skillEntryOrder) == 0 {
 		b.WriteString("No skills available.\n")
 	} else {
-		for _, entry := range skillEntries {
-			b.WriteString(entry + "\n")
+		for _, path := range skillEntryOrder {
+			b.WriteString(fmt.Sprintf("- `%s` — %s\n", path, skillEntriesByPath[path]))
 		}
 	}
 

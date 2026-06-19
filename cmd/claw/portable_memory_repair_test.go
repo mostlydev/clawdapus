@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mostlydev/clawdapus/internal/pod"
 )
@@ -77,7 +79,9 @@ func TestPreMigratePortableMemoryRepairsCrossUIDTree(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not installed")
 	}
-	if err := exec.Command("docker", "info").Run(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "docker", "info").Run(); err != nil {
 		t.Skipf("docker not available: %v", err)
 	}
 	hostUID, hostGID, ok := currentPortableMemoryRepairOwner()
