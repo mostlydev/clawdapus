@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -598,12 +599,14 @@ func TestRefreshRuntimeDescriptorDefaultUsesExistingComposeAndWritesSnapshot(t *
 	prevExists := imageExistsLocally
 	prevDockerBuild := dockerBuildTaggedImage
 	prevRun := runRuntimeDescriptorCommand
+	prevDiscoveryDocker := runDiscoveryDockerCommand
 	prevTimeout := runtimeDescriptorRefreshTimeout
 	prevPoll := runtimeDescriptorRefreshPollInterval
 	defer func() {
 		imageExistsLocally = prevExists
 		dockerBuildTaggedImage = prevDockerBuild
 		runRuntimeDescriptorCommand = prevRun
+		runDiscoveryDockerCommand = prevDiscoveryDocker
 		runtimeDescriptorRefreshTimeout = prevTimeout
 		runtimeDescriptorRefreshPollInterval = prevPoll
 	}()
@@ -641,6 +644,18 @@ func TestRefreshRuntimeDescriptorDefaultUsesExistingComposeAndWritesSnapshot(t *
 			}
 		}
 		return nil, nil
+	}
+	runDiscoveryDockerCommand = func(_ context.Context, args ...string) (string, error) {
+		if len(args) >= 5 && args[0] == "image" && args[1] == "inspect" && args[4] == "trading-api:latest" {
+			switch args[3] {
+			case "{{.Id}}":
+				return "sha256:test-image-id\n", nil
+			case "{{json .RepoDigests}}":
+				return "[]\n", nil
+			}
+		}
+		t.Fatalf("unexpected discovery docker command: %v", args)
+		return "", nil
 	}
 
 	p := &pod.Pod{
