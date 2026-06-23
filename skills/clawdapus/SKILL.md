@@ -333,6 +333,10 @@ When a service subscribes to tools via `x-claw.tools`, cllama performs bounded t
 
 The policy is tunable from the pod YAML via `x-claw.tool-policy` (service level) or `x-claw.tool-policy-defaults` (pod level) with `max-rounds`, `timeout-per-tool-ms`, and `total-timeout-ms`. Omitted fields keep the defaults above; a service-level block replaces the pod default entirely. Slow reasoning models that exceed the 120s total budget fail the whole mediated turn with a 502 `context deadline exceeded` — raise `total-timeout-ms` for those services.
 
+### Compute budget enforcement *(v0.24.0)*
+
+`x-claw.budget` (service level) or `x-claw.budget-defaults` (pod level) compile a per-agent spend/request cap into the agent's `metadata.json`. Fields: `limit-usd` (spend cap), `max-requests` (request-rate cap), `window` (rolling duration, e.g. `1h`, `24h`), and `behavior` (`hard_stop` default, `rate_limit`, or `soft_alert`). Before dispatching either an OpenAI-compatible or Anthropic-format request, cllama sums the agent's `.claw-session-history/<id>/history.jsonl` over the window; when the window is already at or above a cap it returns `429` with a structured `budget_exceeded` (spend) or `rate_limited` (requests) error and logs the matching intervention. `soft_alert` logs the intervention but allows the request. If the ledger cannot be read, cllama **fails open** (logs `budget_check_unavailable`, allows the request); set `CLLAMA_BUDGET_FAIL_MODE=closed` to return `503` instead. Runtime overrides flow through `fleet.budget.set` (claw-api writes `.claw-governance/<id>/budget.json`, mounted read-only into cllama and merged over the compiled cap on each request) so an operator or Master Claw governor can raise a cap without rebuilding the pod. Budgets are an infrastructure hard-cap independent of the (future) policy plane — see ADR-025.
+
 ## Communication Tools Contract
 
 All 7 runtimes enforce private thinking + deliberate delivery — agent reasoning never reaches Discord automatically.

@@ -29,11 +29,18 @@ outline: deep
 
 ## Unreleased
 
+<!-- Nothing yet -->
+
+## v0.24.0 <Badge type="tip" text="Latest" /> {#v0-24-0}
+
+*2026-06-23*
+
 - **Proxy-enforced compute budgets and request-rate caps** -- new `x-claw.budget` / `x-claw.budget-defaults` compile per-agent spend and request caps into cllama context. cllama checks the current session-history window before OpenAI-compatible or Anthropic-format dispatch, returns 429 with `budget_exceeded` or `rate_limited` when a cap is reached, and logs the matching intervention. Ledger read failures default to fail-open with `budget_check_unavailable` telemetry, with `CLLAMA_BUDGET_FAIL_MODE=closed` available for strict deployments. `fleet.budget.set` now writes live overrides that cllama reads from the mounted governance directory on each request, so operators and Master Claw governors can raise caps without rebuilding the pod. Closes [#310](https://github.com/mostlydev/clawdapus/issues/310).
 - **Hermes runtime telemetry stays out of content channels** -- managed Hermes chat services now keep lifecycle, retry/fallback, provider-failure, and background-review status in logs by default instead of delivering it as channel prose. Operators can opt visible status back in with `HERMES_CHAT_STATUS_DELIVERY=on` and background-review summaries with `display.memory_notifications`. The `hermes-base` image refreshes to upstream Hermes `v2026.6.19` with the Clawdapus compatibility patches rebased onto the new module layout. Closes [#257](https://github.com/mostlydev/clawdapus/issues/257), [#259](https://github.com/mostlydev/clawdapus/issues/259).
-- **Pins infra images** -- cllama moves to [v0.7.4](https://github.com/mostlydev/cllama/releases/tag/v0.7.4). `hermes-base` moves to `v2026.6.19-claw.2`.
+- **Policy plane architecture ratified** -- [ADR-025](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/025-policy-plane.md) fixes the contract for cllama's optional policy sidecar: the interception points, the streaming-safety invariants, governor non-recursion, and the four-hook HTTP surface. Budget enforcement above ships as the first concrete enforcement -- in cllama core, independent of the policy plane. The hook implementation is deferred.
+- **Pins infra images** -- the `claw-api` / `clawdash` / `claw-wall` / `claw-mcp-stdio` images move to `v0.24.0` (claw-api gains the `fleet.budget.set` live-override write path). cllama moves to [v0.7.4](https://github.com/mostlydev/cllama/releases/tag/v0.7.4). `hermes-base` moves to `v2026.6.19-claw.2`.
 
-## v0.23.1 <Badge type="tip" text="Latest" /> {#v0-23-1}
+## v0.23.1 {#v0-23-1}
 
 *2026-06-23*
 
