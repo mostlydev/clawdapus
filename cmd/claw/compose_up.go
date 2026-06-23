@@ -585,17 +585,23 @@ func runComposeUp(podFile string) (err error) {
 					if err != nil {
 						return fmt.Errorf("service %q: build memory manifest: %w", ordinalName, err)
 					}
-					md := augmentClawdapusMD(shared.GenerateClawdapusMD(&ordinalRC, p.Name), tools, memory)
+					baseClawdapusMD := shared.GenerateClawdapusMD(&ordinalRC, p.Name)
+					md := augmentClawdapusMD(baseClawdapusMD, tools, memory)
+					effectiveAgentsMD := ""
+					if ordinalRC.ClawType == "hermes" {
+						effectiveAgentsMD = shared.ComposeEffectiveAgentsMD(string(agentContent), baseClawdapusMD)
+					}
 					contextInputs = append(contextInputs, cllama.AgentContextInput{
-						AgentID:          ordinalName,
-						AgentsMD:         string(agentContent),
-						ClawdapusMD:      md,
-						Feeds:            feeds,
-						Tools:            tools,
-						ToolPolicy:       agentToolPolicy(p, name),
-						Memory:           memory,
-						ServiceAuth:      ordinalAuth,
-						ChannelAllowlist: conversationWallAllowlists[ordinalName],
+						AgentID:           ordinalName,
+						AgentsMD:          string(agentContent),
+						EffectiveAgentsMD: effectiveAgentsMD,
+						ClawdapusMD:       md,
+						Feeds:             feeds,
+						Tools:             tools,
+						ToolPolicy:        agentToolPolicy(p, name),
+						Memory:            memory,
+						ServiceAuth:       ordinalAuth,
+						ChannelAllowlist:  conversationWallAllowlists[ordinalName],
 						Metadata: cllama.InjectCompiledModelPolicy(map[string]any{
 							"service":  name,
 							"ordinal":  i,
@@ -626,17 +632,23 @@ func runComposeUp(podFile string) (err error) {
 			if err != nil {
 				return fmt.Errorf("service %q: build memory manifest: %w", name, err)
 			}
-			md := augmentClawdapusMD(shared.GenerateClawdapusMD(rc, p.Name), tools, memory)
+			baseClawdapusMD := shared.GenerateClawdapusMD(rc, p.Name)
+			md := augmentClawdapusMD(baseClawdapusMD, tools, memory)
+			effectiveAgentsMD := ""
+			if rc.ClawType == "hermes" {
+				effectiveAgentsMD = shared.ComposeEffectiveAgentsMD(string(agentContent), baseClawdapusMD)
+			}
 			contextInputs = append(contextInputs, cllama.AgentContextInput{
-				AgentID:          name,
-				AgentsMD:         string(agentContent),
-				ClawdapusMD:      md,
-				Feeds:            feeds,
-				Tools:            tools,
-				ToolPolicy:       agentToolPolicy(p, name),
-				Memory:           memory,
-				ServiceAuth:      svcAuth,
-				ChannelAllowlist: conversationWallAllowlists[name],
+				AgentID:           name,
+				AgentsMD:          string(agentContent),
+				EffectiveAgentsMD: effectiveAgentsMD,
+				ClawdapusMD:       md,
+				Feeds:             feeds,
+				Tools:             tools,
+				ToolPolicy:        agentToolPolicy(p, name),
+				Memory:            memory,
+				ServiceAuth:       svcAuth,
+				ChannelAllowlist:  conversationWallAllowlists[name],
 				Metadata: cllama.InjectCompiledModelPolicy(map[string]any{
 					"service":  name,
 					"pod":      p.Name,

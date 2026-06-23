@@ -104,9 +104,9 @@ func (h *apiHandler) handleAgentContract(w http.ResponseWriter, agentID string) 
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	agentsMD, err := os.ReadFile(filepath.Join(agentDir, "AGENTS.md"))
+	agentsMD, err := readAgentContractMD(agentDir)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("read AGENTS.md: %v", err))
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	clawdapusMD, err := os.ReadFile(filepath.Join(agentDir, "CLAWDAPUS.md"))
@@ -150,6 +150,23 @@ func (h *apiHandler) handleAgentContract(w http.ResponseWriter, agentID string) 
 		Memory:      redactJSONValue(memory),
 		ServiceAuth: redactServiceAuthArtifacts(serviceAuth),
 	})
+}
+
+func readAgentContractMD(agentDir string) ([]byte, error) {
+	effectivePath := filepath.Join(agentDir, "AGENTS.effective.md")
+	data, err := os.ReadFile(effectivePath)
+	if err == nil {
+		return data, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read AGENTS.effective.md: %w", err)
+	}
+
+	data, err = os.ReadFile(filepath.Join(agentDir, "AGENTS.md"))
+	if err != nil {
+		return nil, fmt.Errorf("read AGENTS.md: %w", err)
+	}
+	return data, nil
 }
 
 func (h *apiHandler) handleAgentLiveContext(w http.ResponseWriter, r *http.Request, agentID string) {

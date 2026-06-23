@@ -149,6 +149,39 @@ func TestAgentContractRedactsContextCredentials(t *testing.T) {
 	}
 }
 
+func TestAgentContractPrefersEffectiveAgentsMD(t *testing.T) {
+	contextRoot := t.TempDir()
+	agentDir := writeAgentContextFixture(t, contextRoot, "worker-0", map[string]string{
+		"service": "worker",
+		"type":    "hermes",
+	})
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENTS.effective.md"), []byte("# Effective Contract\n\ninfra included"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newAgentContextTestHandler(t, contextRoot, clawapi.Principal{
+		Name:  "dashboard",
+		Token: "capi_dash",
+		Verbs: []string{clawapi.VerbAgentContext},
+		Pods:  []string{"ops"},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/agents/worker-0/contract", nil)
+	req.Header.Set("Authorization", "Bearer capi_dash")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp agentContractResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.AgentsMD != "# Effective Contract\n\ninfra included" {
+		t.Fatalf("expected effective AGENTS.md, got %q", resp.AgentsMD)
+	}
+}
+
 func TestAgentLiveContextProxiesCllamaSnapshot(t *testing.T) {
 	contextRoot := t.TempDir()
 	writeAgentContextFixture(t, contextRoot, "trader-0", map[string]string{
