@@ -169,7 +169,7 @@ Many MCP servers are distributed as stdio commands instead of HTTP services. Use
 ```yaml
 services:
   perplexity:
-    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.21.0
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.23.1
     environment:
       PERPLEXITY_API_KEY: ${PERPLEXITY_KEY}
     expose:

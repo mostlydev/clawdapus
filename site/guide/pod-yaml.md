@@ -224,7 +224,7 @@ Use `x-claw.mcp-stdio` on a sidecar service to run a stdio MCP command behind th
 ```yaml
 services:
   search:
-    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.21.0
+    image: ghcr.io/mostlydev/claw-mcp-stdio:v0.23.1
     environment:
       PERPLEXITY_API_KEY: ${PERPLEXITY_KEY}
     expose:

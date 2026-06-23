@@ -57,6 +57,13 @@ The Hermes driver emits `HERMES_DEFAULT_AGENT_IDENTITY` so the Hermes runner sta
 
 Container env vars from compose `environment:` are not available in Hermes agent tool execution. Only vars listed in `allowedEnvPassthroughKeys()` reach the tool runtime via the `.env` file. New env vars that agents need must be added to this allowlist.
 
+Hermes runner memory defaults to a 12000-character memory index cap and a
+6000-character user-memory cap. Services can override those caps with
+`HERMES_MEMORY_INDEX_MAX_CHARS` and `HERMES_USER_MEMORY_MAX_CHARS`; the managed
+base image evicts oldest entries on overflow when the new entry can fit after
+eviction and rewrites `MEMORY.md` as mode `0666` so host-side diagnostics remain
+readable across writes.
+
 For Discord handles, the Hermes driver disables the upstream `text_to_speech` tool by default so agents reply in text instead of model-selected voice attachments. A service can opt back in with `x-claw.hermes.allow-tools: [text_to_speech]`.
 
 For Discord, Slack, and Telegram handles, the driver compiles explicit Hermes

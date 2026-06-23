@@ -414,7 +414,7 @@ When the aggregate cap drops a feed the model sees an explicit `--- FEED: <name>
 | `Dockerfile.generated` | Transpiled Clawfile | Next to Clawfile |
 | `compose.generated.yml` | Final compose with all enforcement | Next to claw-pod.yml |
 | `CLAWDAPUS.md` | Per-agent infrastructure map | Mounted into container |
-| `AGENTS.effective.md` | Merged contract + CLAWDAPUS.md (OpenClaw) | Mounted into container |
+| `AGENTS.effective.md` | Merged contract + CLAWDAPUS.md (OpenClaw and Hermes cllama context) | Mounted into container or cllama context |
 | `CLAUDE.md` | Combined contract + CLAWDAPUS.md (NanoClaw) | Mounted into container |
 | `openclaw.json` | Generated runner config (OpenClaw) | Bind-mounted directory |
 | `config.yaml` / `.env` | Generated runner config (Hermes) | Bind-mounted directory |

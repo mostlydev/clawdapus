@@ -31,7 +31,16 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.23.0 <Badge type="tip" text="Latest" /> {#v0-23-0}
+## v0.23.1 <Badge type="tip" text="Latest" /> {#v0-23-1}
+
+*2026-06-23*
+
+- **Streaming watchdogs for cllama** -- cllama now bounds streaming upstream stalls with configurable first-byte and idle timers. Fallback to the next declared model candidate still happens only before downstream bytes are committed; after partial stream output, cllama emits an SSE error instead of replaying a half-written response. Configure with `CLLAMA_STREAM_FIRST_BYTE_TIMEOUT_MS` (default `300000`) and `CLLAMA_STREAM_IDLE_TIMEOUT_MS` (default `120000`). ([cllama v0.7.3](https://github.com/mostlydev/cllama/releases/tag/v0.7.3)) Closes [#319](https://github.com/mostlydev/clawdapus/issues/319).
+- **Hermes effective contract visibility** -- Hermes runners now expose the merged behavioral contract plus `CLAWDAPUS.md` in cllama context and claw-api contract views, so dashboards and operators can inspect the same effective system contract the runner was given. Closes [#199](https://github.com/mostlydev/clawdapus/issues/199).
+- **Hermes memory files are larger, bounded, and host-readable** -- `hermes-base` raises default memory limits, allows per-service overrides through `HERMES_MEMORY_INDEX_MAX_CHARS` and `HERMES_USER_MEMORY_MAX_CHARS`, evicts oldest entries when a new entry can fit after eviction, and rewrites `MEMORY.md` as `0666` so host operators and ACLs are not defeated on every write. Closes [#317](https://github.com/mostlydev/clawdapus/issues/317), [#318](https://github.com/mostlydev/clawdapus/issues/318).
+- **Pins infra images** -- cllama moves to [v0.7.3](https://github.com/mostlydev/cllama/releases/tag/v0.7.3). `claw-api`, `clawdash`, `claw-wall`, `claw-channel-memory`, and `claw-mcp-stdio` republish at `v0.23.1`; `hermes-base` moves to `v2026.5.16-claw.3`.
+
+## v0.23.0 {#v0-23-0}
 
 *2026-06-18*
 

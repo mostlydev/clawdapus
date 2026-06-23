@@ -76,7 +76,7 @@ claw logs assistant   # the runner's own logs
 
 ## Hermes-Specific Gotchas
 
-These are the four things Hermes operators actually hit. Bookmark this section.
+These are the five things Hermes operators actually hit. Bookmark this section.
 
 ### 1. Identity layering: who the agent thinks it is
 
@@ -92,11 +92,17 @@ If your agent introduces itself as "Hermes by Nous Research", your `AGENTS.md` c
 
 Hermes tool execution reads a `.env` file, not the container environment. Only variables in the driver's passthrough allowlist (`allowedEnvPassthroughKeys()` in `internal/driver/hermes/config.go`) cross over. If your agent's tool needs an env var and it isn't on the allowlist, it will be invisible at tool time even though `docker inspect` shows it on the container.
 
-### 3. Tool-only mode and silent finals
+### 3. Memory caps and cross-UID files
+
+Hermes writes runner-owned memory into Clawdapus' portable memory surface. The managed `hermes-base` image defaults to a 12000-character memory index cap and a 6000-character user-memory cap; override them per service with `HERMES_MEMORY_INDEX_MAX_CHARS` and `HERMES_USER_MEMORY_MAX_CHARS` when a pod needs a larger scratchpad. When a new memory entry would exceed the cap, Hermes evicts oldest entries if that makes the write fit and reports how many entries it evicted.
+
+`MEMORY.md` is rewritten as mode `0666` after atomic saves so host operators and non-root diagnostics can keep reading it through bind mounts. An individual entry larger than the cap is rejected instead of erasing existing memory.
+
+### 4. Tool-only mode and silent finals
 
 On Discord, Hermes prefers emitting `send_message` tool calls over plain text finals. Clawdapus configures silent-final handling so the agent doesn't double-post. If your agent "thinks but never replies", check whether it produced a final with no `send_message` — `claw logs assistant` shows the turn; the [troubleshooting guide](/guide/troubleshooting) has the full decision table.
 
-### 4. gateway.log: the first diagnostic surface
+### 5. gateway.log: the first diagnostic surface
 
 ```bash
 claw compose exec assistant cat /root/.hermes/logs/gateway.log
