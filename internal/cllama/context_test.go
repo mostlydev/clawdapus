@@ -10,9 +10,10 @@ import (
 func TestGenerateContextDirWritesFiles(t *testing.T) {
 	dir := t.TempDir()
 	agents := []AgentContextInput{{
-		AgentID:     "tiverton",
-		AgentsMD:    "# Contract",
-		ClawdapusMD: "# Infra",
+		AgentID:           "tiverton",
+		AgentsMD:          "# Contract",
+		EffectiveAgentsMD: "# Effective Contract",
+		ClawdapusMD:       "# Infra",
 		Metadata: map[string]interface{}{
 			"service": "tiverton",
 			"pod":     "test-pod",
@@ -28,6 +29,14 @@ func TestGenerateContextDirWritesFiles(t *testing.T) {
 	}
 	if string(agentsMD) != "# Contract" {
 		t.Errorf("wrong AGENTS.md: %q", agentsMD)
+	}
+
+	effectiveAgentsMD, err := os.ReadFile(filepath.Join(dir, "context", "tiverton", "AGENTS.effective.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(effectiveAgentsMD) != "# Effective Contract" {
+		t.Errorf("wrong AGENTS.effective.md: %q", effectiveAgentsMD)
 	}
 
 	clawdapusMD, err := os.ReadFile(filepath.Join(dir, "context", "tiverton", "CLAWDAPUS.md"))

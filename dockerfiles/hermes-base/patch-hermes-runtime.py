@@ -141,6 +141,108 @@ text += (
 )
 toolsets_py.write_text(text)
 
+config_py = purelib / "hermes_cli" / "config.py"
+text = config_py.read_text()
+text = replace_once(
+    text,
+    '        "memory_char_limit": 2200,   # ~800 tokens at 2.75 chars/token\n'
+    '        "user_char_limit": 1375,     # ~500 tokens at 2.75 chars/token\n',
+    '        "memory_char_limit": 12000,  # Clawdapus default; override with HERMES_MEMORY_INDEX_MAX_CHARS\n'
+    '        "user_char_limit": 6000,     # Clawdapus default; override with HERMES_USER_MEMORY_MAX_CHARS\n',
+    "Hermes memory default limits",
+)
+config_py.write_text(text)
+
+memory_tool = purelib / "tools" / "memory_tool.py"
+text = memory_tool.read_text()
+text = replace_once(
+    text,
+    '''            # Calculate what the new total would be
+            new_entries = entries + [content]
+            new_total = len(ENTRY_DELIMITER.join(new_entries))
+
+            if new_total > limit:
+                current = self._char_count(target)
+                return {
+                    "success": False,
+                    "error": (
+                        f"Memory at {current:,}/{limit:,} chars. "
+                        f"Adding this entry ({len(content)} chars) would exceed the limit. "
+                        f"Replace or remove existing entries first."
+                    ),
+                    "current_entries": entries,
+                    "usage": f"{current:,}/{limit:,}",
+                }
+
+            entries.append(content)
+            self._set_entries(target, entries)
+            self.save_to_disk(target)
+
+        return self._success_response(target, "Entry added.")''',
+    '''            # Calculate what the new total would be. If the new entry can
+            # fit by evicting older entries, evict oldest-first instead of
+            # freezing memory writes at the cap.
+            new_entries = entries + [content]
+            new_total = len(ENTRY_DELIMITER.join(new_entries))
+            evicted_entries = []
+
+            if new_total > limit and len(content) > limit:
+                current = self._char_count(target)
+                return {
+                    "success": False,
+                    "error": (
+                        f"Memory at {current:,}/{limit:,} chars. "
+                        f"This entry is {len(content):,} chars and cannot fit within the limit. "
+                        f"Shorten the entry before saving it."
+                    ),
+                    "current_entries": entries,
+                    "usage": f"{current:,}/{limit:,}",
+                }
+
+            while new_total > limit and entries:
+                evicted_entries.append(entries.pop(0))
+                new_entries = entries + [content]
+                new_total = len(ENTRY_DELIMITER.join(new_entries))
+
+            if new_total > limit:
+                current = self._char_count(target)
+                return {
+                    "success": False,
+                    "error": (
+                        f"Memory at {current:,}/{limit:,} chars. "
+                        f"Adding this entry ({len(content)} chars) would exceed the limit. "
+                        f"Shorten the entry before saving it."
+                    ),
+                    "current_entries": entries,
+                    "usage": f"{current:,}/{limit:,}",
+                }
+
+            entries.append(content)
+            self._set_entries(target, entries)
+            self.save_to_disk(target)
+
+        response = self._success_response(target, "Entry added.")
+        if evicted_entries:
+            response["evicted_count"] = len(evicted_entries)
+            response["evicted_entries"] = evicted_entries
+            response["message"] = (
+                f"Entry added. Evicted {len(evicted_entries)} oldest "
+                f"{'entry' if len(evicted_entries) == 1 else 'entries'} to stay within the memory limit."
+            )
+        return response''',
+    "Hermes memory add oldest-entry eviction",
+)
+text = replace_once(
+    text,
+    '''                atomic_replace(tmp_path, path)
+''',
+    '''                real_path = atomic_replace(tmp_path, path)
+                os.chmod(real_path, 0o666)
+''',
+    "Hermes memory file post-rewrite mode",
+)
+memory_tool.write_text(text)
+
 cron_scheduler = purelib / "cron" / "scheduler.py"
 text = cron_scheduler.read_text()
 
@@ -228,6 +330,36 @@ text = replace_once(
     "        _validate_proxy_env_urls()\n"
     "        _validate_base_url(client_kwargs.get(\"base_url\"))\n",
     "run_agent cllama consumer session epoch header",
+)
+
+text = replace_once(
+    text,
+    "                    self._memory_store = MemoryStore(\n"
+    "                        memory_char_limit=mem_config.get(\"memory_char_limit\", 2200),\n"
+    "                        user_char_limit=mem_config.get(\"user_char_limit\", 1375),\n"
+    "                    )\n",
+    "                    def _claw_memory_limit(env_name: str, configured, fallback: int) -> int:\n"
+    "                        raw = os.getenv(env_name, \"\").strip()\n"
+    "                        value = raw if raw else configured\n"
+    "                        try:\n"
+    "                            parsed = int(value)\n"
+    "                        except (TypeError, ValueError):\n"
+    "                            parsed = fallback\n"
+    "                        return parsed if parsed > 0 else fallback\n"
+    "\n"
+    "                    self._memory_store = MemoryStore(\n"
+    "                        memory_char_limit=_claw_memory_limit(\n"
+    "                            \"HERMES_MEMORY_INDEX_MAX_CHARS\",\n"
+    "                            mem_config.get(\"memory_char_limit\", 12000),\n"
+    "                            12000,\n"
+    "                        ),\n"
+    "                        user_char_limit=_claw_memory_limit(\n"
+    "                            \"HERMES_USER_MEMORY_MAX_CHARS\",\n"
+    "                            mem_config.get(\"user_char_limit\", 6000),\n"
+    "                            6000,\n"
+    "                        ),\n"
+    "                    )\n",
+    "run_agent Hermes memory env-configurable limits",
 )
 
 # Continuing gateway sessions persist a system_prompt snapshot. If the managed
