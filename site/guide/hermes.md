@@ -37,7 +37,7 @@ hermes-quickstart/
 The `Clawfile` is the whole image recipe:
 
 ```dockerfile
-FROM ghcr.io/mostlydev/hermes-base:v2026.5.16-claw.2
+FROM ghcr.io/mostlydev/hermes-base:v2026.5.16-claw.3
 
 CLAW_TYPE hermes
 AGENT AGENTS.md

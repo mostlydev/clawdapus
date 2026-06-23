@@ -19,7 +19,7 @@ services:
         args: ["-y", "perplexity-mcp"]
 
   allen:
-    image: ghcr.io/mostlydev/hermes-base:v2026.3.17-claw.3
+    image: ghcr.io/mostlydev/hermes-base:v2026.5.16-claw.3
     x-claw:
       agent: ./AGENTS.md
       cllama: passthrough
