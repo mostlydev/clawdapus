@@ -807,10 +807,11 @@ type serviceTargetRequest struct {
 }
 
 type budgetSetRequest struct {
-	ClawID   string  `json:"claw_id"`
-	LimitUSD float64 `json:"limit_usd"`
-	Window   string  `json:"window"`
-	Behavior string  `json:"behavior"`
+	ClawID      string   `json:"claw_id"`
+	LimitUSD    *float64 `json:"limit_usd"`
+	MaxRequests *int     `json:"max_requests"`
+	Window      string   `json:"window"`
+	Behavior    string   `json:"behavior"`
 }
 
 type modelRestrictRequest struct {
@@ -819,10 +820,9 @@ type modelRestrictRequest struct {
 }
 
 var knownBudgetBehaviors = map[string]bool{
-	"rate_limit":      true,
-	"hard_stop":       true,
-	"soft_alert":      true,
-	"graceful_switch": true,
+	"rate_limit": true,
+	"hard_stop":  true,
+	"soft_alert": true,
 }
 
 func (h *apiHandler) handleRestart(w http.ResponseWriter, r *http.Request) {
@@ -921,16 +921,31 @@ func (h *apiHandler) handleBudgetSet(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.LimitUSD <= 0 {
+	if req.LimitUSD == nil && req.MaxRequests == nil {
+		writeJSONError(w, http.StatusBadRequest, "at least one of limit_usd or max_requests is required")
+		return
+	}
+	if req.LimitUSD != nil && *req.LimitUSD <= 0 {
 		writeJSONError(w, http.StatusBadRequest, "limit_usd must be positive")
+		return
+	}
+	if req.MaxRequests != nil && *req.MaxRequests <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "max_requests must be positive")
 		return
 	}
 	if req.Window == "" {
 		writeJSONError(w, http.StatusBadRequest, "missing window")
 		return
 	}
+	if d, err := time.ParseDuration(req.Window); err != nil || d <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "window must be a positive duration")
+		return
+	}
+	if strings.TrimSpace(req.Behavior) == "" {
+		req.Behavior = "hard_stop"
+	}
 	if !knownBudgetBehaviors[req.Behavior] {
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("unknown behavior %q: must be one of rate_limit, hard_stop, soft_alert, graceful_switch", req.Behavior))
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("unknown behavior %q: must be one of rate_limit, hard_stop, soft_alert", req.Behavior))
 		return
 	}
 	_, ok := h.authorize(w, r, clawapi.VerbFleetBudgetSet, req.ClawID)
@@ -938,9 +953,14 @@ func (h *apiHandler) handleBudgetSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload := map[string]any{
-		"limit_usd": req.LimitUSD,
-		"window":    req.Window,
-		"behavior":  req.Behavior,
+		"window":   req.Window,
+		"behavior": req.Behavior,
+	}
+	if req.LimitUSD != nil {
+		payload["limit_usd"] = *req.LimitUSD
+	}
+	if req.MaxRequests != nil {
+		payload["max_requests"] = *req.MaxRequests
 	}
 	if err := h.writeGovernanceFile(req.ClawID, "budget.json", payload); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write budget override: %v", err))

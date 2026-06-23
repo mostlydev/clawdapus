@@ -73,6 +73,13 @@ type ToolPolicy struct {
 	TotalTimeoutMS   int `json:"total_timeout_ms"`
 }
 
+type BudgetPolicy struct {
+	LimitUSD    *float64 `json:"limit_usd,omitempty"`
+	MaxRequests *int     `json:"max_requests,omitempty"`
+	Window      string   `json:"window"`
+	Behavior    string   `json:"behavior"`
+}
+
 type ChannelAllowlistManifest struct {
 	Version  int      `json:"version"`
 	Channels []string `json:"channels"`

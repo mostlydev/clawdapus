@@ -29,10 +29,10 @@ e.g. an org's Master Claw policy).
 | 009 | Contract Composition & Policy | Shipped | `x-claw.include` enforce/guide/reference |
 | 010 | CLI Surface Simplification | Shipped | four-verb surface; ADR-022 extends |
 | 011 | Canonical-By-Default Scaffold | Shipped | `claw init`, `claw agent add` |
-| 012 | Master Claw & Fleet Governance | Partial | `x-claw.master` auto-injects `claw-api` + bearer/feeds wiring (shipped). Autonomous budget/quarantine/recipe *decisions* are agent behavior + external policy, not enforced infra. Drift scoring **not** shipped (see 014). |
+| 012 | Master Claw & Fleet Governance | Partial | `x-claw.master` auto-injects `claw-api` + bearer/feeds wiring (shipped). Budget caps are proxy-enforced when declared or updated through `fleet.budget.set`; autonomous budget/quarantine/recipe *decisions* are agent behavior + external policy. Drift scoring **not** shipped (see 014). |
 | 013 | Context Feeds | Shipped | feeds registry; `channel-context`, `channel-awareness` |
 | 014 | Telemetry Normalization & `claw audit` | Partial | `claw audit` shipped (`cmd/claw/audit.go`; columns CLAW/REQ/RESP/ERR/INT/TOOLS/TOOL_ERR/TOK_IN/TOK_OUT/COST_USD/MODELS). **No `drift_score`** anywhere in `cmd/`, `internal/`, `cllama/internal/` — drift scoring is External/Planned, not a shipped column. |
-| 015 | `claw-api` Auth & Scoping | Partial | principals/scopes and write handlers shipped: `POST /fleet/restart`, `/fleet/quarantine`, `/fleet/budget/set`, `/fleet/model/restrict`, and schedule controls (`pause`, `resume`, `skip-next`, `clear-skip-next`, `fire`) route in `cmd/claw-api/handler.go`; master principals get read/write verbs in `internal/clawapi/principal.go`. Caveat: budget/model restrict write governance JSON, but reference cllama/runner enforcement of those files is not wired. |
+| 015 | `claw-api` Auth & Scoping | Partial | principals/scopes and write handlers shipped: `POST /fleet/restart`, `/fleet/quarantine`, `/fleet/budget/set`, `/fleet/model/restrict`, and schedule controls (`pause`, `resume`, `skip-next`, `clear-skip-next`, `fire`) route in `cmd/claw-api/handler.go`; master principals get read/write verbs in `internal/clawapi/principal.go`. `fleet.budget.set` writes governance JSON consumed by cllama for live budget/rate enforcement; model-restrict governance JSON is not yet enforced by the reference proxy. |
 | 016 | Canonical Social Identity & Conformance Spikes | Shipped | `sequential-conformance`; `TestSpikeRollCall` |
 | 017 | Pod Defaults & Service Self-Description | Shipped | pod defaults; `claw.describe`; feed registry |
 | 018 | Session History & Persistent Memory Surfaces | Shipped | `.claw-session-history/`, `.claw-memory/`; `claw history` |
@@ -62,7 +62,7 @@ e.g. an org's Master Claw policy).
 | Session history retention (ADR-018) | Shipped | memory, cli | No |
 | `claw audit` + telemetry (ADR-014) | Shipped | cli, cllama | No |
 | channel-memory + awareness digests | Shipped | memory, social-topology | No |
-| claw-api + Master Claw (ADR-012/015) | Partial | manifesto, what-is, architecture | Policy decisions external; dynamic budget/model enforcement partial |
+| claw-api + Master Claw (ADR-012/015) | Partial | manifesto, what-is, architecture | Budget caps enforced by cllama; policy decisions external; model-restrict enforcement partial |
 | Social topology / HANDLE (ADR-003/016) | Shipped | social-topology | No |
 | Persona materialization | Shipped | anatomy | No |
 | 7 runner drivers | Shipped | drivers | No |

@@ -772,10 +772,11 @@ func TestHandlerBudgetSetWritesOverrideFile(t *testing.T) {
 		ClawIDs: []string{"ops:trader-0"},
 	})
 	w := postJSON(t, h, "/fleet/budget/set", map[string]any{
-		"claw_id":   "ops:trader-0",
-		"limit_usd": 2.00,
-		"window":    "1h",
-		"behavior":  "rate_limit",
+		"claw_id":      "ops:trader-0",
+		"limit_usd":    2.00,
+		"max_requests": 25,
+		"window":       "1h",
+		"behavior":     "rate_limit",
 	}, "capi_gov")
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
@@ -791,8 +792,40 @@ func TestHandlerBudgetSetWritesOverrideFile(t *testing.T) {
 	if budget["limit_usd"] != 2.0 {
 		t.Fatalf("expected limit_usd=2.0, got %v", budget["limit_usd"])
 	}
+	if budget["max_requests"] != 25.0 {
+		t.Fatalf("expected max_requests=25, got %v", budget["max_requests"])
+	}
 	if budget["behavior"] != "rate_limit" {
 		t.Fatalf("expected behavior=rate_limit, got %v", budget["behavior"])
+	}
+}
+
+func TestHandlerBudgetSetDefaultsBehavior(t *testing.T) {
+	govDir := t.TempDir()
+	h := newWriteHandler(t, govDir, clawapi.Principal{
+		Name:    "governor",
+		Token:   "capi_gov",
+		Verbs:   clawapi.AllWriteVerbs,
+		ClawIDs: []string{"ops:trader-0"},
+	})
+	w := postJSON(t, h, "/fleet/budget/set", map[string]any{
+		"claw_id":   "ops:trader-0",
+		"limit_usd": 2.00,
+		"window":    "1h",
+	}, "capi_gov")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	data, err := os.ReadFile(govDir + "/ops:trader-0/budget.json")
+	if err != nil {
+		t.Fatalf("expected budget file: %v", err)
+	}
+	var budget map[string]any
+	if err := json.Unmarshal(data, &budget); err != nil {
+		t.Fatalf("bad budget JSON: %v", err)
+	}
+	if budget["behavior"] != "hard_stop" {
+		t.Fatalf("expected default behavior=hard_stop, got %v", budget["behavior"])
 	}
 }
 
@@ -809,6 +842,23 @@ func TestHandlerBudgetSetRejectsUnknownBehavior(t *testing.T) {
 		"limit_usd": 2.00,
 		"window":    "1h",
 		"behavior":  "magic",
+	}, "capi_gov")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandlerBudgetSetRejectsMissingCap(t *testing.T) {
+	govDir := t.TempDir()
+	h := newWriteHandler(t, govDir, clawapi.Principal{
+		Name:    "governor",
+		Token:   "capi_gov",
+		Verbs:   clawapi.AllWriteVerbs,
+		ClawIDs: []string{"ops:trader-0"},
+	})
+	w := postJSON(t, h, "/fleet/budget/set", map[string]any{
+		"claw_id": "ops:trader-0",
+		"window":  "1h",
 	}, "capi_gov")
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())

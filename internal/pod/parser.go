@@ -72,6 +72,7 @@ type rawClawBlock struct {
 	Feeds        []rawFeedEntry         `yaml:"feeds"`
 	Tools        []rawToolPolicyEntry   `yaml:"tools"`
 	ToolPolicy   *rawToolPolicyConfig   `yaml:"tool-policy"`
+	Budget       *rawBudgetConfig       `yaml:"budget"`
 	Memory       *rawMemoryEntry        `yaml:"memory"`
 	Include      []rawIncludeEntry      `yaml:"include"`
 	Surfaces     []interface{}          `yaml:"surfaces"`
@@ -123,6 +124,16 @@ type rawToolPolicyConfig struct {
 	MaxRounds        *int `yaml:"max-rounds"`
 	TimeoutPerToolMS *int `yaml:"timeout-per-tool-ms"`
 	TotalTimeoutMS   *int `yaml:"total-timeout-ms"`
+}
+
+type rawBudgetConfig struct {
+	LimitUSD              *float64 `yaml:"limit-usd"`
+	LimitUSDUnderscore    *float64 `yaml:"limit_usd"`
+	MaxRequests           *int     `yaml:"max-requests"`
+	MaxRequestsUnderscore *int     `yaml:"max_requests"`
+	Requests              *int     `yaml:"requests"`
+	Window                string   `yaml:"window"`
+	Behavior              string   `yaml:"behavior"`
 }
 
 type rawMemoryEntry struct {
@@ -283,6 +294,10 @@ func Parse(r io.Reader) (*Pod, error) {
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse tool-policy: %w", name, err)
 			}
+			budget, err := parseBudget(svc.XClaw.Budget)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: parse budget: %w", name, err)
+			}
 			memory, err := parseMemory(svc.XClaw.Memory)
 			if err != nil {
 				return nil, fmt.Errorf("service %q: parse memory: %w", name, err)
@@ -332,6 +347,7 @@ func Parse(r io.Reader) (*Pod, error) {
 				Feeds:        feeds,
 				Tools:        tools,
 				ToolPolicy:   toolPolicy,
+				Budget:       budget,
 				Memory:       memory,
 				Include:      include,
 				Surfaces:     parsedSurfaces,
@@ -658,6 +674,95 @@ func parseToolPolicy(raw *rawToolPolicyConfig) (*ToolPolicyConfig, error) {
 	}, nil
 }
 
+func parseBudget(raw *rawBudgetConfig) (*BudgetConfig, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	limitUSD, err := selectBudgetLimitUSD(raw.LimitUSD, raw.LimitUSDUnderscore)
+	if err != nil {
+		return nil, err
+	}
+	if limitUSD != nil && *limitUSD <= 0 {
+		return nil, fmt.Errorf("limit-usd must be > 0")
+	}
+
+	maxRequests, err := selectBudgetMaxRequests(raw.MaxRequests, raw.MaxRequestsUnderscore, raw.Requests)
+	if err != nil {
+		return nil, err
+	}
+	if maxRequests != nil && *maxRequests <= 0 {
+		return nil, fmt.Errorf("max-requests must be > 0")
+	}
+	if limitUSD == nil && maxRequests == nil {
+		return nil, fmt.Errorf("at least one of limit-usd or max-requests is required")
+	}
+
+	window := strings.TrimSpace(raw.Window)
+	if window == "" {
+		return nil, fmt.Errorf("window is required")
+	}
+	if d, err := time.ParseDuration(window); err != nil || d <= 0 {
+		return nil, fmt.Errorf("window must be a positive duration")
+	}
+
+	behavior := strings.TrimSpace(raw.Behavior)
+	if behavior == "" {
+		behavior = "hard_stop"
+	}
+	if !knownBudgetBehavior(behavior) {
+		return nil, fmt.Errorf("unknown behavior %q: must be one of rate_limit, hard_stop, soft_alert", behavior)
+	}
+
+	return &BudgetConfig{
+		LimitUSD:    limitUSD,
+		MaxRequests: maxRequests,
+		Window:      window,
+		Behavior:    behavior,
+	}, nil
+}
+
+func selectBudgetLimitUSD(hyphen, underscore *float64) (*float64, error) {
+	if hyphen != nil && underscore != nil && *hyphen != *underscore {
+		return nil, fmt.Errorf("limit-usd and limit_usd cannot both be set to different values")
+	}
+	if hyphen != nil {
+		return hyphen, nil
+	}
+	return underscore, nil
+}
+
+func selectBudgetMaxRequests(hyphen, underscore, requests *int) (*int, error) {
+	selected := hyphen
+	name := "max-requests"
+	for _, candidate := range []struct {
+		name  string
+		value *int
+	}{
+		{name: "max_requests", value: underscore},
+		{name: "requests", value: requests},
+	} {
+		if candidate.value == nil {
+			continue
+		}
+		if selected != nil && *selected != *candidate.value {
+			return nil, fmt.Errorf("%s and %s cannot both be set to different values", name, candidate.name)
+		}
+		selected = candidate.value
+		name = candidate.name
+	}
+	return selected, nil
+}
+
+func knownBudgetBehavior(behavior string) bool {
+	switch behavior {
+	case "rate_limit", "hard_stop", "soft_alert":
+		return true
+	default:
+		return false
+	}
+}
+
 func parseMemory(raw *rawMemoryEntry) (*MemoryEntry, error) {
 	if raw == nil {
 		return nil, nil
@@ -872,6 +977,7 @@ func expandPodDefaults(root map[string]interface{}) error {
 		FeedsDefaults:    deepCopySliceOrNil(rawXClaw["feeds-defaults"]),
 		ToolsDefaults:    deepCopySliceOrNil(rawXClaw["tools-defaults"]),
 		ToolPolicy:       deepCopyMapOrNil(rawXClaw["tool-policy-defaults"]),
+		BudgetDefaults:   deepCopyMapOrNil(rawXClaw["budget-defaults"]),
 		MemoryDefaults:   deepCopyMapOrNil(rawXClaw["memory-defaults"]),
 		SkillsDefaults:   deepCopySliceOrNil(rawXClaw["skills-defaults"]),
 	}
@@ -923,6 +1029,7 @@ type podDefaults struct {
 	FeedsDefaults    []interface{}
 	ToolsDefaults    []interface{}
 	ToolPolicy       map[string]interface{}
+	BudgetDefaults   map[string]interface{}
 	MemoryDefaults   map[string]interface{}
 	SkillsDefaults   []interface{}
 }
@@ -944,6 +1051,9 @@ func applyRawPodDefaults(raw map[string]interface{}, defaults podDefaults) error
 		return err
 	}
 	if err := applyRawObjectDefault(raw, "tool-policy", defaults.ToolPolicy); err != nil {
+		return err
+	}
+	if err := applyRawObjectDefault(raw, "budget", defaults.BudgetDefaults); err != nil {
 		return err
 	}
 	if err := applyRawObjectDefault(raw, "memory", defaults.MemoryDefaults); err != nil {

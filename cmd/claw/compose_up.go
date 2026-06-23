@@ -602,14 +602,14 @@ func runComposeUp(podFile string) (err error) {
 						Memory:            memory,
 						ServiceAuth:       ordinalAuth,
 						ChannelAllowlist:  conversationWallAllowlists[ordinalName],
-						Metadata: cllama.InjectCompiledModelPolicy(map[string]any{
+						Metadata: injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
 							"service":  name,
 							"ordinal":  i,
 							"pod":      p.Name,
 							"type":     rc.ClawType,
 							"token":    tokens[ordinalName],
 							"timezone": rc.Timezone,
-						}, rc.Models),
+						}, rc.Models), agentBudgetPolicy(p, name)),
 					})
 				}
 				continue
@@ -649,13 +649,13 @@ func runComposeUp(podFile string) (err error) {
 				Memory:            memory,
 				ServiceAuth:       svcAuth,
 				ChannelAllowlist:  conversationWallAllowlists[name],
-				Metadata: cllama.InjectCompiledModelPolicy(map[string]any{
+				Metadata: injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
 					"service":  name,
 					"pod":      p.Name,
 					"type":     rc.ClawType,
 					"token":    tokens[name],
 					"timezone": rc.Timezone,
-				}, rc.Models),
+				}, rc.Models), agentBudgetPolicy(p, name)),
 			})
 		}
 		if err := cllama.GenerateContextDir(runtimeDir, contextInputs); err != nil {
@@ -707,6 +707,7 @@ func runComposeUp(podFile string) (err error) {
 				ContextHostDir:        filepath.Join(runtimeDir, "context"),
 				AuthHostDir:           authDir,
 				SessionHistoryHostDir: sessionHistoryDir,
+				GovernanceHostDir:     governanceDir,
 				DashboardPort:         cllamaDashboardPort,
 				Environment:           finalProxyEnv,
 				PodName:               p.Name,
@@ -1611,6 +1612,27 @@ func agentToolPolicy(p *pod.Pod, serviceName string) *cllama.ToolPolicy {
 	tp := svc.Claw.ToolPolicy
 	policy := cllama.EffectiveToolPolicy(tp.MaxRounds, tp.TimeoutPerToolMS, tp.TotalTimeoutMS)
 	return &policy
+}
+
+func agentBudgetPolicy(p *pod.Pod, serviceName string) *cllama.BudgetPolicy {
+	svc := p.Services[serviceName]
+	if svc == nil || svc.Claw == nil || svc.Claw.Budget == nil {
+		return nil
+	}
+	budget := svc.Claw.Budget
+	return &cllama.BudgetPolicy{
+		LimitUSD:    budget.LimitUSD,
+		MaxRequests: budget.MaxRequests,
+		Window:      budget.Window,
+		Behavior:    budget.Behavior,
+	}
+}
+
+func injectAgentBudget(meta map[string]any, budget *cllama.BudgetPolicy) map[string]any {
+	if budget != nil {
+		meta["budget"] = budget
+	}
+	return meta
 }
 
 func buildToolManifestEntries(p *pod.Pod, descriptors map[string]*describe.ServiceDescriptor, runtimeEnv map[string]string, serviceName string, tools []describe.ToolSpec, serviceAuth []cllama.ServiceAuthEntry) ([]cllama.ToolManifestEntry, error) {
