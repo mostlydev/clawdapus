@@ -21,6 +21,7 @@ const (
 	hermesDefaultAgentIdentityEnv = "HERMES_DEFAULT_AGENT_IDENTITY"
 	hermesGatewayLockDirEnv       = "HERMES_GATEWAY_LOCK_DIR"
 	hermesAllowSilentFinalEnv     = "HERMES_ALLOW_SILENT_FINAL"
+	hermesChatStatusDeliveryEnv   = "HERMES_CHAT_STATUS_DELIVERY"
 	hermesToolProgressModeEnv     = "HERMES_TOOL_PROGRESS_MODE"
 	hermesMemoryIndexMaxCharsEnv  = "HERMES_MEMORY_INDEX_MAX_CHARS"
 	hermesUserMemoryMaxCharsEnv   = "HERMES_USER_MEMORY_MAX_CHARS"
@@ -58,8 +59,9 @@ func GenerateConfig(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, err
 			"wrap_response": false,
 		},
 		"display": map[string]any{
-			"busy_input_mode":  hermesDefaultBusyInputMode,
-			"busy_ack_enabled": false,
+			"busy_input_mode":      hermesDefaultBusyInputMode,
+			"busy_ack_enabled":     false,
+			"memory_notifications": "off",
 		},
 		"model": modelBlock,
 		"onboarding": map[string]any{
@@ -154,6 +156,9 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 	if hasDiscordHandle(rc) || hasSlackHandle(rc) {
 		env[hermesAllowSilentFinalEnv] = "1"
 		env[hermesToolProgressModeEnv] = "off"
+	}
+	if hasManagedChatHandle(rc) {
+		env[hermesChatStatusDeliveryEnv] = "off"
 	}
 	if hasDiscordHandle(rc) {
 		// Hermes upstream defaults reply-mention pings to True
@@ -378,6 +383,7 @@ func allowedEnvPassthroughKeys() []string {
 		"GATEWAY_ALLOW_ALL_USERS",
 		hermesGatewayLockDirEnv,
 		hermesAllowSilentFinalEnv,
+		hermesChatStatusDeliveryEnv,
 		hermesToolProgressModeEnv,
 		hermesMemoryIndexMaxCharsEnv,
 		hermesUserMemoryMaxCharsEnv,
@@ -409,6 +415,10 @@ func hasDiscordHandle(rc *driver.ResolvedClaw) bool {
 
 func hasSlackHandle(rc *driver.ResolvedClaw) bool {
 	return hasHandle(rc, "slack")
+}
+
+func hasManagedChatHandle(rc *driver.ResolvedClaw) bool {
+	return hasDiscordHandle(rc) || hasSlackHandle(rc) || hasHandle(rc, "telegram")
 }
 
 func hasHandle(rc *driver.ResolvedClaw, platform string) bool {

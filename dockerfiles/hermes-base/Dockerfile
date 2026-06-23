@@ -3,7 +3,7 @@ FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 ARG GIT_REVISION=unknown
 ARG CLAW_SOURCE=local-checkout
 ARG CLAW_DIRTY=true
-ARG HERMES_UPSTREAM_TAG=v2026.5.16
+ARG HERMES_UPSTREAM_TAG=v2026.6.19
 
 LABEL claw.component="hermes-base" \
       org.opencontainers.image.revision="${GIT_REVISION}" \

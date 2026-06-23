@@ -366,6 +366,9 @@ func TestGenerateConfigDefaultsManagedGatewayUXQuiet(t *testing.T) {
 	if got := display["busy_ack_enabled"]; got != false {
 		t.Fatalf("expected display.busy_ack_enabled=false, got %#v", got)
 	}
+	if got := display["memory_notifications"]; got != "off" {
+		t.Fatalf("expected display.memory_notifications=off, got %#v", got)
+	}
 
 	onboarding, _ := cfg["onboarding"].(map[string]any)
 	seen, _ := onboarding["seen"].(map[string]any)
@@ -394,6 +397,7 @@ func TestGenerateConfigAllowsManagedGatewayUXOptIn(t *testing.T) {
 			`hermes config set --json cron.wrap_response true`,
 			`hermes config set display.busy_input_mode interrupt`,
 			`hermes config set --json display.busy_ack_enabled true`,
+			`hermes config set display.memory_notifications verbose`,
 			`hermes config set --json onboarding.seen.busy_input_prompt false`,
 			`hermes config set --json platforms.discord.gateway_restart_notification true`,
 		},
@@ -434,6 +438,9 @@ func TestGenerateConfigAllowsManagedGatewayUXOptIn(t *testing.T) {
 	}
 	if got := display["busy_ack_enabled"]; got != true {
 		t.Fatalf("expected display.busy_ack_enabled override, got %#v", got)
+	}
+	if got := display["memory_notifications"]; got != "verbose" {
+		t.Fatalf("expected display.memory_notifications override, got %#v", got)
 	}
 	onboarding, _ := cfg["onboarding"].(map[string]any)
 	seen, _ := onboarding["seen"].(map[string]any)
@@ -553,6 +560,9 @@ func TestGenerateEnvFileDefaultsToolProgressOffForDiscord(t *testing.T) {
 	if !strings.Contains(string(data), hermesAllowSilentFinalEnv+"=1\n") {
 		t.Fatalf("expected %s=1 in .env, got:\n%s", hermesAllowSilentFinalEnv, data)
 	}
+	if !strings.Contains(string(data), hermesChatStatusDeliveryEnv+"=off\n") {
+		t.Fatalf("expected %s=off in .env, got:\n%s", hermesChatStatusDeliveryEnv, data)
+	}
 }
 
 func TestGenerateEnvFileDefaultsToolProgressOffForSlack(t *testing.T) {
@@ -569,6 +579,44 @@ func TestGenerateEnvFileDefaultsToolProgressOffForSlack(t *testing.T) {
 	}
 	if !strings.Contains(string(data), hermesAllowSilentFinalEnv+"=1\n") {
 		t.Fatalf("expected %s=1 in .env, got:\n%s", hermesAllowSilentFinalEnv, data)
+	}
+	if !strings.Contains(string(data), hermesChatStatusDeliveryEnv+"=off\n") {
+		t.Fatalf("expected %s=off in .env, got:\n%s", hermesChatStatusDeliveryEnv, data)
+	}
+}
+
+func TestGenerateEnvFileDefaultsChatStatusDeliveryOffForTelegram(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"telegram": {}},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), hermesChatStatusDeliveryEnv+"=off\n") {
+		t.Fatalf("expected %s=off in .env, got:\n%s", hermesChatStatusDeliveryEnv, data)
+	}
+}
+
+func TestGenerateEnvFileAllowsChatStatusDeliveryOverride(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"discord": {}},
+		Environment: map[string]string{
+			hermesChatStatusDeliveryEnv: "on",
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	if !strings.Contains(env, hermesChatStatusDeliveryEnv+"=on\n") {
+		t.Fatalf("expected %s override in .env, got:\n%s", hermesChatStatusDeliveryEnv, env)
+	}
+	if strings.Contains(env, hermesChatStatusDeliveryEnv+"=off\n") {
+		t.Fatalf("expected no default %s=off when override is set, got:\n%s", hermesChatStatusDeliveryEnv, env)
 	}
 }
 

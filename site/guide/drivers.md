@@ -85,6 +85,14 @@ failures are logged and recorded as failed runs without user-channel delivery
 by default; set `HERMES_CRON_DELIVER_TRANSIENT_FAILURES=1` to restore the old
 delivery behavior.
 
+Managed Hermes chat services also set `HERMES_CHAT_STATUS_DELIVERY=off` and
+`display.memory_notifications: off` by default. Retry/fallback/lifecycle status
+callbacks and background-review summaries stay in logs instead of being posted
+as channel prose; set `HERMES_CHAT_STATUS_DELIVERY=on` or configure
+`display.memory_notifications` when an interactive/debug channel should show
+that runtime telemetry. Unset `HERMES_CHAT_STATUS_DELIVERY` preserves upstream
+Hermes behavior; the quiet default is applied by the Clawdapus driver.
+
 ### nanoclaw
 
 NanoClaw / Claude Code-compatible orchestrator driver. It does not currently support HANDLE or INVOKE, and it requires `PRIVILEGE docker-socket true` because the runtime spawns agent containers through Docker. It has a structured health probe and uses a writable root filesystem.

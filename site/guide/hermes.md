@@ -102,7 +102,18 @@ Hermes writes runner-owned memory into Clawdapus' portable memory surface. The m
 
 On Discord, Hermes prefers emitting `send_message` tool calls over plain text finals. Clawdapus configures silent-final handling so the agent doesn't double-post. If your agent "thinks but never replies", check whether it produced a final with no `send_message` — `claw logs assistant` shows the turn; the [troubleshooting guide](/guide/troubleshooting) has the full decision table.
 
-### 5. gateway.log: the first diagnostic surface
+### 5. Runtime status is not channel content
+
+Managed Hermes chat services keep lifecycle, retry/fallback, provider-failure,
+and background-review status out of content channels by default. `claw logs
+assistant` and `/root/.hermes/logs/gateway.log` remain the diagnostic surfaces.
+For an interactive/debug service, opt visible status back in with
+`HERMES_CHAT_STATUS_DELIVERY=on`; opt background-review summaries back in with
+`hermes config set display.memory_notifications on`. Unset
+`HERMES_CHAT_STATUS_DELIVERY` preserves upstream Hermes behavior; Clawdapus
+sets it to `off` for managed chat services.
+
+### 6. gateway.log: the first diagnostic surface
 
 ```bash
 claw compose exec assistant cat /root/.hermes/logs/gateway.log

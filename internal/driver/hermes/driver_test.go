@@ -221,6 +221,9 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	if got := result.Environment[hermesToolProgressModeEnv]; got != "off" {
 		t.Fatalf("expected %s=off, got %q", hermesToolProgressModeEnv, got)
 	}
+	if got := result.Environment[hermesChatStatusDeliveryEnv]; got != "off" {
+		t.Fatalf("expected %s=off, got %q", hermesChatStatusDeliveryEnv, got)
+	}
 	if got := result.Environment[clawdapusDisabledToolsEnv]; got != hermesTextToSpeechTool {
 		t.Fatalf("expected %s=%s, got %q", clawdapusDisabledToolsEnv, hermesTextToSpeechTool, got)
 	}
@@ -614,6 +617,36 @@ func TestMaterializeAllowsSilentFinalDefaultOverride(t *testing.T) {
 	}
 	if strings.Contains(env, hermesAllowSilentFinalEnv+"=1\n") {
 		t.Fatalf("expected no default %s=1 when override is set, got:\n%s", hermesAllowSilentFinalEnv, env)
+	}
+}
+
+func TestMaterializeAllowsChatStatusDeliveryOverride(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	rc.Environment[hermesChatStatusDeliveryEnv] = "on"
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if got := result.Environment[hermesChatStatusDeliveryEnv]; got != "on" {
+		t.Fatalf("expected %s override, got %q", hermesChatStatusDeliveryEnv, got)
+	}
+
+	envData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", ".env"))
+	if err != nil {
+		t.Fatalf("read .env: %v", err)
+	}
+	env := string(envData)
+	if !strings.Contains(env, hermesChatStatusDeliveryEnv+"=on\n") {
+		t.Fatalf("expected %s override in .env, got:\n%s", hermesChatStatusDeliveryEnv, env)
+	}
+	if strings.Contains(env, hermesChatStatusDeliveryEnv+"=off\n") {
+		t.Fatalf("expected no default %s=off when override is set, got:\n%s", hermesChatStatusDeliveryEnv, env)
 	}
 }
 

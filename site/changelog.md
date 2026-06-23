@@ -29,7 +29,8 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Hermes runtime telemetry stays out of content channels** -- managed Hermes chat services now keep lifecycle, retry/fallback, provider-failure, and background-review status in logs by default instead of delivering it as channel prose. Operators can opt visible status back in with `HERMES_CHAT_STATUS_DELIVERY=on` and background-review summaries with `display.memory_notifications`. The `hermes-base` image refreshes to upstream Hermes `v2026.6.19` with the Clawdapus compatibility patches rebased onto the new module layout. Closes [#257](https://github.com/mostlydev/clawdapus/issues/257), [#259](https://github.com/mostlydev/clawdapus/issues/259).
+- **Pins infra images** -- `hermes-base` moves to `v2026.6.19-claw.2`.
 
 ## v0.23.1 <Badge type="tip" text="Latest" /> {#v0-23-1}
 
