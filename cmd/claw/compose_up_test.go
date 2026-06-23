@@ -5272,3 +5272,38 @@ func TestAgentToolPolicyMergesServiceOverrides(t *testing.T) {
 		t.Fatal("expected nil policy for unknown service")
 	}
 }
+
+func TestAgentBudgetPolicyCopiesServiceBudget(t *testing.T) {
+	floatp := func(v float64) *float64 { return &v }
+	intp := func(v int) *int { return &v }
+	p := &pod.Pod{Services: map[string]*pod.Service{
+		"trader": {Claw: &pod.ClawBlock{Budget: &pod.BudgetConfig{
+			LimitUSD:    floatp(1.5),
+			MaxRequests: intp(10),
+			Window:      "1h",
+			Behavior:    "hard_stop",
+		}}},
+		"plain": {Claw: &pod.ClawBlock{}},
+	}}
+
+	got := agentBudgetPolicy(p, "trader")
+	if got == nil {
+		t.Fatal("expected budget policy for trader")
+	}
+	if got.LimitUSD == nil || *got.LimitUSD != 1.5 {
+		t.Fatalf("unexpected limit: %+v", got)
+	}
+	if got.MaxRequests == nil || *got.MaxRequests != 10 {
+		t.Fatalf("unexpected request cap: %+v", got)
+	}
+	if got.Window != "1h" || got.Behavior != "hard_stop" {
+		t.Fatalf("unexpected budget metadata: %+v", got)
+	}
+
+	if agentBudgetPolicy(p, "plain") != nil {
+		t.Fatal("expected nil budget when service declares none")
+	}
+	if agentBudgetPolicy(p, "missing") != nil {
+		t.Fatal("expected nil budget for unknown service")
+	}
+}

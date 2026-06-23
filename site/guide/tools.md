@@ -276,7 +276,7 @@ Hidden tool rounds are preserved across turns. When the runner sends its next re
 
 ### Error Handling
 
-Tool execution errors are fed back to the LLM as structured results inside the mediated loop — the LLM decides how to communicate the failure to the runner. Duplicate managed tool calls are served from the cached first-call result (or, under `reject` policy, returned as a structured duplicate error) rather than re-executed against the sidecar. If cllama itself encounters a fatal error (budget exhaustion, internal failure), it returns `502` to the runner.
+Tool execution errors are fed back to the LLM as structured results inside the mediated loop — the LLM decides how to communicate the failure to the runner. Duplicate managed tool calls are served from the cached first-call result (or, under `reject` policy, returned as a structured duplicate error) rather than re-executed against the sidecar. If managed-tool mediation itself encounters a fatal timeout or internal failure, cllama returns `502` to the runner.
 
 ## Telemetry and Audit
 

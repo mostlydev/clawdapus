@@ -54,6 +54,7 @@ The top-level `x-claw` block declares shared configuration that all services inh
 | `feeds-defaults` | Context feeds subscribed by all services |
 | `tools-defaults` | Managed tool allowlists inherited by all services |
 | `tool-policy-defaults` | Managed-tool mediation policy (`max-rounds`, `timeout-per-tool-ms`, `total-timeout-ms`) inherited by all services |
+| `budget-defaults` | Proxy-enforced spend and request-rate caps inherited by all cllama-managed services |
 | `memory-defaults` | Memory service subscription inherited by all services |
 | `skills-defaults` | Operator skill files inherited by all services |
 | `handles-defaults` | Shared chat topology (guild IDs, channel IDs) inherited by all services |
@@ -95,7 +96,7 @@ services:
           message: "Run morning market analysis."
 ```
 
-Service-level fields include `agent`, `persona`, `describe-file`, `cllama`, `cllama-env`, `models`, `handles`, `feeds`, `tools`, `tool-policy`, `memory`, `include`, `surfaces`, `skills`, `invoke`, `context`, `claw-api`, `mcp-stdio`, `hermes`, and `count`.
+Service-level fields include `agent`, `persona`, `describe-file`, `cllama`, `cllama-env`, `models`, `handles`, `feeds`, `tools`, `tool-policy`, `budget`, `memory`, `include`, `surfaces`, `skills`, `invoke`, `context`, `claw-api`, `mcp-stdio`, `hermes`, and `count`.
 
 ### Managed-Tool Mediation Policy
 
@@ -118,11 +119,35 @@ services:
 
 All values must be positive, and `total-timeout-ms` must be at least `timeout-per-tool-ms`. The merged policy is compiled into each agent's `tools.json` in the cllama context directory.
 
+### Budget And Request-Rate Caps
+
+Services with cllama can declare a pre-dispatch budget policy. `limit-usd` caps known reported spend in a sliding session-history window; `max-requests` caps successful 2xx turns in that same window. When a cap is already reached, cllama rejects the next OpenAI-compatible or Anthropic-format request with HTTP 429 and logs `budget_exceeded` or `rate_limited`.
+
+Declare defaults at pod level (`budget-defaults`) or override per service (`budget`). A service-level declaration replaces the pod default entirely, and `budget: null` suppresses inherited defaults:
+
+```yaml
+x-claw:
+  budget-defaults:
+    limit-usd: 5.00
+    max-requests: 200
+    window: 24h
+    behavior: hard_stop
+
+services:
+  high-volume-analyst:
+    x-claw:
+      budget:
+        max-requests: 1000
+        window: 1h
+```
+
+At least one of `limit-usd` or `max-requests` is required. `window` accepts any positive Go duration (`30m`, `1h`, `24h`). `behavior` defaults to `hard_stop`; accepted values are `hard_stop`, `rate_limit`, and `soft_alert`. Runtime updates through `POST /fleet/budget/set` write `.claw-governance/<agent-id>/budget.json`; cllama reads that override on each request and merges it over the compiled metadata budget, so operators or a Master Claw can raise caps without `claw up`.
+
 ## Defaults and Overrides
 
 The Clawfile bakes defaults into the image. The pod YAML overrides them per-deployment. This follows a consistent pattern:
 
-- **Inherit by default.** Services receive pod-level `cllama-defaults`, `models-defaults`, `surfaces-defaults`, `feeds-defaults`, `tools-defaults`, `memory-defaults`, `skills-defaults`, and `handles-defaults` automatically.
+- **Inherit by default.** Services receive pod-level `cllama-defaults`, `models-defaults`, `surfaces-defaults`, `feeds-defaults`, `tools-defaults`, `tool-policy-defaults`, `budget-defaults`, `memory-defaults`, `skills-defaults`, and `handles-defaults` automatically.
 - **Override to replace.** Setting a field at the service level replaces the pod default entirely, except `models`, which merges additively per slot.
 - **Spread to extend.** Use `...` to inherit the pod default and add to it:
 

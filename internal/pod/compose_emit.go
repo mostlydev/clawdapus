@@ -19,6 +19,7 @@ type CllamaProxyConfig struct {
 	ContextHostDir        string            // host path for shared context dir
 	AuthHostDir           string            // host path for provider auth state
 	SessionHistoryHostDir string            // host path for session history dir (optional)
+	GovernanceHostDir     string            // host path for governance override dir (optional, read-only in proxy)
 	DashboardPort         string            // host port published to proxy UI :8081 (default "8181")
 	Environment           map[string]string // proxy-only env (e.g. CLAW_POD, provider keys)
 	PodName               string
@@ -355,6 +356,9 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		if proxy.SessionHistoryHostDir != "" {
 			env["CLAW_SESSION_HISTORY_DIR"] = "/claw/session-history"
 		}
+		if proxy.GovernanceHostDir != "" {
+			env["CLAW_GOVERNANCE_DIR"] = "/claw/governance"
+		}
 
 		volumes := []string{
 			fmt.Sprintf("%s:/claw/context:ro", proxy.ContextHostDir),
@@ -362,6 +366,9 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		}
 		if proxy.SessionHistoryHostDir != "" {
 			volumes = append(volumes, fmt.Sprintf("%s:/claw/session-history:rw", proxy.SessionHistoryHostDir))
+		}
+		if proxy.GovernanceHostDir != "" {
+			volumes = append(volumes, fmt.Sprintf("%s:/claw/governance:ro", proxy.GovernanceHostDir))
 		}
 
 		rootServices[serviceName] = map[string]interface{}{

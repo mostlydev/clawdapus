@@ -62,6 +62,7 @@ type ClawBlock struct {
 	Feeds        []FeedEntry
 	Tools        []ToolPolicyEntry
 	ToolPolicy   *ToolPolicyConfig
+	Budget       *BudgetConfig
 	Memory       *MemoryEntry
 	Include      []IncludeEntry
 	Surfaces     []driver.ResolvedSurface
@@ -109,6 +110,15 @@ type ToolPolicyConfig struct {
 	MaxRounds        *int
 	TimeoutPerToolMS *int
 	TotalTimeoutMS   *int
+}
+
+// BudgetConfig holds per-service cllama budget and request-rate caps. Nil caps
+// are disabled; Window must be set when any cap is configured.
+type BudgetConfig struct {
+	LimitUSD    *float64
+	MaxRequests *int
+	Window      string
+	Behavior    string
 }
 
 type MemoryEntry struct {

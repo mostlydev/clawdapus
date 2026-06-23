@@ -14,7 +14,7 @@ Agent → (bearer token) → cllama proxy → (real API key) → LLM Provider
                      audit log + dashboard
 ```
 
-A single proxy instance serves the entire pod. Bearer tokens resolve which agent is calling, so the proxy can apply per-agent model policy, managed-tool budgets, and logging.
+A single proxy instance serves the entire pod. Bearer tokens resolve which agent is calling, so the proxy can apply per-agent model policy, budget caps, managed-tool budgets, and logging.
 
 ## Credential Starvation
 
@@ -77,8 +77,8 @@ Requests to `/v1/messages` are handled as Anthropic format. The payload uses a t
 
 When the resolved provider uses Anthropic format but the incoming request is OpenAI format (`/v1/chat/completions`), the proxy routes through OpenRouter instead, which accepts OpenAI format for all models. This transparent bridging means agents do not need to know which provider or format their assigned model requires.
 
-::: tip Passthrough, Not Policy
-In passthrough mode, the reference proxy still performs infrastructure work: model routing, late runtime-context assembly, memory recall/retain, managed tool mediation, telemetry, and cost accounting. It does **not** run a contract-derived policy engine, redact responses, compute drift scores, or amend final provider text.
+::: tip Passthrough, Not Full Policy
+In passthrough mode, the reference proxy still performs infrastructure work: model routing, budget/rate preflight, late runtime-context assembly, memory recall/retain, managed tool mediation, telemetry, and cost accounting. It does **not** run a contract-derived policy engine, redact responses, compute drift scores, or amend final provider text.
 :::
 
 ## The Interception Pipeline
@@ -87,7 +87,15 @@ The runner never knows the proxy exists -- it thinks it is talking directly to t
 
 ### Pre-flight
 
-Identity resolution, token validation, and model authorization. Invalid tokens are rejected before any downstream work begins.
+Identity resolution, token validation, model authorization, and budget/rate enforcement. Invalid tokens and over-cap turns are rejected before any provider dispatch or runtime context side effect.
+
+### Budget And Rate Enforcement
+
+`x-claw.budget` compiles into each agent's `metadata.json` as a `budget` block. cllama checks that block before dispatching either OpenAI-compatible or Anthropic-format requests. When the current session-history window is already at or above `limit_usd`, the proxy returns `429` with a structured `budget_exceeded` error and logs an intervention with the same reason. When the window is already at or above `max_requests`, it returns `429` with `rate_limited`.
+
+The enforcement ledger is the proxy-owned `.claw-session-history/<agent-id>/history.jsonl` file. Successful 2xx turns are counted in the configured window; known `reported_cost_usd` values are summed for spend caps. If the ledger cannot be read or parsed, cllama defaults to fail-open, logs `budget_check_unavailable`, and allows the request. Set `CLLAMA_BUDGET_FAIL_MODE=closed` to return `503` instead.
+
+Runtime budget changes flow through `POST /fleet/budget/set`. `claw-api` writes `.claw-governance/<agent-id>/budget.json`, and cllama reads that mounted governance file on each request. Overrides merge over the compiled metadata budget, so an operator or Master Claw can raise a cap without rebuilding the pod.
 
 ### Runtime Context Assembly
 
@@ -120,14 +128,14 @@ The cursor ledger lives at `$CLAW_CONTEXT_LEDGER_DIR/<agent-id>/cursor.json`. Th
 
 ### Provider Execution
 
-The proxy strips the dummy token, attaches the real provider API key, and forwards the request upstream. Declared model failover is implemented for key/provider exhaustion, such as dead keys and rate-limit cooldowns; ordinary upstream 5xx responses are returned rather than silently retried against a different model.
+The proxy strips the dummy token, attaches the real provider API key, and forwards the request upstream. Declared model failover is implemented for key/provider exhaustion, transport failures, and eligible upstream 5xx responses before downstream bytes are committed. Auth, quota, and provider rate-limit responses keep their existing key-state semantics.
 
 ### Egress
 
 The provider response is returned to the agent. The reference passthrough proxy does not amend final text, redact PII, or compute a drift score. Those behaviors belong in a future/custom policy proxy layered on the same context and telemetry contracts.
 
 ::: info Passthrough vs Policy
-The reference `passthrough` implementation performs identity resolution, model routing, late runtime-context assembly, managed tool mediation, memory orchestration, telemetry, and cost tracking. It does not perform policy blocking, prompt decoration from policy modules, response amendment, PII redaction, or drift scoring. Full bidirectional policy interception is future/custom proxy work.
+The reference `passthrough` implementation performs identity resolution, model routing, budget/rate enforcement, late runtime-context assembly, managed tool mediation, memory orchestration, telemetry, and cost tracking. It does not perform contract-derived policy blocking, prompt decoration from policy modules, response amendment, PII redaction, or drift scoring. Full bidirectional policy interception is future/custom proxy work.
 :::
 
 ## Context Mount Structure
@@ -143,7 +151,7 @@ During `claw up`, Clawdapus generates context files under the runtime directory:
 ├── crypto-crusher-0/
 │   ├── AGENTS.md        # Compiled contract (includes, enforce, guide)
 │   ├── CLAWDAPUS.md     # Infrastructure map (surfaces, skills, topology)
-│   ├── metadata.json    # Identity, bearer token, handles, model policy
+│   ├── metadata.json    # Identity, bearer token, handles, model and budget policy
 │   ├── service-auth.json
 │   ├── feeds.json
 │   ├── tools.json
@@ -165,7 +173,7 @@ During `claw up`, Clawdapus generates context files under the runtime directory:
 |------|---------|
 | `AGENTS.md` | The agent's compiled behavioral contract, including inlined `enforce` and `guide` content from `INCLUDE` directives. |
 | `CLAWDAPUS.md` | Infrastructure context: surfaces, mount paths, peer handles, feeds, and available skills. |
-| `metadata.json` | Machine-readable identity, handles, bearer token auth, and compiled model policy. |
+| `metadata.json` | Machine-readable identity, handles, bearer token auth, compiled model policy, and compiled budget policy. |
 | `service-auth.json` | Bearer tokens for services the proxy is allowed to call on the agent's behalf. |
 | `feeds.json` | Resolved context feed subscriptions and fetch metadata. |
 | `tools.json` | Compiled managed tool schemas, execution metadata, auth, and mediation budgets. |
@@ -184,7 +192,7 @@ The mount path must include the `context/` directory segment. The proxy expects 
 
 ### Context Mount Contents
 
-The reference loader reads the compiled contract (`AGENTS.md`), infrastructure map (`CLAWDAPUS.md`), identity metadata, service auth, tool manifest, memory manifest, model policy, and channel allowlist. There is still no generic policy-decoration config or response-amendment hook in the context mount.
+The reference loader reads the compiled contract (`AGENTS.md`), infrastructure map (`CLAWDAPUS.md`), identity metadata, service auth, tool manifest, memory manifest, model policy, budget policy, and channel allowlist. There is still no generic policy-decoration config or response-amendment hook in the context mount.
 
 ### Internal Context Snapshots
 
@@ -211,6 +219,7 @@ The cllama container receives its configuration through environment variables in
 | `CLAW_CONTEXT_ROOT` | Path to the shared context mount root (defaults to `/claw/context`). |
 | `CLAW_SESSION_HISTORY_DIR` | Path to the read-write session history mount (defaults to `/claw/session-history`). When set, also seeds the default `CLAW_CONTEXT_LEDGER_DIR`. |
 | `CLAW_CONTEXT_LEDGER_DIR` | Path where per-agent channel cursors are persisted (defaults to `$CLAW_SESSION_HISTORY_DIR/context-ledger`). When unset, cursors fall back to in-memory and every restart re-bootstraps with a 24h tail. |
+| `CLAW_GOVERNANCE_DIR` | Path to the read-only governance override mount (defaults to `/claw/governance` in generated compose when `claw-api` is present). Budget overrides are read from `<agent-id>/budget.json`. |
 | `CLLAMA_FEED_MAX_RESPONSE_BYTES` | Per-feed byte cap applied at fetch time before formatting. Default `32768`. Invalid or non-positive values fall back to the default. |
 | `CLLAMA_FEED_MAX_TOTAL_BYTES` | Aggregate cap across all formatted feed blocks injected into one request. Default `65536`. Invalid or non-positive values fall back to the default. |
 | `CLLAMA_FEED_FETCH_TIMEOUT_MS` | Per-fetch HTTP timeout for feed providers. Default `3000`, sanity range 100–120000; out-of-range values fall back to the default. Raise it when a feed provider computes synchronously under load. |
@@ -464,6 +473,7 @@ The reference image (`ghcr.io/mostlydev/cllama`) implements the v1 API contract 
 - OpenAI and Anthropic API format passthrough with format bridging.
 - Late runtime-context assembly from compiled feeds, memory recall, time, and channel context.
 - Managed tool injection and mediation from `tools.json`.
+- Per-agent budget and request-rate enforcement from compiled metadata plus governance overrides.
 - Per-agent token usage and cost tracking.
 - Structured audit logging of all traffic.
 - Real-time operator dashboard.
@@ -481,7 +491,7 @@ Any OpenAI-compatible proxy that consumes the Clawdapus context mount layout can
 
 ### ClawRouter
 
-[ClawRouter](https://github.com/BlockRunAI/ClawRouter) is a specialized cllama implementation focused on forced model routing, rate limiting, and compute metering. The reference passthrough provides the routing and telemetry contract; stricter budget or rate-limit enforcement belongs to a policy/budget implementation layered on that contract.
+[ClawRouter](https://github.com/BlockRunAI/ClawRouter) is a specialized cllama implementation focused on forced model routing, rate limiting, and compute metering. The reference passthrough provides Clawdapus' per-agent budget/rate caps plus the routing and telemetry contract; specialized routing engines can layer richer provider selection and organization-specific cost policy on that contract.
 
 ## Security Model
 
@@ -508,7 +518,7 @@ These notes reflect the current state of the reference implementation (`cllama/`
 
 ### Proxy Handler
 
-The proxy handler (`cllama/internal/proxy/handler.go`) has separate OpenAI and Anthropic request paths. It resolves model policy, appends late runtime context, mediates managed tools when `tools.json` is present, and forwards to the provider. There is no generic middleware hook system, policy prompt decoration, or response-amendment engine in the reference implementation.
+The proxy handler (`cllama/internal/proxy/handler.go`) has separate OpenAI and Anthropic request paths. It resolves model policy, checks budget/rate caps, appends late runtime context, mediates managed tools when `tools.json` is present, and forwards to the provider. There is no generic middleware hook system, policy prompt decoration, or response-amendment engine in the reference implementation.
 
 ### Logger Internals
 
@@ -540,7 +550,7 @@ The `cllama/` directory is a git submodule pointing to the cllama source reposit
 Current constraints to be aware of:
 
 - **Single proxy type only.** Multi-proxy is represented in the data model, but the runtime currently fails fast if more than one proxy type is declared per pod. Proxy chaining is future work.
-- **Passthrough only.** Full bidirectional policy interception with prompt decoration, policy blocking, response amendment, and redaction is future policy-plane work. The reference implementation does identity, routing, compiled context injection, managed tools, memory orchestration, telemetry, and cost tracking.
+- **Passthrough only.** Full bidirectional policy interception with prompt decoration, policy blocking, response amendment, and redaction is future policy-plane work. The reference implementation does identity, routing, budget/rate enforcement, compiled context injection, managed tools, memory orchestration, telemetry, and cost tracking.
 - **No per-turn hooks.** The Clawdapus `Driver` interface has four methods (`Validate`, `Materialize`, `PostApply`, `HealthProbe`) -- all run once at deploy/startup. There is no per-turn or per-request hook. Any per-request context enrichment must go through cllama or a runner-native mechanism.
 - **Intervention field quirk.** The cllama logger emits `"intervention": null` on every event (the field has no `omitempty` tag). This is expected behavior, not a missing value.
 - **Telemetry compatibility.** The reference implementation uses `intervention` and `ts`. Older logs or downstream consumers may still account for historical `intervention_reason` or `timestamp` names.

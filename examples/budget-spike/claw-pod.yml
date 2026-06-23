@@ -1,0 +1,38 @@
+name: budget-spike
+
+x-claw:
+  pod: budget-spike
+  master: analyst
+  budget-defaults:
+    limit-usd: 0.00005
+    max-requests: 10
+    window: 1h
+    behavior: hard_stop
+  cllama-defaults:
+    proxy: [passthrough]
+    env:
+      OPENAI_API_KEY: sk-local-fake
+      OPENAI_BASE_URL: http://fake-provider:8080/v1
+  models-defaults:
+    primary: openai/gpt-4o
+
+services:
+  analyst:
+    image: budget-spike-agent:latest
+    build:
+      context: .
+      dockerfile: Clawfile
+    x-claw:
+      agent: ./AGENTS.md
+      surfaces:
+        - service://claw-api
+
+  fake-provider:
+    image: python:3.12-alpine
+    command: ["python", "/app/fake_provider.py"]
+    volumes:
+      - ./fake_provider.py:/app/fake_provider.py:ro
+    expose:
+      - "8080"
+    networks:
+      - claw-internal

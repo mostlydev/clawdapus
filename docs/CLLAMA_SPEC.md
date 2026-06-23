@@ -77,7 +77,7 @@ The proxy SHOULD execute the following pipeline:
 2. **Tool Scoping:** If the agent's request contains `tools`, the proxy evaluates the request against the compiled tool manifest for that agent. The reference implementation only exposes tools declared for that agent; policy-plane implementations MAY further filter or deny tools.
 3. **Prompt Decoration (Pre-Prompting):** Policy-plane implementations MAY modify the outbound `messages` array, injecting specific rules, priorities, or warnings based on the compiled context. The passthrough reference does not perform policy prompt decoration.
 4. **Policy Blocking:** If the outbound prompt violates a loaded policy module, a policy-plane implementation MAY short-circuit the request and return an error or a mock response. The passthrough reference does not perform policy blocking.
-5. **Forced Model Routing & Compute Metering:** Even if the agent requests a specific model (e.g., `gpt-4o`), the proxy MAY seamlessly rewrite the request to use a different, operator-approved model (e.g., `claude-3-haiku-20240307`) or provider. The reference implementation meters usage and records cost telemetry; hard budget and rate-limit enforcement (including `429 Too Many Requests`) is a policy/budget extension point rather than a required passthrough behavior.
+5. **Forced Model Routing, Budgets & Compute Metering:** Even if the agent requests a specific model (e.g., `gpt-4o`), the proxy MAY seamlessly rewrite the request to use a different, operator-approved model (e.g., `claude-3-haiku-20240307`) or provider. The reference implementation meters usage, records cost telemetry, and enforces compiled per-agent budget/request caps before provider dispatch. On cap breach it returns `429 Too Many Requests` and emits an `intervention` such as `budget_exceeded` or `rate_limited`. If the budget ledger is unavailable, the reference implementation logs `budget_check_unavailable` and defaults to fail-open unless `CLLAMA_BUDGET_FAIL_MODE=closed` is configured.
 
 ### C. Provider Execution
 The proxy strips the dummy token, attaches the real `PROVIDER_API_KEY`, and forwards the decorated request to the upstream LLM provider.
@@ -177,9 +177,9 @@ The passthrough reference:
 - Adheres to the v1 ingress surface matrix and Listen Port.
 - Validates the environment (`CLAW_POD`, `CLAW_CONTEXT_ROOT`, provider credentials), bearer-token identity resolution, and mounts.
 - Acts as a pure, transparent proxy (no decoration, no amendment).
-- Emits structured logs of all traffic.
+- Emits structured logs of all traffic and budget/rate interventions.
 
 This image is used for testing network integration and serves as the boilerplate for operators to build proprietary `cllama` policy engines (e.g., incorporating advanced DLP, RAG-based context injection, or conversational configuration).
 
 ### Routing and Compute Metering
-Tools like **[ClawRouter](https://github.com/BlockRunAI/ClawRouter)** act as specialized instances of a `cllama` proxy focused on forced model routing, provider availability, rate limiting, and compute metering. The reference passthrough establishes the identity, routing, and telemetry contract; stricter budget or rate-limit enforcement belongs to a policy/budget implementation layered on that contract.
+Tools like **[ClawRouter](https://github.com/BlockRunAI/ClawRouter)** act as specialized instances of a `cllama` proxy focused on forced model routing, provider availability, rate limiting, and compute metering. The reference passthrough establishes the identity, per-agent budget/rate caps, routing, and telemetry contract; specialized engines can layer richer provider selection and organization-specific cost policy on that contract.

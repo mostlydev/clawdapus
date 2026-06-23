@@ -65,10 +65,11 @@ var auditCmd = &cobra.Command{
 			Since:  since,
 		})
 		summary := audit.Summarize(filtered)
+		out := cmd.OutOrStdout()
 		if auditJSON {
-			return writeAuditJSON(os.Stdout, manifest.PodName, skipped, summary, filtered)
+			return writeAuditJSON(out, manifest.PodName, skipped, summary, filtered)
 		}
-		return writeAuditText(os.Stdout, manifest.PodName, skipped, summary, filtered)
+		return writeAuditText(out, manifest.PodName, skipped, summary, filtered)
 	},
 }
 

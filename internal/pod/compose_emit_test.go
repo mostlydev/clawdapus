@@ -821,6 +821,7 @@ func TestEmitComposeWithCllamaProxy(t *testing.T) {
 		ContextHostDir:        "/tmp/test/.claw-runtime/context",
 		AuthHostDir:           "/tmp/test/.claw-runtime/proxy-auth",
 		SessionHistoryHostDir: "/tmp/test/.claw-session-history",
+		GovernanceHostDir:     "/tmp/test/.claw-governance",
 		Environment: map[string]string{
 			"CLAW_POD":       "test-pod",
 			"OPENAI_API_KEY": "sk-real",
@@ -853,6 +854,12 @@ func TestEmitComposeWithCllamaProxy(t *testing.T) {
 	}
 	if !strings.Contains(out, "CLAW_SESSION_HISTORY_DIR: /claw/session-history") {
 		t.Error("expected CLAW_SESSION_HISTORY_DIR=/claw/session-history env var in cllama service")
+	}
+	if !strings.Contains(out, "/tmp/test/.claw-governance:/claw/governance:ro") {
+		t.Error("expected governance volume mount in cllama service")
+	}
+	if !strings.Contains(out, "CLAW_GOVERNANCE_DIR: /claw/governance") {
+		t.Error("expected CLAW_GOVERNANCE_DIR=/claw/governance env var in cllama service")
 	}
 }
 

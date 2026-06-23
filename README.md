@@ -374,12 +374,13 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Credential starvation:** The proxy holds the real API keys. Agents get unique bearer tokens. No credentials, no bypass.
 - **Identity resolution:** Single proxy serves an entire pod. Bearer tokens resolve which agent is calling.
 - **Cost accounting:** Extracts token usage from every response, multiplies by pricing table, tracks per agent/provider/model.
+- **Budget and rate enforcement:** Per-agent `x-claw.budget` caps compile into the proxy context. cllama rejects over-budget or over-rate turns with 429 and logs `budget_exceeded` / `rate_limited` interventions.
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
 - **Managed tool mediation:** Services declare callable tools via `claw.describe` (MCP-shaped schemas). `claw up` compiles per-agent `tools.json`. cllama injects tools into LLM requests, intercepts `tool_call` responses, executes them against the service, and loops until terminal text — transparent to the runner. HTTP services, Streamable HTTP MCP sidecars, and stdio MCP servers wrapped by `claw-mcp-stdio` are supported.
 - **Ambient memory plane:** Services declare `recall`, `retain`, and `forget` endpoints via `claw.describe`. `claw up` compiles per-agent `memory.json`. cllama calls `/recall` before each inference turn and `/retain` after each successful response (async, non-blocking). Memory intelligence stays in swappable external services — the proxy owns orchestration only.
 - **Operator dashboard:** Real-time web UI at host port 8181 by default (container `:8081`) — agent activity, provider status, cost breakdown.
 
-The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
+The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking, budget enforcement). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
 
 See the [cllama specification](./docs/CLLAMA_SPEC.md) for the full standard.
 
@@ -553,10 +554,10 @@ inline the service's advertised tools and the mount path:
 Clawdapus is designed for autonomous fleet governance. The operator writes the `Clawfile` and sets the budgets, but day-to-day oversight can be delegated to a **Master Claw** — an AI governor.
 
 **The Governance Proxy is its Sensory Organ:**
-The `cllama` proxy is the programmatic choke point. It sits on the network, holds provider credentials, applies compiled model/tool/context policy, and emits structured telemetry (cost, interventions, tool rounds). It doesn't "think" about management; it is a passive sensor and firewall.
+The `cllama` proxy is the programmatic choke point. It sits on the network, holds provider credentials, applies compiled model/tool/context/budget policy, rejects over-cap turns, and emits structured telemetry (cost, interventions, tool rounds). It doesn't "think" about management; it is a passive sensor and firewall.
 
 **The Master Claw is the Brain:**
-The Master Claw is an actual LLM-powered agent running in the pod, reading proxy telemetry and acting on it. `x-claw.master` wires this today: it auto-injects a `claw-api` service and hands the governor a scoped bearer token and `CLAW_API_URL`, so it can read fleet telemetry and act through an authenticated, scope-checked API. The executive policy it runs — shifting budgets, quarantining a high-cost or off-policy agent, promoting a recipe — is operator-defined (recipe promotion is still on the roadmap), not built-in enforcement.
+The Master Claw is an actual LLM-powered agent running in the pod, reading proxy telemetry and acting on it. `x-claw.master` wires this today: it auto-injects a `claw-api` service and hands the governor a scoped bearer token and `CLAW_API_URL`, so it can read fleet telemetry and act through an authenticated, scope-checked API. The executive policy it runs — shifting enforced budget caps, quarantining a high-cost or off-policy agent, promoting a recipe — is operator-defined (recipe promotion is still on the roadmap).
 
 In enterprise deployments, this naturally forms a **Hub-and-Spoke Governance Model**: multiple pods across zones run their own `cllama` proxies as local firewalls, while a single Master Claw ingests telemetry from them all to oversee the fleet.
 
@@ -598,7 +599,7 @@ This loop is **designed but not yet implemented** — the `TRACK`/`recipe`/`bake
 4. **Drift is an open metric** — independent audit via the governance proxy, not self-report
 5. **Surfaces are declared** — topology for operators; capability discovery for bots. The proxy enforces cognitive boundaries.
 6. **Claws are users** — standard credentials; the proxy governs intent, the service's own auth governs execution
-7. **Compute is a privilege** — operator assigns models and schedules; proxy meters usage and exposes the budget-control surface; bot doesn't choose
+7. **Compute is a privilege** — operator assigns models, schedules, and budget caps; proxy meters usage and rejects over-cap turns; bot doesn't choose
 8. **Think twice, act once** — a reasoning model cannot be its own judge
 9. **Memory survives the container (and the runner)** — session history is captured at the proxy boundary and persisted outside the runtime directory. Bots don't start amnesia-fresh after every restart. Infrastructure owns the record; the runner owns the scratch space. Two surfaces, two owners, never merged. Because the architecture is the agent, you can swap the runtime (`CLAW_TYPE`) without losing the mind; knowledge seamlessly crosses driver boundaries. Retention is only half of memory. The **ambient memory plane** is live: pluggable memory services declared via `claw.describe`, compiled by `claw up`, and orchestrated by cllama — recalling derived context before each inference turn and retaining after each response. The agent does not manage its own long-term memory. Infrastructure does.
 
