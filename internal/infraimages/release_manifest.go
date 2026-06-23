@@ -10,7 +10,7 @@ const (
 	DefaultClawChannelMemoryTag = DefaultClawInfraTag
 	DefaultClawMCPStdioTag      = DefaultClawInfraTag
 	DefaultCllamaTag            = "v0.7.3"
-	DefaultHermesBaseTag        = "v2026.5.16-claw.2"
+	DefaultHermesBaseTag        = "v2026.5.16-claw.3"
 )
 
 func ReleaseRefs(releaseTag string) []string {
