@@ -22,6 +22,8 @@ const (
 	hermesGatewayLockDirEnv       = "HERMES_GATEWAY_LOCK_DIR"
 	hermesAllowSilentFinalEnv     = "HERMES_ALLOW_SILENT_FINAL"
 	hermesToolProgressModeEnv     = "HERMES_TOOL_PROGRESS_MODE"
+	hermesMemoryIndexMaxCharsEnv  = "HERMES_MEMORY_INDEX_MAX_CHARS"
+	hermesUserMemoryMaxCharsEnv   = "HERMES_USER_MEMORY_MAX_CHARS"
 	hermesDiscordReplyMentionEnv  = "DISCORD_ALLOW_MENTION_REPLIED_USER"
 	clawdapusDisabledToolsEnv     = "CLAWDAPUS_DISABLED_TOOLS"
 	hermesTextToSpeechTool        = "text_to_speech"
@@ -377,6 +379,8 @@ func allowedEnvPassthroughKeys() []string {
 		hermesGatewayLockDirEnv,
 		hermesAllowSilentFinalEnv,
 		hermesToolProgressModeEnv,
+		hermesMemoryIndexMaxCharsEnv,
+		hermesUserMemoryMaxCharsEnv,
 		"NO_PROXY",
 		"no_proxy",
 		"OPENAI_API_KEY",

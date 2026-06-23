@@ -713,6 +713,29 @@ func TestGenerateEnvFileIncludesFirecrawlVars(t *testing.T) {
 	}
 }
 
+func TestGenerateEnvFilePassesThroughMemoryLimitVars(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Environment: map[string]string{
+			hermesMemoryIndexMaxCharsEnv: "16000",
+			hermesUserMemoryMaxCharsEnv:  "8000",
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	env := string(data)
+	for _, want := range []string{
+		hermesMemoryIndexMaxCharsEnv + "=16000\n",
+		hermesUserMemoryMaxCharsEnv + "=8000\n",
+	} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("expected %q in .env, got:\n%s", want, env)
+		}
+	}
+}
+
 func TestGenerateEnvFileSetsAllowSilentEnv(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Hermes: &driver.HermesConfig{AllowSilent: true},
