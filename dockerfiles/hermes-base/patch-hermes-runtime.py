@@ -22,6 +22,22 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
         raise SystemExit(f"expected to patch {label}")
     return text.replace(old, new, 1)
 
+
+def replace_once_any(text: str, options: list[tuple[str, str]], label: str) -> str:
+    for old, new in options:
+        if old in text:
+            return text.replace(old, new, 1)
+    raise SystemExit(f"expected to patch {label}")
+
+
+def first_existing(*relative_paths: str) -> pathlib.Path:
+    for relative_path in relative_paths:
+        candidate = purelib / relative_path
+        if candidate.exists():
+            return candidate
+    joined = ", ".join(relative_paths)
+    raise SystemExit(f"expected one installed Hermes file to exist: {joined}")
+
 shutil.copy("/tmp/minisweagent_path.py", purelib / "minisweagent_path.py")
 
 # Replace only the first identity layer. Hermes memory/session/skill guidance
@@ -59,7 +75,10 @@ prompt_builder.write_text(text)
 # requires elevated bot privileges. members is conditional upstream now and
 # resolves to False for our pods (numeric DISCORD_ALLOWED_USERS, no roles),
 # so the previous unconditional False patch is obsolete and dropped.
-discord_adapter = purelib / "gateway" / "platforms" / "discord.py"
+discord_adapter = first_existing(
+    "plugins/platforms/discord/adapter.py",
+    "gateway/platforms/discord.py",
+)
 text = discord_adapter.read_text()
 text = replace_once(
     text,
@@ -81,14 +100,26 @@ discord_adapter.write_text(text)
 # plain final answers are not silently lost.
 base_adapter = purelib / "gateway" / "platforms" / "base.py"
 text = base_adapter.read_text()
-text = replace_once(
+text = replace_once_any(
     text,
-    "                # Send the text portion\n                if text_content:\n",
-    "                # Send the text portion. In HERMES_TOOL_ONLY_MODE, run.py\n"
-    "                # clears this text only when the current turn already sent\n"
-    "                # a visible message via send_message; otherwise this is the\n"
-    "                # fallback that prevents final answers from disappearing.\n"
-    "                if text_content:\n",
+    [
+        (
+            "                # Send the text portion\n                if text_content:\n",
+            "                # Send the text portion. In HERMES_TOOL_ONLY_MODE, run.py\n"
+            "                # clears this text only when the current turn already sent\n"
+            "                # a visible message via send_message; otherwise this is the\n"
+            "                # fallback that prevents final answers from disappearing.\n"
+            "                if text_content:\n",
+        ),
+        (
+            "                # Send the text portion\n                if text_content and not _tts_caption_delivered:\n",
+            "                # Send the text portion. In HERMES_TOOL_ONLY_MODE, run.py\n"
+            "                # clears this text only when the current turn already sent\n"
+            "                # a visible message via send_message; otherwise this is the\n"
+            "                # fallback that prevents final answers from disappearing.\n"
+            "                if text_content and not _tts_caption_delivered:\n",
+        ),
+    ],
     "base platform tool-only mode fallback delivery",
 )
 base_adapter.write_text(text)
@@ -155,31 +186,7 @@ config_py.write_text(text)
 
 memory_tool = purelib / "tools" / "memory_tool.py"
 text = memory_tool.read_text()
-text = replace_once(
-    text,
-    '''            # Calculate what the new total would be
-            new_entries = entries + [content]
-            new_total = len(ENTRY_DELIMITER.join(new_entries))
-
-            if new_total > limit:
-                current = self._char_count(target)
-                return {
-                    "success": False,
-                    "error": (
-                        f"Memory at {current:,}/{limit:,} chars. "
-                        f"Adding this entry ({len(content)} chars) would exceed the limit. "
-                        f"Replace or remove existing entries first."
-                    ),
-                    "current_entries": entries,
-                    "usage": f"{current:,}/{limit:,}",
-                }
-
-            entries.append(content)
-            self._set_entries(target, entries)
-            self.save_to_disk(target)
-
-        return self._success_response(target, "Entry added.")''',
-    '''            # Calculate what the new total would be. If the new entry can
+memory_add_eviction = '''            # Calculate what the new total would be. If the new entry can
             # fit by evicting older entries, evict oldest-first instead of
             # freezing memory writes at the cap.
             new_entries = entries + [content]
@@ -229,7 +236,57 @@ text = replace_once(
                 f"Entry added. Evicted {len(evicted_entries)} oldest "
                 f"{'entry' if len(evicted_entries) == 1 else 'entries'} to stay within the memory limit."
             )
-        return response''',
+        return response'''
+text = replace_once_any(
+    text,
+    [
+        ('''            # Calculate what the new total would be
+            new_entries = entries + [content]
+            new_total = len(ENTRY_DELIMITER.join(new_entries))
+
+            if new_total > limit:
+                current = self._char_count(target)
+                return {
+                    "success": False,
+                    "error": (
+                        f"Memory at {current:,}/{limit:,} chars. "
+                        f"Adding this entry ({len(content)} chars) would exceed the limit. "
+                        f"Replace or remove existing entries first."
+                    ),
+                    "current_entries": entries,
+                    "usage": f"{current:,}/{limit:,}",
+                }
+
+            entries.append(content)
+            self._set_entries(target, entries)
+            self.save_to_disk(target)
+
+        return self._success_response(target, "Entry added.")''', memory_add_eviction),
+        ('''            # Calculate what the new total would be
+            new_entries = entries + [content]
+            new_total = len(ENTRY_DELIMITER.join(new_entries))
+
+            if new_total > limit:
+                current = self._char_count(target)
+                return {
+                    "success": False,
+                    "error": (
+                        f"Memory at {current:,}/{limit:,} chars. "
+                        f"Adding this entry ({len(content)} chars) would exceed the limit. "
+                        f"Consolidate now: use 'replace' to merge overlapping entries into "
+                        f"shorter ones or 'remove' stale or less important entries (see "
+                        f"current_entries below), then retry this add — all in this turn."
+                    ),
+                    "current_entries": entries,
+                    "usage": f"{current:,}/{limit:,}",
+                }
+
+            entries.append(content)
+            self._set_entries(target, entries)
+            self.save_to_disk(target)
+
+        return self._success_response(target, "Entry added.")''', memory_add_eviction),
+    ],
     "Hermes memory add oldest-entry eviction",
 )
 text = replace_once(
@@ -284,13 +341,7 @@ text = replace_once(
     "def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Optional[str]:\n",
     "cron scheduler transient failure delivery classifier",
 )
-text = replace_once(
-    text,
-    "                # Deliver the final response to the origin/target chat.\n"
-    "                # If the agent responded with [SILENT], skip delivery (but\n"
-    "                # output is already saved above).  Failed jobs always deliver.\n"
-    "                deliver_content = final_response if success else f\"⚠️ Cron job '{job.get('name', job['id'])}' failed:\\n{error}\"\n"
-    "                should_deliver = bool(deliver_content)\n",
+cron_suppress_old = (
     "                # Deliver the final response to the origin/target chat.\n"
     "                # If the agent responded with [SILENT], skip delivery (but\n"
     "                # output is already saved above).  Failed jobs deliver unless\n"
@@ -303,41 +354,97 @@ text = replace_once(
     "                else:\n"
     "                    logger.warning(\"Job '%s': suppressing transient cron failure delivery: %s\", job[\"id\"], error)\n"
     "                    deliver_content = None\n"
-    "                should_deliver = bool(deliver_content)\n",
+    "                should_deliver = bool(deliver_content)\n"
+)
+cron_suppress_current = (
+    "        # Deliver the final response to the origin/target chat.\n"
+    "        # If the agent responded with [SILENT], skip delivery (but\n"
+    "        # output is already saved above).  Failed jobs deliver unless\n"
+    "        # the failure is a transient provider/cllama outage; those are\n"
+    "        # recorded in job state/logs without becoming channel noise.\n"
+    "        if success:\n"
+    "            deliver_content = final_response\n"
+    "        elif _claw_should_deliver_cron_failure(error):\n"
+    "            deliver_content = _summarize_cron_failure_for_delivery(job, error)\n"
+    "        else:\n"
+    "            logger.warning(\"Job '%s': suppressing transient cron failure delivery: %s\", job[\"id\"], error)\n"
+    "            deliver_content = \"\"\n"
+)
+text = replace_once_any(
+    text,
+    [
+        (
+            "                # Deliver the final response to the origin/target chat.\n"
+            "                # If the agent responded with [SILENT], skip delivery (but\n"
+            "                # output is already saved above).  Failed jobs always deliver.\n"
+            "                deliver_content = final_response if success else f\"⚠️ Cron job '{job.get('name', job['id'])}' failed:\\n{error}\"\n"
+            "                should_deliver = bool(deliver_content)\n",
+            cron_suppress_old,
+        ),
+        (
+            "        # Deliver the final response to the origin/target chat.\n"
+            "        # If the agent responded with [SILENT], skip delivery (but\n"
+            "        # output is already saved above).  Failed jobs always deliver.\n"
+            "        deliver_content = final_response if success else _summarize_cron_failure_for_delivery(job, error)\n",
+            cron_suppress_current,
+        ),
+    ],
     "cron scheduler suppress transient failure delivery",
 )
 cron_scheduler.write_text(text)
-
-run_agent = purelib / "run_agent.py"
-text = run_agent.read_text()
 
 # cllama consumer session epoch: when Hermes is routed through the in-pod
 # cllama OpenAI-compatible base URL, attach the process-stable restart epoch
 # generated by entrypoint.sh. Keep this at the Hermes client factory layer so
 # provider-specific transport kwargs keep working unchanged.
-text = replace_once(
+runtime_helpers = first_existing("agent/agent_runtime_helpers.py", "run_agent.py")
+text = runtime_helpers.read_text()
+if "import os\n" not in text:
+    text = replace_once(
+        text,
+        "import logging\n",
+        "import logging\nimport os\n",
+        "run_agent runtime helpers os import",
+    )
+text = replace_once_any(
     text,
-    "        client_kwargs = dict(client_kwargs)\n"
-    "        _validate_proxy_env_urls()\n"
-    "        _validate_base_url(client_kwargs.get(\"base_url\"))\n",
-    "        client_kwargs = dict(client_kwargs)\n"
-    "        _claw_epoch = os.getenv(\"CLLAMA_CONSUMER_SESSION_EPOCH\", \"\").strip()\n"
-    "        _claw_base_host = base_url_hostname(str(client_kwargs.get(\"base_url\", \"\") or \"\"))\n"
-    "        if _claw_epoch and (_claw_base_host == \"cllama\" or _claw_base_host.startswith(\"cllama-\")):\n"
-    "            _claw_headers = dict(client_kwargs.get(\"default_headers\") or {})\n"
-    "            _claw_headers[\"X-Claw-Consumer-Session-Epoch\"] = _claw_epoch\n"
-    "            client_kwargs[\"default_headers\"] = _claw_headers\n"
-    "        _validate_proxy_env_urls()\n"
-    "        _validate_base_url(client_kwargs.get(\"base_url\"))\n",
+    [
+        (
+            "        client_kwargs = dict(client_kwargs)\n"
+            "        _validate_proxy_env_urls()\n"
+            "        _validate_base_url(client_kwargs.get(\"base_url\"))\n",
+            "        client_kwargs = dict(client_kwargs)\n"
+            "        _claw_epoch = os.getenv(\"CLLAMA_CONSUMER_SESSION_EPOCH\", \"\").strip()\n"
+            "        _claw_base_host = base_url_hostname(str(client_kwargs.get(\"base_url\", \"\") or \"\"))\n"
+            "        if _claw_epoch and (_claw_base_host == \"cllama\" or _claw_base_host.startswith(\"cllama-\")):\n"
+            "            _claw_headers = dict(client_kwargs.get(\"default_headers\") or {})\n"
+            "            _claw_headers[\"X-Claw-Consumer-Session-Epoch\"] = _claw_epoch\n"
+            "            client_kwargs[\"default_headers\"] = _claw_headers\n"
+            "        _validate_proxy_env_urls()\n"
+            "        _validate_base_url(client_kwargs.get(\"base_url\"))\n",
+        ),
+        (
+            "    client_kwargs = dict(client_kwargs)\n"
+            "    _validate_proxy_env_urls()\n"
+            "    _validate_base_url(client_kwargs.get(\"base_url\"))\n",
+            "    client_kwargs = dict(client_kwargs)\n"
+            "    _claw_epoch = os.getenv(\"CLLAMA_CONSUMER_SESSION_EPOCH\", \"\").strip()\n"
+            "    _claw_base_host = base_url_hostname(str(client_kwargs.get(\"base_url\", \"\") or \"\"))\n"
+            "    if _claw_epoch and (_claw_base_host == \"cllama\" or _claw_base_host.startswith(\"cllama-\")):\n"
+            "        _claw_headers = dict(client_kwargs.get(\"default_headers\") or {})\n"
+            "        _claw_headers[\"X-Claw-Consumer-Session-Epoch\"] = _claw_epoch\n"
+            "        client_kwargs[\"default_headers\"] = _claw_headers\n"
+            "    _validate_proxy_env_urls()\n"
+            "    _validate_base_url(client_kwargs.get(\"base_url\"))\n",
+        ),
+    ],
     "run_agent cllama consumer session epoch header",
 )
+runtime_helpers.write_text(text)
 
-text = replace_once(
-    text,
-    "                    self._memory_store = MemoryStore(\n"
-    "                        memory_char_limit=mem_config.get(\"memory_char_limit\", 2200),\n"
-    "                        user_char_limit=mem_config.get(\"user_char_limit\", 1375),\n"
-    "                    )\n",
+agent_init = first_existing("agent/agent_init.py", "run_agent.py")
+text = agent_init.read_text()
+memory_limit_patch_self = (
     "                    def _claw_memory_limit(env_name: str, configured, fallback: int) -> int:\n"
     "                        raw = os.getenv(env_name, \"\").strip()\n"
     "                        value = raw if raw else configured\n"
@@ -358,80 +465,147 @@ text = replace_once(
     "                            mem_config.get(\"user_char_limit\", 6000),\n"
     "                            6000,\n"
     "                        ),\n"
-    "                    )\n",
+    "                    )\n"
+)
+memory_limit_patch_agent = (
+    "                def _claw_memory_limit(env_name: str, configured, fallback: int) -> int:\n"
+    "                    raw = os.getenv(env_name, \"\").strip()\n"
+    "                    value = raw if raw else configured\n"
+    "                    try:\n"
+    "                        parsed = int(value)\n"
+    "                    except (TypeError, ValueError):\n"
+    "                        parsed = fallback\n"
+    "                    return parsed if parsed > 0 else fallback\n"
+    "\n"
+    "                agent._memory_store = MemoryStore(\n"
+    "                    memory_char_limit=_claw_memory_limit(\n"
+    "                        \"HERMES_MEMORY_INDEX_MAX_CHARS\",\n"
+    "                        mem_config.get(\"memory_char_limit\", 12000),\n"
+    "                        12000,\n"
+    "                    ),\n"
+    "                    user_char_limit=_claw_memory_limit(\n"
+    "                        \"HERMES_USER_MEMORY_MAX_CHARS\",\n"
+    "                        mem_config.get(\"user_char_limit\", 6000),\n"
+    "                        6000,\n"
+    "                    ),\n"
+    "                )\n"
+)
+text = replace_once_any(
+    text,
+    [
+        (
+            "                    self._memory_store = MemoryStore(\n"
+            "                        memory_char_limit=mem_config.get(\"memory_char_limit\", 2200),\n"
+            "                        user_char_limit=mem_config.get(\"user_char_limit\", 1375),\n"
+            "                    )\n",
+            memory_limit_patch_self,
+        ),
+        (
+            "                agent._memory_store = MemoryStore(\n"
+            "                    memory_char_limit=mem_config.get(\"memory_char_limit\", 2200),\n"
+            "                    user_char_limit=mem_config.get(\"user_char_limit\", 1375),\n"
+            "                )\n",
+            memory_limit_patch_agent,
+        ),
+    ],
     "run_agent Hermes memory env-configurable limits",
 )
+agent_init.write_text(text)
 
 # Continuing gateway sessions persist a system_prompt snapshot. If the managed
 # identity changes, rebuild the prompt instead of reusing a stale Hermes identity.
-text = replace_once(
+conversation_loop = first_existing("agent/conversation_loop.py", "run_agent.py")
+text = conversation_loop.read_text()
+text = replace_once_any(
     text,
-    '                        stored_prompt = session_row.get("system_prompt") or None\n',
-    '                        stored_prompt = session_row.get("system_prompt") or None\n'
-    '                        default_identity = os.getenv("HERMES_DEFAULT_AGENT_IDENTITY", "").strip()\n'
-    '                        if stored_prompt and default_identity and not stored_prompt.startswith(default_identity):\n'
-    '                            logger.info("Refreshing stored system prompt because HERMES_DEFAULT_AGENT_IDENTITY changed")\n'
-    '                            stored_prompt = None\n',
+    [
+        (
+            '                        stored_prompt = session_row.get("system_prompt") or None\n',
+            '                        stored_prompt = session_row.get("system_prompt") or None\n'
+            '                        default_identity = os.getenv("HERMES_DEFAULT_AGENT_IDENTITY", "").strip()\n'
+            '                        if stored_prompt and default_identity and not stored_prompt.startswith(default_identity):\n'
+            '                            logger.info("Refreshing stored system prompt because HERMES_DEFAULT_AGENT_IDENTITY changed")\n'
+            '                            stored_prompt = None\n',
+        ),
+        (
+            '                    stored_prompt = raw_prompt\n'
+            '                    stored_state = "present"\n',
+            '                    stored_prompt = raw_prompt\n'
+            '                    default_identity = os.getenv("HERMES_DEFAULT_AGENT_IDENTITY", "").strip()\n'
+            '                    if stored_prompt and default_identity and not stored_prompt.startswith(default_identity):\n'
+            '                        logger.info("Refreshing stored system prompt because HERMES_DEFAULT_AGENT_IDENTITY changed")\n'
+            '                        stored_prompt = None\n'
+            '                        stored_state = "stale_identity"\n'
+            '                    else:\n'
+            '                        stored_state = "present"\n',
+        ),
+    ],
     "run_agent stored prompt identity invalidation",
 )
+conversation_loop.write_text(text)
 
 # Tool-only mode: force tool_choice=required per user turn.
 # Upstream now has a provider-profile path and a legacy fallback inside
-# `_build_api_kwargs`. Capture the chat-completions kwargs in both paths and
+# `build_api_kwargs`. Capture the chat-completions kwargs in both paths and
 # inject `tool_choice="required"` at the start of each user turn so the model
 # must call a tool (preferably send_message) before falling back to plain text.
+chat_completion_helpers = first_existing("agent/chat_completion_helpers.py", "run_agent.py")
+text = chat_completion_helpers.read_text()
 text = replace_once(
     text,
-    "            return _ct.build_kwargs(\n"
-    "                model=self.model,\n"
-    "                messages=api_messages,\n"
-    "                tools=tools_for_api,\n"
-    "                base_url=self.base_url,\n",
-    "            _claw_kwargs = _ct.build_kwargs(\n"
-    "                model=self.model,\n"
-    "                messages=api_messages,\n"
-    "                tools=tools_for_api,\n"
-    "                base_url=self.base_url,\n",
+    "        return _ct.build_kwargs(\n"
+    "            model=agent.model,\n"
+    "            messages=api_messages,\n"
+    "            tools=tools_for_api,\n"
+    "            base_url=agent.base_url,\n",
+    "        _claw_kwargs = _ct.build_kwargs(\n"
+    "            model=agent.model,\n"
+    "            messages=api_messages,\n"
+    "            tools=tools_for_api,\n"
+    "            base_url=agent.base_url,\n",
     "run_agent provider-profile _build_api_kwargs capture for tool-only mode",
 )
 text = replace_once(
     text,
-    "                qwen_session_metadata=_qwen_meta,\n"
-    "            )\n"
+    "            qwen_session_metadata=_qwen_meta,\n"
+    "        )\n"
     "\n"
-    "        # ── Legacy flag path",
-    "                qwen_session_metadata=_qwen_meta,\n"
-    "            )\n"
-    "            return self._claw_apply_tool_only_choice(_claw_kwargs, api_messages)\n"
+    "    # ── Legacy flag path",
+    "            qwen_session_metadata=_qwen_meta,\n"
+    "        )\n"
+    "        return _claw_apply_tool_only_choice(agent, _claw_kwargs, api_messages)\n"
     "\n"
-    "        # ── Legacy flag path",
+    "    # ── Legacy flag path",
     "run_agent provider-profile tool-only mode return",
 )
 text = replace_once(
     text,
-    "        return _ct.build_kwargs(\n"
-    "            model=self.model,\n"
-    "            messages=_msgs_for_chat,\n"
-    "            tools=tools_for_api,\n"
-    "            base_url=self.base_url,\n",
-    "        _claw_kwargs = _ct.build_kwargs(\n"
-    "            model=self.model,\n"
-    "            messages=_msgs_for_chat,\n"
-    "            tools=tools_for_api,\n"
-    "            base_url=self.base_url,\n",
+    "    return _ct.build_kwargs(\n"
+    "        model=agent.model,\n"
+    "        messages=_msgs_for_chat,\n"
+    "        tools=tools_for_api,\n"
+    "        base_url=agent.base_url,\n",
+    "    _claw_kwargs = _ct.build_kwargs(\n"
+    "        model=agent.model,\n"
+    "        messages=_msgs_for_chat,\n"
+    "        tools=tools_for_api,\n"
+    "        base_url=agent.base_url,\n",
     "run_agent legacy _build_api_kwargs capture for tool-only mode",
 )
 text = replace_once(
     text,
-    "            provider_name=self.provider,\n"
-    "        )\n"
+    "        provider_name=agent.provider,\n"
+    "    )\n"
     "\n"
-    "    def _supports_reasoning_extra_body(self) -> bool:\n",
-    "            provider_name=self.provider,\n"
-    "        )\n"
-    "        return self._claw_apply_tool_only_choice(_claw_kwargs, _msgs_for_chat)\n"
     "\n"
-    "    def _claw_apply_tool_only_choice(self, _claw_kwargs: dict, api_messages: list) -> dict:\n"
+    "\n"
+    "def build_assistant_message(agent, assistant_message, finish_reason: str) -> dict:\n",
+    "        provider_name=agent.provider,\n"
+    "    )\n"
+    "    return _claw_apply_tool_only_choice(agent, _claw_kwargs, _msgs_for_chat)\n"
+    "\n"
+    "\n"
+    "def _claw_apply_tool_only_choice(agent, _claw_kwargs: dict, api_messages: list) -> dict:\n"
     "        # In tool-only mode, force tool_choice=required on the first LLM\n"
     "        # call of each user turn. Inspect only messages after the latest\n"
     "        # user message so prior turns' tool_calls do not satisfy this turn.\n"
@@ -454,36 +628,57 @@ text = replace_once(
     "                _claw_kwargs[\"tool_choice\"] = \"required\"\n"
     "        return _claw_kwargs\n"
     "\n"
-    "    def _supports_reasoning_extra_body(self) -> bool:\n",
+    "\n"
+    "\n"
+    "def build_assistant_message(agent, assistant_message, finish_reason: str) -> dict:\n",
     "run_agent tool_choice=required per turn in tool-only mode",
 )
+chat_completion_helpers.write_text(text)
 
 # Silent-final opt-in: when HERMES_ALLOW_SILENT_FINAL=1, treat empty visible
 # final responses as a successful no-op turn instead of retrying/nudging.
 # Managed messaging agents often deliver the visible reply through send_message
 # and then intentionally have nothing else to say.
+text = conversation_loop.read_text()
 text = replace_once(
     text,
-    '                    if not self._has_content_after_think_block(final_response):\n',
-    '                    if not self._has_content_after_think_block(final_response):\n'
-    '                        if os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1":\n'
-    '                            logger.debug("Silent final enabled; treating empty visible response as completed no-op")\n'
-    '                            self._empty_content_retries = 0\n'
-    '                            self._cleanup_task_resources(effective_task_id)\n'
-    '                            self._persist_session(messages, conversation_history)\n'
-    '                            return {\n'
-    '                                "final_response": None,\n'
-    '                                "messages": messages,\n'
-    '                                "api_calls": api_call_count,\n'
-    '                                "completed": True,\n'
-    '                                "partial": False,\n'
-    '                            }\n',
+    '                if not agent._has_content_after_think_block(final_response):\n',
+    '                if not agent._has_content_after_think_block(final_response):\n'
+    '                    if os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1":\n'
+    '                        logger.debug("Silent final enabled; treating empty visible response as completed no-op")\n'
+    '                        agent._empty_content_retries = 0\n'
+    '                        agent._cleanup_task_resources(effective_task_id)\n'
+    '                        agent._persist_session(messages, conversation_history)\n'
+    '                        return {\n'
+    '                            "final_response": None,\n'
+    '                            "messages": messages,\n'
+    '                            "api_calls": api_call_count,\n'
+    '                            "completed": True,\n'
+    '                            "partial": False,\n'
+    '                        }\n',
     "run_agent silent final opt-in",
 )
-run_agent.write_text(text)
+conversation_loop.write_text(text)
 
 gateway_run = purelib / "gateway" / "run.py"
 text = gateway_run.read_text()
+
+# Clawdapus-managed chat surfaces treat status_callback output as runtime
+# telemetry. Keep upstream behavior when unset, but suppress chat delivery when
+# HERMES_CHAT_STATUS_DELIVERY is explicitly false/off/0.
+text = replace_once(
+    text,
+    "    if not text:\n"
+    "        return None\n"
+    "    if _gateway_platform_value(platform) != \"telegram\":\n",
+    "    if not text:\n"
+    "        return None\n"
+    "    _claw_status_delivery = os.getenv(\"HERMES_CHAT_STATUS_DELIVERY\", \"\").strip().lower()\n"
+    "    if _claw_status_delivery and _claw_status_delivery not in {\"1\", \"true\", \"yes\", \"on\", \"chat\", \"visible\", \"all\"}:\n"
+    "        return None\n"
+    "    if _gateway_platform_value(platform) != \"telegram\":\n",
+    "gateway run managed chat status delivery gate",
+)
 
 # The run_agent.py patch above marks empty visible final responses as
 # successful completed no-op turns when HERMES_ALLOW_SILENT_FINAL=1.  The

@@ -211,6 +211,16 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			env[hermesToolProgressModeEnv] = value
 		}
 	}
+	if hasManagedChatHandle(rc) {
+		env[hermesChatStatusDeliveryEnv] = "off"
+		value, err := resolvedEnvValue(rc, hermesChatStatusDeliveryEnv)
+		if err != nil {
+			return nil, fmt.Errorf("hermes driver: %w", err)
+		}
+		if value != "" {
+			env[hermesChatStatusDeliveryEnv] = value
+		}
+	}
 	value, err := resolvedEnvValue(rc, hermesAllowSilentFinalEnv)
 	if err != nil {
 		return nil, fmt.Errorf("hermes driver: %w", err)

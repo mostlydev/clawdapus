@@ -1,7 +1,7 @@
 package hermes
 
-const UpstreamTag = "v2026.5.16"
+const UpstreamTag = "v2026.6.19"
 
-const BaseImageVersion = UpstreamTag + "-claw.3"
+const BaseImageVersion = UpstreamTag + "-claw.2"
 
 var BaseImageTag = "ghcr.io/mostlydev/hermes-base:" + BaseImageVersion

@@ -34,6 +34,7 @@ python - <<'PY'
 import importlib.util
 import inspect
 import os
+from pathlib import Path
 
 os.environ["HERMES_DEFAULT_AGENT_IDENTITY"] = "Clawdapus identity probe"
 os.environ["CLAWDAPUS_DISABLED_TOOLS"] = "text_to_speech"
@@ -69,7 +70,6 @@ assert "session_search" in SESSION_SEARCH_GUIDANCE
 assert "skill_manage" in SKILLS_GUIDANCE
 
 from run_agent import AIAgent
-import run_agent
 agent = AIAgent(
     base_url="http://127.0.0.1:9/v1",
     api_key="test",
@@ -84,15 +84,23 @@ prompt = agent._build_system_prompt()
 assert prompt.startswith("Clawdapus identity probe"), prompt[:200]
 assert not prompt.startswith("You are Hermes Agent"), prompt[:200]
 
-source = inspect.getsource(run_agent.AIAgent)
-assert "_already_used_tools_this_turn" in source
-assert "api_messages[_last_user_index + 1 :]" in source
-assert "HERMES_ALLOW_SILENT_FINAL" in source
-assert "Silent final enabled; treating empty visible response as completed no-op" in source
-assert '"completed": True' in source
-assert source.index('os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1"') < source.index("Model returned empty after tool calls")
-assert "X-Claw-Consumer-Session-Epoch" in source
-assert "CLLAMA_CONSUMER_SESSION_EPOCH" in source
+import agent.agent_runtime_helpers as runtime_helpers
+import agent.chat_completion_helpers as chat_completion_helpers
+import agent.conversation_loop as conversation_loop
+
+tool_source = Path(chat_completion_helpers.__file__).read_text()
+assert "_already_used_tools_this_turn" in tool_source
+assert "api_messages[_last_user_index + 1 :]" in tool_source
+
+silent_source = Path(conversation_loop.__file__).read_text()
+assert "HERMES_ALLOW_SILENT_FINAL" in silent_source
+assert "Silent final enabled; treating empty visible response as completed no-op" in silent_source
+assert '"completed": True' in silent_source
+assert silent_source.index('os.getenv("HERMES_ALLOW_SILENT_FINAL") == "1"') < silent_source.index("Model returned empty after tool calls")
+
+runtime_source = inspect.getsource(runtime_helpers.create_openai_client)
+assert "X-Claw-Consumer-Session-Epoch" in runtime_source
+assert "CLLAMA_CONSUMER_SESSION_EPOCH" in runtime_source
 
 epoch_agent = AIAgent(
     base_url="http://cllama:8080/v1",
@@ -108,6 +116,16 @@ headers = {str(k).lower(): v for k, v in dict(getattr(epoch_agent.client, "defau
 assert headers.get("x-claw-consumer-session-epoch") == "epoch-contract", headers
 
 from gateway.run import GatewayRunner, _normalize_empty_agent_response
+from gateway.config import Platform
+from gateway.run import _prepare_gateway_status_message
+os.environ.pop("HERMES_CHAT_STATUS_DELIVERY", None)
+assert _prepare_gateway_status_message(Platform.DISCORD, "lifecycle", "Retrying in 1s") == "Retrying in 1s"
+os.environ["HERMES_CHAT_STATUS_DELIVERY"] = "off"
+assert _prepare_gateway_status_message(Platform.DISCORD, "lifecycle", "Retrying in 1s") is None
+assert _prepare_gateway_status_message(Platform.SLACK, "warn", "Auxiliary title generation failed") is None
+os.environ["HERMES_CHAT_STATUS_DELIVERY"] = "on"
+assert _prepare_gateway_status_message(Platform.DISCORD, "lifecycle", "Retrying in 1s") == "Retrying in 1s"
+del os.environ["HERMES_CHAT_STATUS_DELIVERY"]
 assert _normalize_empty_agent_response(
     {"api_calls": 1, "completed": True, "partial": False},
     "",

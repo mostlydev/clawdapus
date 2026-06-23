@@ -51,6 +51,8 @@ func TestHermesBaseImageSourceContract(t *testing.T) {
 		`not stored_prompt.startswith(default_identity)`,
 		`shutil.copy("/tmp/minisweagent_path.py", purelib / "minisweagent_path.py")`,
 		`HERMES_TOOL_ONLY_MODE`,
+		`HERMES_CHAT_STATUS_DELIVERY`,
+		`gateway run managed chat status delivery gate`,
 		`_claw_turn_sent_message`,
 		`Suppressing duplicate final text after send_message`,
 		`_already_used_tools_this_turn`,
