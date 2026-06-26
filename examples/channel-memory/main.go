@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	_ "modernc.org/sqlite"
 )
@@ -1021,7 +1022,7 @@ func upsertDeterministicBlocksTx(ctx context.Context, tx *sql.Tx, source storedS
 		return rebuildTelemetryBlockTx(ctx, tx, source, now)
 	}
 	kind, eventType, score := classifySourceContent(source.Content)
-	return upsertSourceBlockTx(ctx, tx, source, deterministicBlock{
+	if err := upsertSourceBlockTx(ctx, tx, source, deterministicBlock{
 		Key:       sourceBlockKey(kind, source),
 		Kind:      kind,
 		EventType: eventType,
@@ -1029,7 +1030,17 @@ func upsertDeterministicBlocksTx(ctx context.Context, tx *sql.Tx, source storedS
 		Sparse:    false,
 		Score:     score,
 		Processor: "deterministic",
-	}, now)
+	}, now); err != nil {
+		return err
+	}
+	if kind != "raw_excerpt" {
+		return nil
+	}
+	fingerprint, ok := decisionRepeatFingerprint(source.Content)
+	if !ok {
+		return nil
+	}
+	return rebuildDecisionRepeatBlockTx(ctx, tx, source, fingerprint, now)
 }
 
 type deterministicBlock struct {
@@ -1135,6 +1146,99 @@ func rebuildTelemetryBlockTx(ctx context.Context, tx *sql.Tx, source storedSourc
 			stale = 0,
 			dirty = 0`,
 		blockKey, text, source.ChannelID, sources[0].CreatedAt, sources[len(sources)-1].CreatedAt, generatedAt,
+	); err != nil {
+		return err
+	}
+	var blockID int64
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM derived_blocks WHERE block_key = ?`, blockKey).Scan(&blockID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM derived_block_sources WHERE block_id = ?`, blockID); err != nil {
+		return err
+	}
+	for _, record := range sources {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO derived_block_sources(block_id, source_kind, channel_id, message_id, content_hash)
+			VALUES (?, ?, ?, ?, ?)`,
+			blockID, record.SourceKind, record.ChannelID, record.MessageID, record.ContentHash,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rebuildDecisionRepeatBlockTx(ctx context.Context, tx *sql.Tx, source storedSourceMessage, fingerprint string, now time.Time) error {
+	from, to := dayBucket(source.CreatedAt)
+	authorKey := decisionAuthorKey(source)
+	blockKey := decisionRepeatBlockKey(source, authorKey, from, fingerprint)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, source_kind, channel_id, message_id, content_hash, author_id, author_name,
+		       created_at, edited_at, deleted, content, service, surface, guild_id, visibility_scope,
+		       observed_seq, observed_at, is_current
+		FROM source_messages
+		WHERE source_kind = ? AND channel_id = ? AND is_current = 1 AND deleted = 0 AND forgotten_at = ''
+		  AND created_at >= ? AND created_at < ?
+		ORDER BY created_at, observed_seq`,
+		source.SourceKind, source.ChannelID, from, to,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	sources := make([]storedSourceMessage, 0)
+	for rows.Next() {
+		record, err := scanStoredSource(rows)
+		if err != nil {
+			return err
+		}
+		if decisionAuthorKey(record) != authorKey || isTelemetryNoise(record.Content) {
+			continue
+		}
+		if kind, _, _ := classifySourceContent(record.Content); kind != "raw_excerpt" {
+			continue
+		}
+		recordFingerprint, ok := decisionRepeatFingerprint(record.Content)
+		if !ok || recordFingerprint != fingerprint {
+			continue
+		}
+		sources = append(sources, record)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	generatedAt := now.UTC().Format(time.RFC3339)
+	if len(sources) < 2 {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE derived_blocks
+			SET stale = 1, dirty = 0, generated_at = ?
+			WHERE block_key = ?`,
+			generatedAt, blockKey,
+		)
+		return err
+	}
+
+	latest := sources[len(sources)-1]
+	author := firstNonEmpty(latest.AuthorName, latest.AuthorID, "unknown")
+	text := fmt.Sprintf("[%s-%s] %s repeated a low-change decision x%d; latest: %s",
+		clockText(sources[0].CreatedAt), clockText(latest.CreatedAt), author, len(sources), compactSingleLine(latest.Content, 180))
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO derived_blocks(
+			block_key, kind, event_type, text, source_channel, source_window_from, source_window_to,
+			sparse, score, generated_at, stale, dirty, processor
+		) VALUES (?, 'decision_repeat', 'repeated_decision', ?, ?, ?, ?, 1, 0.45, ?, 0, 0, 'deterministic')
+		ON CONFLICT(block_key) DO UPDATE SET
+			text = excluded.text,
+			source_channel = excluded.source_channel,
+			source_window_from = excluded.source_window_from,
+			source_window_to = excluded.source_window_to,
+			generated_at = excluded.generated_at,
+			stale = 0,
+			dirty = 0`,
+		blockKey, text, source.ChannelID, sources[0].CreatedAt, latest.CreatedAt, generatedAt,
 	); err != nil {
 		return err
 	}
@@ -1393,10 +1497,7 @@ func scanDigestBlockRows(rows *sql.Rows) ([]digestBlock, error) {
 func preferSparseRollups(blocks []digestBlock, limit int) []digestBlock {
 	coveredByRollup := make(map[string]struct{})
 	for _, block := range blocks {
-		if block.Processor != digestProcessorLLM {
-			continue
-		}
-		if block.Kind != rollupKindTopic && block.Kind != rollupKindSequence {
+		if !suppressesRawExcerpt(block) {
 			continue
 		}
 		for _, messageID := range block.SourceMessages {
@@ -1429,6 +1530,13 @@ func preferSparseRollups(blocks []digestBlock, limit int) []digestBlock {
 		}
 	}
 	return filtered
+}
+
+func suppressesRawExcerpt(block digestBlock) bool {
+	if block.Processor == digestProcessorLLM && (block.Kind == rollupKindTopic || block.Kind == rollupKindSequence) {
+		return true
+	}
+	return block.Processor == "deterministic" && block.Kind == "decision_repeat"
 }
 
 func (s *channelMemoryStore) loadBlockSources(ctx context.Context, block *digestBlock) error {
@@ -1642,6 +1750,94 @@ func telemetryBucket(ts string) (from, to string) {
 	}
 	start := parsed.UTC().Truncate(time.Hour)
 	return start.Format(time.RFC3339), start.Add(time.Hour).Format(time.RFC3339)
+}
+
+func dayBucket(ts string) (from, to string) {
+	parsed, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		parsed = time.Now().UTC()
+	}
+	start := time.Date(parsed.UTC().Year(), parsed.UTC().Month(), parsed.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	return start.Format(time.RFC3339), start.Add(24 * time.Hour).Format(time.RFC3339)
+}
+
+func decisionAuthorKey(source storedSourceMessage) string {
+	author := strings.ToLower(firstNonEmpty(source.AuthorID, source.AuthorName, "unknown"))
+	return strings.Join(strings.Fields(author), " ")
+}
+
+func decisionRepeatBlockKey(source storedSourceMessage, authorKey, dayStart, fingerprint string) string {
+	sum := sha256.Sum256([]byte(authorKey + "\x00" + fingerprint))
+	return strings.Join([]string{"decision_repeat", source.SourceKind, source.ChannelID, dayStart, hex.EncodeToString(sum[:8])}, ":")
+}
+
+func decisionRepeatFingerprint(content string) (string, bool) {
+	lower := strings.ToLower(content)
+	if !containsAny(lower,
+		"same conclusion",
+		"same call",
+		"no change",
+		"unchanged",
+		"still no trade",
+		"still no action",
+		"stand down remains",
+		"holding pattern",
+		"no-op",
+		"no op",
+		"wait for trigger",
+	) {
+		return "", false
+	}
+	normalized := normalizeDecisionText(lower)
+	if normalized == "" {
+		return "", false
+	}
+	return normalized, true
+}
+
+func normalizeDecisionText(text string) string {
+	var b strings.Builder
+	lastWasSpace := true
+	lastWasNumber := false
+	for _, r := range text {
+		switch {
+		case unicode.IsLetter(r):
+			b.WriteRune(r)
+			lastWasSpace = false
+			lastWasNumber = false
+		case unicode.IsDigit(r):
+			if !lastWasNumber {
+				if !lastWasSpace {
+					b.WriteByte(' ')
+				}
+				b.WriteByte('#')
+			}
+			lastWasSpace = false
+			lastWasNumber = true
+		default:
+			if !lastWasSpace {
+				b.WriteByte(' ')
+			}
+			lastWasSpace = true
+			lastWasNumber = false
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+func compactSingleLine(text string, maxRunes int) string {
+	compact := strings.Join(strings.Fields(text), " ")
+	if maxRunes <= 0 {
+		return compact
+	}
+	runes := []rune(compact)
+	if len(runes) <= maxRunes {
+		return compact
+	}
+	if maxRunes <= 3 {
+		return string(runes[:maxRunes])
+	}
+	return string(runes[:maxRunes-3]) + "..."
 }
 
 func clockText(ts string) string {
