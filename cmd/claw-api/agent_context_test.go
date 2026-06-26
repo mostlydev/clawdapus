@@ -95,7 +95,7 @@ func TestAgentContractRedactsContextCredentials(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(agentDir, "memory.json"), []byte(`{"service":"mem","auth":{"type":"bearer","token":"memory-token"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(agentDir, "runtime-reminders.json"), []byte(`{"version":1,"reminders":[{"id":"focus","text":"Stay on the active operating contract.","enabled":true,"placement":"before_feeds","cadence":"every_turn","max_chars":800}]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(agentDir, "context-blocks.json"), []byte(`{"version":1,"blocks":[{"id":"focus","kind":"runtime_motivation","text":"Stay on the active operating contract.","enabled":true,"placement":"after_feeds","cadence":"every_turn","max_chars":800}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	authDir := filepath.Join(agentDir, "service-auth")
@@ -150,10 +150,10 @@ func TestAgentContractRedactsContextCredentials(t *testing.T) {
 	if clawAPIAuth["token"] != "[REDACTED]" {
 		t.Fatalf("service-auth token was not redacted: %+v", clawAPIAuth)
 	}
-	runtimeReminders := resp["runtime_reminders"].(map[string]any)
-	reminders := runtimeReminders["reminders"].([]any)
-	if reminders[0].(map[string]any)["id"] != "focus" {
-		t.Fatalf("runtime reminders were not returned: %+v", runtimeReminders)
+	contextBlocks := resp["context_blocks"].(map[string]any)
+	blocks := contextBlocks["blocks"].([]any)
+	if blocks[0].(map[string]any)["id"] != "focus" || blocks[0].(map[string]any)["kind"] != "runtime_motivation" {
+		t.Fatalf("context blocks were not returned: %+v", contextBlocks)
 	}
 }
 

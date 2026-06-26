@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-- **Runtime reminder manifests** -- `x-claw.context.runtime-reminders` compiles short operator-authored reminders into per-agent `runtime-reminders.json` files, with pod-level inheritance, service-level replacement, and explicit empty-list suppression. claw-api and Clawdash expose the generated manifest alongside other runtime JSON so operators can verify the prompt-shaping input before relying on paired cllama runtime injection. Closes [#324](https://github.com/mostlydev/clawdapus/issues/324).
+- **Context block manifests** -- `x-claw.context.blocks` compiles short operator-authored context blocks into per-agent `context-blocks.json` files, with pod-level inheritance, service-level replacement, and explicit empty-list suppression. Blocks carry a `kind` tag, support `before_feeds` or `after_feeds` placement, and are exposed by claw-api and Clawdash alongside other runtime JSON so operators can verify the prompt-shaping input before relying on paired cllama runtime injection. Closes [#324](https://github.com/mostlydev/clawdapus/issues/324).
 
 ## v0.24.0 <Badge type="tip" text="Latest" /> {#v0-24-0}
 

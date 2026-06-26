@@ -131,8 +131,8 @@ type ChannelMemoryConfig struct {
 }
 
 type ContextConfig struct {
-	Channel          *ChannelContextConfig
-	RuntimeReminders []RuntimeReminderConfig
+	Channel *ChannelContextConfig
+	Blocks  []ContextBlockConfig
 }
 
 type ChannelContextConfig struct {
@@ -142,8 +142,9 @@ type ChannelContextConfig struct {
 	Buffer   int
 }
 
-type RuntimeReminderConfig struct {
+type ContextBlockConfig struct {
 	ID        string
+	Kind      string
 	Text      string
 	Enabled   bool
 	Placement string

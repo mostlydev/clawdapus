@@ -17,7 +17,7 @@ type AgentContextInput struct {
 	Tools             []ToolManifestEntry
 	ToolPolicy        *ToolPolicy // nil means DefaultToolPolicy
 	Memory            *MemoryManifestEntry
-	RuntimeReminders  []RuntimeReminderManifestEntry
+	ContextBlocks     []ContextBlockManifestEntry
 	ServiceAuth       []ServiceAuthEntry
 	ChannelAllowlist  []string
 }
@@ -101,13 +101,14 @@ type MemoryOp struct {
 	TimeoutMS int    `json:"timeout_ms,omitempty"`
 }
 
-type RuntimeReminderManifest struct {
-	Version   int                            `json:"version"`
-	Reminders []RuntimeReminderManifestEntry `json:"reminders"`
+type ContextBlockManifest struct {
+	Version int                         `json:"version"`
+	Blocks  []ContextBlockManifestEntry `json:"blocks"`
 }
 
-type RuntimeReminderManifestEntry struct {
+type ContextBlockManifestEntry struct {
 	ID        string `json:"id"`
+	Kind      string `json:"kind,omitempty"`
 	Text      string `json:"text"`
 	Enabled   bool   `json:"enabled"`
 	Placement string `json:"placement"`
@@ -139,7 +140,7 @@ func EffectiveToolPolicy(maxRounds, timeoutPerToolMS, totalTimeoutMS *int) ToolP
 
 // GenerateContextDir writes per-agent context files under:
 //
-//	<runtimeDir>/context/<agent-id>/{AGENTS.md,AGENTS.effective.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,runtime-reminders.json,service-auth/...}
+//	<runtimeDir>/context/<agent-id>/{AGENTS.md,AGENTS.effective.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,context-blocks.json,service-auth/...}
 func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 	for _, agent := range agents {
 		if agent.AgentID == "" {
@@ -211,16 +212,16 @@ func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 			}
 		}
 
-		if len(agent.RuntimeReminders) > 0 {
-			remindersJSON, err := json.MarshalIndent(RuntimeReminderManifest{
-				Version:   1,
-				Reminders: append([]RuntimeReminderManifestEntry(nil), agent.RuntimeReminders...),
+		if len(agent.ContextBlocks) > 0 {
+			blocksJSON, err := json.MarshalIndent(ContextBlockManifest{
+				Version: 1,
+				Blocks:  append([]ContextBlockManifestEntry(nil), agent.ContextBlocks...),
 			}, "", "  ")
 			if err != nil {
-				return fmt.Errorf("marshal runtime reminders for %q: %w", agent.AgentID, err)
+				return fmt.Errorf("marshal context blocks for %q: %w", agent.AgentID, err)
 			}
-			if err := os.WriteFile(filepath.Join(agentDir, "runtime-reminders.json"), append(remindersJSON, '\n'), 0644); err != nil {
-				return fmt.Errorf("write runtime-reminders.json for %q: %w", agent.AgentID, err)
+			if err := os.WriteFile(filepath.Join(agentDir, "context-blocks.json"), append(blocksJSON, '\n'), 0644); err != nil {
+				return fmt.Errorf("write context-blocks.json for %q: %w", agent.AgentID, err)
 			}
 		}
 

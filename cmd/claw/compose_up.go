@@ -600,7 +600,7 @@ func runComposeUp(podFile string) (err error) {
 						Tools:             tools,
 						ToolPolicy:        agentToolPolicy(p, name),
 						Memory:            memory,
-						RuntimeReminders:  agentRuntimeReminders(p, name),
+						ContextBlocks:     agentContextBlocks(p, name),
 						ServiceAuth:       ordinalAuth,
 						ChannelAllowlist:  conversationWallAllowlists[ordinalName],
 						Metadata: injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
@@ -648,7 +648,7 @@ func runComposeUp(podFile string) (err error) {
 				Tools:             tools,
 				ToolPolicy:        agentToolPolicy(p, name),
 				Memory:            memory,
-				RuntimeReminders:  agentRuntimeReminders(p, name),
+				ContextBlocks:     agentContextBlocks(p, name),
 				ServiceAuth:       svcAuth,
 				ChannelAllowlist:  conversationWallAllowlists[name],
 				Metadata: injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
@@ -1630,29 +1630,30 @@ func agentBudgetPolicy(p *pod.Pod, serviceName string) *cllama.BudgetPolicy {
 	}
 }
 
-func agentRuntimeReminders(p *pod.Pod, serviceName string) []cllama.RuntimeReminderManifestEntry {
+func agentContextBlocks(p *pod.Pod, serviceName string) []cllama.ContextBlockManifestEntry {
 	if p == nil {
 		return nil
 	}
-	var reminders []pod.RuntimeReminderConfig
-	if p.Context != nil && p.Context.RuntimeReminders != nil {
-		reminders = p.Context.RuntimeReminders
+	var blocks []pod.ContextBlockConfig
+	if p.Context != nil && p.Context.Blocks != nil {
+		blocks = p.Context.Blocks
 	}
-	if svc := p.Services[serviceName]; svc != nil && svc.Claw != nil && svc.Claw.Context != nil && svc.Claw.Context.RuntimeReminders != nil {
-		reminders = svc.Claw.Context.RuntimeReminders
+	if svc := p.Services[serviceName]; svc != nil && svc.Claw != nil && svc.Claw.Context != nil && svc.Claw.Context.Blocks != nil {
+		blocks = svc.Claw.Context.Blocks
 	}
-	if len(reminders) == 0 {
+	if len(blocks) == 0 {
 		return nil
 	}
-	out := make([]cllama.RuntimeReminderManifestEntry, 0, len(reminders))
-	for _, reminder := range reminders {
-		out = append(out, cllama.RuntimeReminderManifestEntry{
-			ID:        reminder.ID,
-			Text:      reminder.Text,
-			Enabled:   reminder.Enabled,
-			Placement: reminder.Placement,
-			MaxChars:  reminder.MaxChars,
-			Cadence:   reminder.Cadence,
+	out := make([]cllama.ContextBlockManifestEntry, 0, len(blocks))
+	for _, block := range blocks {
+		out = append(out, cllama.ContextBlockManifestEntry{
+			ID:        block.ID,
+			Kind:      block.Kind,
+			Text:      block.Text,
+			Enabled:   block.Enabled,
+			Placement: block.Placement,
+			MaxChars:  block.MaxChars,
+			Cadence:   block.Cadence,
 		})
 	}
 	return out

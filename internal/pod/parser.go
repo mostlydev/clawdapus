@@ -86,8 +86,8 @@ type rawClawBlock struct {
 }
 
 type rawContextConfig struct {
-	Channel          *rawChannelContextConfig   `yaml:"channel"`
-	RuntimeReminders []rawRuntimeReminderConfig `yaml:"runtime-reminders"`
+	Channel *rawChannelContextConfig `yaml:"channel"`
+	Blocks  []rawContextBlockConfig  `yaml:"blocks"`
 }
 
 type rawChannelContextConfig struct {
@@ -98,8 +98,9 @@ type rawChannelContextConfig struct {
 	Buffer             int    `yaml:"buffer"`
 }
 
-type rawRuntimeReminderConfig struct {
+type rawContextBlockConfig struct {
 	ID                 string `yaml:"id"`
+	Kind               string `yaml:"kind"`
 	Text               string `yaml:"text"`
 	Enabled            *bool  `yaml:"enabled"`
 	Placement          string `yaml:"placement"`
@@ -825,14 +826,14 @@ func parseContextConfig(raw *rawContextConfig) (*ContextConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("channel: %w", err)
 	}
-	runtimeReminders, err := parseRuntimeReminderConfigs(raw.RuntimeReminders)
+	blocks, err := parseContextBlockConfigs(raw.Blocks)
 	if err != nil {
-		return nil, fmt.Errorf("runtime-reminders: %w", err)
+		return nil, fmt.Errorf("blocks: %w", err)
 	}
-	if channel == nil && runtimeReminders == nil {
+	if channel == nil && blocks == nil {
 		return &ContextConfig{}, nil
 	}
-	return &ContextConfig{Channel: channel, RuntimeReminders: runtimeReminders}, nil
+	return &ContextConfig{Channel: channel, Blocks: blocks}, nil
 }
 
 func parseChannelContextConfig(raw *rawChannelContextConfig) (*ChannelContextConfig, error) {
@@ -879,68 +880,73 @@ func selectChannelContextMaxChars(hyphen, underscore int) (int, error) {
 	return underscore, nil
 }
 
-func parseRuntimeReminderConfigs(raw []rawRuntimeReminderConfig) ([]RuntimeReminderConfig, error) {
+func parseContextBlockConfigs(raw []rawContextBlockConfig) ([]ContextBlockConfig, error) {
 	if raw == nil {
 		return nil, nil
 	}
-	out := make([]RuntimeReminderConfig, 0, len(raw))
+	out := make([]ContextBlockConfig, 0, len(raw))
 	seen := make(map[string]struct{}, len(raw))
 	for i, entry := range raw {
-		reminder, err := parseRuntimeReminderConfig(entry)
+		block, err := parseContextBlockConfig(entry)
 		if err != nil {
 			return nil, fmt.Errorf("entry %d: %w", i, err)
 		}
-		if _, ok := seen[reminder.ID]; ok {
-			return nil, fmt.Errorf("entry %d: duplicate id %q", i, reminder.ID)
+		if _, ok := seen[block.ID]; ok {
+			return nil, fmt.Errorf("entry %d: duplicate id %q", i, block.ID)
 		}
-		seen[reminder.ID] = struct{}{}
-		out = append(out, reminder)
+		seen[block.ID] = struct{}{}
+		out = append(out, block)
 	}
 	return out, nil
 }
 
-func parseRuntimeReminderConfig(raw rawRuntimeReminderConfig) (RuntimeReminderConfig, error) {
+func parseContextBlockConfig(raw rawContextBlockConfig) (ContextBlockConfig, error) {
 	id := strings.TrimSpace(raw.ID)
 	if id == "" {
-		return RuntimeReminderConfig{}, fmt.Errorf("id must not be empty")
+		return ContextBlockConfig{}, fmt.Errorf("id must not be empty")
+	}
+	kind := strings.TrimSpace(raw.Kind)
+	if kind == "" {
+		kind = "context_block"
 	}
 	text := strings.TrimSpace(raw.Text)
 	if text == "" {
-		return RuntimeReminderConfig{}, fmt.Errorf("text must not be empty")
+		return ContextBlockConfig{}, fmt.Errorf("text must not be empty")
 	}
 	placement := strings.TrimSpace(raw.Placement)
 	if placement == "" {
-		placement = "before_feeds"
+		placement = "after_feeds"
 	}
-	if placement != "before_feeds" {
-		return RuntimeReminderConfig{}, fmt.Errorf("placement must be before_feeds")
+	if placement != "before_feeds" && placement != "after_feeds" {
+		return ContextBlockConfig{}, fmt.Errorf("placement must be before_feeds or after_feeds")
 	}
 	cadence := strings.TrimSpace(raw.Cadence)
 	if cadence == "" {
 		cadence = "every_turn"
 	}
 	if cadence != "every_turn" {
-		return RuntimeReminderConfig{}, fmt.Errorf("cadence must be every_turn")
+		return ContextBlockConfig{}, fmt.Errorf("cadence must be every_turn")
 	}
-	maxChars, err := selectRuntimeReminderMaxChars(raw.MaxCharsHyphen, raw.MaxCharsUnderscore)
+	maxChars, err := selectContextBlockMaxChars(raw.MaxCharsHyphen, raw.MaxCharsUnderscore)
 	if err != nil {
-		return RuntimeReminderConfig{}, err
+		return ContextBlockConfig{}, err
 	}
 	if maxChars == 0 {
 		maxChars = 800
 	}
 	if maxChars < 0 {
-		return RuntimeReminderConfig{}, fmt.Errorf("max-chars must be >= 0")
+		return ContextBlockConfig{}, fmt.Errorf("max-chars must be >= 0")
 	}
 	if utf8.RuneCountInString(text) > maxChars {
-		return RuntimeReminderConfig{}, fmt.Errorf("text length must be <= max-chars")
+		return ContextBlockConfig{}, fmt.Errorf("text length must be <= max-chars")
 	}
 	enabled := true
 	if raw.Enabled != nil {
 		enabled = *raw.Enabled
 	}
-	return RuntimeReminderConfig{
+	return ContextBlockConfig{
 		ID:        id,
+		Kind:      kind,
 		Text:      text,
 		Enabled:   enabled,
 		Placement: placement,
@@ -949,7 +955,7 @@ func parseRuntimeReminderConfig(raw rawRuntimeReminderConfig) (RuntimeReminderCo
 	}, nil
 }
 
-func selectRuntimeReminderMaxChars(hyphen, underscore int) (int, error) {
+func selectContextBlockMaxChars(hyphen, underscore int) (int, error) {
 	if hyphen != 0 && underscore != 0 && hyphen != underscore {
 		return 0, fmt.Errorf("max-chars and max_chars cannot both be set to different values")
 	}

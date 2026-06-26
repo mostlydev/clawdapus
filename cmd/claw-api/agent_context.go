@@ -26,15 +26,15 @@ type agentIndexEntry struct {
 }
 
 type agentContractResponse struct {
-	ClawID           string         `json:"claw_id"`
-	AgentsMD         string         `json:"agents_md"`
-	ClawdapusMD      string         `json:"clawdapus_md"`
-	Metadata         any            `json:"metadata"`
-	Feeds            any            `json:"feeds"`
-	Tools            any            `json:"tools"`
-	Memory           any            `json:"memory"`
-	RuntimeReminders any            `json:"runtime_reminders"`
-	ServiceAuth      map[string]any `json:"service_auth,omitempty"`
+	ClawID        string         `json:"claw_id"`
+	AgentsMD      string         `json:"agents_md"`
+	ClawdapusMD   string         `json:"clawdapus_md"`
+	Metadata      any            `json:"metadata"`
+	Feeds         any            `json:"feeds"`
+	Tools         any            `json:"tools"`
+	Memory        any            `json:"memory"`
+	ContextBlocks any            `json:"context_blocks"`
+	ServiceAuth   map[string]any `json:"service_auth,omitempty"`
 }
 
 type agentContextPath struct {
@@ -135,7 +135,7 @@ func (h *apiHandler) handleAgentContract(w http.ResponseWriter, agentID string) 
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	runtimeReminders, err := readJSONArtifact(filepath.Join(agentDir, "runtime-reminders.json"), true)
+	contextBlocks, err := readJSONArtifact(filepath.Join(agentDir, "context-blocks.json"), true)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -147,15 +147,15 @@ func (h *apiHandler) handleAgentContract(w http.ResponseWriter, agentID string) 
 	}
 
 	writeJSON(w, http.StatusOK, agentContractResponse{
-		ClawID:           agentID,
-		AgentsMD:         string(agentsMD),
-		ClawdapusMD:      string(clawdapusMD),
-		Metadata:         redactJSONValue(metadata),
-		Feeds:            redactJSONValue(feeds),
-		Tools:            redactJSONValue(tools),
-		Memory:           redactJSONValue(memory),
-		RuntimeReminders: redactJSONValue(runtimeReminders),
-		ServiceAuth:      redactServiceAuthArtifacts(serviceAuth),
+		ClawID:        agentID,
+		AgentsMD:      string(agentsMD),
+		ClawdapusMD:   string(clawdapusMD),
+		Metadata:      redactJSONValue(metadata),
+		Feeds:         redactJSONValue(feeds),
+		Tools:         redactJSONValue(tools),
+		Memory:        redactJSONValue(memory),
+		ContextBlocks: redactJSONValue(contextBlocks),
+		ServiceAuth:   redactServiceAuthArtifacts(serviceAuth),
 	})
 }
 

@@ -129,11 +129,12 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 			},
 			Auth: &AuthEntry{Type: "bearer", Token: "memory-token"},
 		},
-		RuntimeReminders: []RuntimeReminderManifestEntry{{
+		ContextBlocks: []ContextBlockManifestEntry{{
 			ID:        "focus",
+			Kind:      "runtime_motivation",
 			Text:      "Keep the operating contract visible.",
 			Enabled:   true,
-			Placement: "before_feeds",
+			Placement: "after_feeds",
 			MaxChars:  800,
 			Cadence:   "every_turn",
 		}},
@@ -194,16 +195,16 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 		t.Fatalf("unexpected memory manifest payload: %v", memory)
 	}
 
-	remindersRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "runtime-reminders.json"))
+	blocksRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "context-blocks.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var reminders RuntimeReminderManifest
-	if err := json.Unmarshal(remindersRaw, &reminders); err != nil {
+	var blocks ContextBlockManifest
+	if err := json.Unmarshal(blocksRaw, &blocks); err != nil {
 		t.Fatal(err)
 	}
-	if reminders.Version != 1 || len(reminders.Reminders) != 1 || reminders.Reminders[0].ID != "focus" || !reminders.Reminders[0].Enabled {
-		t.Fatalf("unexpected runtime reminders manifest: %+v", reminders)
+	if blocks.Version != 1 || len(blocks.Blocks) != 1 || blocks.Blocks[0].ID != "focus" || blocks.Blocks[0].Kind != "runtime_motivation" || blocks.Blocks[0].Placement != "after_feeds" || !blocks.Blocks[0].Enabled {
+		t.Fatalf("unexpected context blocks manifest: %+v", blocks)
 	}
 
 	authRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "service-auth", "claw-api.json"))
