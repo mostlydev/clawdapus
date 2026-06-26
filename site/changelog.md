@@ -30,6 +30,7 @@ outline: deep
 ## Unreleased
 
 - **Channel memory collapses repeated low-change decisions** -- deterministic channel-memory now emits a sparse `decision_repeat` block for same-author, same-channel, same-day repeated no-change decisions while preserving source message IDs for lookup. The digest assembler prefers that block over the covered raw excerpts, reducing repetitive context without hiding hard events. Refs [#260](https://github.com/mostlydev/clawdapus/issues/260).
+- **Channel memory elides low-value acknowledgements** -- exact short acknowledgements such as "ok", "thanks", and "got it" now collapse into sparse `low_value_ack` digest blocks by channel/hour before they can bloat raw awareness feeds. Context-bearing messages and hard events remain explicit. Refs [#260](https://github.com/mostlydev/clawdapus/issues/260).
 
 ## v0.24.0 <Badge type="tip" text="Latest" /> {#v0-24-0}
 
