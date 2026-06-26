@@ -600,6 +600,7 @@ func runComposeUp(podFile string) (err error) {
 						Tools:             tools,
 						ToolPolicy:        agentToolPolicy(p, name),
 						Memory:            memory,
+						RuntimeReminders:  agentRuntimeReminders(p, name),
 						ServiceAuth:       ordinalAuth,
 						ChannelAllowlist:  conversationWallAllowlists[ordinalName],
 						Metadata: injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
@@ -647,6 +648,7 @@ func runComposeUp(podFile string) (err error) {
 				Tools:             tools,
 				ToolPolicy:        agentToolPolicy(p, name),
 				Memory:            memory,
+				RuntimeReminders:  agentRuntimeReminders(p, name),
 				ServiceAuth:       svcAuth,
 				ChannelAllowlist:  conversationWallAllowlists[name],
 				Metadata: injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
@@ -1626,6 +1628,34 @@ func agentBudgetPolicy(p *pod.Pod, serviceName string) *cllama.BudgetPolicy {
 		Window:      budget.Window,
 		Behavior:    budget.Behavior,
 	}
+}
+
+func agentRuntimeReminders(p *pod.Pod, serviceName string) []cllama.RuntimeReminderManifestEntry {
+	if p == nil {
+		return nil
+	}
+	var reminders []pod.RuntimeReminderConfig
+	if p.Context != nil && p.Context.RuntimeReminders != nil {
+		reminders = p.Context.RuntimeReminders
+	}
+	if svc := p.Services[serviceName]; svc != nil && svc.Claw != nil && svc.Claw.Context != nil && svc.Claw.Context.RuntimeReminders != nil {
+		reminders = svc.Claw.Context.RuntimeReminders
+	}
+	if len(reminders) == 0 {
+		return nil
+	}
+	out := make([]cllama.RuntimeReminderManifestEntry, 0, len(reminders))
+	for _, reminder := range reminders {
+		out = append(out, cllama.RuntimeReminderManifestEntry{
+			ID:        reminder.ID,
+			Text:      reminder.Text,
+			Enabled:   reminder.Enabled,
+			Placement: reminder.Placement,
+			MaxChars:  reminder.MaxChars,
+			Cadence:   reminder.Cadence,
+		})
+	}
+	return out
 }
 
 func injectAgentBudget(meta map[string]any, budget *cllama.BudgetPolicy) map[string]any {

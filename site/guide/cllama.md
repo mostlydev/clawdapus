@@ -156,6 +156,7 @@ During `claw up`, Clawdapus generates context files under the runtime directory:
 │   ├── feeds.json
 │   ├── tools.json
 │   ├── memory.json
+│   ├── runtime-reminders.json
 │   └── channels-allowlist.json
 ├── crypto-crusher-1/
 │   ├── AGENTS.md
@@ -178,6 +179,7 @@ During `claw up`, Clawdapus generates context files under the runtime directory:
 | `feeds.json` | Resolved context feed subscriptions and fetch metadata. |
 | `tools.json` | Compiled managed tool schemas, execution metadata, auth, and mediation budgets. |
 | `memory.json` | Memory service recall/retain/forget endpoints and auth. |
+| `runtime-reminders.json` | Optional operator-authored reminder snippets that the proxy can inject into late runtime context. |
 | `channels-allowlist.json` | Channel IDs the agent is authorized to read for channel context and retrieval. |
 
 ### Container-Side Mount
@@ -192,7 +194,7 @@ The mount path must include the `context/` directory segment. The proxy expects 
 
 ### Context Mount Contents
 
-The reference loader reads the compiled contract (`AGENTS.md`), infrastructure map (`CLAWDAPUS.md`), identity metadata, service auth, tool manifest, memory manifest, model policy, budget policy, and channel allowlist. There is still no generic policy-decoration config or response-amendment hook in the context mount.
+The reference loader reads the compiled contract (`AGENTS.md`), infrastructure map (`CLAWDAPUS.md`), identity metadata, service auth, tool manifest, memory manifest, runtime reminder manifest, model policy, budget policy, and channel allowlist. There is still no generic policy-decoration config or response-amendment hook in the context mount.
 
 ### Internal Context Snapshots
 
@@ -201,7 +203,7 @@ For operator visibility, cllama stores the most recent provider-visible context 
 - `GET /internal/context`
 - `GET /internal/context/<agent-id>/snapshot`
 
-Clawdash reads these through claw-api so operators can inspect the effective system contract, late runtime context, feed blocks or skip notices, memory recall, tool schemas, model route, and redacted metadata for the last turn. Snapshots are diagnostic state only; they are not a control plane and do not mutate agent context.
+Clawdash reads these through claw-api so operators can inspect the effective system contract, late runtime context, runtime reminders, feed blocks or skip notices, memory recall, tool schemas, model route, and redacted metadata for the last turn. Snapshots are diagnostic state only; they are not a control plane and do not mutate agent context.
 
 ### Scaled Services
 
@@ -415,7 +417,7 @@ Every request through the proxy produces a structured JSON log entry on stdout. 
 | `static_system_hash` | sha256 of the stable system contract (`messages[0]` for OpenAI / top-level `system` for Anthropic). Should be byte-stable across turns when nothing about the agent's contract changed. |
 | `first_system_hash` | sha256 of the first system message in the assembled payload. v1 mirrors `static_system_hash`; reserved for future Anthropic `cache_control` differentiation. |
 | `first_non_system_hash` | sha256 of the first non-system message. Stable on multi-turn runners; expected to drift on single-turn Discord runners and surfaces that drift via this field. |
-| `dynamic_context_hash` | sha256 of the late runtime-context block (memory + feeds + time + channel deltas). Changes per turn when new context arrives. |
+| `dynamic_context_hash` | sha256 of the late runtime-context block (runtime reminders + memory + feeds + time + channel deltas). Changes per turn when new context arrives. |
 | `tools_hash` | sha256 of the canonicalized `tools[]` payload. |
 | `cached_tokens` | Provider-reported `usage.prompt_tokens_details.cached_tokens` when present. |
 | `cache_write_tokens` | Provider-reported `usage.prompt_tokens_details.cache_write_tokens` when present. |
@@ -425,6 +427,7 @@ Event-specific fields may also be present depending on `type`:
 - `static_system_hash`, `first_system_hash`, `first_non_system_hash`, `dynamic_context_hash`, `tools_hash` — request events (prompt assembly fingerprint)
 - `feed_name`, `feed_url`, `fetched_at`, `cached` — feed fetch events
 - `feed_name`, `source`, `feed_status` (`included` / `empty` / `skipped_total_cap`), `feed_truncated`, `feed_source_bytes`, `feed_source_exact`, `feed_content_bytes`, `feed_block_bytes`, `feed_total_before`, `feed_total_after`, `feed_max_response_bytes`, `feed_max_total_bytes` — `feed_injection` events (one per manifest entry, recording whether the feed actually reached the provider-visible context after the per-feed and aggregate byte caps)
+- `runtime_reminder_id`, `runtime_reminder_status`, `runtime_reminder_cadence`, `runtime_reminder_placement`, `runtime_reminder_reason` — `runtime_reminder` events (one per manifest entry that was injected or skipped)
 - `provider`, `key_id`, `action`, `reason`, `cooldown_until` — provider pool events
 - `memory_service`, `memory_op`, `memory_status`, `memory_blocks`, `memory_bytes`, `memory_removed` — memory telemetry events
 

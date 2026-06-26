@@ -129,6 +129,14 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 			},
 			Auth: &AuthEntry{Type: "bearer", Token: "memory-token"},
 		},
+		RuntimeReminders: []RuntimeReminderManifestEntry{{
+			ID:        "focus",
+			Text:      "Keep the operating contract visible.",
+			Enabled:   true,
+			Placement: "before_feeds",
+			MaxChars:  800,
+			Cadence:   "every_turn",
+		}},
 		ServiceAuth: []ServiceAuthEntry{{
 			Service:   "claw-api",
 			AuthType:  "bearer",
@@ -184,6 +192,18 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 	}
 	if memory["service"] != "team-memory" {
 		t.Fatalf("unexpected memory manifest payload: %v", memory)
+	}
+
+	remindersRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "runtime-reminders.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reminders RuntimeReminderManifest
+	if err := json.Unmarshal(remindersRaw, &reminders); err != nil {
+		t.Fatal(err)
+	}
+	if reminders.Version != 1 || len(reminders.Reminders) != 1 || reminders.Reminders[0].ID != "focus" || !reminders.Reminders[0].Enabled {
+		t.Fatalf("unexpected runtime reminders manifest: %+v", reminders)
 	}
 
 	authRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "service-auth", "claw-api.json"))

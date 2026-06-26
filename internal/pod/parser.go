@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -85,7 +86,8 @@ type rawClawBlock struct {
 }
 
 type rawContextConfig struct {
-	Channel *rawChannelContextConfig `yaml:"channel"`
+	Channel          *rawChannelContextConfig   `yaml:"channel"`
+	RuntimeReminders []rawRuntimeReminderConfig `yaml:"runtime-reminders"`
 }
 
 type rawChannelContextConfig struct {
@@ -94,6 +96,16 @@ type rawChannelContextConfig struct {
 	MaxCharsHyphen     int    `yaml:"max-chars"`
 	MaxCharsUnderscore int    `yaml:"max_chars"`
 	Buffer             int    `yaml:"buffer"`
+}
+
+type rawRuntimeReminderConfig struct {
+	ID                 string `yaml:"id"`
+	Text               string `yaml:"text"`
+	Enabled            *bool  `yaml:"enabled"`
+	Placement          string `yaml:"placement"`
+	MaxCharsHyphen     int    `yaml:"max-chars"`
+	MaxCharsUnderscore int    `yaml:"max_chars"`
+	Cadence            string `yaml:"cadence"`
 }
 
 type rawMCPStdioBlock struct {
@@ -813,10 +825,14 @@ func parseContextConfig(raw *rawContextConfig) (*ContextConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("channel: %w", err)
 	}
-	if channel == nil {
+	runtimeReminders, err := parseRuntimeReminderConfigs(raw.RuntimeReminders)
+	if err != nil {
+		return nil, fmt.Errorf("runtime-reminders: %w", err)
+	}
+	if channel == nil && runtimeReminders == nil {
 		return &ContextConfig{}, nil
 	}
-	return &ContextConfig{Channel: channel}, nil
+	return &ContextConfig{Channel: channel, RuntimeReminders: runtimeReminders}, nil
 }
 
 func parseChannelContextConfig(raw *rawChannelContextConfig) (*ChannelContextConfig, error) {
@@ -854,6 +870,86 @@ func parseChannelContextConfig(raw *rawChannelContextConfig) (*ChannelContextCon
 }
 
 func selectChannelContextMaxChars(hyphen, underscore int) (int, error) {
+	if hyphen != 0 && underscore != 0 && hyphen != underscore {
+		return 0, fmt.Errorf("max-chars and max_chars cannot both be set to different values")
+	}
+	if hyphen != 0 {
+		return hyphen, nil
+	}
+	return underscore, nil
+}
+
+func parseRuntimeReminderConfigs(raw []rawRuntimeReminderConfig) ([]RuntimeReminderConfig, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	out := make([]RuntimeReminderConfig, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for i, entry := range raw {
+		reminder, err := parseRuntimeReminderConfig(entry)
+		if err != nil {
+			return nil, fmt.Errorf("entry %d: %w", i, err)
+		}
+		if _, ok := seen[reminder.ID]; ok {
+			return nil, fmt.Errorf("entry %d: duplicate id %q", i, reminder.ID)
+		}
+		seen[reminder.ID] = struct{}{}
+		out = append(out, reminder)
+	}
+	return out, nil
+}
+
+func parseRuntimeReminderConfig(raw rawRuntimeReminderConfig) (RuntimeReminderConfig, error) {
+	id := strings.TrimSpace(raw.ID)
+	if id == "" {
+		return RuntimeReminderConfig{}, fmt.Errorf("id must not be empty")
+	}
+	text := strings.TrimSpace(raw.Text)
+	if text == "" {
+		return RuntimeReminderConfig{}, fmt.Errorf("text must not be empty")
+	}
+	placement := strings.TrimSpace(raw.Placement)
+	if placement == "" {
+		placement = "before_feeds"
+	}
+	if placement != "before_feeds" {
+		return RuntimeReminderConfig{}, fmt.Errorf("placement must be before_feeds")
+	}
+	cadence := strings.TrimSpace(raw.Cadence)
+	if cadence == "" {
+		cadence = "every_turn"
+	}
+	if cadence != "every_turn" {
+		return RuntimeReminderConfig{}, fmt.Errorf("cadence must be every_turn")
+	}
+	maxChars, err := selectRuntimeReminderMaxChars(raw.MaxCharsHyphen, raw.MaxCharsUnderscore)
+	if err != nil {
+		return RuntimeReminderConfig{}, err
+	}
+	if maxChars == 0 {
+		maxChars = 800
+	}
+	if maxChars < 0 {
+		return RuntimeReminderConfig{}, fmt.Errorf("max-chars must be >= 0")
+	}
+	if utf8.RuneCountInString(text) > maxChars {
+		return RuntimeReminderConfig{}, fmt.Errorf("text length must be <= max-chars")
+	}
+	enabled := true
+	if raw.Enabled != nil {
+		enabled = *raw.Enabled
+	}
+	return RuntimeReminderConfig{
+		ID:        id,
+		Text:      text,
+		Enabled:   enabled,
+		Placement: placement,
+		MaxChars:  maxChars,
+		Cadence:   cadence,
+	}, nil
+}
+
+func selectRuntimeReminderMaxChars(hyphen, underscore int) (int, error) {
 	if hyphen != 0 && underscore != 0 && hyphen != underscore {
 		return 0, fmt.Errorf("max-chars and max_chars cannot both be set to different values")
 	}

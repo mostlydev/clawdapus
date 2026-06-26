@@ -403,6 +403,19 @@ func TestAgentContextDetailRendersContractAndLiveSnapshot(t *testing.T) {
 				"type":    "openclaw",
 			},
 			Feeds: map[string]any{"feeds": []any{"alerts"}},
+			RuntimeReminders: map[string]any{
+				"version": float64(1),
+				"reminders": []any{
+					map[string]any{
+						"id":        "focus",
+						"text":      "Stay on the active operating contract.",
+						"enabled":   true,
+						"placement": "before_feeds",
+						"cadence":   "every_turn",
+						"max_chars": float64(800),
+					},
+				},
+			},
 		},
 		liveContext: map[string]any{
 			"agent_id":   "bot-0",
@@ -458,7 +471,7 @@ func TestAgentContextDetailRendersContractAndLiveSnapshot(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	for _, want := range []string{"# Contract", "# Infrastructure", "alerts", "openclaw", "Compiled manifests", "Runtime inputs"} {
+	for _, want := range []string{"# Contract", "# Infrastructure", "alerts", "openclaw", "Runtime reminders", "runtime-reminders.json", "Compiled manifests", "Runtime inputs"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected %q in body:\n%s", want, body)
 		}

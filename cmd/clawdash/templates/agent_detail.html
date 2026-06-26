@@ -259,6 +259,21 @@
                 </div>
               </div>
             {{end}}
+            {{if .HasRuntimeReminderRows}}
+              <div class="dash-detail-stat">
+                <div class="dash-grid-label">Runtime reminders</div>
+                <div class="overflow-x-auto mt-2">
+                  <table class="dash-table min-w-full">
+                    <thead><tr><th>ID</th><th>Enabled</th><th>Cadence</th><th>Placement</th><th>Max chars</th><th>Text</th></tr></thead>
+                    <tbody>
+                      {{range .RuntimeReminderRows}}
+                        <tr><td>{{.ID}}</td><td>{{.Enabled}}</td><td>{{.Cadence}}</td><td>{{.Placement}}</td><td>{{.MaxChars}}</td><td>{{.Text}}</td></tr>
+                      {{end}}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            {{end}}
             {{if .HasServiceAuthRows}}
               <div class="dash-detail-stat">
                 <div class="dash-grid-label">Service credentials</div>
@@ -274,10 +289,10 @@
                 </div>
               </div>
             {{end}}
-            {{if and (not .HasMetadata) (not .HasFeeds) (not .HasTools) (not .HasMemory) (not .HasServiceAuth)}}
+            {{if and (not .HasMetadata) (not .HasFeeds) (not .HasTools) (not .HasMemory) (not .HasRuntimeReminder) (not .HasServiceAuth)}}
               <div class="dash-empty">No generated JSON artifacts were returned for this agent.</div>
             {{end}}
-            {{if or .HasMetadata .HasFeeds .HasTools .HasMemory .HasServiceAuth}}
+            {{if or .HasMetadata .HasFeeds .HasTools .HasMemory .HasRuntimeReminder .HasServiceAuth}}
               <details class="dash-detail-stat">
                 <summary class="dash-grid-label">Raw runtime JSON</summary>
                 {{if .HasMetadata}}<pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">metadata.json
@@ -288,6 +303,8 @@
 {{.ToolsJSON}}</pre>{{end}}
                 {{if .HasMemory}}<pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">memory.json
 {{.MemoryJSON}}</pre>{{end}}
+                {{if .HasRuntimeReminder}}<pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">runtime-reminders.json
+{{.RuntimeReminderJSON}}</pre>{{end}}
                 {{if .HasServiceAuth}}<pre class="dash-detail-value" style="white-space: pre-wrap; overflow-x: auto;">service-auth
 {{.ServiceAuthJSON}}</pre>{{end}}
               </details>

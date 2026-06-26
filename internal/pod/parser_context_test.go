@@ -59,6 +59,68 @@ services:
 	}
 }
 
+func TestParsePodContextRuntimeReminders(t *testing.T) {
+	p, err := Parse(strings.NewReader(`
+x-claw:
+  context:
+    runtime-reminders:
+      - id: operating-focus
+        text: Keep the operating contract visible.
+services:
+  inherited:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+  override:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+      context:
+        runtime-reminders:
+          - id: local-focus
+            text: Use the local reminder.
+            enabled: false
+            cadence: every_turn
+            placement: before_feeds
+            max_chars: 80
+  suppress:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+      context:
+        runtime-reminders: []
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p.Context == nil || len(p.Context.RuntimeReminders) != 1 {
+		t.Fatalf("expected pod runtime reminder config, got %+v", p.Context)
+	}
+	podReminder := p.Context.RuntimeReminders[0]
+	if podReminder.ID != "operating-focus" || podReminder.MaxChars != 800 || !podReminder.Enabled || podReminder.Cadence != "every_turn" || podReminder.Placement != "before_feeds" {
+		t.Fatalf("unexpected pod reminder defaults: %+v", podReminder)
+	}
+
+	inherited := p.Services["inherited"]
+	if inherited == nil || inherited.Claw == nil || inherited.Claw.Context != nil {
+		t.Fatalf("expected no service context override for inherited service, got %+v", inherited)
+	}
+
+	override := p.Services["override"]
+	if override == nil || override.Claw == nil || override.Claw.Context == nil || len(override.Claw.Context.RuntimeReminders) != 1 {
+		t.Fatalf("expected service runtime reminder override, got %+v", override)
+	}
+	local := override.Claw.Context.RuntimeReminders[0]
+	if local.ID != "local-focus" || local.Enabled || local.MaxChars != 80 {
+		t.Fatalf("unexpected service reminder: %+v", local)
+	}
+
+	suppress := p.Services["suppress"]
+	if suppress == nil || suppress.Claw == nil || suppress.Claw.Context == nil || suppress.Claw.Context.RuntimeReminders == nil || len(suppress.Claw.Context.RuntimeReminders) != 0 {
+		t.Fatalf("expected explicit empty runtime reminder override, got %+v", suppress)
+	}
+}
+
 func TestParsePodContextChannelRejectsInvalidValues(t *testing.T) {
 	cases := []struct {
 		name string
@@ -106,6 +168,129 @@ x-claw:
 services:
   trader:
     image: example/trader:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "max-chars",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(strings.NewReader(tc.yaml))
+			if err == nil {
+				t.Fatal("expected parse error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestParsePodContextRuntimeRemindersRejectInvalidValues(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "missing id",
+			yaml: `
+x-claw:
+  context:
+    runtime-reminders:
+      - text: Missing id.
+services:
+  agent:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "id",
+		},
+		{
+			name: "duplicate id",
+			yaml: `
+x-claw:
+  context:
+    runtime-reminders:
+      - id: focus
+        text: One.
+      - id: focus
+        text: Two.
+services:
+  agent:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "duplicate",
+		},
+		{
+			name: "unsupported cadence",
+			yaml: `
+x-claw:
+  context:
+    runtime-reminders:
+      - id: focus
+        text: One.
+        cadence: min_interval
+services:
+  agent:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "cadence",
+		},
+		{
+			name: "unsupported placement",
+			yaml: `
+x-claw:
+  context:
+    runtime-reminders:
+      - id: focus
+        text: One.
+        placement: after_feeds
+services:
+  agent:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "placement",
+		},
+		{
+			name: "oversized text",
+			yaml: `
+x-claw:
+  context:
+    runtime-reminders:
+      - id: focus
+        text: Too long.
+        max_chars: 3
+services:
+  agent:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "max-chars",
+		},
+		{
+			name: "conflicting max chars aliases",
+			yaml: `
+x-claw:
+  context:
+    runtime-reminders:
+      - id: focus
+        text: One.
+        max-chars: 10
+        max_chars: 20
+services:
+  agent:
+    image: example/agent:latest
     x-claw:
       agent: ./AGENTS.md
 `,

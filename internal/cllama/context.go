@@ -17,6 +17,7 @@ type AgentContextInput struct {
 	Tools             []ToolManifestEntry
 	ToolPolicy        *ToolPolicy // nil means DefaultToolPolicy
 	Memory            *MemoryManifestEntry
+	RuntimeReminders  []RuntimeReminderManifestEntry
 	ServiceAuth       []ServiceAuthEntry
 	ChannelAllowlist  []string
 }
@@ -100,6 +101,20 @@ type MemoryOp struct {
 	TimeoutMS int    `json:"timeout_ms,omitempty"`
 }
 
+type RuntimeReminderManifest struct {
+	Version   int                            `json:"version"`
+	Reminders []RuntimeReminderManifestEntry `json:"reminders"`
+}
+
+type RuntimeReminderManifestEntry struct {
+	ID        string `json:"id"`
+	Text      string `json:"text"`
+	Enabled   bool   `json:"enabled"`
+	Placement string `json:"placement"`
+	MaxChars  int    `json:"max_chars"`
+	Cadence   string `json:"cadence"`
+}
+
 var DefaultToolPolicy = ToolPolicy{
 	MaxRounds:        8,
 	TimeoutPerToolMS: 30000,
@@ -124,7 +139,7 @@ func EffectiveToolPolicy(maxRounds, timeoutPerToolMS, totalTimeoutMS *int) ToolP
 
 // GenerateContextDir writes per-agent context files under:
 //
-//	<runtimeDir>/context/<agent-id>/{AGENTS.md,AGENTS.effective.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,service-auth/...}
+//	<runtimeDir>/context/<agent-id>/{AGENTS.md,AGENTS.effective.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,runtime-reminders.json,service-auth/...}
 func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 	for _, agent := range agents {
 		if agent.AgentID == "" {
@@ -193,6 +208,19 @@ func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 			}
 			if err := os.WriteFile(filepath.Join(agentDir, "memory.json"), append(memoryJSON, '\n'), 0644); err != nil {
 				return fmt.Errorf("write memory.json for %q: %w", agent.AgentID, err)
+			}
+		}
+
+		if len(agent.RuntimeReminders) > 0 {
+			remindersJSON, err := json.MarshalIndent(RuntimeReminderManifest{
+				Version:   1,
+				Reminders: append([]RuntimeReminderManifestEntry(nil), agent.RuntimeReminders...),
+			}, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal runtime reminders for %q: %w", agent.AgentID, err)
+			}
+			if err := os.WriteFile(filepath.Join(agentDir, "runtime-reminders.json"), append(remindersJSON, '\n'), 0644); err != nil {
+				return fmt.Errorf("write runtime-reminders.json for %q: %w", agent.AgentID, err)
 			}
 		}
 

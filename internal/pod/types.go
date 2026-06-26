@@ -131,7 +131,8 @@ type ChannelMemoryConfig struct {
 }
 
 type ContextConfig struct {
-	Channel *ChannelContextConfig
+	Channel          *ChannelContextConfig
+	RuntimeReminders []RuntimeReminderConfig
 }
 
 type ChannelContextConfig struct {
@@ -139,6 +140,15 @@ type ChannelContextConfig struct {
 	Limit    int
 	MaxChars int
 	Buffer   int
+}
+
+type RuntimeReminderConfig struct {
+	ID        string
+	Text      string
+	Enabled   bool
+	Placement string
+	MaxChars  int
+	Cadence   string
 }
 
 type IncludeEntry struct {

@@ -42,7 +42,8 @@ claw agent add [name]               # add agent service to existing pod
 claw audit [--since <dur>] [--claw <id>] [--type <type>] [--json]
                                     # summarize cllama telemetry from container logs
                                     # types: request, response, error, intervention,
-                                    #        feed_fetch, provider_pool, tool_call
+                                    #        feed_fetch, feed_injection, runtime_reminder,
+                                    #        memory_op, provider_pool, tool_call
 claw api schedule <subcommand>      # inspect/control scheduled invocations via claw-api
     # list | get <id> | pause <id> | resume <id> | skip-next <id> |
     # clear-skip-next <id> | fire <id>
@@ -305,6 +306,12 @@ When a service subscribes to a memory service via `x-claw.memory`, cllama perfor
 
 `claw up` compiles `memory.json` into each subscribing agent's cllama context directory with endpoint URLs, auth tokens, and timeout configuration.
 
+### Runtime Reminders
+
+Pod or service `x-claw.context.runtime-reminders` compiles short operator-authored snippets into each agent's cllama context directory as `runtime-reminders.json`. cllama injects enabled reminders into late runtime context before feeds on every turn, so durable operating focus stays visible without expanding the primary contract.
+
+Supported fields: `id` (required), `text` (required), `enabled` (default `true`), `cadence` (`every_turn`), `placement` (`before_feeds`), and `max-chars` / `max_chars` (default `800`). A service-level list replaces pod-level reminders; an explicit empty list suppresses inherited reminders.
+
 ### Managed Tool Mediation (v0.5.0)
 
 When a service subscribes to tools via `x-claw.tools`, cllama performs bounded tool execution within the inference turn:
@@ -374,6 +381,7 @@ The proxy sits between agents and LLM providers. Agents get bearer tokens, proxy
   CLAWDAPUS.md      # infrastructure map
   tools.json        # managed tool manifest (when tools subscribed)
   memory.json       # memory service config (when memory subscribed)
+  runtime-reminders.json # runtime reminder manifest (when configured)
 ```
 
 ### Provider support
@@ -425,6 +433,7 @@ When the aggregate cap drops a feed the model sees an explicit `--- FEED: <name>
 | `jobs.json` | Cron schedule for INVOKE tasks | Runner state directory |
 | `tools.json` | Managed tool manifest per agent | cllama context directory |
 | `memory.json` | Memory service config per agent | cllama context directory |
+| `runtime-reminders.json` | Runtime reminder manifest per agent | cllama context directory |
 
 ## Drivers
 
@@ -493,7 +502,7 @@ When a pod declares a `clawdash` surface, `claw up` publishes the operational da
 
 - **Fleet / Topology** — running services, wiring, driver types.
 - **Agents** — per-agent *contract* as compiled at `claw up` time (AGENTS.md, CLAWDAPUS.md, feed subscriptions, managed tools, memory wiring, metadata).
-- **Agents → Live Context** — the system message, tools array, injected feeds, memory recall, time context, and interventions that were assembled for the most recent inference turn. Sourced from the cllama snapshot store (`/internal/context/<agent-id>/snapshot`, proxied through `claw-api`). Credentials and token fields are redacted.
+- **Agents → Live Context** — the system message, tools array, runtime reminders, injected feeds, memory recall, time context, and interventions that were assembled for the most recent inference turn. Sourced from the cllama snapshot store (`/internal/context/<agent-id>/snapshot`, proxied through `claw-api`). Credentials and token fields are redacted.
 - **Schedule** — `INVOKE` and `x-claw.invoke` cron entries, with `claw api schedule ...` controls.
 
 All views are read-only and scoped through `claw-api` principals. Use this before log-diving — "what did the model actually see last turn" has a direct answer here.
@@ -520,6 +529,11 @@ All views are read-only and scoped through `claw-api` principals. Use this befor
 - `claw memory backfill` replays history to a memory service for bootstrapping
 - `claw memory forget --entry-id <id>` writes tombstones; subsequent backfills skip those entries
 - Declaring `memory:` without `cllama:` is a hard error
+
+### Runtime reminders not visible
+- Check `runtime-reminders.json` in `.claw-runtime/context/<agent-id>/`
+- Check `claw audit --type runtime_reminder` for injected or skipped reminder entries
+- Verify `cadence` is `every_turn`, `placement` is `before_feeds`, and the reminder text is within `max-chars`
 
 ## Working Examples
 

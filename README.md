@@ -378,6 +378,7 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
 - **Managed tool mediation:** Services declare callable tools via `claw.describe` (MCP-shaped schemas). `claw up` compiles per-agent `tools.json`. cllama injects tools into LLM requests, intercepts `tool_call` responses, executes them against the service, and loops until terminal text — transparent to the runner. HTTP services, Streamable HTTP MCP sidecars, and stdio MCP servers wrapped by `claw-mcp-stdio` are supported.
 - **Ambient memory plane:** Services declare `recall`, `retain`, and `forget` endpoints via `claw.describe`. `claw up` compiles per-agent `memory.json`. cllama calls `/recall` before each inference turn and `/retain` after each successful response (async, non-blocking). Memory intelligence stays in swappable external services — the proxy owns orchestration only.
+- **Runtime reminders:** Operators can compile short per-agent reminder snippets into `runtime-reminders.json`; cllama injects enabled reminders into late runtime context so durable operating focus stays visible without expanding the primary contract.
 - **Operator dashboard:** Real-time web UI at host port 8181 by default (container `:8081`) — agent activity, provider status, cost breakdown.
 
 The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking, budget enforcement). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
@@ -554,7 +555,7 @@ inline the service's advertised tools and the mount path:
 Clawdapus is designed for autonomous fleet governance. The operator writes the `Clawfile` and sets the budgets, but day-to-day oversight can be delegated to a **Master Claw** — an AI governor.
 
 **The Governance Proxy is its Sensory Organ:**
-The `cllama` proxy is the programmatic choke point. It sits on the network, holds provider credentials, applies compiled model/tool/context/budget policy, rejects over-cap turns, and emits structured telemetry (cost, interventions, tool rounds). It doesn't "think" about management; it is a passive sensor and firewall.
+The `cllama` proxy is the programmatic choke point. It sits on the network, holds provider credentials, applies compiled model/tool/context/budget policy, rejects over-cap turns, injects compiled runtime reminders, and emits structured telemetry (cost, interventions, tool rounds). It doesn't "think" about management; it is a passive sensor and firewall.
 
 **The Master Claw is the Brain:**
 The Master Claw is an actual LLM-powered agent running in the pod, reading proxy telemetry and acting on it. `x-claw.master` wires this today: it auto-injects a `claw-api` service and hands the governor a scoped bearer token and `CLAW_API_URL`, so it can read fleet telemetry and act through an authenticated, scope-checked API. The executive policy it runs — shifting enforced budget caps, quarantining a high-cost or off-policy agent, promoting a recipe — is operator-defined (recipe promotion is still on the roadmap).
