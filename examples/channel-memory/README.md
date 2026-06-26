@@ -30,28 +30,33 @@ The deterministic path is intentionally conservative:
 - preserves obvious hard events as faithful `hard_event` blocks
 - keeps ordinary retained content as `raw_excerpt` blocks
 - collapses runtime/status noise into sparse `telemetry_count` blocks
+- collapses exact short acknowledgements into sparse `low_value_ack` blocks
+- collapses near-identical low-change decisions into sparse `decision_repeat`
+  blocks
 - emits coverage-gap metadata from stored gap records
 - creates tombstone blocks for deleted messages without carrying deleted content
 
-Higher-quality `topic_rollup` and `sequence_rollup` blocks come from the async
-LLM worker below.
+Higher-quality `message_summary`, `topic_rollup`, and `sequence_rollup` blocks
+come from the async LLM worker below.
 
 ## Async LLM Digest Worker
 
 An optional background worker compresses verbose `raw_excerpt` material into
-sparse `topic_rollup` / `sequence_rollup` blocks using an LLM. It is strictly
-off the `/digest` hot path — `/digest` only ever reads already-generated blocks
-and never calls a model.
+sparse `message_summary`, `topic_rollup`, or `sequence_rollup` blocks using an
+LLM. It is strictly off the `/digest` hot path — `/digest` only ever reads
+already-generated blocks and never calls a model.
 
 The worker is conservative by design:
 
-- only `raw_excerpt` windows are summarized; hard events, tombstones, and
-  telemetry blocks keep their faithful deterministic form
+- only `raw_excerpt` long messages and windows are summarized; hard events,
+  tombstones, telemetry blocks, and deterministic low-value rollups keep their
+  faithful deterministic form
 - every generated block requires structured JSON output citing the exact source
   message ids it summarized; malformed or provenance-free results are rejected
   and the deterministic blocks keep serving
-- work is cached by source-message ids plus content hashes, so an unchanged
-  window is never re-summarized
+- long-message work is cached by channel id, message id, content hash,
+  provider, model, and compactor version; window rollups are cached by
+  source-message ids plus content hashes
 - each block stores its provider, model, version, and cost in `metadata_json`
 - conservative per-channel and per-pod daily call caps are enforced, with usage
   tracked in `llm_usage`; over budget, disabled, or failing all fall back to
@@ -64,6 +69,7 @@ It is disabled unless `CHANNEL_MEMORY_LLM_ENABLED=true` and
 are set. Tuning knobs: `CHANNEL_MEMORY_LLM_MODEL`, `CHANNEL_MEMORY_LLM_PROVIDER`,
 `CHANNEL_MEMORY_LLM_VERSION`, `CHANNEL_MEMORY_LLM_API_KEY`,
 `CHANNEL_MEMORY_LLM_WINDOW`, `CHANNEL_MEMORY_LLM_MIN_WINDOW`,
+`CHANNEL_MEMORY_LLM_LONG_MESSAGE_CHARS`,
 `CHANNEL_MEMORY_LLM_PER_CHANNEL_DAILY`, `CHANNEL_MEMORY_LLM_PER_POD_DAILY`,
 `CHANNEL_MEMORY_LLM_PER_CHANNEL_DAILY_USD`,
 `CHANNEL_MEMORY_LLM_PER_POD_DAILY_USD`,

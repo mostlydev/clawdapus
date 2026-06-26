@@ -1613,7 +1613,7 @@ func preferSparseRollups(blocks []digestBlock, limit int) []digestBlock {
 }
 
 func suppressesRawExcerpt(block digestBlock) bool {
-	if block.Processor == digestProcessorLLM && (block.Kind == rollupKindTopic || block.Kind == rollupKindSequence) {
+	if block.Processor == digestProcessorLLM && (block.Kind == rollupKindMessage || block.Kind == rollupKindTopic || block.Kind == rollupKindSequence) {
 		return true
 	}
 	return block.Processor == "deterministic" && block.Kind == "decision_repeat"
