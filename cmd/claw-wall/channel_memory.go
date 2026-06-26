@@ -63,7 +63,8 @@ type channelMemoryDigestRequest struct {
 }
 
 type channelMemoryDigestBudget struct {
-	MaxBlocks int `json:"max_blocks,omitempty"`
+	MaxBlocks int    `json:"max_blocks,omitempty"`
+	RawRecent string `json:"raw_recent,omitempty"`
 }
 
 type channelMemoryDigestResponse struct {
@@ -80,6 +81,7 @@ type channelMemoryDigestCoverage struct {
 	SourceMessages    int                        `json:"source_messages"`
 	DigestMessages    int                        `json:"digest_messages"`
 	RawRecentMessages int                        `json:"raw_recent_messages"`
+	OlderRawMessages  int                        `json:"older_raw_messages,omitempty"`
 	Gaps              []channelMemoryCoverageGap `json:"gaps,omitempty"`
 }
 
@@ -430,6 +432,7 @@ func (c *channelMemoryClient) fetchAwarenessDigest(ctx context.Context, channelI
 		ChannelIDs: normalizeChannelIDs(channelIDs),
 		Budget: channelMemoryDigestBudget{
 			MaxBlocks: defaultDigestMaxBlocks,
+			RawRecent: defaultDigestRawRecent.String(),
 		},
 	}
 	if since > 0 {
@@ -448,6 +451,8 @@ func (c *channelMemoryClient) fetchAwarenessDigest(ctx context.Context, channelI
 	digest.SourceMessages = resp.Coverage.SourceMessages
 	digest.DigestMessages = resp.Coverage.DigestMessages
 	digest.RawRecentMessages = resp.Coverage.RawRecentMessages
+	digest.OlderRawMessages = resp.Coverage.OlderRawMessages
+	digest.RawRecent = req.Budget.RawRecent
 	digest.CoverageGaps = len(resp.Coverage.Gaps)
 	digest.DeterministicOnly = resp.Cost.DeterministicOnly
 	digest.Blocks = append([]channelMemoryDigestBlock(nil), resp.Blocks...)

@@ -18,7 +18,11 @@ source provenance for digest-backed `channel-awareness` work.
   blocks within explicit channel ids, returning source handles for exact
   follow-up retrieval.
 - `POST /digest` returns deterministic digest blocks over already-retained
-  messages. It does not call an LLM.
+  messages. It does not call an LLM. Set `budget.raw_recent` to a duration or
+  RFC3339 timestamp to keep deterministic `raw_excerpt` blocks only for the
+  recent tier while preserving hard events, tombstones, sparse rollups, and LLM
+  summaries across the requested horizon. The response reports omitted older raw
+  source count as `coverage.older_raw_messages`.
 - `POST /coverage-gaps` records an explicit missing source range.
 - `POST /forget` suppresses source messages and marks derived blocks dirty.
 - `GET /health` reports process liveness.

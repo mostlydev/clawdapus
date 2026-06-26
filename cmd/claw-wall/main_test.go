@@ -310,8 +310,9 @@ func TestChannelAwarenessHandlerServesDigestWhenAvailable(t *testing.T) {
 		Status:      "ok",
 		GeneratedAt: "2026-05-21T20:00:00Z",
 		Coverage: channelMemoryDigestCoverage{
-			SourceMessages: 12,
-			DigestMessages: 1,
+			SourceMessages:   12,
+			DigestMessages:   1,
+			OlderRawMessages: 7,
 		},
 		Blocks: []channelMemoryDigestBlock{{
 			Kind:           "telemetry_count",
@@ -360,6 +361,9 @@ func TestChannelAwarenessHandlerServesDigestWhenAvailable(t *testing.T) {
 	if !strings.Contains(text, "digest_blocks=1") || !strings.Contains(text, "digest_source_messages=12") {
 		t.Fatalf("expected digest counts, got %q", text)
 	}
+	if !strings.Contains(text, "digest_raw_recent=6h0m0s") || !strings.Contains(text, "digest_older_raw_omitted=7") {
+		t.Fatalf("expected digest raw tier counts, got %q", text)
+	}
 	if !strings.Contains(text, "[digest kind=telemetry_count source_channel=chan-1 source_messages=100,101") {
 		t.Fatalf("expected digest block provenance, got %q", text)
 	}
@@ -367,7 +371,7 @@ func TestChannelAwarenessHandlerServesDigestWhenAvailable(t *testing.T) {
 		t.Fatalf("expected digest mode to keep only recent raw messages, got %q", text)
 	}
 	gotReqs := memory.requests()
-	if len(gotReqs) != 1 || gotReqs[0].SourceKind != channelMemorySourceKind || gotReqs[0].Since != "24h0m0s" || gotReqs[0].Budget.MaxBlocks != defaultDigestMaxBlocks {
+	if len(gotReqs) != 1 || gotReqs[0].SourceKind != channelMemorySourceKind || gotReqs[0].Since != "24h0m0s" || gotReqs[0].Budget.MaxBlocks != defaultDigestMaxBlocks || gotReqs[0].Budget.RawRecent != defaultDigestRawRecent.String() {
 		t.Fatalf("unexpected digest request: %+v", gotReqs)
 	}
 

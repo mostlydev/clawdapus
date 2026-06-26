@@ -21,6 +21,7 @@ const (
 	defaultTailMaxChars    = 32 * 1024
 	defaultDigestRawLimit  = 10
 	defaultDigestMaxBlocks = 32
+	defaultDigestRawRecent = 6 * time.Hour
 )
 
 const (
@@ -153,6 +154,8 @@ type channelAwarenessDigest struct {
 	SourceMessages    int
 	DigestMessages    int
 	RawRecentMessages int
+	OlderRawMessages  int
+	RawRecent         string
 	CoverageGaps      int
 	DeterministicOnly bool
 	Blocks            []channelMemoryDigestBlock
@@ -1357,6 +1360,12 @@ func formatChannelAwareness(result tailResult, since time.Duration, contextKind 
 			digest.CoverageGaps,
 			digest.DeterministicOnly,
 		)
+		if digest.RawRecent != "" {
+			fmt.Fprintf(&b, " digest_raw_recent=%s digest_older_raw_omitted=%d",
+				headerToken(digest.RawRecent),
+				digest.OlderRawMessages,
+			)
+		}
 		if digest.GeneratedAt != "" {
 			fmt.Fprintf(&b, " digest_generated_at=%s", digest.GeneratedAt)
 		}
