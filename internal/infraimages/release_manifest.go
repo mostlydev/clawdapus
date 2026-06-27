@@ -9,7 +9,7 @@ const (
 	DefaultClawWallTag          = DefaultClawInfraTag
 	DefaultClawChannelMemoryTag = DefaultClawInfraTag
 	DefaultClawMCPStdioTag      = DefaultClawInfraTag
-	DefaultCllamaTag            = "v0.7.4"
+	DefaultCllamaTag            = "v0.7.5"
 	DefaultHermesBaseTag        = "v2026.6.19-claw.2"
 )
 
