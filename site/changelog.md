@@ -29,9 +29,16 @@ outline: deep
 
 ## Unreleased
 
-- **Context block manifests** -- `x-claw.context.blocks` compiles short operator-authored context blocks into per-agent `context-blocks.json` files, with pod-level inheritance, service-level replacement, and explicit empty-list suppression. Blocks carry a `kind` tag, support `before_feeds` or `after_feeds` placement, and are exposed by claw-api and Clawdash alongside other runtime JSON so operators can verify the prompt-shaping input before relying on paired cllama runtime injection. Closes [#324](https://github.com/mostlydev/clawdapus/issues/324).
+<!-- Nothing yet -->
 
-## v0.24.0 <Badge type="tip" text="Latest" /> {#v0-24-0}
+## v0.25.0 <Badge type="tip" text="Latest" /> {#v0-25-0}
+
+*2026-06-27*
+
+- **Context block manifests** -- `x-claw.context.blocks` compiles short operator-authored context blocks into per-agent `context-blocks.json` files, with pod-level inheritance, service-level replacement, and explicit empty-list suppression. Blocks carry a `kind` tag, support `before_feeds` or `after_feeds` placement, and are exposed by claw-api and Clawdash alongside other runtime JSON so operators can verify the prompt-shaping input before relying on paired cllama runtime injection. Requires [cllama v0.7.5](https://github.com/mostlydev/cllama/releases/tag/v0.7.5). Closes [#324](https://github.com/mostlydev/clawdapus/issues/324).
+- **Pins infra images** -- the `claw-api` / `clawdash` / `claw-wall` / `claw-channel-memory` / `claw-mcp-stdio` images move to `v0.25.0`; cllama moves to [v0.7.5](https://github.com/mostlydev/cllama/releases/tag/v0.7.5). `hermes-base` stays at `v2026.6.19-claw.2`.
+
+## v0.24.0 {#v0-24-0}
 
 *2026-06-23*
 
