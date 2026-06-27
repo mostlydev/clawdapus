@@ -59,6 +59,69 @@ services:
 	}
 }
 
+func TestParsePodContextBlocks(t *testing.T) {
+	p, err := Parse(strings.NewReader(`
+x-claw:
+  context:
+    blocks:
+      - id: operating-focus
+        text: Keep the operating contract visible.
+services:
+  inherited:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+  override:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+      context:
+        blocks:
+          - id: local-focus
+            kind: feed_frame
+            text: Use the local reminder.
+            enabled: false
+            cadence: every_turn
+            placement: before_feeds
+            max_chars: 80
+  suppress:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+      context:
+        blocks: []
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p.Context == nil || len(p.Context.Blocks) != 1 {
+		t.Fatalf("expected pod context block config, got %+v", p.Context)
+	}
+	podBlock := p.Context.Blocks[0]
+	if podBlock.ID != "operating-focus" || podBlock.Kind != "context_block" || podBlock.MaxChars != 800 || !podBlock.Enabled || podBlock.Cadence != "every_turn" || podBlock.Placement != "after_feeds" {
+		t.Fatalf("unexpected pod context block defaults: %+v", podBlock)
+	}
+
+	inherited := p.Services["inherited"]
+	if inherited == nil || inherited.Claw == nil || inherited.Claw.Context != nil {
+		t.Fatalf("expected no service context override for inherited service, got %+v", inherited)
+	}
+
+	override := p.Services["override"]
+	if override == nil || override.Claw == nil || override.Claw.Context == nil || len(override.Claw.Context.Blocks) != 1 {
+		t.Fatalf("expected service context block override, got %+v", override)
+	}
+	local := override.Claw.Context.Blocks[0]
+	if local.ID != "local-focus" || local.Kind != "feed_frame" || local.Enabled || local.MaxChars != 80 || local.Placement != "before_feeds" {
+		t.Fatalf("unexpected service context block: %+v", local)
+	}
+
+	suppress := p.Services["suppress"]
+	if suppress == nil || suppress.Claw == nil || suppress.Claw.Context == nil || suppress.Claw.Context.Blocks == nil || len(suppress.Claw.Context.Blocks) != 0 {
+		t.Fatalf("expected explicit empty context block override, got %+v", suppress)
+	}
+}
+
 func TestParsePodContextChannelRejectsInvalidValues(t *testing.T) {
 	cases := []struct {
 		name string
@@ -106,6 +169,129 @@ x-claw:
 services:
   trader:
     image: example/trader:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "max-chars",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(strings.NewReader(tc.yaml))
+			if err == nil {
+				t.Fatal("expected parse error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestParsePodContextBlocksRejectInvalidValues(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "missing id",
+			yaml: `
+x-claw:
+  context:
+    blocks:
+      - text: Missing id.
+services:
+  agent:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "id",
+		},
+		{
+			name: "duplicate id",
+			yaml: `
+x-claw:
+  context:
+    blocks:
+      - id: focus
+        text: One.
+      - id: focus
+        text: Two.
+services:
+  agent:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "duplicate",
+		},
+		{
+			name: "unsupported cadence",
+			yaml: `
+x-claw:
+  context:
+    blocks:
+      - id: focus
+        text: One.
+        cadence: min_interval
+services:
+  agent:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "cadence",
+		},
+		{
+			name: "unsupported placement",
+			yaml: `
+x-claw:
+  context:
+    blocks:
+      - id: focus
+        text: One.
+        placement: middle
+services:
+  agent:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "placement",
+		},
+		{
+			name: "oversized text",
+			yaml: `
+x-claw:
+  context:
+    blocks:
+      - id: focus
+        text: Too long.
+        max_chars: 3
+services:
+  agent:
+    image: example/agent:latest
+    x-claw:
+      agent: ./AGENTS.md
+`,
+			want: "max-chars",
+		},
+		{
+			name: "conflicting max chars aliases",
+			yaml: `
+x-claw:
+  context:
+    blocks:
+      - id: focus
+        text: One.
+        max-chars: 10
+        max_chars: 20
+services:
+  agent:
+    image: example/agent:latest
     x-claw:
       agent: ./AGENTS.md
 `,

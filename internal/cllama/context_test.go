@@ -129,6 +129,15 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 			},
 			Auth: &AuthEntry{Type: "bearer", Token: "memory-token"},
 		},
+		ContextBlocks: []ContextBlockManifestEntry{{
+			ID:        "focus",
+			Kind:      "runtime_motivation",
+			Text:      "Keep the operating contract visible.",
+			Enabled:   true,
+			Placement: "after_feeds",
+			MaxChars:  800,
+			Cadence:   "every_turn",
+		}},
 		ServiceAuth: []ServiceAuthEntry{{
 			Service:   "claw-api",
 			AuthType:  "bearer",
@@ -184,6 +193,18 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 	}
 	if memory["service"] != "team-memory" {
 		t.Fatalf("unexpected memory manifest payload: %v", memory)
+	}
+
+	blocksRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "context-blocks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blocks ContextBlockManifest
+	if err := json.Unmarshal(blocksRaw, &blocks); err != nil {
+		t.Fatal(err)
+	}
+	if blocks.Version != 1 || len(blocks.Blocks) != 1 || blocks.Blocks[0].ID != "focus" || blocks.Blocks[0].Kind != "runtime_motivation" || blocks.Blocks[0].Placement != "after_feeds" || !blocks.Blocks[0].Enabled {
+		t.Fatalf("unexpected context blocks manifest: %+v", blocks)
 	}
 
 	authRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "service-auth", "claw-api.json"))

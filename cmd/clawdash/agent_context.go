@@ -34,14 +34,15 @@ type agentContextIndexEntry struct {
 }
 
 type agentContractView struct {
-	ClawID      string         `json:"claw_id"`
-	AgentsMD    string         `json:"agents_md"`
-	ClawdapusMD string         `json:"clawdapus_md"`
-	Metadata    any            `json:"metadata"`
-	Feeds       any            `json:"feeds"`
-	Tools       any            `json:"tools"`
-	Memory      any            `json:"memory"`
-	ServiceAuth map[string]any `json:"service_auth,omitempty"`
+	ClawID        string         `json:"claw_id"`
+	AgentsMD      string         `json:"agents_md"`
+	ClawdapusMD   string         `json:"clawdapus_md"`
+	Metadata      any            `json:"metadata"`
+	Feeds         any            `json:"feeds"`
+	Tools         any            `json:"tools"`
+	Memory        any            `json:"memory"`
+	ContextBlocks any            `json:"context_blocks"`
+	ServiceAuth   map[string]any `json:"service_auth,omitempty"`
 }
 
 type agentContextHTTPClient struct {
@@ -174,47 +175,51 @@ type agentsPageData struct {
 }
 
 type agentContextDetailPageData struct {
-	PodName            string
-	ActiveTab          string
-	HasSchedule        bool
-	HasAgentContext    bool
-	ContextTab         string
-	IsContractTab      bool
-	IsLiveTab          bool
-	ContractPath       string
-	LivePath           string
-	ClawID             string
-	Service            string
-	ClawType           string
-	Contract           agentContractView
-	HasContract        bool
-	LiveContext        agentLiveContextView
-	LiveContextJSON    string
-	HasLiveContext     bool
-	ContractError      string
-	LiveError          string
-	HasContractErr     bool
-	HasLiveError       bool
-	MetadataJSON       string
-	FeedsJSON          string
-	ToolsJSON          string
-	MemoryJSON         string
-	ServiceAuthJSON    string
-	HasMetadata        bool
-	HasFeeds           bool
-	HasTools           bool
-	HasMemory          bool
-	HasServiceAuth     bool
-	MetadataRows       []keyValueRow
-	FeedRows           []feedManifestRow
-	ToolRows           []toolManifestRow
-	MemoryRows         []keyValueRow
-	ServiceAuthRows    []serviceAuthRow
-	HasMetadataRows    bool
-	HasFeedRows        bool
-	HasToolRows        bool
-	HasMemoryRows      bool
-	HasServiceAuthRows bool
+	PodName             string
+	ActiveTab           string
+	HasSchedule         bool
+	HasAgentContext     bool
+	ContextTab          string
+	IsContractTab       bool
+	IsLiveTab           bool
+	ContractPath        string
+	LivePath            string
+	ClawID              string
+	Service             string
+	ClawType            string
+	Contract            agentContractView
+	HasContract         bool
+	LiveContext         agentLiveContextView
+	LiveContextJSON     string
+	HasLiveContext      bool
+	ContractError       string
+	LiveError           string
+	HasContractErr      bool
+	HasLiveError        bool
+	MetadataJSON        string
+	FeedsJSON           string
+	ToolsJSON           string
+	MemoryJSON          string
+	ContextBlockJSON    string
+	ServiceAuthJSON     string
+	HasMetadata         bool
+	HasFeeds            bool
+	HasTools            bool
+	HasMemory           bool
+	HasContextBlock     bool
+	HasServiceAuth      bool
+	MetadataRows        []keyValueRow
+	FeedRows            []feedManifestRow
+	ToolRows            []toolManifestRow
+	MemoryRows          []keyValueRow
+	ContextBlockRows    []contextBlockRow
+	ServiceAuthRows     []serviceAuthRow
+	HasMetadataRows     bool
+	HasFeedRows         bool
+	HasToolRows         bool
+	HasMemoryRows       bool
+	HasContextBlockRows bool
+	HasServiceAuthRows  bool
 }
 
 type keyValueRow struct {
@@ -247,6 +252,16 @@ type serviceAuthRow struct {
 	AuthType   string
 	Principal  string
 	DetailJSON string
+}
+
+type contextBlockRow struct {
+	ID        string
+	Kind      string
+	Enabled   string
+	Cadence   string
+	Placement string
+	MaxChars  string
+	Text      string
 }
 
 type candidateContextRow struct {
@@ -430,49 +445,54 @@ func buildAgentContextDetailPageData(podName, agentID, tab string, contract agen
 	feedRows := feedManifestRows(contract.Feeds)
 	toolRows := toolManifestRows(contract.Tools)
 	memoryRows := topLevelRows(contract.Memory)
+	contextBlockRows := contextBlockRows(contract.ContextBlocks)
 	serviceAuthRows := serviceAuthRows(contract.ServiceAuth)
 	data := agentContextDetailPageData{
-		PodName:         podName,
-		ActiveTab:       "agents",
-		HasSchedule:     hasSchedule,
-		HasAgentContext: hasAgentContext,
-		ContextTab:      tab,
-		IsContractTab:   tab == "contract",
-		IsLiveTab:       tab == "live",
-		ContractPath:    "/agents/" + url.PathEscape(clawID) + "?tab=contract",
-		LivePath:        "/agents/" + url.PathEscape(clawID) + "?tab=live",
-		ClawID:          clawID,
-		Service:         metadataString(contract.Metadata, "service"),
-		ClawType:        metadataString(contract.Metadata, "type"),
-		Contract:        contract,
-		HasContract:     contractErr == nil,
-		LiveContext:     liveView,
-		ContractError:   errString(contractErr),
-		LiveError:       errString(liveErr),
-		HasContractErr:  contractErr != nil,
-		HasLiveError:    tab == "live" && liveErr != nil,
-		MetadataJSON:    prettyJSON(contract.Metadata),
-		FeedsJSON:       prettyJSON(contract.Feeds),
-		ToolsJSON:       prettyJSON(contract.Tools),
-		MemoryJSON:      prettyJSON(contract.Memory),
-		ServiceAuthJSON: prettyJSON(contract.ServiceAuth),
-		LiveContextJSON: liveView.RawJSON,
-		MetadataRows:    metadataRows,
-		FeedRows:        feedRows,
-		ToolRows:        toolRows,
-		MemoryRows:      memoryRows,
-		ServiceAuthRows: serviceAuthRows,
+		PodName:          podName,
+		ActiveTab:        "agents",
+		HasSchedule:      hasSchedule,
+		HasAgentContext:  hasAgentContext,
+		ContextTab:       tab,
+		IsContractTab:    tab == "contract",
+		IsLiveTab:        tab == "live",
+		ContractPath:     "/agents/" + url.PathEscape(clawID) + "?tab=contract",
+		LivePath:         "/agents/" + url.PathEscape(clawID) + "?tab=live",
+		ClawID:           clawID,
+		Service:          metadataString(contract.Metadata, "service"),
+		ClawType:         metadataString(contract.Metadata, "type"),
+		Contract:         contract,
+		HasContract:      contractErr == nil,
+		LiveContext:      liveView,
+		ContractError:    errString(contractErr),
+		LiveError:        errString(liveErr),
+		HasContractErr:   contractErr != nil,
+		HasLiveError:     tab == "live" && liveErr != nil,
+		MetadataJSON:     prettyJSON(contract.Metadata),
+		FeedsJSON:        prettyJSON(contract.Feeds),
+		ToolsJSON:        prettyJSON(contract.Tools),
+		MemoryJSON:       prettyJSON(contract.Memory),
+		ContextBlockJSON: prettyJSON(contract.ContextBlocks),
+		ServiceAuthJSON:  prettyJSON(contract.ServiceAuth),
+		LiveContextJSON:  liveView.RawJSON,
+		MetadataRows:     metadataRows,
+		FeedRows:         feedRows,
+		ToolRows:         toolRows,
+		MemoryRows:       memoryRows,
+		ContextBlockRows: contextBlockRows,
+		ServiceAuthRows:  serviceAuthRows,
 	}
 	data.HasMetadata = data.MetadataJSON != ""
 	data.HasFeeds = data.FeedsJSON != ""
 	data.HasTools = data.ToolsJSON != ""
 	data.HasMemory = data.MemoryJSON != ""
+	data.HasContextBlock = data.ContextBlockJSON != ""
 	data.HasServiceAuth = data.ServiceAuthJSON != ""
 	data.HasLiveContext = data.LiveContextJSON != ""
 	data.HasMetadataRows = len(metadataRows) > 0
 	data.HasFeedRows = len(feedRows) > 0
 	data.HasToolRows = len(toolRows) > 0
 	data.HasMemoryRows = len(memoryRows) > 0
+	data.HasContextBlockRows = len(contextBlockRows) > 0
 	data.HasServiceAuthRows = len(serviceAuthRows) > 0
 	return data
 }
@@ -559,6 +579,34 @@ func scalarInt(v any) int {
 	default:
 		return 0
 	}
+}
+
+func contextBlockRows(blocks any) []contextBlockRow {
+	root, ok := blocks.(map[string]any)
+	if !ok {
+		return nil
+	}
+	rawList, ok := root["blocks"].([]any)
+	if !ok {
+		return nil
+	}
+	rows := make([]contextBlockRow, 0, len(rawList))
+	for _, item := range rawList {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows = append(rows, contextBlockRow{
+			ID:        scalarString(entry["id"]),
+			Kind:      scalarString(entry["kind"]),
+			Enabled:   displayValue(entry["enabled"]),
+			Cadence:   scalarString(entry["cadence"]),
+			Placement: scalarString(entry["placement"]),
+			MaxChars:  displayValue(entry["max_chars"]),
+			Text:      scalarString(entry["text"]),
+		})
+	}
+	return rows
 }
 
 func displayValue(v any) string {

@@ -132,6 +132,7 @@ type ChannelMemoryConfig struct {
 
 type ContextConfig struct {
 	Channel *ChannelContextConfig
+	Blocks  []ContextBlockConfig
 }
 
 type ChannelContextConfig struct {
@@ -139,6 +140,16 @@ type ChannelContextConfig struct {
 	Limit    int
 	MaxChars int
 	Buffer   int
+}
+
+type ContextBlockConfig struct {
+	ID        string
+	Kind      string
+	Text      string
+	Enabled   bool
+	Placement string
+	MaxChars  int
+	Cadence   string
 }
 
 type IncludeEntry struct {

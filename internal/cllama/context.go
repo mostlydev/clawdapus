@@ -17,6 +17,7 @@ type AgentContextInput struct {
 	Tools             []ToolManifestEntry
 	ToolPolicy        *ToolPolicy // nil means DefaultToolPolicy
 	Memory            *MemoryManifestEntry
+	ContextBlocks     []ContextBlockManifestEntry
 	ServiceAuth       []ServiceAuthEntry
 	ChannelAllowlist  []string
 }
@@ -100,6 +101,21 @@ type MemoryOp struct {
 	TimeoutMS int    `json:"timeout_ms,omitempty"`
 }
 
+type ContextBlockManifest struct {
+	Version int                         `json:"version"`
+	Blocks  []ContextBlockManifestEntry `json:"blocks"`
+}
+
+type ContextBlockManifestEntry struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind,omitempty"`
+	Text      string `json:"text"`
+	Enabled   bool   `json:"enabled"`
+	Placement string `json:"placement"`
+	MaxChars  int    `json:"max_chars"`
+	Cadence   string `json:"cadence"`
+}
+
 var DefaultToolPolicy = ToolPolicy{
 	MaxRounds:        8,
 	TimeoutPerToolMS: 30000,
@@ -124,7 +140,7 @@ func EffectiveToolPolicy(maxRounds, timeoutPerToolMS, totalTimeoutMS *int) ToolP
 
 // GenerateContextDir writes per-agent context files under:
 //
-//	<runtimeDir>/context/<agent-id>/{AGENTS.md,AGENTS.effective.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,service-auth/...}
+//	<runtimeDir>/context/<agent-id>/{AGENTS.md,AGENTS.effective.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,context-blocks.json,service-auth/...}
 func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 	for _, agent := range agents {
 		if agent.AgentID == "" {
@@ -193,6 +209,19 @@ func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 			}
 			if err := os.WriteFile(filepath.Join(agentDir, "memory.json"), append(memoryJSON, '\n'), 0644); err != nil {
 				return fmt.Errorf("write memory.json for %q: %w", agent.AgentID, err)
+			}
+		}
+
+		if len(agent.ContextBlocks) > 0 {
+			blocksJSON, err := json.MarshalIndent(ContextBlockManifest{
+				Version: 1,
+				Blocks:  append([]ContextBlockManifestEntry(nil), agent.ContextBlocks...),
+			}, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal context blocks for %q: %w", agent.AgentID, err)
+			}
+			if err := os.WriteFile(filepath.Join(agentDir, "context-blocks.json"), append(blocksJSON, '\n'), 0644); err != nil {
+				return fmt.Errorf("write context-blocks.json for %q: %w", agent.AgentID, err)
 			}
 		}
 

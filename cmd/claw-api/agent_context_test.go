@@ -95,6 +95,9 @@ func TestAgentContractRedactsContextCredentials(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(agentDir, "memory.json"), []byte(`{"service":"mem","auth":{"type":"bearer","token":"memory-token"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(agentDir, "context-blocks.json"), []byte(`{"version":1,"blocks":[{"id":"focus","kind":"runtime_motivation","text":"Stay on the active operating contract.","enabled":true,"placement":"after_feeds","cadence":"every_turn","max_chars":800}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	authDir := filepath.Join(agentDir, "service-auth")
 	if err := os.MkdirAll(authDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -146,6 +149,11 @@ func TestAgentContractRedactsContextCredentials(t *testing.T) {
 	clawAPIAuth := serviceAuth["claw-api"].(map[string]any)
 	if clawAPIAuth["token"] != "[REDACTED]" {
 		t.Fatalf("service-auth token was not redacted: %+v", clawAPIAuth)
+	}
+	contextBlocks := resp["context_blocks"].(map[string]any)
+	blocks := contextBlocks["blocks"].([]any)
+	if blocks[0].(map[string]any)["id"] != "focus" || blocks[0].(map[string]any)["kind"] != "runtime_motivation" {
+		t.Fatalf("context blocks were not returned: %+v", contextBlocks)
 	}
 }
 

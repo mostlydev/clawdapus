@@ -58,7 +58,7 @@ The top-level `x-claw` block declares shared configuration that all services inh
 | `memory-defaults` | Memory service subscription inherited by all services |
 | `skills-defaults` | Operator skill files inherited by all services |
 | `handles-defaults` | Shared chat topology (guild IDs, channel IDs) inherited by all services |
-| `context` | Tunes auto-injected runtime context feeds (currently the `channel-context` tail served by `claw-wall`) |
+| `context` | Tunes auto-injected runtime context, including channel-context tails and context blocks |
 | `channel-memory` | Optional durable channel-memory sidecar integration for channel retrieval |
 | `principals` | Explicit `claw-api` principals, verbs, scopes, and injection targets |
 | `alert-webhooks` / `alert-mentions` | Pod-scoped fleet alert delivery settings |
@@ -118,6 +118,32 @@ services:
 ```
 
 All values must be positive, and `total-timeout-ms` must be at least `timeout-per-tool-ms`. The merged policy is compiled into each agent's `tools.json` in the cllama context directory.
+
+### Context Blocks
+
+Context blocks are short operator-authored snippets that stay visible in late runtime context without bloating the primary contract. Use them for durable operating focus that should appear every turn, such as a compact policy reminder, a feed-reading frame, or current campaign objective.
+
+Declare blocks at pod level under `x-claw.context.blocks`, or override them per service under `services.<name>.x-claw.context.blocks`. A service-level list replaces the pod-level list; an explicit empty list suppresses inherited blocks for that service.
+
+```yaml
+x-claw:
+  context:
+    blocks:
+      - id: operating-focus
+        kind: runtime_motivation
+        text: Keep the active operating contract visible; act on current evidence.
+        cadence: every_turn
+        placement: after_feeds
+        max-chars: 800
+
+services:
+  quiet-bot:
+    x-claw:
+      context:
+        blocks: []   # suppress pod-level blocks
+```
+
+`id` and `text` are required. `kind` defaults to `context_block`, `enabled` defaults to `true`, `cadence` currently supports `every_turn`, `placement` supports `before_feeds` and `after_feeds` (default), and `max-chars` defaults to `800`. `claw up` validates the manifest and writes `context-blocks.json` to each subscribing agent's cllama context directory.
 
 ### Budget And Request-Rate Caps
 

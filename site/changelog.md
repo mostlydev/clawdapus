@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Context block manifests** -- `x-claw.context.blocks` compiles short operator-authored context blocks into per-agent `context-blocks.json` files, with pod-level inheritance, service-level replacement, and explicit empty-list suppression. Blocks carry a `kind` tag, support `before_feeds` or `after_feeds` placement, and are exposed by claw-api and Clawdash alongside other runtime JSON so operators can verify the prompt-shaping input before relying on paired cllama runtime injection. Closes [#324](https://github.com/mostlydev/clawdapus/issues/324).
 
 ## v0.24.0 <Badge type="tip" text="Latest" /> {#v0-24-0}
 

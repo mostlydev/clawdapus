@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -86,6 +87,7 @@ type rawClawBlock struct {
 
 type rawContextConfig struct {
 	Channel *rawChannelContextConfig `yaml:"channel"`
+	Blocks  []rawContextBlockConfig  `yaml:"blocks"`
 }
 
 type rawChannelContextConfig struct {
@@ -94,6 +96,17 @@ type rawChannelContextConfig struct {
 	MaxCharsHyphen     int    `yaml:"max-chars"`
 	MaxCharsUnderscore int    `yaml:"max_chars"`
 	Buffer             int    `yaml:"buffer"`
+}
+
+type rawContextBlockConfig struct {
+	ID                 string `yaml:"id"`
+	Kind               string `yaml:"kind"`
+	Text               string `yaml:"text"`
+	Enabled            *bool  `yaml:"enabled"`
+	Placement          string `yaml:"placement"`
+	MaxCharsHyphen     int    `yaml:"max-chars"`
+	MaxCharsUnderscore int    `yaml:"max_chars"`
+	Cadence            string `yaml:"cadence"`
 }
 
 type rawMCPStdioBlock struct {
@@ -813,10 +826,14 @@ func parseContextConfig(raw *rawContextConfig) (*ContextConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("channel: %w", err)
 	}
-	if channel == nil {
+	blocks, err := parseContextBlockConfigs(raw.Blocks)
+	if err != nil {
+		return nil, fmt.Errorf("blocks: %w", err)
+	}
+	if channel == nil && blocks == nil {
 		return &ContextConfig{}, nil
 	}
-	return &ContextConfig{Channel: channel}, nil
+	return &ContextConfig{Channel: channel, Blocks: blocks}, nil
 }
 
 func parseChannelContextConfig(raw *rawChannelContextConfig) (*ChannelContextConfig, error) {
@@ -854,6 +871,91 @@ func parseChannelContextConfig(raw *rawChannelContextConfig) (*ChannelContextCon
 }
 
 func selectChannelContextMaxChars(hyphen, underscore int) (int, error) {
+	if hyphen != 0 && underscore != 0 && hyphen != underscore {
+		return 0, fmt.Errorf("max-chars and max_chars cannot both be set to different values")
+	}
+	if hyphen != 0 {
+		return hyphen, nil
+	}
+	return underscore, nil
+}
+
+func parseContextBlockConfigs(raw []rawContextBlockConfig) ([]ContextBlockConfig, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	out := make([]ContextBlockConfig, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for i, entry := range raw {
+		block, err := parseContextBlockConfig(entry)
+		if err != nil {
+			return nil, fmt.Errorf("entry %d: %w", i, err)
+		}
+		if _, ok := seen[block.ID]; ok {
+			return nil, fmt.Errorf("entry %d: duplicate id %q", i, block.ID)
+		}
+		seen[block.ID] = struct{}{}
+		out = append(out, block)
+	}
+	return out, nil
+}
+
+func parseContextBlockConfig(raw rawContextBlockConfig) (ContextBlockConfig, error) {
+	id := strings.TrimSpace(raw.ID)
+	if id == "" {
+		return ContextBlockConfig{}, fmt.Errorf("id must not be empty")
+	}
+	kind := strings.TrimSpace(raw.Kind)
+	if kind == "" {
+		kind = "context_block"
+	}
+	text := strings.TrimSpace(raw.Text)
+	if text == "" {
+		return ContextBlockConfig{}, fmt.Errorf("text must not be empty")
+	}
+	placement := strings.TrimSpace(raw.Placement)
+	if placement == "" {
+		placement = "after_feeds"
+	}
+	if placement != "before_feeds" && placement != "after_feeds" {
+		return ContextBlockConfig{}, fmt.Errorf("placement must be before_feeds or after_feeds")
+	}
+	cadence := strings.TrimSpace(raw.Cadence)
+	if cadence == "" {
+		cadence = "every_turn"
+	}
+	if cadence != "every_turn" {
+		return ContextBlockConfig{}, fmt.Errorf("cadence must be every_turn")
+	}
+	maxChars, err := selectContextBlockMaxChars(raw.MaxCharsHyphen, raw.MaxCharsUnderscore)
+	if err != nil {
+		return ContextBlockConfig{}, err
+	}
+	if maxChars == 0 {
+		maxChars = 800
+	}
+	if maxChars < 0 {
+		return ContextBlockConfig{}, fmt.Errorf("max-chars must be >= 0")
+	}
+	if utf8.RuneCountInString(text) > maxChars {
+		return ContextBlockConfig{}, fmt.Errorf("text length must be <= max-chars")
+	}
+	enabled := true
+	if raw.Enabled != nil {
+		enabled = *raw.Enabled
+	}
+	return ContextBlockConfig{
+		ID:        id,
+		Kind:      kind,
+		Text:      text,
+		Enabled:   enabled,
+		Placement: placement,
+		MaxChars:  maxChars,
+		Cadence:   cadence,
+	}, nil
+}
+
+func selectContextBlockMaxChars(hyphen, underscore int) (int, error) {
 	if hyphen != 0 && underscore != 0 && hyphen != underscore {
 		return 0, fmt.Errorf("max-chars and max_chars cannot both be set to different values")
 	}
