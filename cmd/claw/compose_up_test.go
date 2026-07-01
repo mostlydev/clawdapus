@@ -4995,9 +4995,40 @@ func TestEnsurePersistentCllamaDir(t *testing.T) {
 	if !fi.IsDir() {
 		t.Error("expected directory")
 	}
-	// Check permissions (mask against 0o777 to ignore umask/OS bits)
-	if fi.Mode().Perm()&0o777 == 0 {
-		t.Error("expected writable permissions")
+	if got := fi.Mode().Perm(); got != 0o777 {
+		t.Errorf("dir mode=%o want 777", got)
+	}
+}
+
+func TestEnsureCllamaPersistentDirsCreatesContextLedger(t *testing.T) {
+	podDir := t.TempDir()
+	sessionRoot := filepath.Join(podDir, ".claw-session-history")
+	contextLedgerDir := filepath.Join(sessionRoot, "context-ledger")
+	if err := os.MkdirAll(contextLedgerDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(contextLedgerDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	authDir, sessionHistoryDir, err := ensureCllamaPersistentDirs(podDir)
+	if err != nil {
+		t.Fatalf("ensureCllamaPersistentDirs: %v", err)
+	}
+	if authDir != filepath.Join(podDir, ".claw-auth") {
+		t.Fatalf("unexpected auth dir: %q", authDir)
+	}
+	if sessionHistoryDir != sessionRoot {
+		t.Fatalf("unexpected session history dir: %q", sessionHistoryDir)
+	}
+	for _, path := range []string{authDir, sessionHistoryDir, contextLedgerDir} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != 0o777 {
+			t.Fatalf("%s mode=%o want 777", path, got)
+		}
 	}
 }
 
