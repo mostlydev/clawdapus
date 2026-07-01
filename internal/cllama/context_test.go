@@ -58,6 +58,9 @@ func TestGenerateContextDirWritesFiles(t *testing.T) {
 	if meta["service"] != "tiverton" {
 		t.Errorf("wrong metadata: %v", meta)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "context", "tiverton", "rules.json")); !os.IsNotExist(err) {
+		t.Fatalf("rules.json should not be written without compiled rules, got err=%v", err)
+	}
 }
 
 func TestGenerateContextDirMultipleAgents(t *testing.T) {
@@ -129,6 +132,13 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 			},
 			Auth: &AuthEntry{Type: "bearer", Token: "memory-token"},
 		},
+		Rules: []RuleManifestEntry{{
+			ID:            "include.risk_limits",
+			Mode:          "enforce",
+			Text:          "No unauthorized trades.",
+			Source:        "include:risk_limits",
+			ContentSHA256: "26dca8128cfe071ea5ab55c9b590e2c31ab52e69284b0401e63a657478aa636c",
+		}},
 		ContextBlocks: []ContextBlockManifestEntry{{
 			ID:        "focus",
 			Kind:      "runtime_motivation",
@@ -193,6 +203,34 @@ func TestGenerateContextDirWritesOptionalFeedsAndServiceAuth(t *testing.T) {
 	}
 	if memory["service"] != "team-memory" {
 		t.Fatalf("unexpected memory manifest payload: %v", memory)
+	}
+
+	rulesRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "rules.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRulesRaw := `{
+  "version": 1,
+  "rules": [
+    {
+      "id": "include.risk_limits",
+      "mode": "enforce",
+      "text": "No unauthorized trades.",
+      "source": "include:risk_limits",
+      "content_sha256": "26dca8128cfe071ea5ab55c9b590e2c31ab52e69284b0401e63a657478aa636c"
+    }
+  ]
+}
+`
+	if string(rulesRaw) != wantRulesRaw {
+		t.Fatalf("unexpected rules.json:\n%s", rulesRaw)
+	}
+	var rules RulesManifest
+	if err := json.Unmarshal(rulesRaw, &rules); err != nil {
+		t.Fatal(err)
+	}
+	if rules.Version != 1 || len(rules.Rules) != 1 || rules.Rules[0].ID != "include.risk_limits" || rules.Rules[0].Mode != "enforce" || rules.Rules[0].Source != "include:risk_limits" || rules.Rules[0].ContentSHA256 != "26dca8128cfe071ea5ab55c9b590e2c31ab52e69284b0401e63a657478aa636c" {
+		t.Fatalf("unexpected rules manifest: %+v", rules)
 	}
 
 	blocksRaw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "context-blocks.json"))

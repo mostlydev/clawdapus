@@ -67,6 +67,7 @@ const (
 	clawInternalNetworkName         = "claw-internal"
 	historyReplayAuthService        = "cllama-history"
 	historyReplayBaseURL            = "http://cllama:8080/history"
+	rulesManifestRuleMaxChars       = 64 * 1024
 )
 
 var (
@@ -562,6 +563,10 @@ func runComposeUp(podFile string) (err error) {
 			if err != nil {
 				return fmt.Errorf("service %q: read AGENTS.md for cllama context: %w", name, err)
 			}
+			rules, err := buildRulesManifestEntries(rc.Includes)
+			if err != nil {
+				return fmt.Errorf("service %q: build rules manifest: %w", name, err)
+			}
 
 			if rc.Count > 1 {
 				for i := 0; i < rc.Count; i++ {
@@ -600,6 +605,7 @@ func runComposeUp(podFile string) (err error) {
 						Tools:             tools,
 						ToolPolicy:        agentToolPolicy(p, name),
 						Memory:            memory,
+						Rules:             rules,
 						ContextBlocks:     agentContextBlocks(p, name),
 						ServiceAuth:       ordinalAuth,
 						ChannelAllowlist:  conversationWallAllowlists[ordinalName],
@@ -648,6 +654,7 @@ func runComposeUp(podFile string) (err error) {
 				Tools:             tools,
 				ToolPolicy:        agentToolPolicy(p, name),
 				Memory:            memory,
+				Rules:             rules,
 				ContextBlocks:     agentContextBlocks(p, name),
 				ServiceAuth:       svcAuth,
 				ChannelAllowlist:  conversationWallAllowlists[name],
@@ -1657,6 +1664,35 @@ func agentContextBlocks(p *pod.Pod, serviceName string) []cllama.ContextBlockMan
 		})
 	}
 	return out
+}
+
+func buildRulesManifestEntries(includes []driver.ResolvedInclude) ([]cllama.RuleManifestEntry, error) {
+	if len(includes) == 0 {
+		return nil, nil
+	}
+	out := make([]cllama.RuleManifestEntry, 0, len(includes))
+	for _, include := range includes {
+		if include.Mode != "enforce" && include.Mode != "guide" {
+			continue
+		}
+		content, err := os.ReadFile(include.HostPath)
+		if err != nil {
+			return nil, fmt.Errorf("include %q: read rule source: %w", include.ID, err)
+		}
+		text := strings.TrimRight(string(content), "\n")
+		if len(text) > rulesManifestRuleMaxChars {
+			return nil, fmt.Errorf("include %q: rule text length must be <= %d bytes", include.ID, rulesManifestRuleMaxChars)
+		}
+		sum := sha256.Sum256([]byte(text))
+		out = append(out, cllama.RuleManifestEntry{
+			ID:            "include." + include.ID,
+			Mode:          include.Mode,
+			Text:          text,
+			Source:        "include:" + include.ID,
+			ContentSHA256: hex.EncodeToString(sum[:]),
+		})
+	}
+	return out, nil
 }
 
 func injectAgentBudget(meta map[string]any, budget *cllama.BudgetPolicy) map[string]any {
