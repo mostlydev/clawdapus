@@ -673,11 +673,7 @@ func runComposeUp(podFile string) (err error) {
 
 		// .claw-auth and .claw-session-history are persistent siblings of
 		// .claw-runtime — claw up never wipes them.
-		authDir, err := ensurePersistentCllamaDir(podDir, ".claw-auth")
-		if err != nil {
-			return err
-		}
-		sessionHistoryDir, err := ensurePersistentCllamaDir(podDir, ".claw-session-history")
+		authDir, sessionHistoryDir, err := ensureCllamaPersistentDirs(podDir)
 		if err != nil {
 			return err
 		}
@@ -5226,7 +5222,25 @@ func ensurePersistentCllamaDir(podDir, name string) (string, error) {
 	if err := os.MkdirAll(dir, 0o777); err != nil {
 		return "", fmt.Errorf("create %s dir: %w", name, err)
 	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		return "", fmt.Errorf("chmod %s dir: %w", name, err)
+	}
 	return dir, nil
+}
+
+func ensureCllamaPersistentDirs(podDir string) (authDir string, sessionHistoryDir string, err error) {
+	authDir, err = ensurePersistentCllamaDir(podDir, ".claw-auth")
+	if err != nil {
+		return "", "", err
+	}
+	sessionHistoryDir, err = ensurePersistentCllamaDir(podDir, ".claw-session-history")
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := ensurePersistentCllamaDir(sessionHistoryDir, "context-ledger"); err != nil {
+		return "", "", err
+	}
+	return authDir, sessionHistoryDir, nil
 }
 
 func appendPersistentSkillMount(result *driver.MaterializeResult, skillRoot string, rc *driver.ResolvedClaw) error {
