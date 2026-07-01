@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -167,6 +168,178 @@ services:
 	}); err != nil {
 		t.Fatalf("cllama traffic did not resume after budget override: %v\nlast status=%d body=%s", err, resumed.Status, resumed.Body)
 	}
+}
+
+func TestSpikeFleetGovernanceBudgetLoop(t *testing.T) {
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		t.Skipf("docker not available: %v", err)
+	}
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	repoRoot, err := filepath.Abs(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+
+	workDir := t.TempDir()
+	projectName := "fleet-governance-spike"
+	generatedPath := filepath.Join(workDir, "compose.generated.yml")
+	networkName := projectName + "_claw-internal"
+	spikeCleanupProject(projectName, generatedPath)
+	t.Cleanup(func() {
+		spikeCleanupProject(projectName, generatedPath)
+	})
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		out, _ := exec.Command("docker", "compose", "-f", generatedPath, "logs", "--tail", "200").CombinedOutput()
+		t.Logf("compose logs:\n%s", out)
+	})
+
+	pythonImage := "python:3.12-alpine"
+	agentImage := fmt.Sprintf("fleet-governance-spike-agent:%d", time.Now().UnixNano())
+	spikeEnsurePulledImage(t, pythonImage)
+	spikeBuildImage(t, filepath.Join(repoRoot, "testdata", "openclaw-stub"), agentImage, "Clawfile")
+	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawAPI, infraComponentClawdash)
+	spikeEnsureCllamaPassthroughImage(t, repoRoot)
+	t.Cleanup(func() {
+		_, _ = exec.Command("docker", "image", "rm", "-f", agentImage).CombinedOutput()
+	})
+
+	spikeWriteFile(t, filepath.Join(workDir, "GOVERNOR.md"), "# Governor\n\nRead fleet alerts and set budgets only when current evidence crosses the reference threshold.")
+	spikeWriteFile(t, filepath.Join(workDir, "WORKER.md"), "# Worker\n\nUse the configured model.")
+	spikeWriteFile(t, filepath.Join(workDir, "fake_provider.py"), budgetSpikeFakeProviderScript())
+	spikeWriteFile(t, filepath.Join(workDir, "claw-pod.yml"), fmt.Sprintf(`name: fleet-governance-spike
+
+x-claw:
+  pod: fleet-governance-spike
+  master: governor
+  cllama-defaults:
+    proxy: [passthrough]
+    env:
+      OPENAI_API_KEY: sk-local-fake
+      OPENAI_BASE_URL: http://fake-provider:8080/v1
+  models-defaults:
+    primary: openai/gpt-4o
+
+services:
+  governor:
+    image: %s
+    x-claw:
+      agent: ./GOVERNOR.md
+      feeds: [fleet-alerts]
+      surfaces:
+        - service://claw-api
+
+  worker:
+    image: %s
+    x-claw:
+      agent: ./WORKER.md
+
+  fake-provider:
+    image: %s
+    command: ["python", "/app/fake_provider.py"]
+    volumes:
+      - ./fake_provider.py:/app/fake_provider.py:ro
+    expose:
+      - "8080"
+    networks:
+      - claw-internal
+`, agentImage, agentImage, pythonImage))
+
+	t.Setenv("CLLAMA_UI_PORT", spikeFreePort(t))
+	t.Setenv("CLAWDASH_ADDR", ":"+spikeFreePort(t))
+	t.Setenv("CLAW_ALERT_MAX_COST_USD", "0.000001")
+
+	prevDetach := composeUpDetach
+	composeUpDetach = true
+	defer func() { composeUpDetach = prevDetach }()
+
+	if err := runComposeUp(filepath.Join(workDir, "claw-pod.yml")); err != nil {
+		t.Fatalf("runComposeUp: %v", err)
+	}
+
+	for _, svc := range []string{"governor", "worker", "claw-api", "cllama", "fake-provider"} {
+		id := spikeComposeContainerID(t, generatedPath, svc)
+		spikeWaitRunning(t, id, 30*time.Second)
+	}
+	spikeWaitHealthy(t, spikeComposeContainerID(t, generatedPath, "cllama"), 45*time.Second)
+	spikeWaitHealthy(t, spikeComposeContainerID(t, generatedPath, "claw-api"), 45*time.Second)
+
+	workerToken := spikeReadAgentToken(t, filepath.Join(workDir, ".claw-runtime", "context", "worker", "metadata.json"))
+	first := budgetSpikePostCllama(t, networkName, pythonImage, workerToken)
+	if first.Status != 200 || !strings.Contains(first.Body, "chatcmpl-budget-spike") {
+		t.Fatalf("worker cllama request should succeed, got status=%d body=%s", first.Status, first.Body)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	var alerts governanceAlertsResponse
+	var alertsRaw []byte
+	if err := waitForCondition(ctx, func() bool {
+		out, err := callClawAPICompose(generatedPath, "governor", httpMethodGet, "/fleet/alerts?since=2h", nil)
+		if err != nil {
+			t.Logf("fleet alerts request not ready: %v\n%s", err, out)
+			return false
+		}
+		alertsRaw = out
+		alerts = governanceDecodeAlerts(t, out)
+		return alerts.HasCostAlertFor("worker")
+	}); err != nil {
+		t.Fatalf("fleet alerts never reported worker cost threshold: %v\nlast response:\n%s", err, alertsRaw)
+	}
+
+	overrideBody := map[string]any{
+		"claw_id":      "worker",
+		"max_requests": 20,
+		"window":       "1h",
+		"behavior":     "hard_stop",
+	}
+	out, err := callClawAPICompose(generatedPath, "governor", httpMethodPost, "/fleet/budget/set", overrideBody)
+	if err != nil {
+		t.Fatalf("governor fleet.budget.set failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), `"claw_id": "worker"`) && !strings.Contains(string(out), `"claw_id":"worker"`) {
+		t.Fatalf("unexpected budget-set response:\n%s", out)
+	}
+
+	overrideRaw := spikeReadFile(t, filepath.Join(workDir, ".claw-governance", "worker", "budget.json"))
+	if !strings.Contains(overrideRaw, `"max_requests": 20`) && !strings.Contains(overrideRaw, `"max_requests":20`) {
+		t.Fatalf("budget override file missing max_requests:\n%s", overrideRaw)
+	}
+	if !strings.Contains(overrideRaw, `"behavior": "hard_stop"`) && !strings.Contains(overrideRaw, `"behavior":"hard_stop"`) {
+		t.Fatalf("budget override file missing hard_stop behavior:\n%s", overrideRaw)
+	}
+}
+
+type governanceAlertsResponse struct {
+	Alerts []struct {
+		ClawID  string `json:"claw_id"`
+		Summary string `json:"summary"`
+	} `json:"alerts"`
+}
+
+func governanceDecodeAlerts(t *testing.T, raw []byte) governanceAlertsResponse {
+	t.Helper()
+	var decoded governanceAlertsResponse
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode alerts response: %v\n%s", err, raw)
+	}
+	return decoded
+}
+
+func (r governanceAlertsResponse) HasCostAlertFor(clawID string) bool {
+	for _, alert := range r.Alerts {
+		if alert.ClawID == clawID && strings.Contains(strings.ToLower(alert.Summary), "cost") {
+			return true
+		}
+	}
+	return false
 }
 
 type budgetSpikeHTTPResult struct {

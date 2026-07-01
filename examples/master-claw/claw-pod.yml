@@ -57,6 +57,6 @@ services:
       invoke:
         - schedule: "*/5 * * * *"
           name: "Fleet review"
-          message: "Run your periodic fleet review. Check the alerts in your context and report."
+          message: "Run your periodic fleet review. Read fleet alerts, apply the reference cost policy if a worker crossed the threshold, and report the evidence plus any write result."
     environment:
       DISCORD_BOT_TOKEN: "${GOVERNOR_BOT_TOKEN}"
