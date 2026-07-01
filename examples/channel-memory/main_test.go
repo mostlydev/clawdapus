@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -388,6 +389,133 @@ func TestChannelMemoryDeterministicLowValueAcknowledgementCollapse(t *testing.T)
 	}
 	if search.Status != "ok" || len(search.DerivedBlocks) != 1 || search.DerivedBlocks[0].Kind != "low_value_ack" {
 		t.Fatalf("search should return the sparse low-value acknowledgement block, got %+v", search)
+	}
+}
+
+func TestChannelMemoryDigestRawRecentBudgetOmitsOlderRawExcerpts(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	mustIngest := func(id, createdAt, content string) {
+		t.Helper()
+		if _, err := store.Ingest(context.Background(), ingestRequest{
+			ChannelID: "chan-raw-tier",
+			Message: ingestMessage{
+				ID:          id,
+				AuthorName:  "analyst-a",
+				CreatedAt:   createdAt,
+				Content:     content,
+				ContentHash: "sha256:" + id,
+			},
+		}); err != nil {
+			t.Fatalf("ingest %s: %v", id, err)
+		}
+	}
+
+	mustIngest("901", "2026-05-21T10:00:00Z", "older chatter that should stay searchable")
+	mustIngest("904", "2026-05-21T10:01:00Z", "older chatter that should not spend digest budget")
+	mustIngest("905", "2026-05-21T10:02:00Z", "older chatter that also should not spend digest budget")
+	mustIngest("902", "2026-05-21T10:05:00Z", "Stop remains 610 until invalidation changes.")
+	mustIngest("903", "2026-05-21T19:30:00Z", "recent raw context still matters")
+
+	digest, err := store.Digest(context.Background(), digestRequest{
+		ChannelIDs: []string{"chan-raw-tier"},
+		Since:      "24h",
+		Budget:     digestBudget{MaxBlocks: 2, RawRecent: "2h"},
+	})
+	if err != nil {
+		t.Fatalf("digest with raw_recent: %v", err)
+	}
+	if digest.Coverage.OlderRawMessages != 3 {
+		t.Fatalf("expected three older raw messages omitted, got %+v", digest.Coverage)
+	}
+
+	foundOldHardEvent := false
+	foundRecentRaw := false
+	for _, block := range digest.Blocks {
+		if block.Kind == "raw_excerpt" {
+			for _, messageID := range block.SourceMessages {
+				if messageID == "901" || messageID == "904" || messageID == "905" {
+					t.Fatalf("older raw message leaked into digest: %+v", block)
+				}
+				if messageID == "903" {
+					foundRecentRaw = true
+				}
+			}
+		}
+		if block.Kind == "hard_event" && len(block.SourceMessages) == 1 && block.SourceMessages[0] == "902" {
+			foundOldHardEvent = true
+		}
+	}
+	if !foundOldHardEvent {
+		t.Fatalf("old hard event should stay explicit across raw_recent budget, got %+v", digest.Blocks)
+	}
+	if !foundRecentRaw {
+		t.Fatalf("recent raw excerpt should stay explicit, got %+v", digest.Blocks)
+	}
+
+	search, err := store.Search(context.Background(), searchRequest{
+		ChannelIDs: []string{"chan-raw-tier"},
+		Query:      "older chatter",
+		Since:      "24h",
+	})
+	if err != nil {
+		t.Fatalf("search omitted raw source: %v", err)
+	}
+	foundSearchSource := false
+	for _, source := range search.SourceMessages {
+		if source.MessageID == "901" {
+			foundSearchSource = true
+			break
+		}
+	}
+	if search.Status != "ok" || !foundSearchSource {
+		t.Fatalf("omitted raw source should remain searchable, got %+v", search)
+	}
+}
+
+func TestChannelMemoryDigestRawRecentBudgetDoesNotCrowdOutOlderHardEvents(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	mustIngest := func(id, createdAt, content string) {
+		t.Helper()
+		if _, err := store.Ingest(context.Background(), ingestRequest{
+			ChannelID: "chan-raw-crowd",
+			Message: ingestMessage{
+				ID:          id,
+				AuthorName:  "analyst-a",
+				CreatedAt:   createdAt,
+				Content:     content,
+				ContentHash: "sha256:" + id,
+			},
+		}); err != nil {
+			t.Fatalf("ingest %s: %v", id, err)
+		}
+	}
+
+	mustIngest("950", "2026-05-21T10:00:00Z", "Stop remains 610 until invalidation changes.")
+	for i := 0; i < 8; i++ {
+		mustIngest(
+			fmt.Sprintf("96%d", i),
+			fmt.Sprintf("2026-05-21T11:%02d:00Z", i),
+			fmt.Sprintf("older raw note %d that should not hide hard events", i),
+		)
+	}
+
+	digest, err := store.Digest(context.Background(), digestRequest{
+		ChannelIDs: []string{"chan-raw-crowd"},
+		Since:      "24h",
+		Budget:     digestBudget{MaxBlocks: 1, RawRecent: "2h"},
+	})
+	if err != nil {
+		t.Fatalf("digest with crowded older raw tier: %v", err)
+	}
+	if digest.Coverage.OlderRawMessages != 8 {
+		t.Fatalf("expected eight older raw messages omitted, got %+v", digest.Coverage)
+	}
+	if len(digest.Blocks) != 1 || digest.Blocks[0].Kind != "hard_event" || len(digest.Blocks[0].SourceMessages) != 1 || digest.Blocks[0].SourceMessages[0] != "950" {
+		t.Fatalf("older raw omissions should not crowd out hard event, got %+v", digest.Blocks)
 	}
 }
 

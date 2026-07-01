@@ -139,7 +139,8 @@ type digestRequest struct {
 }
 
 type digestBudget struct {
-	MaxBlocks int `json:"max_blocks,omitempty"`
+	MaxBlocks int    `json:"max_blocks,omitempty"`
+	RawRecent string `json:"raw_recent,omitempty"`
 }
 
 type digestResponse struct {
@@ -156,6 +157,7 @@ type digestCoverage struct {
 	SourceMessages    int           `json:"source_messages"`
 	DigestMessages    int           `json:"digest_messages"`
 	RawRecentMessages int           `json:"raw_recent_messages"`
+	OlderRawMessages  int           `json:"older_raw_messages,omitempty"`
 	Gaps              []coverageGap `json:"gaps,omitempty"`
 }
 
@@ -721,10 +723,17 @@ func (s *channelMemoryStore) Digest(ctx context.Context, req digestRequest) (dig
 	if maxBlocks <= 0 {
 		maxBlocks = 32
 	}
+	rawRecentCutoff, rawRecentEnabled, err := parseRawRecentCutoff(req.Budget.RawRecent, s.now())
+	if err != nil {
+		return digestResponse{}, err
+	}
 
 	blocks := make([]digestBlock, 0)
 	for _, channelID := range channels {
-		channelBlocks, err := s.queryDigestBlocks(ctx, channelID, cutoff.Format(time.RFC3339), maxBlocks-len(blocks))
+		channelBlocks, err := s.queryDigestBlocks(ctx, channelID, cutoff.Format(time.RFC3339), maxBlocks-len(blocks), digestQueryOptions{
+			RawRecentCutoff:  rawRecentCutoff,
+			RawRecentEnabled: rawRecentEnabled,
+		})
 		if err != nil {
 			return digestResponse{}, err
 		}
@@ -742,11 +751,21 @@ func (s *channelMemoryStore) Digest(ctx context.Context, req digestRequest) (dig
 	if err != nil {
 		return digestResponse{}, err
 	}
+	olderRawMessages := 0
+	if rawRecentEnabled {
+		for _, channelID := range channels {
+			count, err := s.countOlderRawDigestMessages(ctx, channelID, cutoff.Format(time.RFC3339), rawRecentCutoff.Format(time.RFC3339))
+			if err != nil {
+				return digestResponse{}, err
+			}
+			olderRawMessages += count
+		}
+	}
 
 	status := "ok"
 	if len(gaps) > 0 {
 		status = "coverage_gap"
-	} else if len(blocks) == 0 {
+	} else if len(blocks) == 0 && olderRawMessages == 0 {
 		status = "unavailable"
 	}
 
@@ -775,6 +794,7 @@ func (s *channelMemoryStore) Digest(ctx context.Context, req digestRequest) (dig
 			SourceMessages:    sourceCount,
 			DigestMessages:    len(blocks),
 			RawRecentMessages: rawRecent,
+			OlderRawMessages:  olderRawMessages,
 			Gaps:              gaps,
 		},
 		Blocks: blocks,
@@ -1515,7 +1535,12 @@ func (s *channelMemoryStore) searchDerivedBlocks(ctx context.Context, sourceKind
 	return preferSparseRollups(blocks, limit), nil
 }
 
-func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, cutoff string, limit int) ([]digestBlock, error) {
+type digestQueryOptions struct {
+	RawRecentCutoff  time.Time
+	RawRecentEnabled bool
+}
+
+func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, cutoff string, limit int, opts digestQueryOptions) ([]digestBlock, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -1523,14 +1548,22 @@ func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, c
 	if queryLimit < limit {
 		queryLimit = limit
 	}
+	where := `source_channel = ? AND source_window_to >= ? AND stale = 0 AND dirty = 0`
+	args := []any{channelID, cutoff}
+	if opts.RawRecentEnabled {
+		// Exclude omitted older raw blocks before LIMIT so eligible sparse and hard-event blocks keep their budget.
+		where += ` AND NOT (processor = ? AND kind = 'raw_excerpt' AND source_window_to < ?)`
+		args = append(args, "deterministic", opts.RawRecentCutoff.Format(time.RFC3339))
+	}
+	args = append(args, queryLimit)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, kind, event_type, text, source_channel, source_window_from, source_window_to,
-		       sparse, score, generated_at, stale, dirty, processor
-		FROM derived_blocks
-		WHERE source_channel = ? AND source_window_to >= ? AND stale = 0 AND dirty = 0
-		ORDER BY source_window_from ASC, id ASC
-		LIMIT ?`,
-		channelID, cutoff, queryLimit,
+			SELECT id, kind, event_type, text, source_channel, source_window_from, source_window_to,
+			       sparse, score, generated_at, stale, dirty, processor
+			FROM derived_blocks
+			WHERE `+where+`
+			ORDER BY source_window_to DESC, id DESC
+			LIMIT ?`,
+		args...,
 	)
 	if err != nil {
 		return nil, err
@@ -1544,13 +1577,37 @@ func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, c
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
+	sort.Slice(blocks, func(i, j int) bool {
+		if blocks[i].SourceWindow.To == blocks[j].SourceWindow.To {
+			return blocks[i].ID < blocks[j].ID
+		}
+		return blocks[i].SourceWindow.To < blocks[j].SourceWindow.To
+	})
 
 	for i := range blocks {
 		if err := s.loadBlockSources(ctx, &blocks[i]); err != nil {
 			return nil, err
 		}
 	}
-	return preferSparseRollups(blocks, limit), nil
+	return preferSparseRollups(filterOlderRawBlocks(blocks, opts), limit), nil
+}
+
+func (s *channelMemoryStore) countOlderRawDigestMessages(ctx context.Context, channelID, cutoff, rawRecentCutoff string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT bs.message_id)
+		FROM derived_blocks b
+		JOIN derived_block_sources bs ON bs.block_id = b.id
+		WHERE b.source_channel = ?
+		  AND b.source_window_to >= ?
+		  AND b.source_window_to < ?
+		  AND b.stale = 0
+		  AND b.dirty = 0
+		  AND b.processor = ?
+		  AND b.kind = 'raw_excerpt'`,
+		channelID, cutoff, rawRecentCutoff, "deterministic",
+	).Scan(&count)
+	return count, err
 }
 
 func scanDigestBlockRows(rows *sql.Rows) ([]digestBlock, error) {
@@ -1610,6 +1667,34 @@ func preferSparseRollups(blocks []digestBlock, limit int) []digestBlock {
 		}
 	}
 	return filtered
+}
+
+func filterOlderRawBlocks(blocks []digestBlock, opts digestQueryOptions) []digestBlock {
+	if !opts.RawRecentEnabled {
+		return blocks
+	}
+	filtered := make([]digestBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if olderRawBlock(block, opts.RawRecentCutoff) {
+			continue
+		}
+		filtered = append(filtered, block)
+	}
+	return filtered
+}
+
+func olderRawBlock(block digestBlock, cutoff time.Time) bool {
+	if block.Processor != "deterministic" || block.Kind != "raw_excerpt" {
+		return false
+	}
+	if cutoff.IsZero() || strings.TrimSpace(block.SourceWindow.To) == "" {
+		return false
+	}
+	to, err := time.Parse(time.RFC3339, block.SourceWindow.To)
+	if err != nil {
+		return false
+	}
+	return to.Before(cutoff)
 }
 
 func suppressesRawExcerpt(block digestBlock) bool {
@@ -1765,6 +1850,25 @@ func parseSince(value string, now time.Time) (time.Time, string, error) {
 		return time.Time{}, "", fmt.Errorf("since must be a duration or RFC3339 timestamp")
 	}
 	return parsed.UTC(), parsed.UTC().Format(time.RFC3339), nil
+}
+
+func parseRawRecentCutoff(value string, now time.Time) (time.Time, bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false, nil
+	}
+	if duration, err := time.ParseDuration(value); err == nil {
+		if duration <= 0 {
+			return time.Time{}, false, fmt.Errorf("raw_recent must be positive")
+		}
+		cutoff := now.UTC().Add(-duration)
+		return cutoff, true, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("raw_recent must be a duration or RFC3339 timestamp")
+	}
+	return parsed.UTC(), true, nil
 }
 
 func sourceHandle(channelID, messageID string) string {
