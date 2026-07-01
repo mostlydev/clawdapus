@@ -17,6 +17,7 @@ type AgentContextInput struct {
 	Tools             []ToolManifestEntry
 	ToolPolicy        *ToolPolicy // nil means DefaultToolPolicy
 	Memory            *MemoryManifestEntry
+	Rules             []RuleManifestEntry
 	ContextBlocks     []ContextBlockManifestEntry
 	ServiceAuth       []ServiceAuthEntry
 	ChannelAllowlist  []string
@@ -106,6 +107,19 @@ type ContextBlockManifest struct {
 	Blocks  []ContextBlockManifestEntry `json:"blocks"`
 }
 
+type RulesManifest struct {
+	Version int                 `json:"version"`
+	Rules   []RuleManifestEntry `json:"rules"`
+}
+
+type RuleManifestEntry struct {
+	ID            string `json:"id"`
+	Mode          string `json:"mode"`
+	Text          string `json:"text"`
+	Source        string `json:"source"`
+	ContentSHA256 string `json:"content_sha256"`
+}
+
 type ContextBlockManifestEntry struct {
 	ID        string `json:"id"`
 	Kind      string `json:"kind,omitempty"`
@@ -140,7 +154,7 @@ func EffectiveToolPolicy(maxRounds, timeoutPerToolMS, totalTimeoutMS *int) ToolP
 
 // GenerateContextDir writes per-agent context files under:
 //
-//	<runtimeDir>/context/<agent-id>/{AGENTS.md,AGENTS.effective.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,context-blocks.json,service-auth/...}
+//	<runtimeDir>/context/<agent-id>/{AGENTS.md,AGENTS.effective.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,rules.json,context-blocks.json,service-auth/...}
 func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 	for _, agent := range agents {
 		if agent.AgentID == "" {
@@ -209,6 +223,19 @@ func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 			}
 			if err := os.WriteFile(filepath.Join(agentDir, "memory.json"), append(memoryJSON, '\n'), 0644); err != nil {
 				return fmt.Errorf("write memory.json for %q: %w", agent.AgentID, err)
+			}
+		}
+
+		if len(agent.Rules) > 0 {
+			rulesJSON, err := json.MarshalIndent(RulesManifest{
+				Version: 1,
+				Rules:   append([]RuleManifestEntry(nil), agent.Rules...),
+			}, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal rules for %q: %w", agent.AgentID, err)
+			}
+			if err := os.WriteFile(filepath.Join(agentDir, "rules.json"), append(rulesJSON, '\n'), 0644); err != nil {
+				return fmt.Errorf("write rules.json for %q: %w", agent.AgentID, err)
 			}
 		}
 

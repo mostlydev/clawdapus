@@ -53,10 +53,35 @@ Clawdapus bind-mounts a shared directory into the proxy (at `CLAW_CONTEXT_ROOT`)
 │   ├── AGENTS.md        # Compiled contract (includes, enforce, guide)
 │   ├── CLAWDAPUS.md     # Infrastructure map
 │   ├── metadata.json    # Identity, handles, and active policy modules
+│   ├── rules.json       # Optional compiled enforce/guide rules
 │   └── context-blocks.json # Optional operator-authored context blocks
 ├── crypto-crusher-1/
 │   └── ...
 ```
+
+When present, `rules.json` is a deterministic `RulesManifest v1` compiled by `claw up` from the
+service's `x-claw.include` entries whose mode is `enforce` or `guide`; `reference` includes remain
+mounted as skills and are not included in the rules manifest. Current v1 schema:
+
+```json
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "include.risk_limits",
+      "mode": "enforce",
+      "text": "No irreversible action without approval.",
+      "source": "include:risk_limits",
+      "content_sha256": "..."
+    }
+  ]
+}
+```
+
+Rule order follows the service-level include declaration order. Rule IDs are source-stable
+(`include.<include_id>` in v1), while `content_sha256` records the digest of the emitted rule text so a
+policy service can distinguish identity from content changes. Each emitted rule text is bounded to 64
+KiB; larger `enforce` or `guide` includes fail at compile time.
 
 ## 4. Pipeline Execution (The Request Lifecycle)
 
@@ -74,7 +99,7 @@ The proxy SHOULD execute the following pipeline:
 3. **Model Validation:** Ensure the requested `model` is within the `CLAW_ALLOWED_MODELS` list (parsed from `metadata.json`).
 
 ### B. Outbound Interception (Context, Routing & Policy Slots)
-1. **Context Aggregation:** The proxy loads the agent-specific compiled context from `CLAW_CONTEXT_ROOT` and MAY inject infrastructure-owned runtime context such as context blocks, feeds, memory recall, time context, and channel deltas.
+1. **Context Aggregation:** The proxy loads the agent-specific compiled context from `CLAW_CONTEXT_ROOT` and MAY inject infrastructure-owned runtime context such as rules, context blocks, feeds, memory recall, time context, and channel deltas.
 2. **Tool Scoping:** If the agent's request contains `tools`, the proxy evaluates the request against the compiled tool manifest for that agent. The reference implementation only exposes tools declared for that agent; policy-plane implementations MAY further filter or deny tools.
 3. **Prompt Decoration (Pre-Prompting):** Policy-plane implementations MAY modify the outbound `messages` array, injecting specific rules, priorities, or warnings based on the compiled context. The passthrough reference does not perform policy prompt decoration.
 4. **Policy Blocking:** If the outbound prompt violates a loaded policy module, a policy-plane implementation MAY short-circuit the request and return an error or a mock response. The passthrough reference does not perform policy blocking.
