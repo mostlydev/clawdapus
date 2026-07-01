@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.26.0 <Badge type="tip" text="Latest" /> {#v0-26-0}
+## v0.27.0 <Badge type="tip" text="Latest" /> {#v0-27-0}
+
+*2026-07-01*
+
+- **Policy plane -- opt-in contract-derived governance** -- cllama gains an optional `PolicyEvaluator` (enabled by setting `CLLAMA_POLICY_URL`) with five interception points over an HTTP policy sidecar: a pre-flight request gate, a managed-tool filter, prompt decoration, a response gate/amend, and an asynchronous score/drift callback. With no policy service configured the proxy stays byte-identical passthrough (a conformance test enforces this across both request formats, plain/managed, and streaming/non-streaming). `enforce`/`guide` contract includes now compile into a per-agent `rules.json` (RulesManifest v1) in the context mount, which the sidecar reads by path + digest. Governor agents are `policy_exempt` (non-recursion); gates default to fail-closed (set `CLLAMA_POLICY_FAIL_MODE=open` to fail-open) while decoration and scoring always fail open. Requires [cllama v0.7.7](https://github.com/mostlydev/cllama/releases/tag/v0.7.7). Closes [#307](https://github.com/mostlydev/clawdapus/issues/307), [#308](https://github.com/mostlydev/clawdapus/issues/308).
+- **Pins infra images** -- the `claw-api` / `clawdash` / `claw-wall` / `claw-channel-memory` / `claw-mcp-stdio` images move to `v0.27.0`; cllama moves to [v0.7.7](https://github.com/mostlydev/cllama/releases/tag/v0.7.7). `hermes-base` stays at `v2026.6.19-claw.2`.
+
+## v0.26.0 {#v0-26-0}
 
 *2026-07-01*
 
