@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -44,6 +45,19 @@ func citeAllTopicRollup(prompt llmDigestPrompt) (llmDigestResult, error) {
 		SourceMessages: ids,
 		Score:          0.7,
 		CostUSD:        0.002,
+	}, nil
+}
+
+func citeSingleMessageSummary(prompt llmDigestPrompt) (llmDigestResult, error) {
+	if len(prompt.Messages) != 1 {
+		return llmDigestResult{}, fmt.Errorf("expected one message, got %d", len(prompt.Messages))
+	}
+	return llmDigestResult{
+		Kind:           rollupKindMessage,
+		Text:           "Summarized long source " + prompt.Messages[0].MessageID + ".",
+		SourceMessages: []string{prompt.Messages[0].MessageID},
+		Score:          0.8,
+		CostUSD:        0.001,
 	}, nil
 }
 
@@ -247,6 +261,89 @@ func TestDigestWorkerCompressesVerboseToSparseAndKeepsHardEvents(t *testing.T) {
 	// Compression: 4 source messages -> 2 served blocks.
 	if len(resp.Blocks) != 2 {
 		t.Fatalf("expected 2 served blocks (hard event + rollup), got %d: %+v", len(resp.Blocks), resp.Blocks)
+	}
+}
+
+func TestDigestWorkerSummarizesLongMessagesIndividually(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	base := time.Date(2026, 5, 21, 18, 0, 0, 0, time.UTC)
+
+	longContent := "Long operational note: " + strings.Repeat("details that should be compacted before feed injection. ", 8)
+	ingestRaw(t, store, "chan-1", "901", longContent, base, "sha256:long-901")
+	ingestRaw(t, store, "chan-1", "902", "short context that should remain raw", base.Add(time.Minute), "sha256:short-902")
+	_, err := store.Ingest(context.Background(), ingestRequest{
+		ChannelID: "chan-1",
+		Message: ingestMessage{
+			ID: "903", AuthorName: "lead", CreatedAt: base.Add(2 * time.Minute).Format(time.RFC3339),
+			Content:     "[APPROVED] signal-903 BUY ACME " + strings.Repeat("risk controls stay verbatim. ", 4),
+			ContentHash: "sha256:hard-903",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ingest hard event: %v", err)
+	}
+
+	client := &fakeLLMClient{respond: citeSingleMessageSummary}
+	worker := testWorker(store, client, func(c *workerConfig) {
+		c.LongMessageChars = 80
+	})
+
+	generated, err := worker.processOnce(context.Background())
+	if err != nil {
+		t.Fatalf("processOnce: %v", err)
+	}
+	if generated != 1 {
+		t.Fatalf("expected 1 long-message summary, got %d", generated)
+	}
+	if client.callCount() != 1 {
+		t.Fatalf("expected exactly 1 LLM call, got %d", client.callCount())
+	}
+	if got := client.prompts[0].Messages; len(got) != 1 || got[0].MessageID != "901" {
+		t.Fatalf("expected only long raw message 901 summarized, got %+v", got)
+	}
+
+	resp := digestFor(t, store, "chan-1")
+	if resp.Cost.DeterministicOnly {
+		t.Fatalf("expected deterministic_only=false once a message summary exists: %+v", resp.Cost)
+	}
+	var summary digestBlock
+	foundSummary := false
+	foundShortRaw := false
+	foundHardEvent := false
+	for _, b := range resp.Blocks {
+		if b.Kind == rollupKindMessage {
+			foundSummary = true
+			summary = b
+		}
+		if b.Kind == "raw_excerpt" && len(b.SourceMessages) == 1 && b.SourceMessages[0] == "901" {
+			t.Fatalf("long source 901 should be suppressed by message_summary: %+v", b)
+		}
+		if b.Kind == "raw_excerpt" && len(b.SourceMessages) == 1 && b.SourceMessages[0] == "902" {
+			foundShortRaw = true
+		}
+		if b.Kind == "hard_event" && len(b.SourceMessages) == 1 && b.SourceMessages[0] == "903" {
+			foundHardEvent = true
+		}
+	}
+	if !foundSummary {
+		t.Fatalf("expected message_summary block, got %+v", resp.Blocks)
+	}
+	if !summary.Sparse || summary.Processor != digestProcessorLLM || len(summary.SourceMessages) != 1 || summary.SourceMessages[0] != "901" {
+		t.Fatalf("unexpected message_summary provenance: %+v", summary)
+	}
+	if !foundShortRaw {
+		t.Fatalf("short context-bearing raw message should remain explicit: %+v", resp.Blocks)
+	}
+	if !foundHardEvent {
+		t.Fatalf("hard event should remain explicit: %+v", resp.Blocks)
+	}
+
+	if _, err := worker.processOnce(context.Background()); err != nil {
+		t.Fatalf("processOnce #2: %v", err)
+	}
+	if client.callCount() != 1 {
+		t.Fatalf("expected long-message summary cache hit, got %d calls", client.callCount())
 	}
 }
 
