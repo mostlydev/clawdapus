@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Channel memory collapses repeated low-change decisions** -- deterministic channel-memory now emits a sparse `decision_repeat` block for same-author, same-channel, same-day repeated no-change decisions while preserving source message IDs for lookup. The digest assembler prefers that block over the covered raw excerpts, reducing repetitive context without hiding hard events. Refs [#260](https://github.com/mostlydev/clawdapus/issues/260).
 
 ## v0.25.0 <Badge type="tip" text="Latest" /> {#v0-25-0}
 

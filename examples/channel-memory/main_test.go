@@ -223,6 +223,86 @@ func TestChannelMemoryDeterministicTelemetryAndCoverageGap(t *testing.T) {
 	}
 }
 
+func TestChannelMemoryDeterministicRepeatedDecisionCollapse(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	mustIngest := func(id, author, createdAt, content string) {
+		t.Helper()
+		if _, err := store.Ingest(context.Background(), ingestRequest{
+			ChannelID: "chan-decisions",
+			Message: ingestMessage{
+				ID:          id,
+				AuthorName:  author,
+				CreatedAt:   createdAt,
+				Content:     content,
+				ContentHash: "sha256:" + id,
+			},
+		}); err != nil {
+			t.Fatalf("ingest %s: %v", id, err)
+		}
+	}
+
+	mustIngest("701", "analyst-a", "2026-05-21T18:00:00Z", "Same conclusion as 09:30: no change; wait for cleaner entry.")
+	mustIngest("702", "analyst-a", "2026-05-21T18:10:00Z", "Same conclusion as 10:15: no change; wait for cleaner entry.")
+	mustIngest("703", "analyst-b", "2026-05-21T18:12:00Z", "Same conclusion as 10:15: no change; wait for cleaner entry.")
+	mustIngest("704", "analyst-a", "2026-05-21T18:20:00Z", "[PROPOSED] signal-704 BUY ACME")
+
+	digest, err := store.Digest(context.Background(), digestRequest{ChannelIDs: []string{"chan-decisions"}, Since: "24h"})
+	if err != nil {
+		t.Fatalf("digest decisions: %v", err)
+	}
+
+	var repeated *digestBlock
+	foundHardEvent := false
+	for i := range digest.Blocks {
+		block := &digest.Blocks[i]
+		if block.Kind == "decision_repeat" {
+			if repeated != nil {
+				t.Fatalf("expected one decision_repeat block, got %+v", digest.Blocks)
+			}
+			repeated = block
+		}
+		if block.Kind == "hard_event" && len(block.SourceMessages) == 1 && block.SourceMessages[0] == "704" {
+			foundHardEvent = true
+		}
+		if block.Kind == "raw_excerpt" {
+			for _, messageID := range block.SourceMessages {
+				if messageID == "701" || messageID == "702" {
+					t.Fatalf("collapsed decision source %s leaked as raw excerpt: %+v", messageID, block)
+				}
+			}
+		}
+	}
+	if repeated == nil {
+		t.Fatalf("expected repeated decision block, got %+v", digest.Blocks)
+	}
+	if !repeated.Sparse || repeated.EventType != "repeated_decision" || repeated.Processor != "deterministic" {
+		t.Fatalf("unexpected repeated decision metadata: %+v", repeated)
+	}
+	if got := repeated.SourceMessages; len(got) != 2 || got[0] != "701" || got[1] != "702" {
+		t.Fatalf("repeated decision should cover analyst-a sources only, got %+v", got)
+	}
+	if !strings.Contains(repeated.Text, "repeated a low-change decision x2") {
+		t.Fatalf("repeated decision text should include count, got %q", repeated.Text)
+	}
+	if !foundHardEvent {
+		t.Fatalf("hard event should remain explicit, got %+v", digest.Blocks)
+	}
+
+	search, err := store.Search(context.Background(), searchRequest{
+		ChannelIDs: []string{"chan-decisions"},
+		Query:      "low-change decision",
+		Since:      "24h",
+	})
+	if err != nil {
+		t.Fatalf("search repeated decision: %v", err)
+	}
+	if search.Status != "ok" || len(search.DerivedBlocks) != 1 || search.DerivedBlocks[0].Kind != "decision_repeat" {
+		t.Fatalf("search should return the sparse repeated decision block, got %+v", search)
+	}
+}
+
 func TestChannelMemoryHTTPAPI(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
