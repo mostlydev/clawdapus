@@ -29,11 +29,20 @@ outline: deep
 
 ## Unreleased
 
+<!-- Nothing yet -->
+
+## v0.26.0 <Badge type="tip" text="Latest" /> {#v0-26-0}
+
+*2026-07-01*
+
 - **Channel memory collapses repeated low-change decisions** -- deterministic channel-memory now emits a sparse `decision_repeat` block for same-author, same-channel, same-day repeated no-change decisions while preserving source message IDs for lookup. The digest assembler prefers that block over the covered raw excerpts, reducing repetitive context without hiding hard events. Refs [#260](https://github.com/mostlydev/clawdapus/issues/260).
 - **Channel memory elides low-value acknowledgements** -- exact short acknowledgements such as "ok", "thanks", and "got it" now collapse into sparse `low_value_ack` digest blocks by channel/hour before they can bloat raw awareness feeds. Context-bearing messages and hard events remain explicit. Refs [#260](https://github.com/mostlydev/clawdapus/issues/260).
 - **Channel memory summarizes long messages off the hot path** -- the async digest worker now generates cached `message_summary` blocks for individual long raw messages, keyed by message identity, content hash, provider, model, and compactor version. `/digest` prefers the summary over the full raw excerpt while hard events and shorter context-bearing messages remain explicit. Refs [#260](https://github.com/mostlydev/clawdapus/issues/260).
+- **Age-tiered channel-memory digests** -- `/digest` gains a `budget.raw_recent` age tier so deterministic `raw_excerpt` blocks only serve inside the recent window, while hard events, tombstones, sparse rollups, and LLM summaries are preserved across the full requested horizon; claw-wall requests the age-tiered window. Together these four slices give compact, recency-tiered channel-awareness feeds for long channel tails. Closes [#260](https://github.com/mostlydev/clawdapus/issues/260).
+- **cllama v0.7.6 -- managed-tool soft-deadline + bounded history** -- managed-tool turns approaching the hard total-timeout now get a soft-deadline finalization round (tools disabled, a stale-data instruction injected, one final response) instead of a bare timeout; session-history tool traces record per-round wall time and prompt tokens; and each agent `history.jsonl` rotates at a configurable byte cap with reads spanning the rotated file. Requires [cllama v0.7.6](https://github.com/mostlydev/cllama/releases/tag/v0.7.6).
+- **Pins infra images** -- the `claw-api` / `clawdash` / `claw-wall` / `claw-channel-memory` / `claw-mcp-stdio` images move to `v0.26.0`; cllama moves to [v0.7.6](https://github.com/mostlydev/cllama/releases/tag/v0.7.6). `hermes-base` stays at `v2026.6.19-claw.2`.
 
-## v0.25.0 <Badge type="tip" text="Latest" /> {#v0-25-0}
+## v0.25.0 {#v0-25-0}
 
 *2026-06-27*
 
