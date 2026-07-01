@@ -303,6 +303,94 @@ func TestChannelMemoryDeterministicRepeatedDecisionCollapse(t *testing.T) {
 	}
 }
 
+func TestChannelMemoryDeterministicLowValueAcknowledgementCollapse(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	mustIngest := func(id, author, createdAt, content string) {
+		t.Helper()
+		if _, err := store.Ingest(context.Background(), ingestRequest{
+			ChannelID: "chan-acks",
+			Message: ingestMessage{
+				ID:          id,
+				AuthorName:  author,
+				CreatedAt:   createdAt,
+				Content:     content,
+				ContentHash: "sha256:" + id,
+			},
+		}); err != nil {
+			t.Fatalf("ingest %s: %v", id, err)
+		}
+	}
+
+	mustIngest("801", "analyst-a", "2026-05-21T18:00:00Z", "ok")
+	mustIngest("802", "analyst-b", "2026-05-21T18:02:00Z", "Thanks!")
+	mustIngest("803", "analyst-c", "2026-05-21T18:03:00Z", "got it.")
+	mustIngest("804", "analyst-a", "2026-05-21T18:04:00Z", "ok ACME level still matters")
+	mustIngest("805", "analyst-a", "2026-05-21T18:05:00Z", "[APPROVED] signal-805 BUY ACME")
+
+	digest, err := store.Digest(context.Background(), digestRequest{ChannelIDs: []string{"chan-acks"}, Since: "24h"})
+	if err != nil {
+		t.Fatalf("digest acknowledgements: %v", err)
+	}
+
+	var ack *digestBlock
+	foundRawContext := false
+	foundHardEvent := false
+	for i := range digest.Blocks {
+		block := &digest.Blocks[i]
+		if block.Kind == "low_value_ack" {
+			if ack != nil {
+				t.Fatalf("expected one low_value_ack block, got %+v", digest.Blocks)
+			}
+			ack = block
+		}
+		if block.Kind == "raw_excerpt" && len(block.SourceMessages) == 1 && block.SourceMessages[0] == "804" {
+			foundRawContext = true
+		}
+		if block.Kind == "hard_event" && len(block.SourceMessages) == 1 && block.SourceMessages[0] == "805" {
+			foundHardEvent = true
+		}
+		if block.Kind == "raw_excerpt" {
+			for _, messageID := range block.SourceMessages {
+				if messageID == "801" || messageID == "802" || messageID == "803" {
+					t.Fatalf("low-value acknowledgement %s leaked as raw excerpt: %+v", messageID, block)
+				}
+			}
+		}
+	}
+	if ack == nil {
+		t.Fatalf("expected low_value_ack block, got %+v", digest.Blocks)
+	}
+	if !ack.Sparse || ack.EventType != "low_value_acknowledgement" || ack.Processor != "deterministic" {
+		t.Fatalf("unexpected low-value acknowledgement metadata: %+v", ack)
+	}
+	if got := ack.SourceMessages; len(got) != 3 || got[0] != "801" || got[1] != "802" || got[2] != "803" {
+		t.Fatalf("low-value acknowledgement should cover only exact short acks, got %+v", got)
+	}
+	if !strings.Contains(ack.Text, "low-value acknowledgements elided: 3 messages from 3 authors") {
+		t.Fatalf("low-value acknowledgement text should include count, got %q", ack.Text)
+	}
+	if !foundRawContext {
+		t.Fatalf("non-trivial message should remain raw, got %+v", digest.Blocks)
+	}
+	if !foundHardEvent {
+		t.Fatalf("hard event should remain explicit, got %+v", digest.Blocks)
+	}
+
+	search, err := store.Search(context.Background(), searchRequest{
+		ChannelIDs: []string{"chan-acks"},
+		Query:      "low-value acknowledgements",
+		Since:      "24h",
+	})
+	if err != nil {
+		t.Fatalf("search low-value acknowledgement: %v", err)
+	}
+	if search.Status != "ok" || len(search.DerivedBlocks) != 1 || search.DerivedBlocks[0].Kind != "low_value_ack" {
+		t.Fatalf("search should return the sparse low-value acknowledgement block, got %+v", search)
+	}
+}
+
 func TestChannelMemoryHTTPAPI(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()

@@ -1021,6 +1021,9 @@ func upsertDeterministicBlocksTx(ctx context.Context, tx *sql.Tx, source storedS
 	if isTelemetryNoise(source.Content) {
 		return rebuildTelemetryBlockTx(ctx, tx, source, now)
 	}
+	if isLowValueAcknowledgement(source.Content) {
+		return rebuildLowValueAcknowledgementBlockTx(ctx, tx, source, now)
+	}
 	kind, eventType, score := classifySourceContent(source.Content)
 	if err := upsertSourceBlockTx(ctx, tx, source, deterministicBlock{
 		Key:       sourceBlockKey(kind, source),
@@ -1140,6 +1143,83 @@ func rebuildTelemetryBlockTx(ctx context.Context, tx *sql.Tx, source storedSourc
 		) VALUES (?, 'telemetry_count', ?, ?, ?, ?, 1, 0.25, ?, 0, 0, 'deterministic')
 		ON CONFLICT(block_key) DO UPDATE SET
 			text = excluded.text,
+			source_window_from = excluded.source_window_from,
+			source_window_to = excluded.source_window_to,
+			generated_at = excluded.generated_at,
+			stale = 0,
+			dirty = 0`,
+		blockKey, text, source.ChannelID, sources[0].CreatedAt, sources[len(sources)-1].CreatedAt, generatedAt,
+	); err != nil {
+		return err
+	}
+	var blockID int64
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM derived_blocks WHERE block_key = ?`, blockKey).Scan(&blockID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM derived_block_sources WHERE block_id = ?`, blockID); err != nil {
+		return err
+	}
+	for _, record := range sources {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO derived_block_sources(block_id, source_kind, channel_id, message_id, content_hash)
+			VALUES (?, ?, ?, ?, ?)`,
+			blockID, record.SourceKind, record.ChannelID, record.MessageID, record.ContentHash,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rebuildLowValueAcknowledgementBlockTx(ctx context.Context, tx *sql.Tx, source storedSourceMessage, now time.Time) error {
+	from, to := telemetryBucket(source.CreatedAt)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, source_kind, channel_id, message_id, content_hash, author_id, author_name,
+		       created_at, edited_at, deleted, content, service, surface, guild_id, visibility_scope,
+		       observed_seq, observed_at, is_current
+		FROM source_messages
+		WHERE source_kind = ? AND channel_id = ? AND is_current = 1 AND deleted = 0 AND forgotten_at = ''
+		  AND created_at >= ? AND created_at < ?
+		ORDER BY created_at, observed_seq`,
+		source.SourceKind, source.ChannelID, from, to,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	sources := make([]storedSourceMessage, 0)
+	authors := make(map[string]struct{})
+	for rows.Next() {
+		record, err := scanStoredSource(rows)
+		if err != nil {
+			return err
+		}
+		if !isLowValueAcknowledgement(record.Content) {
+			continue
+		}
+		sources = append(sources, record)
+		authors[decisionAuthorKey(record)] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(sources) == 0 {
+		return nil
+	}
+
+	blockKey := strings.Join([]string{"low_value_ack", source.SourceKind, source.ChannelID, from}, ":")
+	generatedAt := now.UTC().Format(time.RFC3339)
+	text := fmt.Sprintf("[%s-%s] low-value acknowledgements elided: %d messages from %d authors.",
+		clockText(sources[0].CreatedAt), clockText(sources[len(sources)-1].CreatedAt), len(sources), len(authors))
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO derived_blocks(
+			block_key, kind, event_type, text, source_channel, source_window_from, source_window_to,
+			sparse, score, generated_at, stale, dirty, processor
+		) VALUES (?, 'low_value_ack', 'low_value_acknowledgement', ?, ?, ?, ?, 1, 0.20, ?, 0, 0, 'deterministic')
+		ON CONFLICT(block_key) DO UPDATE SET
+			text = excluded.text,
+			source_channel = excluded.source_channel,
 			source_window_from = excluded.source_window_from,
 			source_window_to = excluded.source_window_to,
 			generated_at = excluded.generated_at,
@@ -1730,6 +1810,51 @@ func isTelemetryNoise(content string) bool {
 		"upstream request failed",
 		"context deadline exceeded",
 	)
+}
+
+func isLowValueAcknowledgement(content string) bool {
+	switch normalizeLowValueText(content) {
+	case "+1",
+		"ack",
+		"acked",
+		"copy",
+		"copied",
+		"got it",
+		"k",
+		"kk",
+		"makes sense",
+		"noted",
+		"ok",
+		"okay",
+		"roger",
+		"sounds good",
+		"thank you",
+		"thanks",
+		"thx",
+		"understood":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeLowValueText(text string) string {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	var b strings.Builder
+	lastWasSpace := true
+	for _, r := range lower {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r), r == '+':
+			b.WriteRune(r)
+			lastWasSpace = false
+		default:
+			if !lastWasSpace {
+				b.WriteByte(' ')
+				lastWasSpace = true
+			}
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
 }
 
 func formatSourceLine(source storedSourceMessage) string {
