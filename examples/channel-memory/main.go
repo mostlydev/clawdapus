@@ -1548,14 +1548,22 @@ func (s *channelMemoryStore) queryDigestBlocks(ctx context.Context, channelID, c
 	if queryLimit < limit {
 		queryLimit = limit
 	}
+	where := `source_channel = ? AND source_window_to >= ? AND stale = 0 AND dirty = 0`
+	args := []any{channelID, cutoff}
+	if opts.RawRecentEnabled {
+		// Exclude omitted older raw blocks before LIMIT so eligible sparse and hard-event blocks keep their budget.
+		where += ` AND NOT (processor = ? AND kind = 'raw_excerpt' AND source_window_to < ?)`
+		args = append(args, "deterministic", opts.RawRecentCutoff.Format(time.RFC3339))
+	}
+	args = append(args, queryLimit)
 	rows, err := s.db.QueryContext(ctx, `
 			SELECT id, kind, event_type, text, source_channel, source_window_from, source_window_to,
 			       sparse, score, generated_at, stale, dirty, processor
 			FROM derived_blocks
-			WHERE source_channel = ? AND source_window_to >= ? AND stale = 0 AND dirty = 0
+			WHERE `+where+`
 			ORDER BY source_window_to DESC, id DESC
 			LIMIT ?`,
-		channelID, cutoff, queryLimit,
+		args...,
 	)
 	if err != nil {
 		return nil, err

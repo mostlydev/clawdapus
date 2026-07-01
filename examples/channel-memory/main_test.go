@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -470,6 +471,51 @@ func TestChannelMemoryDigestRawRecentBudgetOmitsOlderRawExcerpts(t *testing.T) {
 	}
 	if search.Status != "ok" || !foundSearchSource {
 		t.Fatalf("omitted raw source should remain searchable, got %+v", search)
+	}
+}
+
+func TestChannelMemoryDigestRawRecentBudgetDoesNotCrowdOutOlderHardEvents(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	mustIngest := func(id, createdAt, content string) {
+		t.Helper()
+		if _, err := store.Ingest(context.Background(), ingestRequest{
+			ChannelID: "chan-raw-crowd",
+			Message: ingestMessage{
+				ID:          id,
+				AuthorName:  "analyst-a",
+				CreatedAt:   createdAt,
+				Content:     content,
+				ContentHash: "sha256:" + id,
+			},
+		}); err != nil {
+			t.Fatalf("ingest %s: %v", id, err)
+		}
+	}
+
+	mustIngest("950", "2026-05-21T10:00:00Z", "Stop remains 610 until invalidation changes.")
+	for i := 0; i < 8; i++ {
+		mustIngest(
+			fmt.Sprintf("96%d", i),
+			fmt.Sprintf("2026-05-21T11:%02d:00Z", i),
+			fmt.Sprintf("older raw note %d that should not hide hard events", i),
+		)
+	}
+
+	digest, err := store.Digest(context.Background(), digestRequest{
+		ChannelIDs: []string{"chan-raw-crowd"},
+		Since:      "24h",
+		Budget:     digestBudget{MaxBlocks: 1, RawRecent: "2h"},
+	})
+	if err != nil {
+		t.Fatalf("digest with crowded older raw tier: %v", err)
+	}
+	if digest.Coverage.OlderRawMessages != 8 {
+		t.Fatalf("expected eight older raw messages omitted, got %+v", digest.Coverage)
+	}
+	if len(digest.Blocks) != 1 || digest.Blocks[0].Kind != "hard_event" || len(digest.Blocks[0].SourceMessages) != 1 || digest.Blocks[0].SourceMessages[0] != "950" {
+		t.Fatalf("older raw omissions should not crowd out hard event, got %+v", digest.Blocks)
 	}
 }
 
