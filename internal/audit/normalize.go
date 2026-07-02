@@ -98,6 +98,14 @@ func NormalizeLine(line []byte) (*Event, error) {
 	event.Action = strings.TrimSpace(stringField(raw, "action"))
 	event.Reason = strings.TrimSpace(stringField(raw, "reason"))
 	event.CooldownUntil = strings.TrimSpace(stringField(raw, "cooldown_until"))
+	// failover event fields
+	event.FromProvider = strings.TrimSpace(stringField(raw, "from_provider"))
+	event.ToProvider = strings.TrimSpace(stringField(raw, "to_provider"))
+	event.FromModel = strings.TrimSpace(stringField(raw, "from_model"))
+	event.ToModel = strings.TrimSpace(stringField(raw, "to_model"))
+	if value, ok := intField(raw, "slot_index"); ok {
+		event.SlotIndex = &value
+	}
 
 	return event, nil
 }

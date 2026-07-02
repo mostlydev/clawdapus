@@ -122,14 +122,15 @@ func writeAuditText(w io.Writer, podName string, skipped int, summary audit.Summ
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "CLAW\tREQ\tRESP\tERR\tINT\tTOOLS\tTOOL_ERR\tTOK_IN\tTOK_OUT\tCOST_USD\tMODELS")
+	fmt.Fprintln(tw, "CLAW\tREQ\tRESP\tERR\tINT\tFAILOVER\tTOOLS\tTOOL_ERR\tTOK_IN\tTOK_OUT\tCOST_USD\tMODELS")
 	for _, item := range summary.Agents {
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.4f\t%s\n",
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.4f\t%s\n",
 			item.ClawID,
 			item.Requests,
 			item.Responses,
 			item.Errors,
 			item.Interventions,
+			item.Failovers,
 			item.ToolCalls,
 			item.ToolErrors,
 			item.TokensIn,
@@ -142,11 +143,12 @@ func writeAuditText(w io.Writer, podName string, skipped int, summary audit.Summ
 		return err
 	}
 
-	_, err := fmt.Fprintf(w, "\nTotals: req=%d resp=%d err=%d int=%d tools=%d/%d tokens=%d/%d cost=$%.4f\n",
+	_, err := fmt.Fprintf(w, "\nTotals: req=%d resp=%d err=%d int=%d failover=%d tools=%d/%d tokens=%d/%d cost=$%.4f\n",
 		summary.Requests,
 		summary.Responses,
 		summary.Errors,
 		summary.Interventions,
+		summary.Failovers,
 		summary.ToolCalls,
 		summary.ToolErrors,
 		summary.TokensIn,
@@ -189,7 +191,7 @@ func formatModelUsage(models map[string]int) string {
 func init() {
 	auditCmd.Flags().StringVar(&auditSince, "since", "", "Only include events since this duration or RFC3339 timestamp")
 	auditCmd.Flags().StringVar(&auditClaw, "claw", "", "Only include events for one claw_id")
-	auditCmd.Flags().StringVar(&auditType, "type", "", "Only include one event type (for example request, response, error, intervention, feed_fetch, channel_context_op, provider_pool, tool_call)")
+	auditCmd.Flags().StringVar(&auditType, "type", "", "Only include one event type (for example request, response, error, intervention, failover, feed_fetch, channel_context_op, provider_pool, tool_call)")
 	auditCmd.Flags().BoolVar(&auditJSON, "json", false, "Emit machine-readable JSON")
 	rootCmd.AddCommand(auditCmd)
 }

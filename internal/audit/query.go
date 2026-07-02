@@ -103,6 +103,9 @@ func Summarize(events []Event) Summary {
 		case "provider_pool":
 			agent.ProviderPoolEvents++
 			summary.ProviderPoolEvents++
+		case "failover":
+			agent.Failovers++
+			summary.Failovers++
 		}
 	}
 

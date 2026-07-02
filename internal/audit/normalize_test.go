@@ -30,6 +30,23 @@ func TestNormalizeLineAcceptsSpecShape(t *testing.T) {
 	}
 }
 
+func TestNormalizeLineParseFailoverEvent(t *testing.T) {
+	line := `{"ts":"2026-07-02T10:00:00Z","claw_id":"weston","type":"failover","model":"openai/gpt-4o","from_provider":"openai","from_model":"gpt-4o","to_provider":"openrouter","to_model":"anthropic/claude-haiku-4-5","reason":"http_500","slot_index":1,"latency_ms":42}`
+	event, err := NormalizeLine([]byte(line))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if event.Type != "failover" || event.ClawID != "weston" || event.Model != "openai/gpt-4o" {
+		t.Fatalf("unexpected failover identity fields: %+v", event)
+	}
+	if event.FromProvider != "openai" || event.FromModel != "gpt-4o" || event.ToProvider != "openrouter" || event.ToModel != "anthropic/claude-haiku-4-5" {
+		t.Fatalf("unexpected failover route fields: %+v", event)
+	}
+	if event.Reason != "http_500" || event.SlotIndex == nil || *event.SlotIndex != 1 || event.LatencyMS == nil || *event.LatencyMS != 42 {
+		t.Fatalf("unexpected failover reason/timing fields: %+v", event)
+	}
+}
+
 func TestParseReaderSkipsMalformedLines(t *testing.T) {
 	raw := strings.NewReader("{bad json\n" +
 		"{\"ts\":\"2026-03-19T14:32:00Z\",\"claw_id\":\"octopus\",\"type\":\"request\"}\n")
@@ -50,12 +67,16 @@ func TestSummarizeAggregatesByClaw(t *testing.T) {
 		{ClawID: "octopus", Type: "request", Model: "openai/gpt-4o"},
 		{ClawID: "octopus", Type: "response", Model: "openai/gpt-4o", TokensIn: ptrInt(100), TokensOut: ptrInt(40), CostUSD: ptrFloat64(0.12)},
 		{ClawID: "octopus", Type: "error"},
+		{ClawID: "octopus", Type: "failover"},
 	}
 	summary := Summarize(events)
 	if summary.Requests != 1 || summary.Responses != 1 || summary.Errors != 1 {
 		t.Fatalf("unexpected summary: %+v", summary)
 	}
-	if len(summary.Agents) != 1 || summary.Agents[0].TokensIn != 100 {
+	if summary.Failovers != 1 {
+		t.Fatalf("expected one failover, got %+v", summary)
+	}
+	if len(summary.Agents) != 1 || summary.Agents[0].TokensIn != 100 || summary.Agents[0].Failovers != 1 {
 		t.Fatalf("unexpected agent summary: %+v", summary.Agents)
 	}
 }
