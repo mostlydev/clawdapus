@@ -85,7 +85,7 @@ func newScheduler(manifest *schedulepkg.Manifest, docker *client.Client, state *
 			manifest:    inv,
 			location:    location,
 			schedule:    compiled,
-			nextFireUTC: compiled.Next(now.In(location)).UTC(),
+			nextFireUTC: nextScheduledFireUTC(compiled, now, location),
 			lastStatus:  "scheduled",
 		})
 	}
@@ -133,7 +133,7 @@ func (s *scheduler) tick(ctx context.Context, now time.Time) {
 	s.mu.Unlock()
 
 	for _, entry := range entries {
-		if entry == nil || now.Before(entry.nextFireUTC) {
+		if entry == nil || entry.nextFireUTC.IsZero() || now.Before(entry.nextFireUTC) {
 			continue
 		}
 		fireAt := entry.nextFireUTC
@@ -143,7 +143,7 @@ func (s *scheduler) tick(ctx context.Context, now time.Time) {
 		entry.lastFireUTC = fireAt
 		entry.lastStatus = result.status
 		entry.lastDetail = result.detail
-		entry.nextFireUTC = entry.schedule.Next(now.In(entry.location)).UTC()
+		entry.nextFireUTC = nextScheduledFireUTC(entry.schedule, now, entry.location)
 		s.mu.Unlock()
 
 		s.persistDispatchResult(entry, fireAt, entry.nextFireUTC, result)
@@ -295,6 +295,20 @@ func wakeExecTimeout(adapter string) time.Duration {
 	}
 }
 
+func nextScheduledFireUTC(schedule cron.Schedule, now time.Time, location *time.Location) time.Time {
+	if schedule == nil {
+		return time.Time{}
+	}
+	if location != nil {
+		now = now.In(location)
+	}
+	next := schedule.Next(now)
+	if next.IsZero() {
+		return time.Time{}
+	}
+	return next.UTC()
+}
+
 func deferWakeForHealthStatus(adapter string, state *types.ContainerState) (string, bool) {
 	if strings.TrimSpace(adapter) != "openclaw-exec" || state == nil || state.Health == nil {
 		return "", false
@@ -366,9 +380,6 @@ func (s *scheduler) FireNow(ctx context.Context, id string, bypassWhen, bypassPa
 	nextFire := entry.nextFireUTC
 	s.mu.Unlock()
 
-	if nextFire.IsZero() {
-		nextFire = fireAt
-	}
 	s.persistDispatchResult(entry, fireAt, nextFire, result)
 	return result, nil
 }
@@ -405,7 +416,15 @@ func (s *scheduler) syncInitialState() error {
 				state.LastStatus = "scheduled"
 			}
 			nextFire := entry.nextFireUTC
-			state.NextFireAt = &nextFire
+			if nextFire.IsZero() {
+				state.NextFireAt = nil
+				if state.LastStatus == "scheduled" {
+					state.LastStatus = "schedule-exhausted"
+					state.LastDetail = "schedule has no future fire time"
+				}
+			} else {
+				state.NextFireAt = &nextFire
+			}
 			file.Invocations[entry.manifest.ID] = state
 		}
 	})
@@ -426,9 +445,13 @@ func (s *scheduler) persistDispatchResult(entry *scheduledInvocation, fireAt, ne
 			state.SkipNext = false
 		}
 		evaluatedAt := fireAt.UTC()
-		next := nextFire.UTC()
 		state.LastEvaluatedAt = &evaluatedAt
-		state.NextFireAt = &next
+		if nextFire.IsZero() {
+			state.NextFireAt = nil
+		} else {
+			next := nextFire.UTC()
+			state.NextFireAt = &next
+		}
 		state.LastStatus = result.status
 		state.LastDetail = result.detail
 		if result.skipped {

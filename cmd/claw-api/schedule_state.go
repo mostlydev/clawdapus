@@ -71,6 +71,7 @@ func (s *scheduleStateStore) Update(mutator func(*schedulepkg.StateFile)) error 
 	if mutator != nil {
 		mutator(&s.state)
 	}
+	normalizeScheduleState(&s.state)
 	now := time.Now().UTC()
 	s.state.Version = scheduleStateVersion
 	s.state.UpdatedAt = &now
@@ -94,6 +95,7 @@ func (s *scheduleStateStore) UpdateInvocation(id string, mutator func(*schedulep
 			return schedulepkg.InvocationState{}, err
 		}
 	}
+	normalizeInvocationState(&state)
 	now := time.Now().UTC()
 	s.state.Version = scheduleStateVersion
 	s.state.UpdatedAt = &now
@@ -174,4 +176,27 @@ func normalizeScheduleState(state *schedulepkg.StateFile) {
 	if state.Invocations == nil {
 		state.Invocations = make(map[string]schedulepkg.InvocationState)
 	}
+	for id, invocation := range state.Invocations {
+		normalizeInvocationState(&invocation)
+		state.Invocations[id] = invocation
+	}
+}
+
+func normalizeInvocationState(state *schedulepkg.InvocationState) {
+	if state == nil {
+		return
+	}
+	state.PausedUntil = nilIfZeroTime(state.PausedUntil)
+	state.LastEvaluatedAt = nilIfZeroTime(state.LastEvaluatedAt)
+	state.LastAttemptedAt = nilIfZeroTime(state.LastAttemptedAt)
+	state.LastFiredAt = nilIfZeroTime(state.LastFiredAt)
+	state.LastSkippedAt = nilIfZeroTime(state.LastSkippedAt)
+	state.NextFireAt = nilIfZeroTime(state.NextFireAt)
+}
+
+func nilIfZeroTime(ts *time.Time) *time.Time {
+	if ts == nil || ts.IsZero() {
+		return nil
+	}
+	return ts
 }
