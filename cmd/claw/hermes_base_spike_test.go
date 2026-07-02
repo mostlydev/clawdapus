@@ -33,7 +33,9 @@ grep -q 'CLLAMA_CONSUMER_SESSION_EPOCH' /usr/local/bin/hermes-entrypoint
 python - <<'PY'
 import importlib.util
 import inspect
+import errno
 import os
+import tempfile
 from pathlib import Path
 
 os.environ["HERMES_DEFAULT_AGENT_IDENTITY"] = "Clawdapus identity probe"
@@ -68,6 +70,41 @@ assert "You are Hermes Agent" not in DEFAULT_AGENT_IDENTITY
 assert "You have persistent memory across sessions" in MEMORY_GUIDANCE
 assert "session_search" in SESSION_SEARCH_GUIDANCE
 assert "skill_manage" in SKILLS_GUIDANCE
+
+import tools.skill_manager_tool as skill_manager_tool
+with tempfile.TemporaryDirectory() as skill_tmp:
+    skill_tmp_path = Path(skill_tmp)
+    skill_dir = skill_tmp_path / "skills" / "demo"
+    (skill_dir / "references").mkdir(parents=True)
+    absolute_reference = skill_dir / "references" / "note.md"
+    assert skill_manager_tool._validate_file_path(str(absolute_reference), skill_dir) is None
+    outside_reference = skill_tmp_path / "outside" / "references" / "note.md"
+    assert "Absolute path must stay within" in skill_manager_tool._validate_file_path(str(outside_reference), skill_dir)
+
+    target = skill_tmp_path / "skill.md"
+    calls = {"count": 0}
+    original_replace = skill_manager_tool.atomic_replace
+    def flaky_replace(src, dst):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise OSError(errno.EBUSY, "busy")
+        return original_replace(src, dst)
+    skill_manager_tool.atomic_replace = flaky_replace
+    try:
+        skill_manager_tool._atomic_write_text(target, "persisted after retry")
+    finally:
+        skill_manager_tool.atomic_replace = original_replace
+    assert target.read_text() == "persisted after retry"
+    assert calls["count"] == 3
+
+    def always_busy(src, dst):
+        raise OSError(errno.EBUSY, "busy")
+    skill_manager_tool.atomic_replace = always_busy
+    try:
+        skill_manager_tool._atomic_write_text(target, "persisted by fallback")
+    finally:
+        skill_manager_tool.atomic_replace = original_replace
+    assert target.read_text() == "persisted by fallback"
 
 from run_agent import AIAgent
 agent = AIAgent(

@@ -300,6 +300,336 @@ text = replace_once(
 )
 memory_tool.write_text(text)
 
+skill_manager_tool = purelib / "tools" / "skill_manager_tool.py"
+text = skill_manager_tool.read_text()
+# Keep patch literals free of trailing whitespace while still matching Hermes
+# source that carries indented blank lines inside docstrings.
+text = text.replace("    \n", "\n")
+text = replace_once(
+    text,
+    "import json\nimport logging\nimport os\nimport re\nimport shutil\nimport tempfile\n",
+    "import errno\nimport json\nimport logging\nimport os\nimport re\nimport shutil\nimport tempfile\nimport time\n",
+    "Hermes skill_manage retry imports",
+)
+text = replace_once(
+    text,
+    '''def _validate_file_path(file_path: str) -> Optional[str]:
+    """
+    Validate a file path for write_file/remove_file.
+    Must be under an allowed subdirectory and not escape the skill dir.
+    """
+    from tools.path_security import has_traversal_component
+
+    if not file_path:
+        return "file_path is required."
+
+    normalized = Path(file_path)
+
+    # Prevent path traversal (checked before any allow-listing so the SKILL.md
+    # exception below can never be reached by a traversal-laden path).
+    if has_traversal_component(file_path):
+        return "Path traversal ('..') is not allowed."
+
+    # SKILL.md is the canonical skill file and lives at the skill root, not
+    # under an allowed subdirectory. Accept its two natural spellings —
+    # 'SKILL.md' and '<skill-name>/SKILL.md' — so callers can target the main
+    # file. The traversal guard above still applies, so this can't escape.
+    if normalized.parts and normalized.name == "SKILL.md":
+        if len(normalized.parts) == 1 or len(normalized.parts) == 2:
+            return None
+
+    # Must be under an allowed subdirectory
+    if not normalized.parts or normalized.parts[0] not in ALLOWED_SUBDIRS:
+        allowed = ", ".join(sorted(ALLOWED_SUBDIRS))
+        return f"File must be under one of: {allowed}. Got: '{file_path}'"
+
+    # Must have a filename (not just a directory)
+    if len(normalized.parts) < 2:
+        return f"Provide a file path, not just a directory. Example: '{normalized.parts[0]}/myfile.md'"
+
+    return None
+''',
+    '''def _validate_file_path(file_path: str, skill_dir: Path | None = None) -> Optional[str]:
+    """
+    Validate a file path for write_file/remove_file.
+    Must be under an allowed subdirectory and not escape the skill dir.
+    """
+    from tools.path_security import has_traversal_component
+
+    if not file_path:
+        return "file_path is required."
+
+    normalized = Path(file_path)
+
+    if normalized.is_absolute():
+        if skill_dir is None:
+            return "Absolute paths require a known skill directory."
+        try:
+            normalized = normalized.resolve().relative_to(skill_dir.resolve())
+        except ValueError:
+            return f"Absolute path must stay within skill directory '{skill_dir}'. Got: '{file_path}'"
+
+    # Prevent path traversal (checked before any allow-listing so the SKILL.md
+    # exception below can never be reached by a traversal-laden path).
+    if has_traversal_component(file_path):
+        return "Path traversal ('..') is not allowed."
+
+    # SKILL.md is the canonical skill file and lives at the skill root, not
+    # under an allowed subdirectory. Accept its two natural spellings —
+    # 'SKILL.md' and '<skill-name>/SKILL.md' — so callers can target the main
+    # file. The traversal guard above still applies, so this can't escape.
+    if normalized.parts and normalized.name == "SKILL.md":
+        if len(normalized.parts) == 1 or len(normalized.parts) == 2:
+            return None
+
+    # Must be under an allowed subdirectory
+    if not normalized.parts or normalized.parts[0] not in ALLOWED_SUBDIRS:
+        allowed = ", ".join(sorted(ALLOWED_SUBDIRS))
+        return f"File must be under one of: {allowed}. Got: '{file_path}'"
+
+    # Must have a filename (not just a directory)
+    if len(normalized.parts) < 2:
+        return f"Provide a file path, not just a directory. Example: '{normalized.parts[0]}/myfile.md'"
+
+    return None
+''',
+    "Hermes skill_manage absolute supporting-file validation",
+)
+text = replace_once(
+    text,
+    '''def _atomic_write_text(file_path: Path, content: str, encoding: str = "utf-8") -> None:
+    """
+    Atomically write text content to a file.
+
+    Uses a temporary file in the same directory and os.replace() to ensure
+    the target file is never left in a partially-written state if the process
+    crashes or is interrupted.
+
+    Args:
+        file_path: Target file path
+        content: Content to write
+        encoding: Text encoding (default: utf-8)
+    """
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(
+        dir=str(file_path.parent),
+        prefix=f".{file_path.name}.tmp.",
+        suffix="",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(content)
+        atomic_replace(temp_path, file_path)
+    except Exception:
+        # Clean up temp file on error
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            logger.error("Failed to remove temporary file %s during atomic write", temp_path, exc_info=True)
+        raise
+''',
+    '''def _claw_path_is_mountpoint(path: Path) -> bool:
+    """Return True when /proc/self/mountinfo identifies path as a mount target."""
+    try:
+        target = str(path.resolve())
+        with open("/proc/self/mountinfo", encoding="utf-8") as f:
+            for line in f:
+                fields = line.split()
+                if len(fields) > 4 and fields[4].replace("\\\\040", " ") == target:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def _atomic_write_text(file_path: Path, content: str, encoding: str = "utf-8") -> None:
+    """
+    Atomically write text content to a file.
+
+    Uses a temporary file in the same directory and os.replace() to ensure
+    the target file is never left in a partially-written state if the process
+    crashes or is interrupted. Overlayfs can transiently return EBUSY while
+    readers hold the target open, so retry before falling back to in-place
+    replacement for ordinary files. File-level mount targets stay protected:
+    those are managed outside the agent's writable skill workspace.
+
+    Args:
+        file_path: Target file path
+        content: Content to write
+        encoding: Text encoding (default: utf-8)
+    """
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(
+        dir=str(file_path.parent),
+        prefix=f".{file_path.name}.tmp.",
+        suffix="",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(content)
+
+        last_busy = None
+        for attempt in range(5):
+            try:
+                atomic_replace(temp_path, file_path)
+                return
+            except OSError as exc:
+                if exc.errno != errno.EBUSY:
+                    raise
+                last_busy = exc
+                if _claw_path_is_mountpoint(file_path):
+                    raise OSError(
+                        errno.EBUSY,
+                        (
+                            f"Cannot replace mounted skill file '{file_path}'. "
+                            "This skill is managed outside the agent workspace; "
+                            "report the desired edit instead."
+                        ),
+                    ) from exc
+                time.sleep(0.05 * (attempt + 1))
+
+        logger.warning(
+            "skill_manage: atomic_replace stayed busy for %s; falling back to in-place write",
+            file_path,
+        )
+        with open(file_path, "w", encoding=encoding) as f:
+            f.write(content)
+        os.unlink(temp_path)
+        if last_busy is not None:
+            logger.debug("skill_manage: recovered from EBUSY while writing %s", file_path)
+    except Exception:
+        # Clean up temp file on error
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            logger.error("Failed to remove temporary file %s during atomic write", temp_path, exc_info=True)
+        raise
+''',
+    "Hermes skill_manage EBUSY retry and fallback write",
+)
+text = replace_once(
+    text,
+    '''        err = _validate_file_path(file_path)
+        if err:
+            return {"success": False, "error": err}
+        target, err = _resolve_skill_target(skill_dir, file_path)
+        if err:
+            return {"success": False, "error": err}
+''',
+    '''        err = _validate_file_path(file_path, skill_dir)
+        if err:
+            return {"success": False, "error": err}
+        target, err = _resolve_skill_target(skill_dir, file_path)
+        if err:
+            return {"success": False, "error": err}
+''',
+    "Hermes skill_manage patch absolute file_path validation",
+)
+text = replace_once(
+    text,
+    '''def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
+    """Add or overwrite a supporting file within any skill directory."""
+    err = _validate_file_path(file_path)
+    if err:
+        return {"success": False, "error": err}
+
+    if not file_content and file_content != "":
+        return {"success": False, "error": "file_content is required."}
+
+    # Check size limits
+    content_bytes = len(file_content.encode("utf-8"))
+    if content_bytes > MAX_SKILL_FILE_BYTES:
+        return {
+            "success": False,
+            "error": (
+                f"File content is {content_bytes:,} bytes "
+                f"(limit: {MAX_SKILL_FILE_BYTES:,} bytes / 1 MiB). "
+                f"Consider splitting into smaller files."
+            ),
+        }
+    err = _validate_content_size(file_content, label=file_path)
+    if err:
+        return {"success": False, "error": err}
+
+    existing = _find_skill(name)
+    if not existing:
+        return {"success": False, "error": _skill_not_found_error(name, " Create it first with action='create'.")}
+
+    target, err = _resolve_skill_target(existing["path"], file_path)
+    if err:
+        return {"success": False, "error": err}
+''',
+    '''def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
+    """Add or overwrite a supporting file within any skill directory."""
+    if not file_content and file_content != "":
+        return {"success": False, "error": "file_content is required."}
+
+    # Check size limits
+    content_bytes = len(file_content.encode("utf-8"))
+    if content_bytes > MAX_SKILL_FILE_BYTES:
+        return {
+            "success": False,
+            "error": (
+                f"File content is {content_bytes:,} bytes "
+                f"(limit: {MAX_SKILL_FILE_BYTES:,} bytes / 1 MiB). "
+                f"Consider splitting into smaller files."
+            ),
+        }
+    err = _validate_content_size(file_content, label=file_path)
+    if err:
+        return {"success": False, "error": err}
+
+    existing = _find_skill(name)
+    if not existing:
+        return {"success": False, "error": _skill_not_found_error(name, " Create it first with action='create'.")}
+
+    err = _validate_file_path(file_path, existing["path"])
+    if err:
+        return {"success": False, "error": err}
+
+    target, err = _resolve_skill_target(existing["path"], file_path)
+    if err:
+        return {"success": False, "error": err}
+''',
+    "Hermes skill_manage write_file absolute path validation",
+)
+text = replace_once(
+    text,
+    '''def _remove_file(name: str, file_path: str) -> Dict[str, Any]:
+    """Remove a supporting file from any skill directory."""
+    err = _validate_file_path(file_path)
+    if err:
+        return {"success": False, "error": err}
+
+    existing = _find_skill(name)
+    if not existing:
+        return {"success": False, "error": _skill_not_found_error(name)}
+
+    skill_dir = existing["path"]
+
+    target, err = _resolve_skill_target(skill_dir, file_path)
+    if err:
+        return {"success": False, "error": err}
+''',
+    '''def _remove_file(name: str, file_path: str) -> Dict[str, Any]:
+    """Remove a supporting file from any skill directory."""
+    existing = _find_skill(name)
+    if not existing:
+        return {"success": False, "error": _skill_not_found_error(name)}
+    skill_dir = existing["path"]
+
+    err = _validate_file_path(file_path, skill_dir)
+    if err:
+        return {"success": False, "error": err}
+
+    target, err = _resolve_skill_target(skill_dir, file_path)
+    if err:
+        return {"success": False, "error": err}
+''',
+    "Hermes skill_manage remove_file absolute path validation",
+)
+skill_manager_tool.write_text(text)
+
 cron_scheduler = purelib / "cron" / "scheduler.py"
 text = cron_scheduler.read_text()
 
