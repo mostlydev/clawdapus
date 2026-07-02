@@ -186,6 +186,69 @@ config_py.write_text(text)
 
 memory_tool = purelib / "tools" / "memory_tool.py"
 text = memory_tool.read_text()
+text = replace_once_any(
+    text,
+    [
+        (
+            "import json\nimport logging\nimport os\nimport re\nimport tempfile\n",
+            "import difflib\nimport json\nimport logging\nimport os\nimport re\nimport tempfile\n",
+        ),
+        (
+            "import json\nimport logging\nimport os\nimport tempfile\n",
+            "import difflib\nimport json\nimport logging\nimport os\nimport re\nimport tempfile\n",
+        ),
+    ],
+    "Hermes memory fuzzy-match import",
+)
+text = replace_once(
+    text,
+    'ENTRY_DELIMITER = "\\n§\\n"\n',
+    '''ENTRY_DELIMITER = "\\n§\\n"
+
+
+def _normalize_match_text(value: str) -> str:
+    """Normalize memory match text for tolerant substring lookup."""
+    return " ".join(re.sub(r"\\W+", " ", str(value or "").casefold()).split())
+
+
+def _entry_matches(entry: str, old_text: str) -> bool:
+    """Return true when old_text identifies entry exactly or after light normalization."""
+    if old_text in entry:
+        return True
+    needle = _normalize_match_text(old_text)
+    if not needle:
+        return False
+    return needle in _normalize_match_text(entry)
+
+
+def _memory_match_previews(entries: List[str], old_text: str, limit: int = 3) -> List[str]:
+    """Return likely entries for a missed locator so the next call can recover."""
+    needle = _normalize_match_text(old_text)
+    if not needle:
+        return []
+    scored = []
+    for entry in entries:
+        normalized_entry = _normalize_match_text(entry)
+        if not normalized_entry:
+            continue
+        score = difflib.SequenceMatcher(None, needle, normalized_entry).ratio()
+        if score >= 0.28:
+            scored.append((score, entry))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [
+        entry[:160] + ("..." if len(entry) > 160 else "")
+        for _, entry in scored[:limit]
+    ]
+
+
+def _memory_match_hint(entries: List[str], old_text: str) -> str:
+    close_matches = _memory_match_previews(entries, old_text)
+    if not close_matches:
+        return ""
+    return " Close matches: " + " | ".join(close_matches)
+''',
+    "Hermes memory tolerant match helpers",
+)
 memory_add_eviction = '''            # Calculate what the new total would be. If the new entry can
             # fit by evicting older entries, evict oldest-first instead of
             # freezing memory writes at the cap.
@@ -288,6 +351,154 @@ text = replace_once_any(
         return self._success_response(target, "Entry added.")''', memory_add_eviction),
     ],
     "Hermes memory add oldest-entry eviction",
+)
+text = replace_once(
+    text,
+    '''            matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
+
+            if not matches:
+                return {"success": False, "error": f"No entry matched '{old_text}'."}
+''',
+    '''            matches = [(i, e) for i, e in enumerate(entries) if _entry_matches(e, old_text)]
+
+            if not matches:
+                close_matches = _memory_match_previews(entries, old_text)
+                response = {
+                    "success": False,
+                    "error": (
+                        f"No entry matched '{old_text}'. "
+                        "Use an exact substring from current_entries or one of close_matches."
+                    ),
+                    "current_entries": entries,
+                }
+                if close_matches:
+                    response["close_matches"] = close_matches
+                return response
+''',
+    "Hermes memory replace tolerant miss response",
+)
+text = replace_once(
+    text,
+    '''            matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
+
+            if not matches:
+                return {"success": False, "error": f"No entry matched '{old_text}'."}
+''',
+    '''            matches = [(i, e) for i, e in enumerate(entries) if _entry_matches(e, old_text)]
+
+            if not matches:
+                close_matches = _memory_match_previews(entries, old_text)
+                response = {
+                    "success": False,
+                    "error": (
+                        f"No entry matched '{old_text}'. "
+                        "Use an exact substring from current_entries or one of close_matches."
+                    ),
+                    "current_entries": entries,
+                }
+                if close_matches:
+                    response["close_matches"] = close_matches
+                return response
+''',
+    "Hermes memory remove tolerant miss response",
+)
+text = replace_once(
+    text,
+    '''                    matches = [j for j, e in enumerate(working) if old_text in e]
+                    if not matches:
+                        return self._batch_error(target, f"{pos}: no entry matched '{old_text}'.")
+''',
+    '''                    matches = [j for j, e in enumerate(working) if _entry_matches(e, old_text)]
+                    if not matches:
+                        return self._batch_error(
+                            target,
+                            f"{pos}: no entry matched '{old_text}'." + _memory_match_hint(working, old_text),
+                        )
+''',
+    "Hermes memory batch replace tolerant miss response",
+)
+text = replace_once(
+    text,
+    '''                    matches = [j for j, e in enumerate(working) if old_text in e]
+                    if not matches:
+                        return self._batch_error(target, f"{pos}: no entry matched '{old_text}'.")
+''',
+    '''                    matches = [j for j, e in enumerate(working) if _entry_matches(e, old_text)]
+                    if not matches:
+                        return self._batch_error(
+                            target,
+                            f"{pos}: no entry matched '{old_text}'." + _memory_match_hint(working, old_text),
+                        )
+''',
+    "Hermes memory batch remove tolerant miss response",
+)
+text = replace_once_any(
+    text,
+    [
+        ('''        if not content:
+            return tool_error("content is required for 'replace' action.", success=False)
+''', '''        if not content:
+            return tool_error(
+                "content is required for 'replace' action. Include full replacement content "
+                "and old_text in the same call; use 'remove' to delete an entry.",
+                success=False,
+            )
+'''),
+        ('''    if action == "replace" and (not old_text or not content):
+        missing = "old_text" if not old_text else "content"
+        return tool_error(f"{missing} is required for 'replace' action.", success=False)
+''', '''    if action == "replace" and (not old_text or not content):
+        missing = "old_text" if not old_text else "content"
+        if missing == "content":
+            return tool_error(
+                "content is required for 'replace' action. Include full replacement content "
+                "and old_text in the same call; use 'remove' to delete an entry.",
+                success=False,
+            )
+        return tool_error(f"{missing} is required for 'replace' action.", success=False)
+'''),
+    ],
+    "Hermes memory replace missing-content guidance",
+)
+text = replace_once_any(
+    text,
+    [
+        ('''            "content": {
+                "type": "string",
+                "description": "The entry content. Required for 'add' and 'replace'."
+            },
+            "old_text": {
+                "type": "string",
+                "description": "Short unique substring identifying the entry to replace or remove."
+            },
+''', '''            "content": {
+                "type": "string",
+                "description": "The entry content. Required for 'add' and 'replace'; for replace, send the full replacement entry in the same call."
+            },
+            "old_text": {
+                "type": "string",
+                "description": "Short unique substring identifying the entry to replace or remove. Matching tolerates case, whitespace, and punctuation."
+            },
+'''),
+        ('''            "content": {
+                "type": "string",
+                "description": "The entry content. Required for 'add' and 'replace' (single-op shape)."
+            },
+            "old_text": {
+                "type": "string",
+                "description": "Short unique substring identifying the entry to replace or remove (single-op shape)."
+            },
+''', '''            "content": {
+                "type": "string",
+                "description": "The entry content. Required for 'add' and 'replace'; for replace, send the full replacement entry in the same call."
+            },
+            "old_text": {
+                "type": "string",
+                "description": "Short unique substring identifying the entry to replace or remove. Matching tolerates case, whitespace, and punctuation."
+            },
+'''),
+    ],
+    "Hermes memory replace schema guidance",
 )
 text = replace_once(
     text,

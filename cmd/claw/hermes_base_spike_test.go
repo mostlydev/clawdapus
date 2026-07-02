@@ -34,6 +34,7 @@ python - <<'PY'
 import importlib.util
 import inspect
 import errno
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -105,6 +106,90 @@ with tempfile.TemporaryDirectory() as skill_tmp:
     finally:
         skill_manager_tool.atomic_replace = original_replace
     assert target.read_text() == "persisted by fallback"
+
+import tools.memory_tool as memory_tool_module
+with tempfile.TemporaryDirectory() as memory_home:
+    os.environ["HERMES_HOME"] = memory_home
+    store = memory_tool_module.MemoryStore(memory_char_limit=12000, user_char_limit=12000)
+    store.load_from_disk()
+
+    added = json.loads(memory_tool_module.memory_tool(
+        action="add",
+        target="memory",
+        content="Wojtek (pod owner, tiverton-house) prefers live runtime verification.",
+        store=store,
+    ))
+    assert added["success"], added
+
+    missing_content = json.loads(memory_tool_module.memory_tool(
+        action="replace",
+        target="memory",
+        old_text="Wojtek pod owner",
+        store=store,
+    ))
+    assert not missing_content["success"], missing_content
+    assert "Include full replacement content" in missing_content["error"], missing_content
+
+    missed = json.loads(memory_tool_module.memory_tool(
+        action="replace",
+        target="memory",
+        old_text="Wojtek runtime proofs",
+        content="Wojtek prefers direct verification.",
+        store=store,
+    ))
+    assert not missed["success"], missed
+    assert "current_entries" in missed, missed
+    assert "close_matches" in missed, missed
+
+    replaced = json.loads(memory_tool_module.memory_tool(
+        action="replace",
+        target="memory",
+        old_text="wojtek pod owner tiverton house",
+        content="Wojtek prefers live runtime verification for Tiverton.",
+        store=store,
+    ))
+    assert replaced["success"], replaced
+    assert store._entries_for("memory") == ["Wojtek prefers live runtime verification for Tiverton."], replaced
+
+    removed = json.loads(memory_tool_module.memory_tool(
+        action="remove",
+        target="memory",
+        old_text="tiverton",
+        store=store,
+    ))
+    assert removed["success"], removed
+    assert store._entries_for("memory") == [], removed
+
+    batched = json.loads(memory_tool_module.memory_tool(
+        target="memory",
+        operations=[
+            {
+                "action": "add",
+                "content": "Dundas (news router) files actionable catalyst notes.",
+            },
+            {
+                "action": "replace",
+                "old_text": "dundas news router",
+                "content": "Dundas files actionable catalyst notes.",
+            },
+        ],
+        store=store,
+    ))
+    assert batched["success"], batched
+    assert store._entries_for("memory") == ["Dundas files actionable catalyst notes."], batched
+
+    batch_miss = json.loads(memory_tool_module.memory_tool(
+        target="memory",
+        operations=[
+            {
+                "action": "remove",
+                "old_text": "catalyst router",
+            },
+        ],
+        store=store,
+    ))
+    assert not batch_miss["success"], batch_miss
+    assert "Close matches:" in batch_miss["error"], batch_miss
 
 from run_agent import AIAgent
 agent = AIAgent(
