@@ -47,6 +47,12 @@ type Event struct {
 	Action        string `json:"action,omitempty"`
 	Reason        string `json:"reason,omitempty"`
 	CooldownUntil string `json:"cooldown_until,omitempty"`
+	// failover event fields
+	FromProvider string `json:"from_provider,omitempty"`
+	ToProvider   string `json:"to_provider,omitempty"`
+	FromModel    string `json:"from_model,omitempty"`
+	ToModel      string `json:"to_model,omitempty"`
+	SlotIndex    *int   `json:"slot_index,omitempty"`
 }
 
 type AgentSummary struct {
@@ -66,6 +72,7 @@ type AgentSummary struct {
 	ChannelContextOps  int            `json:"channel_context_ops,omitempty"`
 	ChannelContextErrs int            `json:"channel_context_errors,omitempty"`
 	ProviderPoolEvents int            `json:"provider_pool_events,omitempty"`
+	Failovers          int            `json:"failovers,omitempty"`
 	FirstTimestamp     time.Time      `json:"first_timestamp,omitempty"`
 	LastTimestamp      time.Time      `json:"last_timestamp,omitempty"`
 }
@@ -82,4 +89,5 @@ type Summary struct {
 	ToolCalls          int            `json:"tool_calls,omitempty"`
 	ToolErrors         int            `json:"tool_errors,omitempty"`
 	ProviderPoolEvents int            `json:"provider_pool_events,omitempty"`
+	Failovers          int            `json:"failovers,omitempty"`
 }

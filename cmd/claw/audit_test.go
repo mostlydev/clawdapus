@@ -69,7 +69,7 @@ func TestWriteAuditTextShowsManagedToolCounts(t *testing.T) {
 		t.Fatalf("writeAuditText: %v", err)
 	}
 	rendered := out.String()
-	for _, want := range []string{"TOOLS", "TOOL_ERR", "weston", "Totals: req=1 resp=0 err=0 int=0 tools=2/1"} {
+	for _, want := range []string{"FAILOVER", "TOOLS", "TOOL_ERR", "weston", "Totals: req=1 resp=0 err=0 int=0 failover=0 tools=2/1"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected %q in output, got:\n%s", want, rendered)
 		}
