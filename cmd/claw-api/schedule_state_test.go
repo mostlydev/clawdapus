@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	schedulepkg "github.com/mostlydev/clawdapus/internal/schedule"
 )
@@ -66,5 +67,43 @@ func TestScheduleStateStorePersistsAndDropsStaleInvocations(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "schedule-state.json")); err != nil {
 		t.Fatalf("expected persisted state file: %v", err)
+	}
+}
+
+func TestScheduleStateStoreNormalizesZeroTimePointers(t *testing.T) {
+	dir := t.TempDir()
+	manifest := &schedulepkg.Manifest{
+		Version: 1,
+		Pod:     "ops",
+		Invocations: []schedulepkg.ManifestInvocation{
+			{ID: "never", Service: "westin"},
+		},
+	}
+	store, err := newScheduleStateStore(dir, manifest)
+	if err != nil {
+		t.Fatalf("newScheduleStateStore: %v", err)
+	}
+	zero := time.Time{}
+	if err := store.Update(func(file *schedulepkg.StateFile) {
+		state := file.Invocations["never"]
+		state.PausedUntil = &zero
+		state.LastEvaluatedAt = &zero
+		state.LastAttemptedAt = &zero
+		state.LastFiredAt = &zero
+		state.LastSkippedAt = &zero
+		state.NextFireAt = &zero
+		file.Invocations["never"] = state
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	state := store.Snapshot().Invocations["never"]
+	if state.PausedUntil != nil ||
+		state.LastEvaluatedAt != nil ||
+		state.LastAttemptedAt != nil ||
+		state.LastFiredAt != nil ||
+		state.LastSkippedAt != nil ||
+		state.NextFireAt != nil {
+		t.Fatalf("expected zero time pointers to be nil, got %+v", state)
 	}
 }
