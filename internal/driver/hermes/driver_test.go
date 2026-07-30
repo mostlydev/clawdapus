@@ -676,13 +676,18 @@ func TestMaterializeHonorsHermesAllowToolsOptIn(t *testing.T) {
 	}
 }
 
-func TestMaterializeWritesExplicitDisabledToolsWithoutChatHandle(t *testing.T) {
+func TestMaterializeWritesExplicitDisabledToolsForTelegramOnlyService(t *testing.T) {
 	rc, tmp := newTestRC(t)
-	rc.Handles = nil
+	rc.Handles = map[string]*driver.HandleInfo{"telegram": {}}
+	rc.Environment["TELEGRAM_BOT_TOKEN"] = "telegram-token"
 	rc.Hermes = &driver.HermesConfig{DisableTools: []string{"skill_manage"}}
 	runtimeDir := filepath.Join(tmp, "runtime")
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatal(err)
+	}
+
+	if err := (&Driver{}).Validate(rc); err != nil {
+		t.Fatalf("Validate returned error: %v", err)
 	}
 
 	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
