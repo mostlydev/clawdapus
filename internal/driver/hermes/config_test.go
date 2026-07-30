@@ -877,6 +877,42 @@ func TestGenerateEnvFileKeepsTTSDisabledForUnrelatedAllowTool(t *testing.T) {
 	}
 }
 
+func TestGenerateEnvFileAddsExplicitDisabledTools(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Hermes: &driver.HermesConfig{
+			DisableTools: []string{"skill_manage", "session_search", "skill_manage"},
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	want := clawdapusDisabledToolsEnv + "=skill_manage,session_search\n"
+	if !strings.Contains(string(data), want) {
+		t.Fatalf("expected %q for a handle-less service, got:\n%s", want, data)
+	}
+}
+
+func TestGenerateEnvFileHermesAllowToolsWinsOverDisableTools(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Handles: map[string]*driver.HandleInfo{"discord": {}},
+		Hermes: &driver.HermesConfig{
+			AllowTools:   []string{"skill_manage"},
+			DisableTools: []string{"skill_manage", "session_search"},
+		},
+	}
+	data, err := GenerateEnvFile(rc, &modelConfig{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("GenerateEnvFile returned error: %v", err)
+	}
+
+	want := clawdapusDisabledToolsEnv + "=" + hermesTextToSpeechTool + ",session_search\n"
+	if !strings.Contains(string(data), want) {
+		t.Fatalf("expected allow-tools to remove the conflicting deny entry; want %q, got:\n%s", want, data)
+	}
+}
+
 func TestGenerateEnvFileDoesNotDisableTTSForTelegramOnly(t *testing.T) {
 	rc := &driver.ResolvedClaw{
 		Handles: map[string]*driver.HandleInfo{"telegram": {}},

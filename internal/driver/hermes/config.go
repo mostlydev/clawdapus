@@ -434,15 +434,33 @@ func hasHandle(rc *driver.ResolvedClaw, platform string) bool {
 }
 
 func resolveDisabledHermesTools(rc *driver.ResolvedClaw) []string {
-	if !hasDiscordHandle(rc) && !hasSlackHandle(rc) {
-		return nil
+	disabled := make([]string, 0)
+	seen := make(map[string]struct{})
+	addDisabled := func(tool string) {
+		tool = strings.TrimSpace(tool)
+		if tool == "" {
+			return
+		}
+		if _, exists := seen[tool]; exists {
+			return
+		}
+		seen[tool] = struct{}{}
+		disabled = append(disabled, tool)
 	}
 
-	disabled := []string{hermesTextToSpeechTool}
-	if rc == nil || rc.Hermes == nil || len(rc.Hermes.AllowTools) == 0 {
+	if hasDiscordHandle(rc) || hasSlackHandle(rc) {
+		addDisabled(hermesTextToSpeechTool)
+	}
+
+	if rc == nil || rc.Hermes == nil {
 		return disabled
 	}
-
+	for _, tool := range rc.Hermes.DisableTools {
+		addDisabled(tool)
+	}
+	if len(rc.Hermes.AllowTools) == 0 {
+		return disabled
+	}
 	allowSet := make(map[string]struct{}, len(rc.Hermes.AllowTools))
 	for _, tool := range rc.Hermes.AllowTools {
 		tool = strings.TrimSpace(tool)

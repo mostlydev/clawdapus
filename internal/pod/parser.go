@@ -115,8 +115,9 @@ type rawMCPStdioBlock struct {
 }
 
 type rawHermesConfig struct {
-	AllowTools  []string `yaml:"allow-tools"`
-	AllowSilent bool     `yaml:"allow-silent"`
+	AllowTools   []string `yaml:"allow-tools"`
+	DisableTools []string `yaml:"disable-tools"`
+	AllowSilent  bool     `yaml:"allow-silent"`
 }
 
 type rawFeedEntry struct {
@@ -993,7 +994,7 @@ func parseMCPStdio(serviceName string, raw *rawMCPStdioBlock, agent string, clla
 }
 
 func parseHermesConfig(raw *rawHermesConfig) (*driver.HermesConfig, error) {
-	if raw == nil || (len(raw.AllowTools) == 0 && !raw.AllowSilent) {
+	if raw == nil || (len(raw.AllowTools) == 0 && len(raw.DisableTools) == 0 && !raw.AllowSilent) {
 		return nil, nil
 	}
 
@@ -1005,12 +1006,21 @@ func parseHermesConfig(raw *rawHermesConfig) (*driver.HermesConfig, error) {
 		}
 		allowTools = append(allowTools, tool)
 	}
-	if len(allowTools) == 0 && !raw.AllowSilent {
+	disableTools := make([]string, 0, len(raw.DisableTools))
+	for i, tool := range raw.DisableTools {
+		tool = strings.TrimSpace(tool)
+		if tool == "" {
+			return nil, fmt.Errorf("disable-tools[%d] must not be empty", i)
+		}
+		disableTools = append(disableTools, tool)
+	}
+	if len(allowTools) == 0 && len(disableTools) == 0 && !raw.AllowSilent {
 		return nil, nil
 	}
 	return &driver.HermesConfig{
-		AllowTools:  allowTools,
-		AllowSilent: raw.AllowSilent,
+		AllowTools:   allowTools,
+		DisableTools: disableTools,
+		AllowSilent:  raw.AllowSilent,
 	}, nil
 }
 
