@@ -4511,7 +4511,9 @@ func cloneHermesConfig(cfg *driver.HermesConfig) *driver.HermesConfig {
 		return nil
 	}
 	return &driver.HermesConfig{
-		AllowTools: append([]string(nil), cfg.AllowTools...),
+		AllowTools:   append([]string(nil), cfg.AllowTools...),
+		DisableTools: append([]string(nil), cfg.DisableTools...),
+		AllowSilent:  cfg.AllowSilent,
 	}
 }
 
