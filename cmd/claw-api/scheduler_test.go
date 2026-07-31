@@ -39,11 +39,14 @@ func TestShouldAttemptDegradedThrottlesToRoughlyTenPercent(t *testing.T) {
 	}
 }
 
-func TestWakeExecTimeoutUsesOpenClawBudget(t *testing.T) {
+func TestWakeExecTimeoutUsesRunnerSpecificBudgets(t *testing.T) {
 	if got := wakeExecTimeout("openclaw-exec"); got != openclawWakeExecTimeout {
 		t.Fatalf("expected openclaw wake timeout %v, got %v", openclawWakeExecTimeout, got)
 	}
-	if got := wakeExecTimeout("hermes-exec"); got != defaultWakeExecTimeout {
+	if got := wakeExecTimeout("hermes-exec"); got != hermesWakeExecTimeout {
+		t.Fatalf("expected hermes wake timeout %v, got %v", hermesWakeExecTimeout, got)
+	}
+	if got := wakeExecTimeout("nanobot-exec"); got != defaultWakeExecTimeout {
 		t.Fatalf("expected default wake timeout %v, got %v", defaultWakeExecTimeout, got)
 	}
 }

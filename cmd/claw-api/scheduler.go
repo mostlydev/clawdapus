@@ -72,6 +72,7 @@ type dispatchOptions struct {
 
 const defaultWakeExecTimeout = 30 * time.Second
 const openclawWakeExecTimeout = schedulepkg.MaxWakeExecTimeout
+const hermesWakeExecTimeout = schedulepkg.MaxWakeExecTimeout
 
 var errScheduleInvocationInFlight = errors.New("schedule invocation already in flight")
 
@@ -610,6 +611,8 @@ func wakeExecTimeout(adapter string) time.Duration {
 	switch strings.TrimSpace(adapter) {
 	case "openclaw-exec":
 		return openclawWakeExecTimeout
+	case "hermes-exec":
+		return hermesWakeExecTimeout
 	default:
 		return defaultWakeExecTimeout
 	}
