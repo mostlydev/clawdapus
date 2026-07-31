@@ -139,18 +139,20 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	var serveErr error
 	select {
 	case sig := <-sigCh:
 		fmt.Fprintf(stderr, "received signal %s, shutting down\n", sig)
 	case err := <-errCh:
-		stopRuntime()
-		return err
+		serveErr = err
 	}
 
 	stopRuntime()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return server.Shutdown(ctx)
+	serverErr := server.Shutdown(ctx)
+	schedulerErr := scheduler.Wait(ctx)
+	return errors.Join(serveErr, serverErr, schedulerErr)
 }
 
 func loadManifest(path string) (*manifestpkg.PodManifest, error) {

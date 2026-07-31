@@ -712,6 +712,34 @@ func TestHandlerScheduleFireBypassesCalendarWhenRequested(t *testing.T) {
 	}
 }
 
+func TestHandlerScheduleFireReturnsConflictWhenInvocationIsInFlight(t *testing.T) {
+	manifest := sampleScheduleManifest()
+	state := newTestScheduleStateStore(t, manifest)
+	scheduler, err := newScheduler(manifest, nil, state, io.Discard)
+	if err != nil {
+		t.Fatalf("newScheduler: %v", err)
+	}
+	entry := scheduler.lookupEntry("westin-open")
+	scheduler.mu.Lock()
+	entry.inFlight = true
+	scheduler.mu.Unlock()
+	h := newScheduleTestHandler(t, manifest, state, scheduler, clawapi.Principal{
+		Name:     "westin-ops",
+		Token:    "capi_westin_ops",
+		Verbs:    []string{clawapi.VerbScheduleControl},
+		Services: []string{"westin"},
+	})
+
+	w := postJSON(t, h, "/schedule/westin-open/fire", map[string]any{}, "capi_westin_ops")
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), errScheduleInvocationInFlight.Error()) {
+		t.Fatalf("expected in-flight error body, got %s", w.Body.String())
+	}
+}
+
 func TestHandlerRestartRequiresRestartVerb(t *testing.T) {
 	h := newWriteHandler(t, t.TempDir(), clawapi.Principal{
 		Name:  "reader",

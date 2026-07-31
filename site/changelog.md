@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Slow scheduled wakes no longer block unrelated targets** -- claw-api dispatches due targets concurrently while serializing wakes per runner, coalesces overlapping slots without regressing next-fire state, rejects duplicate manual fires with a conflict, and drains active scheduler dispatches cleanly on shutdown. Closes [#347](https://github.com/mostlydev/clawdapus/issues/347).
 
 ## v0.27.0 <Badge type="tip" text="Latest" /> {#v0-27-0}
 

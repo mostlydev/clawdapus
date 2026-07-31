@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -25,8 +26,17 @@ type scheduler struct {
 	state    *scheduleStateStore
 	now      func() time.Time
 
-	mu      sync.RWMutex
-	entries []*scheduledInvocation
+	mu           sync.RWMutex
+	entries      []*scheduledInvocation
+	targetQueues map[string]*targetQueue
+	stopping     bool
+	stopCtx      context.Context
+	stopCancel   context.CancelFunc
+	dispatchWG   sync.WaitGroup
+	done         chan struct{}
+	logMu        sync.Mutex
+	dispatchFn   func(context.Context, *scheduledInvocation, time.Time, dispatchOptions) dispatchResult
+	lookupFn     func(context.Context, string) (types.Container, error)
 }
 
 type scheduledInvocation struct {
@@ -37,6 +47,7 @@ type scheduledInvocation struct {
 	lastFireUTC time.Time
 	lastStatus  string
 	lastDetail  string
+	inFlight    bool
 }
 
 type dispatchResult struct {
@@ -48,6 +59,7 @@ type dispatchResult struct {
 	failure       bool
 	clearPause    bool
 	clearSkipNext bool
+	canceled      bool
 }
 
 type dispatchOptions struct {
@@ -60,6 +72,8 @@ type dispatchOptions struct {
 
 const defaultWakeExecTimeout = 30 * time.Second
 const openclawWakeExecTimeout = 2 * time.Minute
+
+var errScheduleInvocationInFlight = errors.New("schedule invocation already in flight")
 
 func newScheduler(manifest *schedulepkg.Manifest, docker *client.Client, state *scheduleStateStore, log io.Writer) (*scheduler, error) {
 	if manifest == nil || len(manifest.Invocations) == 0 {
@@ -89,11 +103,16 @@ func newScheduler(manifest *schedulepkg.Manifest, docker *client.Client, state *
 			lastStatus:  "scheduled",
 		})
 	}
+	stopCtx, stopCancel := context.WithCancel(context.Background())
 	s := &scheduler{
-		manifest: manifest,
-		docker:   docker,
-		log:      log,
-		state:    state,
+		manifest:     manifest,
+		docker:       docker,
+		log:          log,
+		state:        state,
+		targetQueues: make(map[string]*targetQueue),
+		stopCtx:      stopCtx,
+		stopCancel:   stopCancel,
+		done:         make(chan struct{}),
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -109,6 +128,7 @@ func (s *scheduler) Run(ctx context.Context) {
 	if s == nil {
 		return
 	}
+	defer close(s.done)
 	s.logf("scheduler started with %d invocation(s)", len(s.entries))
 	timer := time.NewTimer(nextSchedulerDelay(time.Now().UTC()))
 	defer timer.Stop()
@@ -118,6 +138,12 @@ func (s *scheduler) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			s.stopScheduledDispatches()
+			s.dispatchWG.Wait()
+			s.logf("scheduler stopped")
+			return
+		case <-s.stopCtx.Done():
+			s.dispatchWG.Wait()
 			s.logf("scheduler stopped")
 			return
 		case <-timer.C:
@@ -129,32 +155,303 @@ func (s *scheduler) Run(ctx context.Context) {
 
 func (s *scheduler) tick(ctx context.Context, now time.Time) {
 	s.mu.Lock()
-	entries := append([]*scheduledInvocation(nil), s.entries...)
-	s.mu.Unlock()
-
-	for _, entry := range entries {
+	if s.stopping || ctx.Err() != nil {
+		s.mu.Unlock()
+		return
+	}
+	batches := make([]scheduledDispatchBatch, 0, len(s.entries))
+	batchByTarget := make(map[string]int)
+	nextFireUpdates := make([]nextFireUpdate, 0, len(s.entries))
+	suppressed := make([]string, 0)
+	for _, entry := range s.entries {
 		if entry == nil || entry.nextFireUTC.IsZero() || now.Before(entry.nextFireUTC) {
 			continue
 		}
 		fireAt := entry.nextFireUTC
-		result := s.dispatch(ctx, entry, fireAt)
-
-		s.mu.Lock()
-		entry.lastFireUTC = fireAt
-		entry.lastStatus = result.status
-		entry.lastDetail = result.detail
 		entry.nextFireUTC = nextScheduledFireUTC(entry.schedule, now, entry.location)
-		s.mu.Unlock()
+		nextFireUpdates = append(nextFireUpdates, nextFireUpdate{id: entry.manifest.ID, nextFire: entry.nextFireUTC})
+		if entry.inFlight {
+			suppressed = append(suppressed, entry.manifest.ID)
+			continue
+		}
+		entry.inFlight = true
+		target := strings.TrimSpace(entry.manifest.Wake.Target)
+		batchIndex, ok := batchByTarget[target]
+		if !ok {
+			batchIndex = len(batches)
+			batchByTarget[target] = batchIndex
+			queue := s.targetQueueLocked(target)
+			// Reserve synchronously so goroutine scheduling cannot reorder batches
+			// submitted by later ticks or manual fires.
+			batches = append(batches, scheduledDispatchBatch{
+				reservation: queue.reserve(),
+			})
+		}
+		batches[batchIndex].invocations = append(batches[batchIndex].invocations, scheduledDispatch{entry: entry, fireAt: fireAt})
+	}
+	s.dispatchWG.Add(len(batches))
+	s.mu.Unlock()
 
-		s.persistDispatchResult(entry, fireAt, entry.nextFireUTC, result)
+	if err := s.persistNextFireUpdates(nextFireUpdates); err != nil {
+		s.logf("persist next-fire updates failed: %v", err)
+	}
+	for _, id := range suppressed {
+		s.logf("schedule %s: overlap-suppressed", id)
+	}
+	for _, batch := range batches {
+		go s.runScheduledBatch(ctx, batch)
 	}
 }
 
-func (s *scheduler) dispatch(ctx context.Context, entry *scheduledInvocation, fireAt time.Time) dispatchResult {
-	return s.dispatchWithOptions(ctx, entry, fireAt, dispatchOptions{})
+type scheduledDispatch struct {
+	entry  *scheduledInvocation
+	fireAt time.Time
+}
+
+type scheduledDispatchBatch struct {
+	reservation *targetReservation
+	invocations []scheduledDispatch
+}
+
+type targetQueue struct {
+	mu      sync.Mutex
+	active  bool
+	waiters []*targetReservation
+}
+
+// A targetReservation is a FIFO ticket. One scheduled batch holds one ticket,
+// which prevents later work from interleaving between its manifest-ordered wakes.
+
+type targetReservation struct {
+	queue *targetQueue
+	ready chan struct{}
+	state targetReservationState
+}
+
+type targetReservationState uint8
+
+const (
+	reservationWaiting targetReservationState = iota
+	reservationGranted
+	reservationReleased
+	reservationCanceled
+)
+
+func (q *targetQueue) reserve() *targetReservation {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	reservation := &targetReservation{
+		queue: q,
+		ready: make(chan struct{}),
+		state: reservationWaiting,
+	}
+	if !q.active {
+		q.active = true
+		reservation.state = reservationGranted
+		close(reservation.ready)
+		return reservation
+	}
+	q.waiters = append(q.waiters, reservation)
+	return reservation
+}
+
+func (r *targetReservation) acquire(ctx context.Context) bool {
+	if r == nil {
+		return false
+	}
+	if ctx == nil {
+		r.cancel()
+		return false
+	}
+	if ctx.Err() != nil {
+		r.cancel()
+		return false
+	}
+	select {
+	case <-r.ready:
+		r.queue.mu.Lock()
+		granted := r.state == reservationGranted
+		r.queue.mu.Unlock()
+		if !granted || ctx.Err() != nil {
+			r.cancel()
+			return false
+		}
+		return true
+	case <-ctx.Done():
+		r.cancel()
+		return false
+	}
+}
+
+func (r *targetReservation) cancel() {
+	if r == nil || r.queue == nil {
+		return
+	}
+	q := r.queue
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	switch r.state {
+	case reservationWaiting:
+		for index, waiter := range q.waiters {
+			if waiter == r {
+				q.waiters = append(q.waiters[:index], q.waiters[index+1:]...)
+				break
+			}
+		}
+		r.state = reservationCanceled
+		close(r.ready)
+	case reservationGranted:
+		r.state = reservationCanceled
+		q.grantNextLocked()
+	}
+}
+
+func (r *targetReservation) release() {
+	if r == nil || r.queue == nil {
+		return
+	}
+	q := r.queue
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if r.state != reservationGranted {
+		return
+	}
+	r.state = reservationReleased
+	q.grantNextLocked()
+}
+
+func (q *targetQueue) grantNextLocked() {
+	for len(q.waiters) > 0 {
+		next := q.waiters[0]
+		q.waiters = q.waiters[1:]
+		if next.state != reservationWaiting {
+			continue
+		}
+		next.state = reservationGranted
+		close(next.ready)
+		return
+	}
+	q.active = false
+}
+
+type nextFireUpdate struct {
+	id       string
+	nextFire time.Time
+}
+
+func (s *scheduler) runScheduledBatch(ctx context.Context, batch scheduledDispatchBatch) {
+	defer s.dispatchWG.Done()
+	if !batch.reservation.acquire(ctx) {
+		for _, invocation := range batch.invocations {
+			s.markInvocationIdle(invocation.entry)
+		}
+		return
+	}
+	defer batch.reservation.release()
+
+	for index, invocation := range batch.invocations {
+		if ctx.Err() != nil {
+			for _, pending := range batch.invocations[index:] {
+				s.markInvocationIdle(pending.entry)
+			}
+			break
+		}
+		result := s.executeDispatch(ctx, invocation.entry, invocation.fireAt, dispatchOptions{})
+		if result.canceled {
+			s.logf("schedule %s: wake canceled", invocation.entry.manifest.ID)
+			for _, pending := range batch.invocations[index:] {
+				s.markInvocationIdle(pending.entry)
+			}
+			break
+		}
+		s.completeScheduledDispatch(invocation.entry, invocation.fireAt, result)
+		if ctx.Err() != nil {
+			for _, pending := range batch.invocations[index+1:] {
+				s.markInvocationIdle(pending.entry)
+			}
+			break
+		}
+	}
+}
+
+func (s *scheduler) completeScheduledDispatch(entry *scheduledInvocation, fireAt time.Time, result dispatchResult) {
+	defer s.markInvocationIdle(entry)
+	s.mu.Lock()
+	entry.lastFireUTC = fireAt
+	entry.lastStatus = result.status
+	entry.lastDetail = result.detail
+	nextFire := entry.nextFireUTC
+	s.mu.Unlock()
+
+	if err := s.persistDispatchResult(entry, fireAt, nextFire, result); err != nil {
+		s.logf("schedule %s: persist state failed: %v", entry.manifest.ID, err)
+	}
+}
+
+func (s *scheduler) executeDispatch(ctx context.Context, entry *scheduledInvocation, fireAt time.Time, opts dispatchOptions) dispatchResult {
+	if s.dispatchFn != nil {
+		return s.dispatchFn(ctx, entry, fireAt, opts)
+	}
+	return s.dispatchWithOptions(ctx, entry, fireAt, opts)
+}
+
+func (s *scheduler) targetQueueLocked(target string) *targetQueue {
+	key := strings.TrimSpace(target)
+	if s.targetQueues == nil {
+		s.targetQueues = make(map[string]*targetQueue)
+	}
+	if s.targetQueues[key] == nil {
+		s.targetQueues[key] = &targetQueue{}
+	}
+	return s.targetQueues[key]
+}
+
+func (s *scheduler) claimManualReservation(entry *scheduledInvocation) (*targetReservation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return nil, context.Canceled
+	}
+	if entry == nil || entry.inFlight {
+		return nil, errScheduleInvocationInFlight
+	}
+	entry.inFlight = true
+	return s.targetQueueLocked(entry.manifest.Wake.Target).reserve(), nil
+}
+
+func (s *scheduler) markInvocationIdle(entry *scheduledInvocation) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry != nil {
+		entry.inFlight = false
+	}
+}
+
+func (s *scheduler) stopScheduledDispatches() {
+	s.mu.Lock()
+	if !s.stopping {
+		s.stopping = true
+		s.stopCancel()
+	}
+	s.mu.Unlock()
+}
+
+func (s *scheduler) Wait(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	select {
+	case <-s.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *scheduler) dispatchWithOptions(ctx context.Context, entry *scheduledInvocation, fireAt time.Time, opts dispatchOptions) dispatchResult {
+	if err := ctx.Err(); err != nil {
+		return dispatchResult{status: "wake-canceled", detail: err.Error(), canceled: true}
+	}
 	var state schedulepkg.InvocationState
 	if s.state != nil {
 		state, _ = s.state.Invocation(entry.manifest.ID)
@@ -225,6 +522,12 @@ func (s *scheduler) dispatchWithOptions(ctx context.Context, entry *scheduledInv
 	target, err := s.lookupTargetContainer(ctx, entry.manifest.Wake.Target)
 	if err != nil {
 		detail := err.Error()
+		if ctx.Err() != nil {
+			result.status = "wake-canceled"
+			result.detail = detail
+			result.canceled = true
+			return result
+		}
 		s.logf("schedule %s: wake target error: %s", entry.manifest.ID, detail)
 		result.status = "wake-target-error"
 		result.detail = detail
@@ -245,6 +548,12 @@ func (s *scheduler) dispatchWithOptions(ctx context.Context, entry *scheduledInv
 	stdout, stderr, exitCode, err := shared.ExecInContainer(execCtx, s.docker, target.ID, entry.manifest.Wake.Command)
 	if err != nil {
 		detail := err.Error()
+		if ctx.Err() != nil {
+			result.status = "wake-canceled"
+			result.detail = detail
+			result.canceled = true
+			return result
+		}
 		s.logf("schedule %s: wake failed: %s", entry.manifest.ID, detail)
 		result.status = "wake-error"
 		result.detail = detail
@@ -336,6 +645,9 @@ func (s *scheduler) deferWakeForHealth(ctx context.Context, containerID, adapter
 }
 
 func (s *scheduler) lookupTargetContainer(ctx context.Context, target string) (types.Container, error) {
+	if s != nil && s.lookupFn != nil {
+		return s.lookupFn(ctx, target)
+	}
 	if s == nil || s.docker == nil {
 		return types.Container{}, fmt.Errorf("docker client unavailable")
 	}
@@ -364,14 +676,42 @@ func (s *scheduler) FireNow(ctx context.Context, id string, bypassWhen, bypassPa
 	if entry == nil {
 		return dispatchResult{}, fmt.Errorf("schedule %q not found", id)
 	}
+	reservation, err := s.claimManualReservation(entry)
+	if err != nil {
+		if errors.Is(err, errScheduleInvocationInFlight) {
+			return dispatchResult{}, fmt.Errorf("%w: %s", err, id)
+		}
+		return dispatchResult{}, err
+	}
+	defer s.markInvocationIdle(entry)
+	dispatchCtx, cancel := context.WithCancel(ctx)
+	stopCancel := context.AfterFunc(s.stopCtx, cancel)
+	defer func() {
+		stopCancel()
+		cancel()
+	}()
+	if !reservation.acquire(dispatchCtx) {
+		if err := dispatchCtx.Err(); err != nil {
+			return dispatchResult{}, err
+		}
+		return dispatchResult{}, context.Canceled
+	}
+	defer reservation.release()
+
 	fireAt := s.now()
-	result := s.dispatchWithOptions(ctx, entry, fireAt, dispatchOptions{
+	result := s.executeDispatch(dispatchCtx, entry, fireAt, dispatchOptions{
 		manual:         true,
 		bypassPause:    bypassPause,
 		bypassWhen:     bypassWhen,
 		ignoreSkipNext: true,
 		ignoreDegraded: true,
 	})
+	if result.canceled {
+		if err := dispatchCtx.Err(); err != nil {
+			return dispatchResult{}, err
+		}
+		return dispatchResult{}, context.Canceled
+	}
 
 	s.mu.Lock()
 	entry.lastFireUTC = fireAt
@@ -380,7 +720,9 @@ func (s *scheduler) FireNow(ctx context.Context, id string, bypassWhen, bypassPa
 	nextFire := entry.nextFireUTC
 	s.mu.Unlock()
 
-	s.persistDispatchResult(entry, fireAt, nextFire, result)
+	if err := s.persistDispatchResult(entry, fireAt, nextFire, result); err != nil {
+		s.logf("schedule %s: persist state failed: %v", entry.manifest.ID, err)
+	}
 	return result, nil
 }
 
@@ -402,6 +744,8 @@ func (s *scheduler) logf(format string, args ...any) {
 	if s == nil || s.log == nil {
 		return
 	}
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
 	fmt.Fprintf(s.log, "claw-api scheduler: "+format+"\n", args...)
 }
 
@@ -430,11 +774,24 @@ func (s *scheduler) syncInitialState() error {
 	})
 }
 
-func (s *scheduler) persistDispatchResult(entry *scheduledInvocation, fireAt, nextFire time.Time, result dispatchResult) {
-	if s == nil || s.state == nil {
-		return
+func (s *scheduler) persistNextFireUpdates(updates []nextFireUpdate) error {
+	if s == nil || s.state == nil || len(updates) == 0 {
+		return nil
 	}
-	if err := s.state.Update(func(file *schedulepkg.StateFile) {
+	return s.state.Update(func(file *schedulepkg.StateFile) {
+		for _, update := range updates {
+			state := file.Invocations[update.id]
+			setNextFireMonotonic(&state, update.nextFire)
+			file.Invocations[update.id] = state
+		}
+	})
+}
+
+func (s *scheduler) persistDispatchResult(entry *scheduledInvocation, fireAt, nextFire time.Time, result dispatchResult) error {
+	if s == nil || s.state == nil {
+		return nil
+	}
+	return s.state.Update(func(file *schedulepkg.StateFile) {
 		state := file.Invocations[entry.manifest.ID]
 		if result.clearPause {
 			state.Paused = false
@@ -446,12 +803,7 @@ func (s *scheduler) persistDispatchResult(entry *scheduledInvocation, fireAt, ne
 		}
 		evaluatedAt := fireAt.UTC()
 		state.LastEvaluatedAt = &evaluatedAt
-		if nextFire.IsZero() {
-			state.NextFireAt = nil
-		} else {
-			next := nextFire.UTC()
-			state.NextFireAt = &next
-		}
+		setNextFireMonotonic(&state, nextFire)
 		state.LastStatus = result.status
 		state.LastDetail = result.detail
 		if result.skipped {
@@ -474,8 +826,17 @@ func (s *scheduler) persistDispatchResult(entry *scheduledInvocation, fireAt, ne
 			}
 		}
 		file.Invocations[entry.manifest.ID] = state
-	}); err != nil {
-		s.logf("schedule %s: persist state failed: %v", entry.manifest.ID, err)
+	})
+}
+
+func setNextFireMonotonic(state *schedulepkg.InvocationState, nextFire time.Time) {
+	if nextFire.IsZero() {
+		state.NextFireAt = nil
+		return
+	}
+	next := nextFire.UTC()
+	if state.NextFireAt == nil || next.After(state.NextFireAt.UTC()) {
+		state.NextFireAt = &next
 	}
 }
 

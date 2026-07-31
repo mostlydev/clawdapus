@@ -475,6 +475,10 @@ func (h *apiHandler) handleScheduleFire(w http.ResponseWriter, r *http.Request, 
 			writeJSONError(w, http.StatusNotFound, err.Error())
 			return
 		}
+		if errors.Is(err, errScheduleInvocationInFlight) {
+			writeJSONError(w, http.StatusConflict, err.Error())
+			return
+		}
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
