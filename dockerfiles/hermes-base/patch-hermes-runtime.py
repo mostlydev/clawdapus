@@ -844,6 +844,30 @@ skill_manager_tool.write_text(text)
 cron_scheduler = purelib / "cron" / "scheduler.py"
 text = cron_scheduler.read_text()
 
+# Cron jobs initialize Hermes with skip_memory=True so their system prompts do
+# not mutate user representations. Keep the advertised tools consistent with
+# that runtime capability while leaving native memory available to interactive
+# agents.
+text = replace_once(
+    text,
+    "    Three protected toolsets are always disabled in cron context:\n"
+    "      - ``cronjob`` — would let a cron-spawned agent schedule more cron jobs\n"
+    "      - ``messaging`` — interactive, needs a live gateway session\n"
+    "      - ``clarify`` — interactive, blocks waiting for user input\n",
+    "    Four protected toolsets are always disabled in cron context:\n"
+    "      - ``cronjob`` — would let a cron-spawned agent schedule more cron jobs\n"
+    "      - ``messaging`` — interactive, needs a live gateway session\n"
+    "      - ``clarify`` — interactive, blocks waiting for user input\n"
+    "      - ``memory`` — unavailable because cron agents use ``skip_memory=True``\n",
+    "cron scheduler protected toolsets documentation",
+)
+text = replace_once(
+    text,
+    '    disabled = ["cronjob", "messaging", "clarify"]\n',
+    '    disabled = ["cronjob", "messaging", "clarify", "memory"]\n',
+    "cron scheduler memory tool suppression",
+)
+
 # Cron transient-failure delivery: provider/cllama outages are already logged
 # and recorded on the job run. They should not be posted into user channels as
 # actionable cron responses, while real operator-actionable cron failures still
