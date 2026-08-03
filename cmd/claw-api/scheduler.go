@@ -142,10 +142,6 @@ func (s *scheduler) Run(ctx context.Context) {
 			s.dispatchWG.Wait()
 			s.logf("scheduler stopped")
 			return
-		case <-s.stopCtx.Done():
-			s.dispatchWG.Wait()
-			s.logf("scheduler stopped")
-			return
 		case <-timer.C:
 			s.tick(ctx, time.Now().UTC())
 			timer.Reset(nextSchedulerDelay(time.Now().UTC()))
@@ -162,18 +158,25 @@ func (s *scheduler) tick(ctx context.Context, now time.Time) {
 	batches := make([]scheduledDispatchBatch, 0, len(s.entries))
 	batchByTarget := make(map[string]int)
 	nextFireUpdates := make([]nextFireUpdate, 0, len(s.entries))
-	suppressed := make([]string, 0)
+	suppressed := make([]suppressedSlot, 0)
 	for _, entry := range s.entries {
 		if entry == nil || entry.nextFireUTC.IsZero() || now.Before(entry.nextFireUTC) {
 			continue
 		}
 		fireAt := entry.nextFireUTC
 		entry.nextFireUTC = nextScheduledFireUTC(entry.schedule, now, entry.location)
-		nextFireUpdates = append(nextFireUpdates, nextFireUpdate{id: entry.manifest.ID, nextFire: entry.nextFireUTC})
+		update := nextFireUpdate{id: entry.manifest.ID, nextFire: entry.nextFireUTC}
 		if entry.inFlight {
-			suppressed = append(suppressed, entry.manifest.ID)
+			// The previous wake for this invocation is still running, so this
+			// slot is dropped rather than queued. Record it in schedule state:
+			// the log line alone is invisible to clawdash and claw api schedule.
+			slot := fireAt
+			update.suppressedSlot = &slot
+			nextFireUpdates = append(nextFireUpdates, update)
+			suppressed = append(suppressed, suppressedSlot{id: entry.manifest.ID, slot: fireAt})
 			continue
 		}
+		nextFireUpdates = append(nextFireUpdates, update)
 		entry.inFlight = true
 		target := strings.TrimSpace(entry.manifest.Wake.Target)
 		batchIndex, ok := batchByTarget[target]
@@ -195,8 +198,8 @@ func (s *scheduler) tick(ctx context.Context, now time.Time) {
 	if err := s.persistNextFireUpdates(nextFireUpdates); err != nil {
 		s.logf("persist next-fire updates failed: %v", err)
 	}
-	for _, id := range suppressed {
-		s.logf("schedule %s: overlap-suppressed", id)
+	for _, entry := range suppressed {
+		s.logf("schedule %s: overlap-suppressed slot %s", entry.id, entry.slot.UTC().Format(time.RFC3339))
 	}
 	for _, batch := range batches {
 		go s.runScheduledBatch(ctx, batch)
@@ -337,6 +340,14 @@ func (q *targetQueue) grantNextLocked() {
 type nextFireUpdate struct {
 	id       string
 	nextFire time.Time
+	// suppressedSlot is set when this tick found the invocation still in
+	// flight, so the due slot was dropped instead of dispatched.
+	suppressedSlot *time.Time
+}
+
+type suppressedSlot struct {
+	id   string
+	slot time.Time
 }
 
 func (s *scheduler) runScheduledBatch(ctx context.Context, batch scheduledDispatchBatch) {
@@ -782,6 +793,11 @@ func (s *scheduler) persistNextFireUpdates(updates []nextFireUpdate) error {
 		for _, update := range updates {
 			state := file.Invocations[update.id]
 			setNextFireMonotonic(&state, update.nextFire)
+			if update.suppressedSlot != nil {
+				state.SuppressedSlots++
+				slot := update.suppressedSlot.UTC()
+				state.LastSuppressedAt = &slot
+			}
 			file.Invocations[update.id] = state
 		}
 	})

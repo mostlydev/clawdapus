@@ -23,6 +23,12 @@ type InvocationState struct {
 	NextFireAt          *time.Time `json:"next_fire_at,omitempty"`
 	LastStatus          string     `json:"last_status,omitempty"`
 	LastDetail          string     `json:"last_detail,omitempty"`
+	// SuppressedSlots counts due fire slots that were dropped because the
+	// previous wake for the same invocation was still running. It is
+	// cumulative and never reset, so the operator surface can distinguish a
+	// schedule that quietly coalesces from one that fires every slot.
+	SuppressedSlots  int        `json:"suppressed_slots,omitempty"`
+	LastSuppressedAt *time.Time `json:"last_suppressed_at,omitempty"`
 }
 
 func (s StateFile) Clone() StateFile {
@@ -58,6 +64,8 @@ func (s InvocationState) Clone() InvocationState {
 		NextFireAt:          cloneTimePtr(s.NextFireAt),
 		LastStatus:          s.LastStatus,
 		LastDetail:          s.LastDetail,
+		SuppressedSlots:     s.SuppressedSlots,
+		LastSuppressedAt:    cloneTimePtr(s.LastSuppressedAt),
 	}
 }
 

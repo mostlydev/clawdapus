@@ -312,6 +312,70 @@ func TestSchedulerDoesNotOverlapSameInvocation(t *testing.T) {
 	}
 }
 
+func TestSchedulerRecordsSuppressedSlotsInState(t *testing.T) {
+	now := time.Date(2026, time.July, 2, 14, 45, 0, 0, time.UTC)
+	scheduler, state := newDueTestScheduler(t, now, testScheduleEntry{id: "analyst-open", target: "analyst"})
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	scheduler.dispatchFn = func(_ context.Context, entry *scheduledInvocation, _ time.Time, _ dispatchOptions) dispatchResult {
+		started <- entry.manifest.ID
+		<-release
+		return dispatchResult{status: "fired", attempted: true, fired: true}
+	}
+
+	scheduler.tick(context.Background(), now)
+	awaitDispatchStart(t, started)
+
+	// Two further slots come due while the first wake is still running. A wake
+	// budget longer than the schedule cadence makes this ordinary, not exotic.
+	scheduler.tick(context.Background(), now.Add(time.Minute))
+	scheduler.tick(context.Background(), now.Add(2*time.Minute))
+
+	invocation := stateForInvocation(t, state, "analyst-open")
+	if invocation.SuppressedSlots != 2 {
+		t.Fatalf("expected 2 suppressed slots recorded, got %d", invocation.SuppressedSlots)
+	}
+	wantSuppressed := now.Add(2 * time.Minute)
+	if invocation.LastSuppressedAt == nil || !invocation.LastSuppressedAt.Equal(wantSuppressed) {
+		t.Fatalf("expected last suppressed slot %s, got %+v", wantSuppressed, invocation.LastSuppressedAt)
+	}
+
+	close(release)
+	waitForInvocationIdle(t, scheduler, "analyst-open")
+
+	// Completing the in-flight wake must not erase the audit record of the
+	// slots that were dropped while it ran.
+	invocation = stateForInvocation(t, state, "analyst-open")
+	if invocation.LastStatus != "fired" {
+		t.Fatalf("expected completed wake to persist fired, got %q", invocation.LastStatus)
+	}
+	if invocation.SuppressedSlots != 2 {
+		t.Fatalf("completion erased suppressed-slot count, got %d", invocation.SuppressedSlots)
+	}
+	if invocation.LastSuppressedAt == nil || !invocation.LastSuppressedAt.Equal(wantSuppressed) {
+		t.Fatalf("completion erased last suppressed slot, got %+v", invocation.LastSuppressedAt)
+	}
+}
+
+func TestSchedulerLeavesSuppressedSlotsUntouchedWithoutOverlap(t *testing.T) {
+	now := time.Date(2026, time.July, 2, 14, 45, 0, 0, time.UTC)
+	scheduler, state := newDueTestScheduler(t, now, testScheduleEntry{id: "analyst-open", target: "analyst"})
+	scheduler.dispatchFn = func(_ context.Context, _ *scheduledInvocation, _ time.Time, _ dispatchOptions) dispatchResult {
+		return dispatchResult{status: "fired", attempted: true, fired: true}
+	}
+
+	scheduler.tick(context.Background(), now)
+	waitForInvocationIdle(t, scheduler, "analyst-open")
+
+	invocation := stateForInvocation(t, state, "analyst-open")
+	if invocation.SuppressedSlots != 0 {
+		t.Fatalf("expected no suppressed slots for a clean dispatch, got %d", invocation.SuppressedSlots)
+	}
+	if invocation.LastSuppressedAt != nil {
+		t.Fatalf("expected no suppressed timestamp for a clean dispatch, got %+v", invocation.LastSuppressedAt)
+	}
+}
+
 func TestSchedulerFireNowRejectsInvocationAlreadyInFlight(t *testing.T) {
 	now := time.Date(2026, time.July, 2, 14, 45, 0, 0, time.UTC)
 	scheduler, _ := newDueTestScheduler(t, now, testScheduleEntry{id: "analyst-open", target: "analyst"})
