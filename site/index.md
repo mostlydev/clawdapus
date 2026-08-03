@@ -49,7 +49,7 @@ FROM openclaw:latest
 CLAW_TYPE openclaw
 AGENT AGENTS.md
 
-MODEL primary openrouter/anthropic/claude-sonnet-4
+MODEL primary openrouter/anthropic/claude-sonnet-5
 CLLAMA passthrough
 
 HANDLE discord

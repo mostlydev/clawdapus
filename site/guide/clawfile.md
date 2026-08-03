@@ -176,7 +176,7 @@ The `MODEL` directive binds named slots to provider/model pairs:
 ```dockerfile
 MODEL primary openrouter/anthropic/claude-sonnet-5
 MODEL fallback anthropic/claude-haiku-4-5
-MODEL summarizer openrouter/google/gemini-flash-2.0
+MODEL summarizer openrouter/google/gemini-3.6-flash
 ```
 
 When cllama is enabled, the proxy can silently downgrade a requested model (e.g., from a primary to a fallback) and meter usage without exposing provider credentials to the agent. Hard budget caps and proxy-level rate limits are tracked as future enforcement work.
