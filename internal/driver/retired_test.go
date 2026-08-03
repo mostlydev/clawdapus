@@ -24,12 +24,9 @@ func TestLookupRejectsRetiredRunnersWithMigrationGuidance(t *testing.T) {
 			if !strings.Contains(msg, "ADR-026") {
 				t.Errorf("error should point at the decision record, got %q", msg)
 			}
-			for _, retained := range []string{"openclaw", "hermes", "picoclaw", "nanobot"} {
-				if strings.Contains(msg, retained) {
-					return
-				}
+			if !strings.Contains(msg, `CLAW_TYPE "hermes"`) {
+				t.Errorf("error should name Hermes as the migration target, got %q", msg)
 			}
-			t.Errorf("error should name at least one supported runner to migrate to, got %q", msg)
 		})
 	}
 }

@@ -5,11 +5,26 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
+
+func TestBuiltInDriverSetMatchesSupportedContract(t *testing.T) {
+	registered := driver.Registered()
+	got := make([]string, 0, len(registered))
+	for name := range registered {
+		got = append(got, name)
+	}
+	sort.Strings(got)
+	want := []string{"hermes", "nanobot", "openclaw", "picoclaw"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("registered built-in drivers = %v, want %v", got, want)
+	}
+}
 
 func TestGenerateWritesDockerfile(t *testing.T) {
 	dir := t.TempDir()
@@ -72,6 +87,29 @@ AGENT CONTRACT.md
 	}
 	if !strings.Contains(err.Error(), "unknown CLAW_TYPE") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGenerateRejectsRetiredClawTypesWithMigrationGuidance(t *testing.T) {
+	for _, clawType := range []string{"nanoclaw", "microclaw", "nullclaw"} {
+		t.Run(clawType, func(t *testing.T) {
+			dir := t.TempDir()
+			clawfilePath := filepath.Join(dir, "Clawfile")
+			input := "FROM alpine:latest\nCLAW_TYPE " + clawType + "\nAGENT AGENTS.md\n"
+			if err := os.WriteFile(clawfilePath, []byte(input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Generate(clawfilePath)
+			if err == nil {
+				t.Fatalf("expected Generate to reject retired CLAW_TYPE %q", clawType)
+			}
+			for _, want := range []string{clawType, "retired", "ADR-026", `CLAW_TYPE "hermes"`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("retirement error %q does not contain %q", err, want)
+				}
+			}
+		})
 	}
 }
 

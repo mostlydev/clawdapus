@@ -349,11 +349,11 @@ The policy is tunable from the pod YAML via `x-claw.tool-policy` (service level)
 
 ## Communication Tools Contract
 
-All 7 runtimes enforce private thinking + deliberate delivery — agent reasoning never reaches Discord automatically.
+All four drivers compile mention-only channel consumption so an unaddressed bot message does not create a feedback loop.
 
 - **Hermes**: `HERMES_TOOL_ONLY_MODE=1` injected when Discord handles are present; runtime patches prefer `send_message`, suppress duplicate final text after a successful `send_message`, and fall back to final-text delivery rather than silently dropping replies
 - **OpenClaw**: enforced natively
-- **NullClaw, MicroClaw, NanoClaw, NanoBot, PicoClaw**: `discord-responder.sh` passes a `send_message` tool to the LLM; only posts to Discord when the tool is called
+- **NanoBot and PicoClaw**: generated channel configuration enables each runner's mention-only equivalent
 
 CLAWDAPUS.md includes a `## Communication Tools` section with private-thinking policy whenever handles are configured.
 
@@ -430,7 +430,6 @@ When the aggregate cap drops a feed the model sees an explicit `--- FEED: <name>
 | `compose.generated.yml` | Final compose with all enforcement | Next to claw-pod.yml |
 | `CLAWDAPUS.md` | Per-agent infrastructure map | Mounted into container |
 | `AGENTS.effective.md` | Merged contract + CLAWDAPUS.md (OpenClaw and Hermes cllama context) | Mounted into container or cllama context |
-| `CLAUDE.md` | Combined contract + CLAWDAPUS.md (NanoClaw) | Mounted into container |
 | `openclaw.json` | Generated runner config (OpenClaw) | Bind-mounted directory |
 | `config.yaml` / `.env` | Generated runner config (Hermes) | Bind-mounted directory |
 | `jobs.json` | Cron schedule for INVOKE tasks | Runner state directory |
@@ -444,7 +443,7 @@ When the aggregate cap drops a feed the model sees an explicit `--- FEED: <name>
 |--------|-----------|--------|--------------|-------|
 | OpenClaw | `openclaw` | OpenClaw | JSON5 Go-native patching -> `openclaw.json` | Primary driver. Read-only container. Docker exec health probe. |
 | Hermes | `hermes` | Hermes (Python) | `config.yaml` + `.env` | Discord/Telegram/Slack. `HERMES_TOOL_ONLY_MODE`. Requires at least one handle. |
-| NanoBot | `nanobot` | Nanobot (Node.js) | `config.json` | Cron via `jobs.json`. Merged AGENTS.md. |
+| NanoBot | `nanobot` | Nanobot (Python) | `config.json` | Cron via `jobs.json`. Merged AGENTS.md. |
 | PicoClaw | `picoclaw` | PicoClaw | `config.json` | HTTP `/health` + `/ready` probe. Read-only container. |
 
 Retired (ADR-026): `nanoclaw`, `microclaw`, `nullclaw` — these `CLAW_TYPE`s fail `claw up` with a migration message.

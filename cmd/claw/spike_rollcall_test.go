@@ -182,8 +182,7 @@ func TestSpikeRollCall(t *testing.T) {
 		{
 			// nb-roll carries the anthropic-messages ingress surface for the
 			// default run. The retired nullclaw/nanoclaw stubs used to cover
-			// it (ADR-026); pc-roll also exercises it but is gated behind
-			// CLAW_SPIKE_ENABLE_PICOCLAW while #137 is open. Stubs send the
+			// it (ADR-026). Stubs send the
 			// bare provider/model ref directly via curl, so we must use a
 			// model name that Anthropic actually recognises today
 			// (claude-sonnet-4 alone is no longer a valid alias upstream).
@@ -195,17 +194,14 @@ func TestSpikeRollCall(t *testing.T) {
 			requireKeys:     []string{"ANTHROPIC_API_KEY"},
 		},
 		{
-			// pc-roll is currently broken upstream — picoclaw's gateway binary
-			// rejects a port=0 config pre-check that the clawdapus picoclaw
-			// driver does not populate. Reproduces on master, tracked in #137.
-			// Gated behind CLAW_SPIKE_ENABLE_PICOCLAW so it skips by default
-			// instead of failing the suite while #137 is open.
+			// #137 fixed the upstream gateway-port regression; keep PicoClaw in
+			// the default matrix so rollcall covers every retained driver.
 			name:            "pc-roll",
 			runtime:         "picoclaw",
 			proxyFormat:     "anthropic",
 			proxyModel:      "anthropic/claude-sonnet-4-6",
 			expectedSurface: "anthropic-messages",
-			requireKeys:     []string{"ANTHROPIC_API_KEY", "CLAW_SPIKE_ENABLE_PICOCLAW"},
+			requireKeys:     []string{"ANTHROPIC_API_KEY"},
 		},
 		{
 			name:            "hm-roll",

@@ -22,8 +22,7 @@ New to Hermes? Start with the dedicated [Hermes quickstart](/guide/hermes).
 ::: info Retired drivers
 `nanoclaw`, `microclaw`, and `nullclaw` were retired in
 [ADR-026](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/026-runner-adoption-and-retirement.md).
-Their `CLAW_TYPE`s fail `claw up` with a migration message naming the closest
-supported runner.
+Their `CLAW_TYPE`s fail `claw up` with a migration message pointing to Hermes.
 :::
 
 **PicoClaw long-tail platforms:** WhatsApp, Feishu, LINE, QQ, DingTalk, OneBot, WeCom, WeCom App, Pico, MaixCam.

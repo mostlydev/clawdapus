@@ -42,6 +42,22 @@ func TestParseClawTypeRejectsUnknownValue(t *testing.T) {
 	}
 }
 
+func TestParseClawTypeRejectsRetiredValuesWithMigrationGuidance(t *testing.T) {
+	for _, clawType := range []string{"nanoclaw", "microclaw", "nullclaw"} {
+		t.Run(clawType, func(t *testing.T) {
+			_, err := parseClawType(clawType)
+			if err == nil {
+				t.Fatalf("expected %s to be rejected", clawType)
+			}
+			for _, want := range []string{clawType, "retired", "ADR-026", `CLAW_TYPE "hermes"`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("retirement error %q does not contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestDefaultBaseImageForClawType(t *testing.T) {
 	tests := []struct {
 		name     string

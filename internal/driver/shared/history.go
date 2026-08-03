@@ -53,6 +53,14 @@ func legacyPortableHistoryDirs(root string) []portableHistoryDirMapping {
 		{srcPath: filepath.Join(root, "nanobot-home", "sessions"), dstRel: filepath.Join("nanobot", "sessions")},
 		{srcPath: filepath.Join(root, "picoclaw-home", "workspace", "sessions"), dstRel: filepath.Join("picoclaw", "sessions")},
 		{srcPath: filepath.Join(root, "picoclaw-home", "sessions"), dstRel: filepath.Join("picoclaw", "sessions")},
+		// Retired runner paths remain importable so an operator can migrate
+		// without losing the portable history those drivers already wrote.
+		{srcPath: filepath.Join(root, "data", "working_dir", "sessions"), dstRel: filepath.Join("microclaw", "sessions")},
+		{srcPath: filepath.Join(root, "data", "working_dir", "history"), dstRel: filepath.Join("microclaw", "history")},
+		{srcPath: filepath.Join(root, "nullclaw-home", "sessions"), dstRel: filepath.Join("nullclaw", "sessions")},
+		{srcPath: filepath.Join(root, "nullclaw-home", "history"), dstRel: filepath.Join("nullclaw", "history")},
+		{srcPath: filepath.Join(root, "data", "sessions"), dstRel: filepath.Join("nanoclaw", "data-sessions")},
+		{srcPath: filepath.Join(root, "store", "sessions"), dstRel: filepath.Join("nanoclaw", "store-sessions")},
 	}
 }
 

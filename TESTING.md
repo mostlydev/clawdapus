@@ -35,7 +35,7 @@ Docker, and a real Discord server. They are not CI tests.
 
 The two primary spike paths are:
 
-- `TestSpikeRollCall`: the broad driver-parity validation path. Boots all 7 driver
+- `TestSpikeRollCall`: the broad driver-parity validation path. Boots all 4 retained driver
   types plus `cllama` passthrough and `clawdash`, sends a Discord roll call, and
   verifies runtime-specific responses.
 - `TestSpikeComposeUp`: the deeper trading-desk validation path. Focuses on artifact
@@ -54,9 +54,6 @@ cross-driver support. It uses [`examples/rollcall/`](./examples/rollcall/) and
 exercises:
 
 - `openclaw`
-- `nullclaw`
-- `microclaw`
-- `nanoclaw`
 - `nanobot`
 - `picoclaw`
 - `hermes`
@@ -65,7 +62,7 @@ exercises:
 
 ### What it validates
 
-- Base images build for all 7 driver families
+- Base images build for all 4 retained driver families
 - Agent images build from their `Clawfile`s
 - `claw up` succeeds on the rollcall pod
 - All agent containers converge to healthy/running state

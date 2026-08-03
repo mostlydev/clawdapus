@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-08-03T00:00:00Z",
+  "captured_at": "2026-08-03T01:58:23.798226Z",
   "window_days": 30,
   "window_count": 4,
   "limitations": [
@@ -12,49 +12,66 @@
     {
       "driver": "openclaw",
       "repo": "openclaw/openclaw",
-      "stars": 384956,
-      "forks": 80902,
-      "pushed_at": "2026-08-03T01:06:49Z",
+      "stars": 384960,
+      "forks": 80906,
+      "pushed_at": "2026-08-03T01:58:22Z",
       "latest_release": "2026-08-02T08:11:31Z",
       "fork_windows": [
-        1805,
-        2187,
-        3758,
-        6995
-      ]
+        1807,
+        2182,
+        3756,
+        6980
+      ],
+      "commit_windows_90d": [
+        34524,
+        32475
+      ],
+      "release_count": 229,
+      "release_asset_downloads": 1825617
     },
     {
       "driver": "hermes",
       "repo": "NousResearch/hermes-agent",
-      "stars": 224327,
-      "forks": 43378,
-      "pushed_at": "2026-08-03T00:20:48Z",
+      "stars": 224342,
+      "forks": 43387,
+      "pushed_at": "2026-08-03T01:53:26Z",
       "latest_release": "2026-07-30T23:45:37Z",
       "fork_windows": [
-        6043,
-        7598,
-        10438,
-        16303
-      ]
+        6036,
+        7587,
+        10442,
+        16307
+      ],
+      "commit_windows_90d": [
+        13124,
+        7074
+      ],
+      "release_count": 23,
+      "release_asset_downloads": 25561
     },
     {
       "driver": "nanobot",
       "repo": "HKUDS/nanobot",
       "pypi": "nanobot-ai",
-      "stars": 46521,
+      "stars": 46522,
       "forks": 8231,
-      "pushed_at": "2026-08-02T15:25:22Z",
+      "pushed_at": "2026-08-03T01:51:35Z",
       "latest_release": "2026-07-25T08:08:47Z",
       "fork_windows": [
         366,
-        316,
-        482,
-        811
+        314,
+        480,
+        813
       ],
+      "commit_windows_90d": [
+        1479,
+        2192
+      ],
+      "release_count": 19,
       "pypi_monthly": [
         {
           "period": "2026-02",
-          "count": 50395
+          "count": 49581
         },
         {
           "period": "2026-03",
@@ -86,16 +103,21 @@
       "driver": "nanoclaw",
       "repo": "nanocoai/nanoclaw",
       "note": "canonical repo redirected from qwibitai/nanoclaw",
-      "stars": 30410,
+      "stars": 30411,
       "forks": 12871,
       "pushed_at": "2026-08-02T14:13:24Z",
       "latest_release": "2026-08-01T20:46:31Z",
       "fork_windows": [
         167,
-        223,
-        412,
-        2355
-      ]
+        222,
+        413,
+        2346
+      ],
+      "commit_windows_90d": [
+        888,
+        1310
+      ],
+      "release_count": 5
     },
     {
       "driver": "picoclaw",
@@ -108,9 +130,16 @@
       "fork_windows": [
         315,
         102,
-        156,
-        305
-      ]
+        154,
+        306
+      ],
+      "commit_windows_90d": [
+        506,
+        2077
+      ],
+      "release_count": 16,
+      "release_asset_downloads": 227049,
+      "docker_hub_pulls": 210807
     },
     {
       "driver": "microclaw",
@@ -124,7 +153,13 @@
         3,
         10,
         8
-      ]
+      ],
+      "commit_windows_90d": [
+        91,
+        996
+      ],
+      "release_count": 161,
+      "release_asset_downloads": 12161
     },
     {
       "driver": "nullclaw",
@@ -138,7 +173,13 @@
         22,
         44,
         44
-      ]
+      ],
+      "commit_windows_90d": [
+        260,
+        2475
+      ],
+      "release_count": 30,
+      "release_asset_downloads": 13229
     }
   ]
 }

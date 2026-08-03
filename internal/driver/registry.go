@@ -16,14 +16,24 @@ func Register(name string, d Driver) {
 	drivers[name] = d
 }
 
-// retiredRunners maps a runner dropped by ADR-026 to the reason it went and
-// the supported runner closest to it. A retired type fails compilation with
-// this guidance rather than the generic unknown-driver message, so an operator
-// on an old pod file learns what happened instead of guessing at a typo.
-var retiredRunners = map[string]string{
-	"nanoclaw":  "no independent distribution channel to corroborate adoption, and the steepest adoption decay in the runner set; closest supported runner: nanobot",
-	"microclaw": "no material adoption growth; closest supported runner: picoclaw",
-	"nullclaw":  "upstream is no longer viable (no release in over 60 days); closest supported runner: picoclaw",
+const retiredRunnerMigrationTarget = "hermes"
+
+// retiredRunners records runner types deliberately removed by ADR-026. Keep
+// this compatibility error for one release so old Clawfiles fail with an
+// actionable migration instead of looking like typos.
+var retiredRunners = map[string]struct{}{
+	"nanoclaw":  {},
+	"microclaw": {},
+	"nullclaw":  {},
+}
+
+// RetirementError returns the canonical migration error for a retired runner.
+// Other unknown names return nil and keep the generic unknown-driver path.
+func RetirementError(name string) error {
+	if _, retired := retiredRunners[name]; !retired {
+		return nil
+	}
+	return fmt.Errorf("CLAW_TYPE %q was retired by ADR-026; migrate this Clawfile to CLAW_TYPE %q", name, retiredRunnerMigrationTarget)
 }
 
 func Lookup(name string) (Driver, error) {
@@ -31,8 +41,8 @@ func Lookup(name string) (Driver, error) {
 	defer mu.RUnlock()
 	d, ok := drivers[name]
 	if !ok {
-		if reason, retired := retiredRunners[name]; retired {
-			return nil, fmt.Errorf("CLAW_TYPE %q was retired in ADR-026: %s", name, reason)
+		if err := RetirementError(name); err != nil {
+			return nil, err
 		}
 		return nil, fmt.Errorf("unknown CLAW_TYPE %q: no registered driver", name)
 	}

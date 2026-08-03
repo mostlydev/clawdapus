@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
 
@@ -160,6 +161,9 @@ func parseClawType(value string) (string, error) {
 	case "openclaw", "hermes", "nanobot", "picoclaw", "generic":
 		return v, nil
 	default:
+		if err := driver.RetirementError(v); err != nil {
+			return "", err
+		}
 		return "", fmt.Errorf("invalid claw type %q (allowed: %s)", value, strings.Join(scaffoldClawTypes, ", "))
 	}
 }

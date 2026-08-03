@@ -8,20 +8,16 @@
 // stargazer timestamps are unavailable (the endpoint 404s for external repos)
 // and per-release downloads-per-day is confounded by post-publication decay.
 //
-// Classification thresholds deliberately live in ADR-026, not here, so a future
-// audit can refresh the data without inheriting today's judgement.
+// Classification judgments deliberately live in ADR-026, not here, so a future
+// audit can refresh the data without inheriting today's judgment.
 //
 // Usage:
 //
 //	go run ./scripts/runner-adoption-snapshot -out docs/evidence
 //
-// Requires an authenticated `gh` CLI on PATH.
-//
-// Fork pagination dominates the runtime: the window tally reads 100 forks per
-// request until it passes the oldest window, so a runner with tens of thousands
-// of recent forks costs hundreds of sequential API calls. A full 4x30d snapshot
-// across all runners spends a few thousand requests against the 5000/hour core
-// limit. Narrow -windows or -window-days when iterating.
+// Requires an authenticated `gh` CLI on PATH. Fork-window boundaries are found
+// with binary search over newest-first pages and cached across windows, so even
+// large repositories take tens of requests rather than hundreds.
 package main
 
 import (
@@ -30,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,17 +67,18 @@ type snapshot struct {
 
 type runnerResult struct {
 	runner
-	Stars         int      `json:"stars,omitempty"`
-	Forks         int      `json:"forks,omitempty"`
-	Archived      bool     `json:"archived,omitempty"`
-	PushedAt      string   `json:"pushed_at,omitempty"`
-	LatestRelease string   `json:"latest_release,omitempty"`
-	ForkWindows   []int    `json:"fork_windows,omitempty"`
-	PyPIMonthly   []bucket `json:"pypi_monthly,omitempty"`
-	Errors        []string `json:"errors,omitempty"`
-	// ForkWindowsTruncated marks counts that hit the page cap before reaching
-	// the oldest window. Such counts are lower bounds, not totals.
-	ForkWindowsTruncated bool `json:"fork_windows_truncated,omitempty"`
+	Stars          int      `json:"stars,omitempty"`
+	Forks          int      `json:"forks,omitempty"`
+	Archived       bool     `json:"archived,omitempty"`
+	PushedAt       string   `json:"pushed_at,omitempty"`
+	LatestRelease  string   `json:"latest_release,omitempty"`
+	ForkWindows    []int    `json:"fork_windows,omitempty"`
+	CommitWindows  []int    `json:"commit_windows_90d,omitempty"`
+	ReleaseCount   int      `json:"release_count,omitempty"`
+	AssetDownloads int      `json:"release_asset_downloads,omitempty"`
+	DockerHubPulls int      `json:"docker_hub_pulls,omitempty"`
+	PyPIMonthly    []bucket `json:"pypi_monthly,omitempty"`
+	Errors         []string `json:"errors,omitempty"`
 }
 
 type bucket struct {
@@ -92,17 +90,16 @@ func main() {
 	out := flag.String("out", "docs/evidence", "directory for the dated JSON artifact")
 	windowDays := flag.Int("window-days", 30, "width of each fork-count window in days")
 	windows := flag.Int("windows", 4, "number of consecutive windows to collect, newest first")
-	maxPages := flag.Int("max-pages", 0, "cap fork pages read per runner (0 = no cap); capped counts are marked truncated")
 	flag.Parse()
 
-	if err := run(*out, *windowDays, *windows, *maxPages); err != nil {
+	if err := run(*out, *windowDays, *windows); err != nil {
 		fmt.Fprintln(os.Stderr, "runner-adoption-snapshot:", err)
 		os.Exit(1)
 	}
 }
 
-func run(outDir string, windowDays, windowCount, maxPages int) error {
-	now := time.Now().UTC().Truncate(24 * time.Hour)
+func run(outDir string, windowDays, windowCount int) error {
+	now := time.Now().UTC()
 	snap := snapshot{
 		CapturedAt:  now,
 		WindowDays:  windowDays,
@@ -115,22 +112,38 @@ func run(outDir string, windowDays, windowCount, maxPages int) error {
 		},
 	}
 
-	for _, r := range runners {
-		result := runnerResult{runner: r}
-		if r.Repo != "" {
-			if err := collectRepo(&result, now, windowDays, windowCount, maxPages); err != nil {
-				result.Errors = append(result.Errors, err.Error())
+	results := make([]runnerResult, len(runners))
+	var wg sync.WaitGroup
+	for index, r := range runners {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result := runnerResult{runner: r}
+			if r.Repo != "" {
+				if err := collectRepo(&result, now, windowDays, windowCount); err != nil {
+					result.Errors = append(result.Errors, err.Error())
+				}
 			}
-		}
-		if r.PyPI != "" {
-			monthly, err := collectPyPI(r.PyPI)
-			if err != nil {
-				result.Errors = append(result.Errors, err.Error())
+			if r.PyPI != "" {
+				monthly, err := collectPyPI(r.PyPI)
+				if err != nil {
+					result.Errors = append(result.Errors, err.Error())
+				}
+				result.PyPIMonthly = monthly
 			}
-			result.PyPIMonthly = monthly
-		}
-		snap.Runners = append(snap.Runners, result)
+			if r.DockerHub != "" {
+				pulls, err := collectDockerHubPulls(r.DockerHub)
+				if err != nil {
+					result.Errors = append(result.Errors, err.Error())
+				} else {
+					result.DockerHubPulls = pulls
+				}
+			}
+			results[index] = result
+		}()
 	}
+	wg.Wait()
+	snap.Runners = results
 
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", outDir, err)
@@ -149,7 +162,7 @@ func run(outDir string, windowDays, windowCount, maxPages int) error {
 	return nil
 }
 
-func collectRepo(result *runnerResult, now time.Time, windowDays, windowCount, maxPages int) error {
+func collectRepo(result *runnerResult, now time.Time, windowDays, windowCount int) error {
 	meta, err := ghJSON("repos/" + result.Repo)
 	if err != nil {
 		return fmt.Errorf("repo metadata: %w", err)
@@ -159,54 +172,220 @@ func collectRepo(result *runnerResult, now time.Time, windowDays, windowCount, m
 	result.Archived = boolField(meta, "archived")
 	result.PushedAt = stringField(meta, "pushed_at")
 
-	if releases, err := ghArray("repos/" + result.Repo + "/releases?per_page=1"); err == nil && len(releases) > 0 {
-		result.LatestRelease = stringField(releases[0], "published_at")
+	latest, releaseCount, downloads, err := collectReleases(result.Repo)
+	if err != nil {
+		result.Errors = append(result.Errors, "releases: "+err.Error())
+	} else {
+		result.LatestRelease = latest
+		result.ReleaseCount = releaseCount
+		result.AssetDownloads = downloads
 	}
 
-	counts, truncated, err := forkWindows(result.Repo, now, windowDays, windowCount, maxPages)
+	counts, err := forkWindows(result.Repo, result.Forks, now, windowDays, windowCount)
 	if err != nil {
 		return fmt.Errorf("fork windows: %w", err)
 	}
 	result.ForkWindows = counts
-	result.ForkWindowsTruncated = truncated
+
+	current, err := commitCount(result.Repo, now.AddDate(0, 0, -90), now)
+	if err != nil {
+		result.Errors = append(result.Errors, "current commit window: "+err.Error())
+	} else {
+		previous, err := commitCount(result.Repo, now.AddDate(0, 0, -180), now.AddDate(0, 0, -90))
+		if err != nil {
+			result.Errors = append(result.Errors, "previous commit window: "+err.Error())
+		} else {
+			result.CommitWindows = []int{current, previous}
+		}
+	}
 	return nil
 }
 
-// forkWindows pages newest-first through forks and tallies each one into the
-// window its creation timestamp falls in, stopping as soon as it reads past the
-// oldest window. Repositories with very large fork counts make this the most
-// expensive call in the collector, which is why it terminates early rather than
-// paginating the whole list.
-func forkWindows(repo string, now time.Time, windowDays, windowCount, maxPages int) ([]int, bool, error) {
-	counts := make([]int, windowCount)
-	horizon := now.AddDate(0, 0, -windowDays*windowCount)
+type forkPageLoader func(page int) ([]map[string]any, error)
 
-	for page := 1; ; page++ {
-		if maxPages > 0 && page > maxPages {
-			return counts, true, nil
-		}
+func forkWindows(repo string, totalForks int, now time.Time, windowDays, windowCount int) ([]int, error) {
+	return forkWindowsWithLoader(totalForks, now, windowDays, windowCount, func(page int) ([]map[string]any, error) {
 		path := fmt.Sprintf("repos/%s/forks?sort=newest&per_page=100&page=%d", repo, page)
-		items, err := ghArray(path)
+		return ghArray(path)
+	})
+}
+
+// forkWindowsWithLoader finds each time boundary with binary search over the
+// newest-first fork pages. Complete pages between boundaries do not need to be
+// downloaded; only boundary pages are inspected and all fetched pages are
+// cached across windows.
+func forkWindowsWithLoader(totalForks int, now time.Time, windowDays, windowCount int, load forkPageLoader) ([]int, error) {
+	if windowDays <= 0 || windowCount <= 0 || totalForks < 0 {
+		return nil, fmt.Errorf("invalid fork-window configuration")
+	}
+	counts := make([]int, windowCount)
+	if totalForks == 0 {
+		return counts, nil
+	}
+
+	pages := (totalForks + 99) / 100
+	cache := make(map[int][]map[string]any)
+	page := func(number int) ([]map[string]any, error) {
+		if items, ok := cache[number]; ok {
+			return items, nil
+		}
+		items, err := load(number)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
-		if len(items) == 0 {
-			return counts, false, nil
+		cache[number] = items
+		return items, nil
+	}
+
+	countAfter := func(cutoff time.Time) (int, error) {
+		lo, hi := 1, pages
+		boundary := pages + 1
+		for lo <= hi {
+			mid := lo + (hi-lo)/2
+			items, err := page(mid)
+			if err != nil {
+				return 0, err
+			}
+			if len(items) == 0 {
+				boundary = mid
+				hi = mid - 1
+				continue
+			}
+			last, err := time.Parse(time.RFC3339, stringField(items[len(items)-1], "created_at"))
+			if err != nil {
+				return 0, fmt.Errorf("page %d last fork timestamp: %w", mid, err)
+			}
+			if last.After(cutoff) {
+				lo = mid + 1
+			} else {
+				boundary = mid
+				hi = mid - 1
+			}
 		}
+
+		if boundary == pages+1 {
+			lastPage, err := page(pages)
+			if err != nil {
+				return 0, err
+			}
+			return (pages-1)*100 + len(lastPage), nil
+		}
+
+		items, err := page(boundary)
+		if err != nil {
+			return 0, err
+		}
+		prefix := 0
 		for _, item := range items {
 			created, err := time.Parse(time.RFC3339, stringField(item, "created_at"))
 			if err != nil {
-				continue
+				return 0, fmt.Errorf("page %d fork timestamp: %w", boundary, err)
 			}
-			if created.Before(horizon) {
-				// Forks are newest-first, so everything after this is older.
-				return counts, false, nil
+			if !created.After(cutoff) {
+				break
 			}
-			if index, ok := windowIndex(now, created, windowDays, windowCount); ok {
-				counts[index]++
+			prefix++
+		}
+		return (boundary-1)*100 + prefix, nil
+	}
+
+	previous, err := countAfter(now)
+	if err != nil {
+		return nil, err
+	}
+	for index := 0; index < windowCount; index++ {
+		cutoff := now.AddDate(0, 0, -windowDays*(index+1))
+		cumulative, err := countAfter(cutoff)
+		if err != nil {
+			return nil, err
+		}
+		counts[index] = cumulative - previous
+		previous = cumulative
+	}
+	return counts, nil
+}
+
+func collectReleases(repo string) (string, int, int, error) {
+	latest := ""
+	count := 0
+	downloads := 0
+	for page := 1; ; page++ {
+		releases, err := ghArray(fmt.Sprintf("repos/%s/releases?per_page=100&page=%d", repo, page))
+		if err != nil {
+			return "", 0, 0, err
+		}
+		if page == 1 && len(releases) > 0 {
+			latest = stringField(releases[0], "published_at")
+		}
+		for _, release := range releases {
+			count++
+			assets, _ := release["assets"].([]any)
+			for _, raw := range assets {
+				asset, _ := raw.(map[string]any)
+				downloads += intField(asset, "download_count")
 			}
 		}
+		if len(releases) < 100 {
+			return latest, count, downloads, nil
+		}
 	}
+}
+
+func commitCount(repo string, since, until time.Time) (int, error) {
+	query := url.Values{}
+	query.Set("since", since.UTC().Format(time.RFC3339))
+	query.Set("until", until.UTC().Format(time.RFC3339))
+	query.Set("per_page", "1")
+	body, headers, err := ghResponse("repos/" + repo + "/commits?" + query.Encode())
+	if err != nil {
+		return 0, err
+	}
+	var commits []map[string]any
+	if err := json.Unmarshal(body, &commits); err != nil {
+		return 0, err
+	}
+	if len(commits) == 0 {
+		return 0, nil
+	}
+	if last := lastPage(headers.Get("Link")); last > 0 {
+		return last, nil
+	}
+	return len(commits), nil
+}
+
+func lastPage(link string) int {
+	for _, part := range strings.Split(link, ",") {
+		if !strings.Contains(part, `rel="last"`) {
+			continue
+		}
+		start := strings.Index(part, "<")
+		end := strings.Index(part, ">")
+		if start < 0 || end <= start {
+			return 0
+		}
+		u, err := url.Parse(part[start+1 : end])
+		if err != nil {
+			return 0
+		}
+		var page int
+		_, _ = fmt.Sscanf(u.Query().Get("page"), "%d", &page)
+		return page
+	}
+	return 0
+}
+
+func collectDockerHubPulls(repo string) (int, error) {
+	body, err := httpGet("https://hub.docker.com/v2/repositories/" + repo + "/")
+	if err != nil {
+		return 0, fmt.Errorf("docker hub %s: %w", repo, err)
+	}
+	var payload struct {
+		PullCount int `json:"pull_count"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return 0, fmt.Errorf("docker hub %s: %w", repo, err)
+	}
+	return payload.PullCount, nil
 }
 
 // collectPyPI returns monthly download totals excluding mirrors. This is the
@@ -320,17 +499,21 @@ func ghArray(path string) ([]map[string]any, error) {
 }
 
 // gh calls the GitHub REST API directly, borrowing the `gh` CLI's credentials
-// once rather than spawning a subprocess per request. Fork pagination issues
-// hundreds of calls for a large repo, and per-call process startup dominated
-// the runtime when this shelled out to `gh api` each time.
+// once rather than spawning a subprocess per request. Even with boundary search,
+// process startup would otherwise dominate the collector's runtime.
 func gh(path string) ([]byte, error) {
+	body, _, err := ghResponse(path)
+	return body, err
+}
+
+func ghResponse(path string) ([]byte, http.Header, error) {
 	token, err := githubToken()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/"+strings.TrimPrefix(path, "/"), nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -339,17 +522,17 @@ func gh(path string) ([]byte, error) {
 	}
 	resp, err := githubClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", path, err)
+		return nil, nil, fmt.Errorf("GET %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", path, err)
+		return nil, nil, fmt.Errorf("GET %s: %w", path, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %s: %s", path, resp.Status, strings.TrimSpace(string(body)))
+		return nil, resp.Header, fmt.Errorf("GET %s: status %s: %s", path, resp.Status, strings.TrimSpace(string(body)))
 	}
-	return body, nil
+	return body, resp.Header, nil
 }
 
 var (

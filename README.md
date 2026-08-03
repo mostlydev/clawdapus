@@ -353,7 +353,7 @@ Notes:
 block-beta
   columns 1
   contract["Behavioral Contract\nread-only bind mount\nAGENTS.md — purpose, on the host\nSurvives full container compromise"]
-  runner["Runner\nOpenClaw · NanoClaw · Claude Code · custom"]
+  runner["Runner\nOpenClaw · Hermes · Nanobot · PicoClaw"]
   persona["Persona\nMemory · history · style · knowledge"]
   proxy["cllama — governance proxy\nIntercepts prompts outbound + responses inbound\nRunner never knows it's there"]
 

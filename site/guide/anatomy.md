@@ -6,7 +6,7 @@ A running Claw splits cognition into two independent layers: **internal executio
 block-beta
   columns 1
   contract["Behavioral Contract\nread-only bind mount\nAGENTS.md — purpose, on the host\nSurvives full container compromise"]
-  runner["Runner\nOpenClaw · Hermes · NanoClaw · custom"]
+  runner["Runner\nOpenClaw · Hermes · Nanobot · PicoClaw"]
   persona["Persona\nStyle · knowledge · workspace state"]
   proxy["cllama — governance proxy\nRoutes model calls, injects context, mediates tools\nRunner never sees provider keys"]
 
