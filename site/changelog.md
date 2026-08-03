@@ -29,17 +29,23 @@ outline: deep
 
 ## Unreleased
 
+<!-- Nothing yet -->
+
+## v0.28.0 <Badge type="tip" text="Latest" /> {#v0-28-0}
+
+*2026-08-03*
+
 - **Ordered fallback model chains** ([ADR-019 amendment](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/019-model-policy-authority-and-declared-failover.md), [#359](https://github.com/mostlydev/clawdapus/issues/359)) -- `x-claw.models.fallback` (and `models-defaults`) now accepts an ordered list. The compiled model policy emits every chain link as a `fallback`-slot entry, so cllama's declared failover traverses the full chain in order when providers are exhausted. The fallback family merges atomically across defaults, service overrides, and image labels -- chains never interleave. OpenClaw receives the whole chain natively (`agents.defaults.model.fallbacks`); `claw init import` now preserves full source fallback chains instead of truncating to one.
 - **Responses-only model support via [cllama v0.9.0](https://github.com/mostlydev/cllama/releases/tag/v0.9.0)** -- cllama translates responses-only OpenAI models (`gpt-5.6*`, `gpt-5-pro*` built in) at the provider boundary while agents keep the chat/completions contract; every governance surface observes the unchanged shape. Extend coverage with `CLLAMA_RESPONSES_API_MODELS` or disable with `CLLAMA_RESPONSES_API_DISABLED` via `x-claw.cllama-defaults.env`. Documented in the [cllama guide](/guide/cllama#responses-only-models). A new spike (`TestSpikeOrderedModelFailover`) proves the compiled two-fallback chain end-to-end: red on cllama v0.7.8, green on v0.9.0.
 - **`x-claw.terminalOnSuccess` validated at compile time** -- the managed-tool annotation must be a JSON boolean; `claw up` now fails closed on other types instead of letting cllama silently ignore the annotation at runtime. Unknown annotation keys still pass through untouched.
 - **Examples and docs refreshed to current provider model shapes** -- stale references (`gpt-4o`, `claude-sonnet-4`, `claude-haiku-3-5`, `claude-opus-4-1`) move to current models priced by cllama v0.9.0 (`gpt-5.6`, `claude-sonnet-5`, `claude-opus-5`, `claude-haiku-4-5`, `gemini-3.6-flash`).
-
 - **NanoClaw, MicroClaw, and NullClaw drivers retired** ([ADR-026](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/026-runner-adoption-and-retirement.md), [#353](https://github.com/mostlydev/clawdapus/issues/353)) -- a reproducible upstream-adoption audit (`scripts/runner-adoption-snapshot`, dated evidence under `docs/evidence/`) exposed three ambiguous maintenance cases, and the maintainer chose to stop carrying them. Retired `CLAW_TYPE`s now fail `claw up` with a migration error pointing to Hermes instead of a generic unknown-driver message. The retained set is `openclaw`, `hermes`, `nanobot`, and `picoclaw`; the rollcall conformance pod and trading-desk example were revised to keep full coverage across all four.
 - **Slow scheduled wakes no longer block unrelated targets** -- claw-api dispatches due targets concurrently while serializing wakes per runner, coalesces overlapping slots without regressing next-fire state, rejects duplicate manual fires with a conflict, and drains active scheduler dispatches cleanly on shutdown. Coalesced slots are now recorded in schedule state (`suppressed_slots`, `last_suppressed_at`) and surfaced on the clawdash schedule card, so a schedule whose wake outruns its own cadence no longer reads as perfectly healthy. Closes [#347](https://github.com/mostlydev/clawdapus/issues/347).
 - **Manual schedule fires honor runner wake budgets** -- `claw api schedule fire` now gives the in-container request 2 minutes 5 seconds and its outer compose transport 2 minutes 10 seconds, enough to return the final result of the longest supported runner wake. Other schedule operations retain their short defaults, and an explicit `--exec-timeout` still overrides the outer transport. Closes [#348](https://github.com/mostlydev/clawdapus/issues/348).
 - **Hermes scheduled wakes get a runner-sized timeout** -- claw-api now gives `hermes-exec` the same two-minute wake budget as other runner-native cron paths, preventing a successfully triggered Hermes job from being recorded as `exec timed out` solely because the runner took longer than the generic 30-second transport budget. Closes [#345](https://github.com/mostlydev/clawdapus/issues/345).
+- **Pins infra images** -- `claw-api` / `clawdash` / `claw-wall` / `claw-channel-memory` / `claw-mcp-stdio` move to `v0.28.0`; cllama moves to [v0.9.0](https://github.com/mostlydev/cllama/releases/tag/v0.9.0). `hermes-base` stays at `v2026.6.19-claw.3`.
 
-## v0.27.0 <Badge type="tip" text="Latest" /> {#v0-27-0}
+## v0.27.0 {#v0-27-0}
 
 *2026-07-01*
 

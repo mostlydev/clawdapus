@@ -241,6 +241,7 @@ services:
 - **`mcp-stdio`**: Sidecar-only block for the shared `claw-mcp-stdio` wrapper. `command` is required, `args` is a list, and credentials stay in the sidecar's regular `environment:`. Run `claw discover <service>` to ask the MCP server for `tools/list` and write `.claw-discovered/<service>.claw-describe.json`; `describe-file` remains an explicit override when live discovery is unavailable.
 - **`memory`**: Requires `cllama` on the consuming service. Target service must declare `memory` in its `claw.describe` descriptor v2.
 - **Pod defaults**: `*-defaults` at pod level are inherited by all services. Declaring the field at service level replaces the default. Use `...` spread token to extend list-type defaults (surfaces, feeds, skills, tools). Memory defaults are object-form (no spread — presence of `memory:` at service level replaces entirely; `memory: null` suppresses).
+- **`models` / `models-defaults`**: slot map overriding image `MODEL` labels per key (`primary`, `fallback`, custom slots). `fallback` also accepts an ordered list (`fallback: [ref, ref]`) — cllama walks the chain in declared order on provider exhaustion (v0.28.0, cllama ≥ v0.9.0). The fallback family replaces atomically: a service-level fallback (scalar, list, or `[]` to clear) replaces the entire inherited/image chain, never merging positionally. Only `fallback` takes a list; images stay single-fallback (declare chains at pod level).
 
 ## Service Self-Description (claw.describe)
 
