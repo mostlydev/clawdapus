@@ -110,3 +110,32 @@ Operators declare the models their agents are allowed to use. If cllama were to 
 - The implied contract that a runner can self-select its model is broken. Runners that rely on sending arbitrary model strings will be clamped silently. This is correct behavior but may surprise operators who have not read this ADR.
 - `dispatchWithRetry` in cllama requires structural changes to support cross-provider candidate traversal. The current function is provider-scoped; the new design is candidate-list-scoped.
 - Clawfiles with no `MODEL` directives produce an empty policy. cllama treats an empty policy as unconstrained (legacy behavior). Operators who expect enforcement must declare at least one `MODEL` slot.
+
+## Amendment (2026-08-03): Ordered Multi-Fallback Chains
+
+cllama's declared failover originally consumed a single `fallback` slot. As of
+cllama's managed read-failover work, `FailoverRefs` walks **every** allowed
+entry whose slot is `fallback`, in declared order. Clawdapus now compiles full
+chains:
+
+- **Pod surface.** `x-claw.models.fallback` accepts a scalar (unchanged) or an
+  ordered list. List entries normalize to reserved internal slot keys
+  `fallback`, `fallback-2`, `fallback-3`, ... in declared order. Declaring the
+  ordinal keys directly is rejected; the list is the only authoring surface.
+- **Policy emission.** Every chain link is emitted into `model_policy.allowed`
+  with slot name `fallback`, ordered primary → chain → other slots. Older
+  cllama versions use only the first fallback entry and treat the rest as
+  allowed models — graceful degradation, no compatibility break.
+- **Atomic family merge.** The fallback family merges as one unit everywhere:
+  a service-level `fallback` declaration (scalar or list) replaces the entire
+  `models-defaults` chain, and a pod-declared chain replaces the entire
+  image-label fallback family. Chains never interleave across layers.
+- **Images stay scalar.** `MODEL fallback` in a Clawfile declares at most one
+  fallback; repeated declarations fail with guidance toward the pod surface.
+  Failover chains are deployment policy, not image authorship: the image
+  author cannot know which providers a pod holds keys for. If image-declared
+  chains become a real need, indexed labels (`claw.model.fallback-2`) are the
+  planned encoding — deferred until a producer exists.
+- **Slots stay purposeful.** Only the fallback family participates in
+  failover. A model declared under any other slot (`analysis`, `cheap`, ...)
+  is allowed but never a failover target, matching cllama's contract.

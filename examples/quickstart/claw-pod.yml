@@ -1,7 +1,7 @@
 x-claw:
   pod: quickstart
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4
+    primary: openrouter/anthropic/claude-sonnet-4-6
     fallback: anthropic/claude-haiku-4-5
 services:
   assistant:

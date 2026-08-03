@@ -14,7 +14,7 @@ x-claw:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4
+    primary: openrouter/anthropic/claude-sonnet-4-6
     fallback: anthropic/claude-haiku-4-5
   surfaces-defaults:
     - "service://operations-api"
@@ -195,7 +195,7 @@ Image `MODEL` labels still define the base slot map, but pod YAML can retarget s
 ```yaml
 x-claw:
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4
+    primary: openrouter/anthropic/claude-sonnet-4-6
     fallback: anthropic/claude-haiku-4-5
 
 services:
@@ -214,6 +214,34 @@ Precedence is:
 - image `MODEL` labels
 
 `x-claw.models` merges additively over `models-defaults`, so overriding `primary` still inherits `fallback` unless you explicitly suppress pod defaults. `models: {}` and `models: null` both suppress pod defaults only; image-declared slots still apply.
+
+### Ordered Fallback Chains
+
+The `fallback` slot accepts an ordered list. cllama walks the chain in
+declared order when a provider is exhausted:
+
+```yaml
+x-claw:
+  models-defaults:
+    primary: openai/gpt-5.6
+    fallback:
+      - openai/gpt-5.1
+      - anthropic/claude-sonnet-5
+      - anthropic/claude-haiku-4-5
+```
+
+Chain rules:
+
+- The fallback family replaces **atomically**: any service-level `fallback`
+  declaration (scalar or list) replaces the entire default chain — chains
+  never interleave across layers. The same rule applies to image `MODEL
+  fallback` labels: a pod-declared chain replaces the image's fallback.
+- Only `fallback` accepts a list. Other slots (`primary`, `analysis`, ...)
+  are scalar, and non-fallback slots never participate in failover.
+- Clawfile images declare at most one `MODEL fallback`; longer chains are
+  pod-level deployment policy.
+
+See ADR-019 for the full failover contract.
 
 ## Mixed Cognitive and Non-Cognitive Services
 

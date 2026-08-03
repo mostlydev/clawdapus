@@ -6,8 +6,12 @@ x-claw:
     env:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4
-    fallback: anthropic/claude-haiku-4-5
+    primary: openrouter/anthropic/claude-sonnet-4-6
+    # Ordered failover chain: cllama walks these in order when a provider
+    # is exhausted. A service-level fallback replaces the whole chain.
+    fallback:
+      - anthropic/claude-haiku-4-5
+      - openrouter/anthropic/claude-haiku-4-5
 
 services:
   worker-a:
@@ -46,7 +50,7 @@ services:
     x-claw:
       agent: ./agents/GOVERNOR.md
       models:
-        primary: openrouter/anthropic/claude-opus-4-1
+        primary: openrouter/anthropic/claude-opus-4-6
       feeds: [fleet-alerts]
       surfaces:
         - "service://claw-api"

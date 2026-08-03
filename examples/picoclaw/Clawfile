@@ -3,7 +3,7 @@ FROM docker.io/sipeed/picoclaw:latest
 CLAW_TYPE picoclaw
 AGENT AGENTS.md
 
-MODEL primary openrouter/anthropic/claude-sonnet-4
+MODEL primary openrouter/anthropic/claude-sonnet-4-6
 CLLAMA passthrough
 
 HANDLE discord

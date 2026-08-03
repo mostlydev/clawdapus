@@ -2,4 +2,4 @@ FROM openclaw:latest
 
 CLAW_TYPE openclaw
 AGENT AGENTS.md
-MODEL primary openai/gpt-4o
+MODEL primary openai/gpt-5.6

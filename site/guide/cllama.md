@@ -279,6 +279,36 @@ When the aggregate cap does drop a feed, cllama no longer fails silently: the mo
 The aggregate cap drops whole feeds in manifest order once the budget is exhausted; there is no per-feed priority or reservation yet. If a large feed earlier in the manifest can starve a later one, raise `CLLAMA_FEED_MAX_TOTAL_BYTES` rather than relying on ordering.
 :::
 
+### Responses-Only Models
+
+Some of OpenAI's newest models reject function tools on `/v1/chat/completions`
+and are reachable only through the Responses API. cllama translates for them at
+the **provider boundary**: agents and runners keep speaking chat/completions
+(or Anthropic Messages), and cllama re-encodes the outbound request as a
+Responses call and translates the reply back. Every governance surface — audit,
+session history, budgets, tool mediation, declared failover — keeps observing
+the unchanged shape. Requests routed this way emit an `intervention` audit
+event with reason `responses_api_adapter`.
+
+The built-in list covers `openai/gpt-5.6*` and `openai/gpt-5-pro*`. When
+OpenAI moves a model before the built-in list catches up, cllama detects the
+upstream rejection and retries once through the adapter automatically. Two
+knobs tune the behavior through the proxy environment:
+
+```yaml
+x-claw:
+  cllama-defaults:
+    proxy: [passthrough]
+    env:
+      # Extra provider-scoped model prefixes to route through the adapter
+      CLLAMA_RESPONSES_API_MODELS: "openai/gpt-6"
+      # Escape hatch: disable the adapter entirely
+      # CLLAMA_RESPONSES_API_DISABLED: "1"
+```
+
+No runner or Clawfile changes are needed — declare the model in a slot like
+any other, and cllama handles the dialect.
+
 ## Pod Configuration
 
 ### Declaring a cllama Proxy
@@ -394,7 +424,7 @@ $ claw audit --since 24h --claw analyst-0
 Pod: trading-desk
 Events: 128
 CLAW       REQ  RESP  ERR  INT  TOOLS  TOOL_ERR  TOK_IN  TOK_OUT  COST_USD  MODELS
-analyst-0  64   64    0    1    9      0         81204   18402    0.2130    claude-sonnet-4(64)
+analyst-0  64   64    0    1    9      0         81204   18402    0.2130    claude-sonnet-4-6(64)
 ```
 
 ## Telemetry and Audit

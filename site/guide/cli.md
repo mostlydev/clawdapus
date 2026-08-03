@@ -281,8 +281,8 @@ $ claw inspect trading-desk-analyst:latest
 Claw Type: openclaw
 Agent:     AGENTS.md
 Cllama:    passthrough
-Model[primary]: openrouter/anthropic/claude-sonnet-4
-Model[fallback]: anthropic/claude-haiku-3-5
+Model[primary]: openrouter/anthropic/claude-sonnet-4-6
+Model[fallback]: anthropic/claude-haiku-4-5
 Surface:   service://trading-api
 Surface:   volume://shared-research read-write
 ```
@@ -458,8 +458,8 @@ $ claw audit --since 24h
 Pod: trading-desk
 Events: 847
 CLAW       REQ  RESP  ERR  INT  TOOLS  TOOL_ERR  TOK_IN  TOK_OUT  COST_USD  MODELS
-analyst    312  310   2    0    18     1         482101  89402    1.2340    claude-sonnet-4(312)
-scanner    535  535   0    3    0      0         201440  45200    0.5120    claude-haiku-3-5(535)
+analyst    312  310   2    0    18     1         482101  89402    1.2340    claude-sonnet-4-6(312)
+scanner    535  535   0    3    0      0         201440  45200    0.5120    claude-haiku-4-5(535)
 
 Totals: req=847 resp=845 err=2 int=3 tools=18/1 tokens=683541/134602 cost=$1.7460
 ```

@@ -2,5 +2,5 @@ FROM openclaw:latest
 
 CLAW_TYPE openclaw
 AGENT AGENTS.md
-MODEL primary openrouter/openai/gpt-4o-mini
+MODEL primary openrouter/openai/gpt-4.1-mini
 CLLAMA passthrough
