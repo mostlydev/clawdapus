@@ -30,6 +30,7 @@ outline: deep
 ## Unreleased
 
 - **Slow scheduled wakes no longer block unrelated targets** -- claw-api dispatches due targets concurrently while serializing wakes per runner, coalesces overlapping slots without regressing next-fire state, rejects duplicate manual fires with a conflict, and drains active scheduler dispatches cleanly on shutdown. Coalesced slots are now recorded in schedule state (`suppressed_slots`, `last_suppressed_at`) and surfaced on the clawdash schedule card, so a schedule whose wake outruns its own cadence no longer reads as perfectly healthy. Closes [#347](https://github.com/mostlydev/clawdapus/issues/347).
+- **Manual schedule fires honor runner wake budgets** -- `claw api schedule fire` now gives the in-container request 2 minutes 5 seconds and its outer compose transport 2 minutes 10 seconds, enough to return the final result of the longest supported runner wake. Other schedule operations retain their short defaults, and an explicit `--exec-timeout` still overrides the outer transport. Closes [#348](https://github.com/mostlydev/clawdapus/issues/348).
 
 ## v0.27.0 <Badge type="tip" text="Latest" /> {#v0-27-0}
 

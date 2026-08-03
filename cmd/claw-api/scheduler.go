@@ -71,7 +71,7 @@ type dispatchOptions struct {
 }
 
 const defaultWakeExecTimeout = 30 * time.Second
-const openclawWakeExecTimeout = 2 * time.Minute
+const openclawWakeExecTimeout = schedulepkg.MaxWakeExecTimeout
 
 var errScheduleInvocationInFlight = errors.New("schedule invocation already in flight")
 

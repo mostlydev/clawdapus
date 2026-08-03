@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	schedulepkg "github.com/mostlydev/clawdapus/internal/schedule"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -31,10 +32,16 @@ type composeServiceIndex struct {
 }
 
 const (
-	httpMethodGet      = "GET"
-	httpMethodPost     = "POST"
-	clawAPIServiceName = "claw-api"
+	httpMethodGet         = "GET"
+	httpMethodPost        = "POST"
+	clawAPIServiceName    = "claw-api"
+	defaultAPIExecTimeout = 15 * time.Second
 )
+
+type clawAPIRequestBudget struct {
+	requestTimeout time.Duration
+	execTimeout    time.Duration
+}
 
 var apiCmd = &cobra.Command{
 	Use:   "api",
@@ -153,6 +160,10 @@ func callClawAPICompose(composePath, principalName, method, requestPath string, 
 		"-request-path", strings.TrimSpace(requestPath),
 		"-request-principal", defaultAPIPrincipal(principalName),
 	}
+	budget := clawAPIRequestBudgetFor(method, requestPath)
+	if budget.requestTimeout > 0 {
+		args = append(args, "-request-timeout", budget.requestTimeout.String())
+	}
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {
@@ -162,11 +173,29 @@ func callClawAPICompose(composePath, principalName, method, requestPath string, 
 			args = append(args, "-request-body", string(raw))
 		}
 	}
-	out, err := runClawAPIComposeCommand(args...)
+	execTimeout := budget.execTimeout
+	if apiExecTimeout > 0 {
+		execTimeout = apiExecTimeout
+	}
+	out, err := runClawAPIComposeCommand(execTimeout, args...)
 	if err != nil {
 		return nil, formatComposeOutputError("docker compose exec "+clawAPIServiceName, err, out)
 	}
 	return out, nil
+}
+
+func clawAPIRequestBudgetFor(method, requestPath string) clawAPIRequestBudget {
+	budget := clawAPIRequestBudget{execTimeout: defaultAPIExecTimeout}
+	if !strings.EqualFold(strings.TrimSpace(method), httpMethodPost) {
+		return budget
+	}
+	path := strings.SplitN(strings.TrimSpace(requestPath), "?", 2)[0]
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 3 && parts[0] == "schedule" && parts[1] != "" && parts[2] == "fire" {
+		budget.requestTimeout = schedulepkg.ManualFireRequestTimeout
+		budget.execTimeout = schedulepkg.ManualFireTransportTimeout
+	}
+	return budget
 }
 
 func defaultAPIPrincipal(name string) string {
@@ -195,10 +224,9 @@ func ensureComposeService(composePath, service string) error {
 	return fmt.Errorf("service %q not found in compose.generated.yml", service)
 }
 
-func runClawAPIComposeCommandDefault(args ...string) ([]byte, error) {
-	timeout := apiExecTimeout
+func runClawAPIComposeCommandDefault(timeout time.Duration, args ...string) ([]byte, error) {
 	if timeout <= 0 {
-		timeout = 15 * time.Second
+		timeout = defaultAPIExecTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -212,7 +240,7 @@ func runClawAPIComposeCommandDefault(args ...string) ([]byte, error) {
 
 func init() {
 	apiCmd.PersistentFlags().StringVar(&apiPrincipalName, "principal", "claw-scheduler", "Principal name inside claw-api principals.json to use for the request; not a host-side access boundary")
-	apiCmd.PersistentFlags().DurationVar(&apiExecTimeout, "exec-timeout", 15*time.Second, "Maximum time to wait for the docker compose exec transport")
+	apiCmd.PersistentFlags().DurationVar(&apiExecTimeout, "exec-timeout", 0, "Maximum time to wait for the docker compose exec transport (0 selects an operation-specific default)")
 
 	apiSchedulePauseCmd.Flags().StringVar(&schedulePauseUntil, "until", "", "Pause until this RFC3339 timestamp instead of indefinitely")
 	apiSchedulePauseCmd.Flags().StringVar(&schedulePauseReason, "reason", "", "Optional operator reason recorded with the pause")
