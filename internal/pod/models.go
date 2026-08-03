@@ -56,6 +56,13 @@ func (m *ModelSlots) UnmarshalYAML(node *yaml.Node) error {
 			if err != nil {
 				return err
 			}
+			// Preserve an explicit empty chain as a tombstone. The compose-time
+			// merge uses it to clear fallback refs inherited from pod defaults or
+			// image labels, then removes the blank marker from resolved output.
+			if len(refs) == 0 {
+				out["fallback"] = ""
+				continue
+			}
 			for idx, ref := range refs {
 				out[fallbackSlotName(idx)] = ref
 			}

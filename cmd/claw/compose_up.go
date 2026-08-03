@@ -3344,6 +3344,9 @@ func mergeModelSlots(image, pod map[string]string) map[string]string {
 		}
 	}
 	for key, value := range pod {
+		if cllama.FallbackSlotOrdinal(key) > 0 && strings.TrimSpace(value) == "" {
+			continue
+		}
 		out[key] = value
 	}
 	return out

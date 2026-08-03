@@ -90,8 +90,8 @@ services:
         fallback: []
 `)
 	models := p.Services["agent"].Claw.Models
-	if _, ok := models["fallback"]; ok {
-		t.Fatalf("empty list must clear fallback, got %v", models)
+	if got, ok := models["fallback"]; !ok || got != "" {
+		t.Fatalf("empty list must preserve an explicit fallback-clear marker, got %v", models)
 	}
 }
 

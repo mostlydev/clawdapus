@@ -2,6 +2,7 @@ package cllama
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -102,14 +103,8 @@ func FallbackSlotOrdinal(slot string) int {
 	if !ok || rest == "" {
 		return 0
 	}
-	n := 0
-	for _, r := range rest {
-		if r < '0' || r > '9' {
-			return 0
-		}
-		n = n*10 + int(r-'0')
-	}
-	if n < 2 {
+	n, err := strconv.Atoi(rest)
+	if err != nil || n < 2 || strconv.Itoa(n) != rest {
 		return 0
 	}
 	return n

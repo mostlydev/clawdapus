@@ -139,3 +139,10 @@ chains:
 - **Slots stay purposeful.** Only the fallback family participates in
   failover. A model declared under any other slot (`analysis`, `cheap`, ...)
   is allowed but never a failover target, matching cllama's contract.
+- **The runner ingress still bounds reachability.** An OpenAI-format runner
+  enters through `/v1/chat/completions`; its candidates must be directly
+  OpenAI-compatible, or an Anthropic ref must be bridged through a configured
+  OpenRouter provider. An Anthropic-format runner enters through
+  `/v1/messages`, where every candidate must be `anthropic/...`. Ordered
+  policy does not imply arbitrary request-shape conversion. cllama fails
+  closed when a chain cannot be encoded for the active ingress.

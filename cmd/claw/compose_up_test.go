@@ -109,6 +109,12 @@ func TestMergeModelSlots(t *testing.T) {
 			want:  map[string]string{"primary": "image-primary", "fallback": "pod-fb", "fallback-2": "pod-fb2"},
 		},
 		{
+			name:  "pod empty fallback list clears image fallback family",
+			image: map[string]string{"primary": "image-primary", "fallback": "image-fb", "fallback-2": "image-fb2"},
+			pod:   map[string]string{"fallback": ""},
+			want:  map[string]string{"primary": "image-primary"},
+		},
+		{
 			name:  "image fallback family preserved when pod declares none",
 			image: map[string]string{"primary": "image-primary", "fallback": "image-fb", "fallback-2": "image-fb2"},
 			pod:   map[string]string{"primary": "pod-primary"},
@@ -170,6 +176,39 @@ services:
 		if !reflect.DeepEqual(got, imageModels) {
 			t.Fatalf("%s: expected image-declared slots to remain after pod-default suppression, got %v", serviceName, got)
 		}
+	}
+
+	const clearDefaultsYAML = `
+x-claw:
+  pod: clear-model-defaults
+  models-defaults:
+    primary: pod-default-primary
+    fallback:
+      - pod-default-fallback
+      - pod-default-fallback-2
+
+services:
+  clear_fallbacks:
+    image: clear-fallbacks:latest
+    x-claw:
+      agent: ./AGENTS.md
+      models:
+        fallback: []
+`
+
+	parsed, err = pod.Parse(strings.NewReader(clearDefaultsYAML))
+	if err != nil {
+		t.Fatalf("Parse clear defaults: %v", err)
+	}
+	service := parsed.Services["clear_fallbacks"]
+	got := mergeModelSlots(map[string]string{
+		"primary":    "image-primary",
+		"fallback":   "image-fallback",
+		"fallback-2": "image-fallback-2",
+	}, service.Claw.Models)
+	want := map[string]string{"primary": "pod-default-primary"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("explicit empty fallback list must clear inherited and image fallback chains: got %v, want %v", got, want)
 	}
 }
 

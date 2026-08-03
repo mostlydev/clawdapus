@@ -1,6 +1,9 @@
 package cllama
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 func TestCompileModelPolicyOrdersPrimaryFallbackThenSortedRemainder(t *testing.T) {
 	policy := CompileModelPolicy(map[string]string{
@@ -128,6 +131,50 @@ func TestCompileModelPolicyFallbackChainSkipsBlankAndDuplicateLinks(t *testing.T
 		{Slot: "primary", Ref: "openai/gpt-5.6"},
 		{Slot: "fallback", Ref: "anthropic/claude-sonnet-5"},
 		{Slot: "fallback", Ref: "anthropic/claude-haiku-4-5"},
+	}
+	if len(policy.Allowed) != len(want) {
+		t.Fatalf("allowed = %#v, want %#v", policy.Allowed, want)
+	}
+	for i, entry := range want {
+		if policy.Allowed[i] != entry {
+			t.Fatalf("allowed[%d] = %#v, want %#v", i, policy.Allowed[i], entry)
+		}
+	}
+}
+
+func TestFallbackSlotOrdinalAcceptsOnlyCanonicalPositiveOrdinals(t *testing.T) {
+	tests := map[string]int{
+		"fallback":    1,
+		"fallback-2":  2,
+		"fallback-10": 10,
+		"fallback-0":  0,
+		"fallback-1":  0,
+		"fallback-01": 0,
+		"fallback-02": 0,
+		"fallback--2": 0,
+		"fallback-x":  0,
+		"other":       0,
+		"fallback-" + strconv.FormatUint(^uint64(0), 10): 0,
+	}
+	for slot, want := range tests {
+		if got := FallbackSlotOrdinal(slot); got != want {
+			t.Errorf("FallbackSlotOrdinal(%q) = %d, want %d", slot, got, want)
+		}
+	}
+}
+
+func TestCompileModelPolicyTreatsNonCanonicalFallbackKeysAsOrdinarySlots(t *testing.T) {
+	policy := CompileModelPolicy(map[string]string{
+		"primary":     "openai/gpt-5.6",
+		"fallback":    "openai/gpt-5.1",
+		"fallback-01": "legacy/noncanonical",
+		"fallback-2":  "anthropic/claude-sonnet-5",
+	})
+	want := []AllowedModel{
+		{Slot: "primary", Ref: "openai/gpt-5.6"},
+		{Slot: "fallback", Ref: "openai/gpt-5.1"},
+		{Slot: "fallback", Ref: "anthropic/claude-sonnet-5"},
+		{Slot: "fallback-01", Ref: "legacy/noncanonical"},
 	}
 	if len(policy.Allowed) != len(want) {
 		t.Fatalf("allowed = %#v, want %#v", policy.Allowed, want)

@@ -226,8 +226,8 @@ x-claw:
     primary: openai/gpt-5.6
     fallback:
       - openai/gpt-5.1
-      - anthropic/claude-sonnet-5
-      - anthropic/claude-haiku-4-5
+      - openrouter/anthropic/claude-sonnet-4-6
+      - google/gemini-2.5-flash
 ```
 
 Chain rules:
@@ -240,6 +240,13 @@ Chain rules:
   are scalar, and non-fallback slots never participate in failover.
 - Clawfile images declare at most one `MODEL fallback`; longer chains are
   pod-level deployment policy.
+- Every candidate must be reachable through the runner's request format.
+  OpenAI-format runners use `/v1/chat/completions`; an `anthropic/...` ref on
+  that path is bridged through OpenRouter only when OpenRouter is configured.
+  Anthropic-format runners use `/v1/messages`, where every candidate must be
+  `anthropic/...`. For cross-vendor failover from an OpenAI-format runner, use
+  explicit OpenAI-compatible refs such as `openrouter/anthropic/...` and seed
+  every provider key in `x-claw.cllama-env`.
 
 See ADR-019 for the full failover contract.
 
