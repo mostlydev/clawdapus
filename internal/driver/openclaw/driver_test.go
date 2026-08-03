@@ -3,6 +3,7 @@ package openclaw
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -141,6 +142,17 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 
 	if result.Restart != "on-failure" {
 		t.Errorf("expected restart=on-failure, got %q", result.Restart)
+	}
+
+	wantHealthcheck := []string{
+		"CMD-SHELL",
+		`response="$(curl -fsS --max-time 2 http://localhost:18789/readyz 2>/dev/null)" || exec openclaw health --json >/dev/null 2>&1; printf '%s' "$$response" | jq -e 'has("ready")' >/dev/null 2>&1 || exec openclaw health --json >/dev/null 2>&1; printf '%s' "$$response" | jq -e '.ready == true' >/dev/null 2>&1`,
+	}
+	if result.Healthcheck == nil {
+		t.Fatal("expected OpenClaw healthcheck")
+	}
+	if got := result.Healthcheck.Test; !reflect.DeepEqual(got, wantHealthcheck) {
+		t.Fatalf("healthcheck test = %#v, want %#v", got, wantHealthcheck)
 	}
 
 	foundMemoryMount := false
