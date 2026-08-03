@@ -191,6 +191,7 @@ func normalizeInvocationState(state *schedulepkg.InvocationState) {
 	state.LastAttemptedAt = nilIfZeroTime(state.LastAttemptedAt)
 	state.LastFiredAt = nilIfZeroTime(state.LastFiredAt)
 	state.LastSkippedAt = nilIfZeroTime(state.LastSkippedAt)
+	state.LastSuppressedAt = nilIfZeroTime(state.LastSuppressedAt)
 	state.NextFireAt = nilIfZeroTime(state.NextFireAt)
 }
 

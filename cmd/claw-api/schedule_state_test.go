@@ -91,6 +91,7 @@ func TestScheduleStateStoreNormalizesZeroTimePointers(t *testing.T) {
 		state.LastAttemptedAt = &zero
 		state.LastFiredAt = &zero
 		state.LastSkippedAt = &zero
+		state.LastSuppressedAt = &zero
 		state.NextFireAt = &zero
 		file.Invocations["never"] = state
 	}); err != nil {
@@ -103,6 +104,7 @@ func TestScheduleStateStoreNormalizesZeroTimePointers(t *testing.T) {
 		state.LastAttemptedAt != nil ||
 		state.LastFiredAt != nil ||
 		state.LastSkippedAt != nil ||
+		state.LastSuppressedAt != nil ||
 		state.NextFireAt != nil {
 		t.Fatalf("expected zero time pointers to be nil, got %+v", state)
 	}
