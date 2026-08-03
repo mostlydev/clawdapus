@@ -69,6 +69,9 @@ Lifecycle commands block if `claw-pod.yml` is newer than `compose.generated.yml`
 `claw api schedule ...` does not require a host-published claw-api port. It
 tunnels through `docker compose exec -T claw-api /claw-api -request-*`, so the
 pod must already be up and include an injected `claw-api` service.
+`claw api schedule fire` waits synchronously for the final runner outcome and
+therefore uses a longer operation-specific timeout. `--exec-timeout` overrides
+the outer compose transport when an operator needs a different bound.
 
 Trust boundary: if you can run `docker compose exec` against the pod, you can
 select any principal present in claw-api's `principals.json`. The `--principal`
