@@ -362,7 +362,7 @@ services:
       agent: analyst
       cllama: passthrough
       models:
-        primary: google/gemini-2.5-flash
+        primary: google/gemini-3.6-flash
       cllama-env:
         GEMINI_API_KEY: ${GEMINI_API_KEY}
         # optional override for proxies or alternate endpoints
@@ -385,7 +385,7 @@ services:
       agent: analyst
       cllama: passthrough
       models:
-        primary: vercel/anthropic/claude-sonnet-4.6
+        primary: vercel/anthropic/claude-sonnet-5
       cllama-env:
         AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY}
         # optional override for proxies or alternate endpoints
@@ -393,7 +393,7 @@ services:
 ```
 
 The OpenAI-compatible `/v1/chat/completions` path forwards
-`anthropic/claude-sonnet-4.6` to Vercel as the upstream model. The Anthropic
+`anthropic/claude-sonnet-5` to Vercel as the upstream model. The Anthropic
 `/v1/messages` path remains native Anthropic-only.
 
 ### Count Expansion with cllama
@@ -424,7 +424,7 @@ $ claw audit --since 24h --claw analyst-0
 Pod: trading-desk
 Events: 128
 CLAW       REQ  RESP  ERR  INT  TOOLS  TOOL_ERR  TOK_IN  TOK_OUT  COST_USD  MODELS
-analyst-0  64   64    0    1    9      0         81204   18402    0.2130    claude-sonnet-4-6(64)
+analyst-0  64   64    0    1    9      0         81204   18402    0.2130    claude-sonnet-5(64)
 ```
 
 ## Telemetry and Audit

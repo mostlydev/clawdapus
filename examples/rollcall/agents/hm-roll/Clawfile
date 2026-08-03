@@ -2,5 +2,5 @@ FROM hermes:latest
 
 CLAW_TYPE hermes
 AGENT AGENTS.md
-MODEL primary openrouter/anthropic/claude-sonnet-4-6
+MODEL primary openrouter/anthropic/claude-sonnet-5
 HANDLE discord

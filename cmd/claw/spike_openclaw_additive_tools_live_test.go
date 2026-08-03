@@ -234,7 +234,7 @@ func openClawAdditiveProxyRequest(t *testing.T, env map[string]string) rollcallP
 		cfg.CllamaEnv["XAI_API_KEY"] = xaiKey
 	case anthropicKey != "":
 		cfg.APIFormat = "anthropic"
-		cfg.Model = "anthropic/claude-sonnet-4-6"
+		cfg.Model = "anthropic/claude-sonnet-5"
 		cfg.CllamaEnv["ANTHROPIC_API_KEY"] = anthropicKey
 	default:
 		t.Fatal("openclaw additive spike requires at least one real provider key")

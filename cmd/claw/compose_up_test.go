@@ -2958,7 +2958,7 @@ func TestMergeProviderSeedsNoKeylessProviderWithoutModelRef(t *testing.T) {
 	claws := map[string]*driver.ResolvedClaw{
 		"analyst": {
 			Cllama: []string{"passthrough"},
-			Models: map[string]string{"primary": "openrouter/google/gemini-2.5-flash"},
+			Models: map[string]string{"primary": "openrouter/google/gemini-3.6-flash"},
 		},
 	}
 	if err := mergeProviderSeeds(dir, p, claws); err != nil {

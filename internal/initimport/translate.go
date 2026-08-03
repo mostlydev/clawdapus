@@ -27,7 +27,7 @@ func Translate(src Descriptor, opts Options) (Plan, error) {
 		}
 	}
 	if model.Provider == "" {
-		model = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4-6"}
+		model = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-5"}
 	}
 	if len(fallbacks) > 1 {
 		notes.Action = append(notes.Action, fmt.Sprintf("source fallback chain preserved at pod level via x-claw.models.fallback: %s", strings.Join(modelRefStrings(fallbacks), ", ")))

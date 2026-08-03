@@ -14,7 +14,7 @@ FROM openclaw:latest
 CLAW_TYPE openclaw
 AGENT AGENTS.md                   # behavioral contract — bind-mounted read-only
 
-MODEL primary openrouter/anthropic/claude-sonnet-4-6
+MODEL primary openrouter/anthropic/claude-sonnet-5
 MODEL fallback anthropic/claude-haiku-4-5
 
 CLLAMA passthrough                # governance proxy — credential starvation + cost tracking
@@ -154,7 +154,7 @@ Composes contracts at pod level with three inclusion modes:
 The Clawfile is not interpreted at runtime. `claw build` produces a standard Dockerfile, and `docker build` produces a standard OCI image. The extended directives become image labels that `claw up` reads at deployment time.
 :::
 
-For example, `CLAW_TYPE openclaw` becomes a label on the image. `MODEL primary openrouter/anthropic/claude-sonnet-4-6` becomes a label encoding the model binding. `claw up` reads these labels when composing the pod and generates the appropriate runtime configuration for the selected driver.
+For example, `CLAW_TYPE openclaw` becomes a label on the image. `MODEL primary openrouter/anthropic/claude-sonnet-5` becomes a label encoding the model binding. `claw up` reads these labels when composing the pod and generates the appropriate runtime configuration for the selected driver.
 
 ## CLAW_TYPE and Drivers
 
@@ -174,7 +174,7 @@ The `CLAW_TYPE` directive selects which runtime driver handles the agent. All dr
 The `MODEL` directive binds named slots to provider/model pairs:
 
 ```dockerfile
-MODEL primary openrouter/anthropic/claude-sonnet-4-6
+MODEL primary openrouter/anthropic/claude-sonnet-5
 MODEL fallback anthropic/claude-haiku-4-5
 MODEL summarizer openrouter/google/gemini-flash-2.0
 ```

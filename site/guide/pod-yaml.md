@@ -14,7 +14,7 @@ x-claw:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4-6
+    primary: openrouter/anthropic/claude-sonnet-5
     fallback: anthropic/claude-haiku-4-5
   surfaces-defaults:
     - "service://operations-api"
@@ -195,7 +195,7 @@ Image `MODEL` labels still define the base slot map, but pod YAML can retarget s
 ```yaml
 x-claw:
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4-6
+    primary: openrouter/anthropic/claude-sonnet-5
     fallback: anthropic/claude-haiku-4-5
 
 services:
@@ -204,7 +204,7 @@ services:
     x-claw:
       agent: ./agents/analyst/AGENTS.md
       models:
-        primary: openrouter/google/gemini-2.5-flash
+        primary: openrouter/google/gemini-3.6-flash
 ```
 
 Precedence is:
@@ -226,8 +226,8 @@ x-claw:
     primary: openai/gpt-5.6
     fallback:
       - openai/gpt-5.1
-      - openrouter/anthropic/claude-sonnet-4-6
-      - google/gemini-2.5-flash
+      - openrouter/anthropic/claude-sonnet-5
+      - google/gemini-3.6-flash
 ```
 
 Chain rules:

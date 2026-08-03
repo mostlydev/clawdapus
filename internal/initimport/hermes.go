@@ -58,7 +58,7 @@ func readHermes(configPath string) (Descriptor, error) {
 	apiKey, _ := model["api_key"].(string)
 	desc.Models.Primary = hermesModelRef(provider, defaultModel, baseURL, apiKey)
 	if desc.Models.Primary.Provider == "" {
-		desc.Models.Primary = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4-6"}
+		desc.Models.Primary = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-5"}
 	}
 	if strings.TrimSpace(baseURL) != "" {
 		desc.Cllama = true

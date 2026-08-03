@@ -10,7 +10,7 @@ import (
 func TestDetectAmbiguousSourceRequiresOverride(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "openclaw.json"), `{"channels":{}}`)
-	mustWrite(t, filepath.Join(dir, "config.yaml"), "model:\n  provider: openrouter\n  default: anthropic/claude-sonnet-4-6\n")
+	mustWrite(t, filepath.Join(dir, "config.yaml"), "model:\n  provider: openrouter\n  default: anthropic/claude-sonnet-5\n")
 
 	if _, err := Detect(dir, ""); err == nil {
 		t.Fatal("expected ambiguous source to fail")
@@ -28,7 +28,7 @@ func TestTranslateOpenClawSlackRoutingWritesActionNote(t *testing.T) {
 	src := Descriptor{
 		Kind:      SourceOpenClaw,
 		AgentName: "assistant",
-		Models:    ModelSlots{Primary: ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4-6"}},
+		Models:    ModelSlots{Primary: ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-5"}},
 		Channels: Channels{Slack: &SlackChannel{
 			BotToken:     "${SLACK_BOT_TOKEN}",
 			AppToken:     "${SLACK_APP_TOKEN}",
@@ -52,7 +52,7 @@ func TestTranslateProxyModelEmitsCllama(t *testing.T) {
 		AgentName: "assistant",
 		Models: ModelSlots{Primary: ModelRef{
 			Provider: "openrouter",
-			Model:    "anthropic/claude-sonnet-4-6",
+			Model:    "anthropic/claude-sonnet-5",
 			BaseURL:  "http://cllama:8080/v1",
 		}},
 	}
@@ -70,7 +70,7 @@ func TestTranslateRejectsCllamaNoWithProxySource(t *testing.T) {
 		Kind: SourceOpenClaw,
 		Models: ModelSlots{Primary: ModelRef{
 			Provider: "openrouter",
-			Model:    "anthropic/claude-sonnet-4-6",
+			Model:    "anthropic/claude-sonnet-5",
 			BaseURL:  "http://proxy.example/v1",
 		}},
 	}
@@ -88,7 +88,7 @@ func TestTranslateCronIsMigrationAction(t *testing.T) {
 	src := Descriptor{
 		Kind:    SourceHermes,
 		CronDir: "/tmp/source-cron",
-		Models:  ModelSlots{Primary: ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4-6"}},
+		Models:  ModelSlots{Primary: ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-5"}},
 		Channels: Channels{Discord: &DiscordChannel{
 			Token: "${DISCORD_BOT_TOKEN}",
 			BotID: "${DISCORD_BOT_ID}",
@@ -124,7 +124,7 @@ func TestTranslateFallbackModelsEmitClawfileLines(t *testing.T) {
 	src := Descriptor{
 		Kind: SourceOpenClaw,
 		Models: ModelSlots{
-			Primary: ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4-6"},
+			Primary: ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-5"},
 			Fallback: []ModelRef{
 				{Provider: "anthropic", Model: "claude-haiku-4-5"},
 				{Provider: "openai", Model: "gpt-4.1-mini"},
@@ -166,7 +166,7 @@ func TestTranslateUnsupportedFallbackProviderIsNotEmitted(t *testing.T) {
 	src := Descriptor{
 		Kind: SourceOpenClaw,
 		Models: ModelSlots{
-			Primary:  ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4-6"},
+			Primary:  ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-5"},
 			Fallback: []ModelRef{{Provider: "mistral-ai", Model: "large"}},
 		},
 	}
@@ -217,7 +217,7 @@ func TestReadHermesFoldsEnvIdentityWithSoulAndNotesToolsets(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "config.yaml"), `model:
   provider: openrouter
-  default: anthropic/claude-sonnet-4-6
+  default: anthropic/claude-sonnet-5
 platform_toolsets:
   slack: true
 `)
@@ -251,7 +251,7 @@ func TestEmitCanonicalLayoutAndCronReferences(t *testing.T) {
 		ProjectName:   "demo",
 		AgentName:     "assistant",
 		BaseImage:     "hermes-base:test",
-		Model:         ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4-6"},
+		Model:         ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-5"},
 		Handles:       []HandlePlan{{Platform: "slack", IDEnv: "SLACK_BOT_ID", Username: "assistant"}},
 		Environment:   map[string]string{"SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}", "SLACK_APP_TOKEN": "${SLACK_APP_TOKEN}", "SLACK_BOT_ID": "${SLACK_BOT_ID}"},
 		AgentContract: "# Agent Contract\n",

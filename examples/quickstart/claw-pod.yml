@@ -1,7 +1,7 @@
 x-claw:
   pod: quickstart
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4-6
+    primary: openrouter/anthropic/claude-sonnet-5
     fallback: anthropic/claude-haiku-4-5
 services:
   assistant:
@@ -12,7 +12,7 @@ services:
       agent: ./agents/assistant/AGENTS.md
       cllama: passthrough
       models:
-        primary: openrouter/google/gemini-2.5-flash
+        primary: openrouter/google/gemini-3.6-flash
       cllama-env:
         OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
       handles:

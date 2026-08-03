@@ -2,6 +2,6 @@ FROM ghcr.io/mostlydev/openclaw:latest
 
 CLAW_TYPE openclaw
 
-MODEL primary openrouter/anthropic/claude-sonnet-4-6
+MODEL primary openrouter/anthropic/claude-sonnet-5
 
 HANDLE discord
