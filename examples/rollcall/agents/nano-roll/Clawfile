@@ -1,7 +1,0 @@
-FROM nanoclaw-orchestrator:latest
-
-CLAW_TYPE nanoclaw
-AGENT AGENTS.md
-MODEL primary anthropic/claude-sonnet-4-6
-PRIVILEGE docker-socket true
-HANDLE discord

@@ -1,6 +1,0 @@
-FROM microclaw:latest
-
-CLAW_TYPE microclaw
-AGENT AGENTS.md
-MODEL primary anthropic/claude-sonnet-4
-HANDLE discord

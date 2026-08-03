@@ -61,11 +61,11 @@ New forks per 30-day window, newest first, snapshot 2026-08-03T00:00Z:
 
 | runner | 0-30d | 30-60d | 60-90d | 90-120d | newest/oldest | recent60/prior60 | commits QoQ | latest release |
 |---|---|---|---|---|---|---|---|---|
-| Hermes | 6040 | 7598 | 10437 | 16301 | 0.37 | 0.51 | **+76%** | 2026-07-30 |
-| OpenClaw | 1804 | 2187 | 3758 | 6995 | 0.26 | 0.37 | **+8%** | 2026-08-02 |
+| Hermes | 6043 | 7598 | 10438 | 16303 | 0.37 | 0.51 | **+76%** | 2026-07-30 |
+| OpenClaw | 1805 | 2187 | 3758 | 6995 | 0.26 | 0.37 | **+8%** | 2026-08-02 |
 | Nanobot | 366 | 316 | 482 | 811 | 0.45 | 0.53 | -35% | 2026-07-25 |
 | PicoClaw | 315 | 102 | 156 | 305 | **1.03** | **0.90** | **-75%** | 2026-07-02 (`nightly`) |
-| NanoClaw | 167 | 223 | 412 | 2355 | 0.07 | 0.14 | -29% | 2026-08-01 |
+| NanoClaw | 167 | 223 | 412 | 2355 | **0.07** | 0.14 | -29% | 2026-08-01 |
 | NullClaw | 32 | 22 | 44 | 44 | 0.73 | 0.61 | -89% | **2026-05-29** |
 | MicroClaw | **0** | 3 | 10 | 8 | **0.00** | 0.17 | -91% | 2026-08-01 |
 
@@ -80,10 +80,10 @@ new stars and is not literally inert.
 
 The table above is the committed collector's output. Those figures were also collected independently
 by a second agent using separately written tooling, which agreed exactly on five of seven runners
-(Nanobot 366, NanoClaw 167, PicoClaw 315, NullClaw 32, MicroClaw 0) and to within two forks on
+(Nanobot 366, NanoClaw 167, PicoClaw 315, NullClaw 32, MicroClaw 0) and to within three forks on
 OpenClaw and Hermes, the difference being live drift between snapshots taken minutes apart. Two
 collectors reaching the same answer is a materially stronger basis for deleting a driver than either
-run alone, and it is the reason the retirement below is stated without hedging.
+run alone, and it is the reason the retirements below are stated without hedging.
 
 ### Two findings that determine the policy
 
@@ -102,38 +102,69 @@ reason the policy below separates the two rules and never collapses them.
 
 ## Decision
 
-**This ADR retires drivers on adoption grounds only.** A maintenance-viability rule is deliberately
-*not* adopted here — see "Deferred" below for why.
+The operator's instruction was to stop carrying the ambiguous runners: *"Just remove all the
+ambiguous ones. I don't need to maintain them."* The basis for this ADR is therefore **maintenance
+cost**, with the adoption evidence used to decide which runners are defensibly worth that cost. It is
+worth being explicit that this is a broader basis than adoption alone, rather than pretending a pure
+adoption rule produced this set.
 
-**Adoption floor.** A runner fails when new forks in the trailing 30-day window are not materially
-distinguishable from zero relative to the cohort, corroborated by at least one secondary distribution
-metric. Threshold for this snapshot: fewer than 10 new forks in the trailing 30 days, where the
-next-lowest surviving runner has 32. The wording is "no material adoption growth", not "no growth" —
-MicroClaw's 11 recent `WatchEvent`s mean the stronger claim would be false.
+A runner is retained only if it satisfies **all three** conditions:
 
-**Outcome:** retire **MicroClaw** — 0 new forks in the trailing 30 days, 0.00 retention, 730 stars,
-and ~30-95 downloads per release, three orders of magnitude below PicoClaw. It is the only runner
-that fails the floor, and it is worth stating that it is *actively maintained* (five releases in ten
-days). MicroClaw has a maintainer and no users; that is the honest reading, and it is exactly what an
-adoption rule is supposed to catch and a maintenance rule would have missed.
+1. **Adoption floor.** New forks in the trailing 30-day window are materially distinguishable from
+   zero relative to the cohort. Threshold for this snapshot: at least 10.
+2. **Upstream viability.** The upstream has shipped a release within 60 days, or its commit volume
+   has not collapsed quarter-over-quarter. Both failing together is disqualifying.
+3. **Independent corroboration.** Adoption is visible on at least one distribution channel other
+   than GitHub social counts — package downloads, image pulls, or release assets — so the figure can
+   be checked against something.
 
-Retain OpenClaw, Hermes, Nanobot, NanoClaw, PicoClaw, and NullClaw. Flag PicoClaw and NanoClaw for
-revisit at the next audit — PicoClaw for its maintenance trend, NanoClaw for the steepest retention
-decay in the set (0.07) despite healthy absolute numbers.
+Requiring all three is what makes the rule survive the two findings above. Condition 1 is a floor
+rather than a derivative, because every runner's fork rate is declining. Condition 2 is separate from
+adoption and cannot on its own delete a runner people use. Condition 3 exists because GitHub stars
+and forks are the metrics we trust least and the only ones available for every project.
 
-**Deferred: upstream maintenance viability.** NullClaw is the obvious candidate for a
-maintenance-based rule — no release since 2026-05-29 and commit volume down 89%. It is retained here
-anyway, because 32 new forks in the trailing 30 days, ~2k downloads per release, and 7987 stars are
-real use. Retiring a runner people demonstrably use, under an issue whose stated basis is adoption,
-would mean deciding on one rule and justifying with another. If carrying an unmaintained upstream
-becomes a real cost, that deserves its own issue, its own thresholds, and its own argument — with
-NullClaw as its first candidate. The related open question, whether NullClaw is a user-facing runner
-at all or an internal null adapter that should be judged on architectural utility as a test seam,
-belongs to that issue too. This ADR does not close it from data.
+### Verdicts
 
-**Removed `CLAW_TYPE` values fail closed for one release** with a validation error naming the removed
-runner and its migration target, then are deleted. A `claw up` that fails with a clear message is
-compile-time behavior consistent with the compiler contract; silently changing behavior is not.
+| runner | floor | viability | corroboration | verdict |
+|---|---|---|---|---|
+| OpenClaw | 1805 | release 2026-08-02, +8% | ~123k downloads/release | **retain** |
+| Hermes | 6043 | release 2026-07-30, +76% | ~2k downloads/release | **retain** |
+| Nanobot | 366 | release 2026-07-25, -35% | PyPI 68201/month | **retain** |
+| PicoClaw | 315 | commits -75% but released 2026-07-02 | 210714 Docker Hub pulls | **retain** |
+| NanoClaw | 167 | release 2026-08-01, -29% | **none** | **retire** |
+| NullClaw | 32 | **no release in 64 days and -89%** | ~2k downloads/release | **retire** |
+| MicroClaw | **0** | release 2026-08-01, -91% | ~30-95 downloads/release | **retire** |
+
+**MicroClaw fails the adoption floor.** Zero new forks in the trailing 30 days, 0.00 retention, 730
+stars, and tens of downloads per release — three orders of magnitude below PicoClaw. It is
+*actively maintained*, four releases in the ten days before the snapshot, which is precisely the
+point: it has a maintainer and no users. That is what an adoption rule catches and a maintenance rule
+would have missed. It is not literally inert — its Events API shows 11 `WatchEvent`s in the same
+window — which is why the wording throughout is "no material adoption growth" rather than "no
+growth".
+
+**NullClaw fails upstream viability.** No release since 2026-05-29 and commit volume down 89%. Its
+adoption is real (7987 stars, ~2k downloads per release, 32 new forks), so this is a decision to stop
+carrying an upstream that has stopped moving, not a claim that nobody uses it.
+
+**NanoClaw fails corroboration.** It is the only runner in the set with no asset distribution at all,
+so its 30410 stars cannot be checked against anything independent. It also carries the steepest
+adoption decay in the cohort by a wide margin — 0.07 newest/oldest, 0.14 across 60-day windows,
+against a next-worst of 0.26. Absent corroboration, a decay that steep is the whole picture rather
+than one signal among several.
+
+**PicoClaw is retained, and this is the load-bearing case.** On maintenance it looks like the worst
+runner in the set: commits down 75%, eight commits in the trailing four weeks, and its most recent
+tag is a `nightly`. On adoption it is the *best* — the only runner whose fork rate is flat-to-rising
+(1.03 newest/oldest, 0.90 across 60-day windows), plus 210714 Docker Hub pulls and ~33k downloads per
+release. Two metrics, opposite verdicts. Any rule that let maintenance activity decide would have
+deleted the healthiest-retaining runner in the cohort while keeping weaker ones. Condition 2 is
+therefore written as a conjunction — a slowing upstream is not disqualifying on its own.
+
+**Removed `CLAW_TYPE` values fail closed** with a validation error naming the retired runner, why it
+went, and the closest supported runner (`internal/driver/registry.go`). A `claw up` that fails with a
+clear message is compile-time behavior consistent with the compiler contract; silently changing
+behavior is not.
 
 **Revisit policy:** re-run the collector and re-evaluate at each minor release, or whenever a
 retained runner's upstream goes 60+ days without a release.
@@ -141,16 +172,17 @@ retained runner's upstream goes 60+ days without a release.
 ## Consequences
 
 **The cost side is not free, and it is not the deleted lines.** Driver LOC: openclaw 3523, hermes
-2784, picoclaw 1252, nullclaw 1125, nanobot 974, microclaw 847, nanoclaw 597. Retiring MicroClaw
-reclaims 847 lines. What it actually costs is **a conformance shape**. `examples/rollcall/` is a
-seven-driver pod and `CLAUDE.md` requires it remain a full spike test; `TestSpikeRollCall` is the
-primary proof that cllama proxy enforcement holds across *heterogeneous* runner shapes — distinct
-config formats, `HOME` handling, mention-only semantics, cron paths. Every shape removed is a shape
-that can no longer catch a driver-generic regression, and `CLAUDE.md` records that "bug fixes in one
-driver often apply to all 7". The rollcall fixture must be **revised to keep full conformance
-coverage across all six retained drivers**, not merely have a service deleted from it. Confining this
-ADR to a single removal keeps that cost to one shape, which is part of why the narrower outcome is
-the right one.
+2784, picoclaw 1252, nullclaw 1125, nanobot 974, microclaw 847, nanoclaw 597. Retiring NanoClaw,
+MicroClaw, and NullClaw reclaims ~2,600 lines of driver code plus their examples, fixtures, and
+docs. What it actually costs is **three conformance shapes**. `examples/rollcall/` was a seven-driver
+pod and `CLAUDE.md` requires it remain a full spike test; `TestSpikeRollCall` is the primary proof
+that cllama proxy enforcement holds across *heterogeneous* runner shapes — distinct config formats,
+`HOME` handling, mention-only semantics, cron paths. Every shape removed is a shape that can no
+longer catch a driver-generic regression, and `CLAUDE.md` records that "bug fixes in one driver often
+apply to all 7". The rollcall fixture must be **revised to keep full conformance coverage across all
+four retained drivers**, not merely have three services deleted from it. The offsetting gain is the
+operator's stated one: every driver-generic fix now has four targets instead of seven, and none of
+the remaining four is a runner we cannot corroborate real use for.
 
 **Historical references are not support surface, and must not be edited.** A retired runner's name
 survives in three distinct kinds of place, and they get different treatment:

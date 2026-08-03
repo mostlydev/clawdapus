@@ -1,6 +1,0 @@
-FROM nullclaw:latest
-
-CLAW_TYPE nullclaw
-AGENT AGENTS.md
-MODEL primary anthropic/claude-sonnet-4
-HANDLE discord
