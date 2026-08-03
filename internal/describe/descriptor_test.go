@@ -1,6 +1,10 @@
 package describe
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestParseDescriptorValidatesAndNormalizes(t *testing.T) {
 	data := []byte(`{
@@ -224,5 +228,52 @@ func TestParseDescriptorRejectsInvalidV2CapabilityShape(t *testing.T) {
 				t.Fatal("expected validation error")
 			}
 		})
+	}
+}
+
+// x-claw.terminalOnSuccess is a known annotation key consumed by cllama's
+// managed-tool mediation; cllama silently ignores non-boolean values, so claw
+// up fails closed at compile time instead. Unknown annotation keys pass
+// through untouched.
+func TestParseDescriptorValidatesTerminalOnSuccessAnnotation(t *testing.T) {
+	template := `{
+	  "version": 2,
+	  "description": "svc",
+	  "tools": [{
+	    "name": "hand_off",
+	    "description": "Hand off",
+	    "inputSchema": {"type": "object"},
+	    "http": {"method": "post", "path": "/hand-off"},
+	    "annotations": %s
+	  }]
+	}`
+
+	valid := []string{
+		`{"x-claw.terminalOnSuccess": true}`,
+		`{"x-claw.terminalOnSuccess": false}`,
+		`{"x-claw.terminalOnSuccess": true, "custom.key": {"nested": 1}}`,
+		`{"unknown.annotation": "any-shape"}`,
+	}
+	for _, annotations := range valid {
+		if _, err := Parse([]byte(fmt.Sprintf(template, annotations))); err != nil {
+			t.Errorf("annotations %s should parse, got %v", annotations, err)
+		}
+	}
+
+	invalid := []string{
+		`{"x-claw.terminalOnSuccess": "true"}`,
+		`{"x-claw.terminalOnSuccess": 1}`,
+		`{"x-claw.terminalOnSuccess": null}`,
+		`{"x-claw.terminalOnSuccess": {"enabled": true}}`,
+	}
+	for _, annotations := range invalid {
+		_, err := Parse([]byte(fmt.Sprintf(template, annotations)))
+		if err == nil {
+			t.Errorf("annotations %s should be rejected", annotations)
+			continue
+		}
+		if !strings.Contains(err.Error(), "x-claw.terminalOnSuccess") || !strings.Contains(err.Error(), "boolean") {
+			t.Errorf("error should name the key and require a boolean, got %v", err)
+		}
 	}
 }

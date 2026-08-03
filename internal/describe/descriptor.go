@@ -235,6 +235,11 @@ func validateTools(tools []ToolDescriptor, mcp *MCPDescriptor) error {
 		if strings.ToLower(strings.TrimSpace(schemaType)) != "object" {
 			return fmt.Errorf("tools[%d]: inputSchema.type must be \"object\"", i)
 		}
+		if value, declared := tool.Annotations["x-claw.terminalOnSuccess"]; declared {
+			if _, ok := value.(bool); !ok {
+				return fmt.Errorf("tools[%d]: annotation \"x-claw.terminalOnSuccess\" must be a JSON boolean, got %T", i, value)
+			}
+		}
 		if mcp != nil && tool.HTTP != nil {
 			return fmt.Errorf("tools[%d]: http must not be set when descriptor mcp is set", i)
 		}

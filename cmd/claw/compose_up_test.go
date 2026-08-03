@@ -96,6 +96,24 @@ func TestMergeModelSlots(t *testing.T) {
 			pod:   nil,
 			want:  nil,
 		},
+		{
+			name:  "pod fallback replaces entire image fallback family",
+			image: map[string]string{"primary": "image-primary", "fallback": "image-fb", "fallback-2": "image-fb2"},
+			pod:   map[string]string{"fallback": "pod-fb"},
+			want:  map[string]string{"primary": "image-primary", "fallback": "pod-fb"},
+		},
+		{
+			name:  "pod fallback chain replaces image scalar fallback",
+			image: map[string]string{"primary": "image-primary", "fallback": "image-fb"},
+			pod:   map[string]string{"fallback": "pod-fb", "fallback-2": "pod-fb2"},
+			want:  map[string]string{"primary": "image-primary", "fallback": "pod-fb", "fallback-2": "pod-fb2"},
+		},
+		{
+			name:  "image fallback family preserved when pod declares none",
+			image: map[string]string{"primary": "image-primary", "fallback": "image-fb", "fallback-2": "image-fb2"},
+			pod:   map[string]string{"primary": "pod-primary"},
+			want:  map[string]string{"primary": "pod-primary", "fallback": "image-fb", "fallback-2": "image-fb2"},
+		},
 	}
 
 	for _, tt := range tests {

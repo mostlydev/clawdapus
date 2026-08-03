@@ -75,9 +75,11 @@ func renderClawfile(plan Plan) string {
 	b.WriteString("MODEL primary ")
 	b.WriteString(plan.Model.String())
 	b.WriteString("\n")
-	for _, fallback := range plan.Fallback {
+	// Images declare at most one fallback; longer chains are emitted at pod
+	// level (x-claw.models.fallback), which replaces the image family anyway.
+	if len(plan.Fallback) > 0 {
 		b.WriteString("MODEL fallback ")
-		b.WriteString(fallback.String())
+		b.WriteString(plan.Fallback[0].String())
 		b.WriteString("\n")
 	}
 	if plan.Cllama {
@@ -114,6 +116,15 @@ func renderPod(plan Plan) string {
 	b.WriteString("      agent: ./agents/")
 	b.WriteString(plan.AgentName)
 	b.WriteString("/AGENTS.md\n")
+	if len(plan.Fallback) > 1 {
+		b.WriteString("      models:\n")
+		b.WriteString("        fallback:\n")
+		for _, fallback := range plan.Fallback {
+			b.WriteString("          - ")
+			b.WriteString(fallback.String())
+			b.WriteString("\n")
+		}
+	}
 	if plan.Cllama {
 		b.WriteString("      cllama: passthrough\n")
 		if len(plan.CllamaEnv) > 0 {

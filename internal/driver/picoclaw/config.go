@@ -225,15 +225,26 @@ func sortedModelSlots(models map[string]string) []string {
 		out = append(out, "primary")
 	}
 
+	// The fallback family orders numerically (fallback, fallback-2, ...,
+	// fallback-10) so model_list entries preserve declared chain order.
+	family := make([]string, 0, len(models))
 	others := make([]string, 0, len(models))
 	for slot, ref := range models {
 		if slot == "primary" || strings.TrimSpace(ref) == "" {
 			continue
 		}
+		if cllama.FallbackSlotOrdinal(slot) > 0 {
+			family = append(family, slot)
+			continue
+		}
 		others = append(others, slot)
 	}
+	sort.Slice(family, func(i, j int) bool {
+		return cllama.FallbackSlotOrdinal(family[i]) < cllama.FallbackSlotOrdinal(family[j])
+	})
 	sort.Strings(others)
 
+	out = append(out, family...)
 	return append(out, others...)
 }
 

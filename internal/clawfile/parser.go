@@ -79,6 +79,9 @@ func Parse(r io.Reader) (*ParseResult, error) {
 			}
 			slot := args[0]
 			if _, exists := config.Models[slot]; exists {
+				if slot == "fallback" {
+					return nil, fmt.Errorf("line %d: duplicate MODEL slot %q: images declare a single fallback; declare ordered fallback chains at pod level (x-claw.models.fallback: [ref, ref, ...])", node.StartLine, slot)
+				}
 				return nil, fmt.Errorf("line %d: duplicate MODEL slot %q", node.StartLine, slot)
 			}
 			config.Models[slot] = strings.TrimSpace(strings.TrimPrefix(remainder, slot))

@@ -81,3 +81,60 @@ func TestInjectCompiledModelPolicyClonesMetadataAndAddsPolicy(t *testing.T) {
 		t.Fatalf("unexpected compiled policy: %#v", policy)
 	}
 }
+
+// Ordered fallback chains: normalized fallback-N slots compile into multiple
+// slot=="fallback" entries in chain order, because cllama's FailoverRefs
+// consumes every fallback-slot entry in declared order (cllama ADR / #28).
+func TestCompileModelPolicyEmitsFallbackChainInOrderWithFallbackSlot(t *testing.T) {
+	policy := CompileModelPolicy(map[string]string{
+		"fallback-10": "openrouter/meta-llama/llama-4-maverick",
+		"primary":     "openai/gpt-5.6",
+		"fallback-2":  "anthropic/claude-sonnet-5",
+		"fallback":    "openai/gpt-5.1",
+		"cheap":       "anthropic/claude-haiku-4-5",
+	})
+	if policy == nil {
+		t.Fatal("expected non-nil policy")
+	}
+	want := []AllowedModel{
+		{Slot: "primary", Ref: "openai/gpt-5.6"},
+		{Slot: "fallback", Ref: "openai/gpt-5.1"},
+		{Slot: "fallback", Ref: "anthropic/claude-sonnet-5"},
+		{Slot: "fallback", Ref: "openrouter/meta-llama/llama-4-maverick"},
+		{Slot: "cheap", Ref: "anthropic/claude-haiku-4-5"},
+	}
+	if len(policy.Allowed) != len(want) {
+		t.Fatalf("allowed = %#v, want %#v", policy.Allowed, want)
+	}
+	for i, entry := range want {
+		if policy.Allowed[i] != entry {
+			t.Fatalf("allowed[%d] = %#v, want %#v", i, policy.Allowed[i], entry)
+		}
+	}
+}
+
+func TestCompileModelPolicyFallbackChainSkipsBlankAndDuplicateLinks(t *testing.T) {
+	policy := CompileModelPolicy(map[string]string{
+		"primary":    "openai/gpt-5.6",
+		"fallback":   "anthropic/claude-sonnet-5",
+		"fallback-2": "  ",
+		"fallback-3": "anthropic/claude-sonnet-5",
+		"fallback-4": "anthropic/claude-haiku-4-5",
+	})
+	if policy == nil {
+		t.Fatal("expected non-nil policy")
+	}
+	want := []AllowedModel{
+		{Slot: "primary", Ref: "openai/gpt-5.6"},
+		{Slot: "fallback", Ref: "anthropic/claude-sonnet-5"},
+		{Slot: "fallback", Ref: "anthropic/claude-haiku-4-5"},
+	}
+	if len(policy.Allowed) != len(want) {
+		t.Fatalf("allowed = %#v, want %#v", policy.Allowed, want)
+	}
+	for i, entry := range want {
+		if policy.Allowed[i] != entry {
+			t.Fatalf("allowed[%d] = %#v, want %#v", i, policy.Allowed[i], entry)
+		}
+	}
+}

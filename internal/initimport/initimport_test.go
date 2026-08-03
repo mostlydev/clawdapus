@@ -138,20 +138,27 @@ func TestTranslateFallbackModelsEmitClawfileLines(t *testing.T) {
 	}
 	clawfile := renderClawfile(plan)
 	if !strings.Contains(clawfile, "MODEL fallback anthropic/claude-haiku-3-5") {
-		t.Fatalf("expected fallback model in Clawfile, got:\n%s", clawfile)
+		t.Fatalf("expected first fallback model in Clawfile, got:\n%s", clawfile)
 	}
-	if strings.Contains(clawfile, "fallback_2") {
-		t.Fatalf("expected additional fallbacks to stay out of Clawfile, got:\n%s", clawfile)
+	if strings.Contains(clawfile, "gpt-4.1-mini") {
+		t.Fatalf("chain tail belongs at pod level, not in the Clawfile, got:\n%s", clawfile)
+	}
+	pod := renderPod(plan)
+	if !strings.Contains(pod, "models:") || !strings.Contains(pod, "fallback:") {
+		t.Fatalf("expected pod-level fallback chain, got:\n%s", pod)
+	}
+	if !strings.Contains(pod, "- anthropic/claude-haiku-3-5") || !strings.Contains(pod, "- openai/gpt-4.1-mini") {
+		t.Fatalf("expected full ordered chain in pod models block, got:\n%s", pod)
 	}
 	if got := plan.Environment["ANTHROPIC_API_KEY"]; got != "${ANTHROPIC_API_KEY}" {
 		t.Fatalf("expected fallback provider key placeholder, got %q", got)
 	}
-	if _, ok := plan.Environment["OPENAI_API_KEY"]; ok {
-		t.Fatal("did not expect placeholder for additional fallback that current runtimes ignore")
+	if got := plan.Environment["OPENAI_API_KEY"]; got != "${OPENAI_API_KEY}" {
+		t.Fatalf("expected chain-tail provider key placeholder, got %q", got)
 	}
 	migration := renderMigration(plan)
-	if !strings.Contains(migration, "additional source fallback models") || !strings.Contains(migration, "openai/gpt-4.1-mini") {
-		t.Fatalf("expected additional fallback migration note, got:\n%s", migration)
+	if strings.Contains(migration, "additional source fallback models are not emitted") {
+		t.Fatalf("chain is preserved now; stale truncation note found:\n%s", migration)
 	}
 }
 

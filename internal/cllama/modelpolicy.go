@@ -49,17 +49,19 @@ func orderedAllowedModels(models map[string]string) []AllowedModel {
 		return nil
 	}
 
+	// Slot keys in policy order: primary, the fallback chain (fallback,
+	// fallback-2, ... in ordinal order), then remaining slots sorted by name.
+	// Every chain link is emitted with slot name "fallback" because cllama's
+	// failover walks each fallback-slot entry in declared order.
 	slots := make([]string, 0, len(models))
 	if ref := strings.TrimSpace(models["primary"]); ref != "" {
 		slots = append(slots, "primary")
 	}
-	if ref := strings.TrimSpace(models["fallback"]); ref != "" {
-		slots = append(slots, "fallback")
-	}
+	slots = append(slots, orderedFallbackSlots(models)...)
 
 	otherSlots := make([]string, 0, len(models))
 	for slot, ref := range models {
-		if slot == "primary" || slot == "fallback" || strings.TrimSpace(ref) == "" {
+		if slot == "primary" || FallbackSlotOrdinal(slot) > 0 || strings.TrimSpace(ref) == "" {
 			continue
 		}
 		otherSlots = append(otherSlots, slot)
@@ -78,10 +80,63 @@ func orderedAllowedModels(models map[string]string) []AllowedModel {
 			continue
 		}
 		seen[ref] = struct{}{}
+		name := slot
+		if FallbackSlotOrdinal(slot) > 0 {
+			name = "fallback"
+		}
 		allowed = append(allowed, AllowedModel{
-			Slot: slot,
+			Slot: name,
 			Ref:  ref,
 		})
 	}
 	return allowed
+}
+
+// FallbackSlotOrdinal returns the 1-based chain position for fallback-family
+// slot keys ("fallback" -> 1, "fallback-2" -> 2, ...) and 0 for other slots.
+func FallbackSlotOrdinal(slot string) int {
+	if slot == "fallback" {
+		return 1
+	}
+	rest, ok := strings.CutPrefix(slot, "fallback-")
+	if !ok || rest == "" {
+		return 0
+	}
+	n := 0
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		n = n*10 + int(r-'0')
+	}
+	if n < 2 {
+		return 0
+	}
+	return n
+}
+
+// FallbackChain returns the declared fallback refs in chain order (fallback,
+// fallback-2, ...), with blanks skipped.
+func FallbackChain(models map[string]string) []string {
+	slots := orderedFallbackSlots(models)
+	chain := make([]string, 0, len(slots))
+	for _, slot := range slots {
+		if ref := strings.TrimSpace(models[slot]); ref != "" {
+			chain = append(chain, ref)
+		}
+	}
+	return chain
+}
+
+func orderedFallbackSlots(models map[string]string) []string {
+	family := make([]string, 0, 2)
+	for slot := range models {
+		if FallbackSlotOrdinal(slot) > 0 {
+			family = append(family, slot)
+		}
+	}
+	sort.Slice(family, func(i, j int) bool {
+		return FallbackSlotOrdinal(family[i]) < FallbackSlotOrdinal(family[j])
+	})
+	return family
 }
