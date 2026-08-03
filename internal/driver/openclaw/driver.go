@@ -1,7 +1,6 @@
 package openclaw
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,9 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
 	"github.com/mostlydev/clawdapus/internal/health"
@@ -208,7 +205,15 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		Restart:  "on-failure",
 		SkillDir: "/claw/skills",
 		Healthcheck: &driver.Healthcheck{
-			Test:     []string{"CMD", "openclaw", "health", "--json"},
+			// Current OpenClaw gateways expose unauthenticated liveness and
+			// readiness JSON, while the CLI health RPC requires the gateway's
+			// runtime credential. Validate the JSON body rather than accepting an
+			// arbitrary 200/SPA response. The CLI fallback keeps older images,
+			// which predate /readyz, on their established probe path.
+			Test: []string{
+				"CMD-SHELL",
+				`response="$(curl -fsS --max-time 2 http://localhost:18789/readyz 2>/dev/null)" || exec openclaw health --json >/dev/null 2>&1; printf '%s' "$$response" | jq -e 'has("ready")' >/dev/null 2>&1 || exec openclaw health --json >/dev/null 2>&1; printf '%s' "$$response" | jq -e '.ready == true' >/dev/null 2>&1`,
+			},
 			Interval: "30s",
 			Timeout:  "10s",
 			Retries:  3,
@@ -299,66 +304,50 @@ func (d *Driver) HealthProbe(ref driver.ContainerRef) (*driver.Health, error) {
 		return &driver.Health{OK: false, Detail: fmt.Sprintf("container is not running (status: %s)", status)}, nil
 	}
 
-	execCfg := types.ExecConfig{
-		Cmd:          []string{"openclaw", "health", "--json"},
-		AttachStdout: true,
-		AttachStderr: true,
-	}
-	execID, err := cli.ContainerExecCreate(ctx, ref.ContainerID, execCfg)
-	if err != nil {
-		return &driver.Health{OK: false, Detail: fmt.Sprintf("exec create failed: %v", err)}, nil
-	}
-
-	resp, err := cli.ContainerExecAttach(ctx, execID.ID, types.ExecStartCheck{})
-	if err != nil {
-		return &driver.Health{OK: false, Detail: fmt.Sprintf("exec attach failed: %v", err)}, nil
-	}
-	defer resp.Close()
-
-	var stdoutBuf bytes.Buffer
-	var stderrBuf bytes.Buffer
-	copyDone := make(chan error, 1)
-	go func() {
-		_, copyErr := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, resp.Reader)
-		copyDone <- copyErr
-	}()
-
-	select {
-	case copyErr := <-copyDone:
-		if copyErr != nil {
-			return &driver.Health{OK: false, Detail: fmt.Sprintf("exec read failed: %v", copyErr)}, nil
+	// Current gateways expose /readyz without the ephemeral gateway token that
+	// the CLI health RPC requires. A failed request or an unrecognized response
+	// falls back to the CLI for compatibility with older OpenClaw images. A
+	// valid ready:false response is authoritative and must not be masked.
+	stdout, _, exitCode, execErr := shared.ExecInContainer(ctx, cli, ref.ContainerID, []string{
+		"curl", "-fsS", "--max-time", "2", "http://localhost:18789/readyz",
+	})
+	if execErr == nil && exitCode == 0 {
+		if result, parseErr := health.ParseOpenClawReadinessJSON([]byte(stdout)); parseErr == nil {
+			return &driver.Health{OK: result.OK, Detail: result.Detail}, nil
 		}
-	case <-ctx.Done():
-		resp.Close()
-		return &driver.Health{OK: false, Detail: "health probe timed out after 15s"}, nil
 	}
 
-	execInspect, err := cli.ContainerExecInspect(ctx, execID.ID)
+	stdout, stderr, exitCode, err := shared.ExecInContainer(ctx, cli, ref.ContainerID, []string{
+		"openclaw", "health", "--json",
+	})
 	if err != nil {
-		return &driver.Health{OK: false, Detail: fmt.Sprintf("exec inspect failed: %v", err)}, nil
+		if ctx.Err() != nil {
+			return &driver.Health{OK: false, Detail: "health probe timed out after 15s"}, nil
+		}
+		return &driver.Health{OK: false, Detail: err.Error()}, nil
 	}
-	if execInspect.ExitCode != 0 {
-		detail := strings.TrimSpace(stderrBuf.String())
+	if exitCode != 0 {
+		detail := strings.TrimSpace(stderr)
 		if detail == "" {
-			detail = strings.TrimSpace(stdoutBuf.String())
+			detail = strings.TrimSpace(stdout)
 		}
 		if detail == "" {
 			detail = "health command failed with no output"
 		}
-		return &driver.Health{OK: false, Detail: fmt.Sprintf("health command exit code %d: %s", execInspect.ExitCode, detail)}, nil
+		return &driver.Health{OK: false, Detail: fmt.Sprintf("health command exit code %d: %s", exitCode, detail)}, nil
 	}
 
-	result, err := health.ParseHealthJSON(stdoutBuf.Bytes())
+	result, err := health.ParseHealthJSON([]byte(stdout))
 	if err != nil {
 		detail := fmt.Sprintf("parse failed: %v", err)
-		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
+		if stderr = strings.TrimSpace(stderr); stderr != "" {
 			detail += fmt.Sprintf(" (stderr: %s)", stderr)
 		}
 		return &driver.Health{OK: false, Detail: detail}, nil
 	}
 
 	detail := result.Detail
-	if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
+	if stderr = strings.TrimSpace(stderr); stderr != "" {
 		detail += fmt.Sprintf(" (stderr: %s)", stderr)
 	}
 	return &driver.Health{OK: result.OK, Detail: detail}, nil
