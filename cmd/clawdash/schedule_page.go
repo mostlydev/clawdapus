@@ -422,7 +422,29 @@ func buildNextSlotDisplay(inv scheduleInvocationView, now time.Time) nextSlotDis
 		display.Modifier = "(degraded, ~10% fire chance)"
 	}
 
+	if note := coalescedSlotNote(inv.State, inv.Timezone); note != "" {
+		display.Notes = append(display.Notes, note)
+	}
+
 	return display
+}
+
+// coalescedSlotNote explains slots the scheduler dropped because the previous
+// wake for the same invocation was still running. Without it the card looks
+// healthy even though the schedule is firing less often than its cron says.
+func coalescedSlotNote(state schedulepkg.InvocationState, timezone string) string {
+	if state.SuppressedSlots <= 0 {
+		return ""
+	}
+	slots := "slots"
+	if state.SuppressedSlots == 1 {
+		slots = "slot"
+	}
+	note := fmt.Sprintf("%d due %s coalesced because the previous wake was still running", state.SuppressedSlots, slots)
+	if at := formatScheduleTime(state.LastSuppressedAt, timezone); at != "-" {
+		note += "; most recent " + at
+	}
+	return note + "."
 }
 
 func buildLastEventDisplay(state schedulepkg.InvocationState, timezone string, now time.Time) lastEventDisplay {
