@@ -31,7 +31,14 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.28.0 <Badge type="tip" text="Latest" /> {#v0-28-0}
+## v0.28.1 <Badge type="tip" text="Latest" /> {#v0-28-1}
+
+*2026-08-03*
+
+- **cllama moves to [v0.10.0](https://github.com/mostlydev/cllama/releases/tag/v0.10.0)** -- three opt-in proxy knobs, all validated and audit-observable: `CLLAMA_RESPONSES_DEFAULT_REASONING_EFFORT` (default reasoning effort for Responses-adapted requests that omit one; invalid values skip injection and emit an intervention instead of failing the model fleet-wide), `CLLAMA_RESPONSES_REQUIRED_TOOL_CHOICE_AS_AUTO` (relaxes `tool_choice: "required"` at the adapter boundary, each rewrite logged), and `CLLAMA_TOOL_ARG_PRUNE_SENTINELS` (model-scoped pruning of optional tool args set to their schema minimum -- a filler habit of specific model families). Set them via `x-claw.cllama-defaults.env`.
+- Infra image pins stay at `v0.28.0` (no `claw-api`/`clawdash`/`claw-wall`/`claw-channel-memory`/`claw-mcp-stdio` code changes); `hermes-base` stays at `v2026.6.19-claw.3`.
+
+## v0.28.0 {#v0-28-0}
 
 *2026-08-03*
 

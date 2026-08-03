@@ -309,6 +309,16 @@ x-claw:
 No runner or Clawfile changes are needed — declare the model in a slot like
 any other, and cllama handles the dialect.
 
+Two further adapter knobs (cllama ≥ v0.10.0), both opt-in and audit-observable:
+
+- `CLLAMA_RESPONSES_DEFAULT_REASONING_EFFORT` — reasoning effort injected when
+  the caller omits `reasoning_effort` (`none`/`minimal`/`low`/`medium`/`high`;
+  explicit caller values win; invalid values skip injection and emit a
+  `responses_reasoning_effort_invalid` intervention).
+- `CLLAMA_RESPONSES_REQUIRED_TOOL_CHOICE_AS_AUTO` — relaxes a caller's
+  `tool_choice: "required"` to `"auto"` at the adapter boundary; every rewrite
+  emits a `responses_required_tool_choice_relaxed` intervention.
+
 ## Pod Configuration
 
 ### Declaring a cllama Proxy
