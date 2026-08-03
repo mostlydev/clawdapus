@@ -14,7 +14,7 @@ x-claw:
       OPENAI_API_KEY: sk-local-fake
       OPENAI_BASE_URL: http://fake-provider:8080/v1
   models-defaults:
-    primary: openai/gpt-4o
+    primary: openai/gpt-5.6
 
 services:
   analyst:

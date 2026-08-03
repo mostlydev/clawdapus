@@ -30,12 +30,16 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
 
-	// Apply MODEL directives. openclaw uses "fallbacks" ([]string), not "fallback" (string).
+	// Apply MODEL directives. openclaw uses "fallbacks" ([]string), not
+	// "fallback" (string); the whole fallback family (fallback, fallback-2,
+	// ...) projects into that one array in chain order.
+	if chain := cllama.FallbackChain(rc.Models); len(chain) > 0 {
+		if err := setPath(config, "agents.defaults.model.fallbacks", chain); err != nil {
+			return nil, fmt.Errorf("config generation: %w", err)
+		}
+	}
 	for slot, model := range rc.Models {
-		if slot == "fallback" {
-			if err := setPath(config, "agents.defaults.model.fallbacks", []string{model}); err != nil {
-				return nil, fmt.Errorf("config generation: %w", err)
-			}
+		if cllama.FallbackSlotOrdinal(slot) > 0 {
 			continue
 		}
 		if err := setPath(config, "agents.defaults.model."+slot, model); err != nil {

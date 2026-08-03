@@ -15,7 +15,7 @@ CHANNEL_ID="${ROLLCALL_CHANNEL_ID:-}"
 RUNTIME="${CLAW_RUNTIME:-unknown}"
 CLLAMA="${CLLAMA_TOKEN:-}"
 CLLAMA_FORMAT="${ROLLCALL_CLLAMA_API_FORMAT:-openai}"
-CLLAMA_MODEL="${ROLLCALL_CLLAMA_MODEL:-anthropic/claude-sonnet-4}"
+CLLAMA_MODEL="${ROLLCALL_CLLAMA_MODEL:-anthropic/claude-sonnet-5}"
 REPLY_MODE="${ROLLCALL_REPLY_MODE:-tool_only}"
 UA="DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)"
 

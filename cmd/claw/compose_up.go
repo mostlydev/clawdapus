@@ -3316,8 +3316,11 @@ func mergeResolvedSkills(imageSkills, podSkills []driver.ResolvedSkill) []driver
 }
 
 // mergeModelSlots overlays pod-declared model slots onto image-declared slots.
-// Image-only slots are preserved; pod entries replace image entries by key.
-// Empty or nil pod maps suppress pod defaults only; image labels still apply.
+// Image-only slots are preserved; pod entries replace image entries by key,
+// except the fallback family (fallback, fallback-2, ...), which replaces
+// atomically: any pod-declared fallback chain drops the image's entire chain
+// so the two can never interleave. Empty or nil pod maps suppress pod defaults
+// only; image labels still apply.
 func mergeModelSlots(image, pod map[string]string) map[string]string {
 	out := cloneStringMap(image)
 	if len(pod) == 0 {
@@ -3326,7 +3329,24 @@ func mergeModelSlots(image, pod map[string]string) map[string]string {
 	if out == nil {
 		out = make(map[string]string, len(pod))
 	}
+	podDeclaresFallback := false
+	for key := range pod {
+		if cllama.FallbackSlotOrdinal(key) > 0 {
+			podDeclaresFallback = true
+			break
+		}
+	}
+	if podDeclaresFallback {
+		for key := range out {
+			if cllama.FallbackSlotOrdinal(key) > 0 {
+				delete(out, key)
+			}
+		}
+	}
 	for key, value := range pod {
+		if cllama.FallbackSlotOrdinal(key) > 0 && strings.TrimSpace(value) == "" {
+			continue
+		}
 		out[key] = value
 	}
 	return out

@@ -79,7 +79,7 @@ x-claw:
     env:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4
+    primary: openrouter/anthropic/claude-sonnet-5
     fallback: anthropic/claude-haiku-4-5
   surfaces-defaults:
     - "service://trading-api"

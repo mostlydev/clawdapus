@@ -606,3 +606,16 @@ The capability-evolution wave (this ADR + ADR-021) landed together. Current stat
 - Phase 6: `parallel_safe` annotation, dynamic filtering, native mode graduation
 
 See `docs/plans/2026-03-30-memory-plane-and-pluggable-recall.md` for the companion implementation-status document covering both ADR-020 and ADR-021.
+
+## Amendment (2026-08-03): Terminal-on-Success Annotation Validation
+
+cllama's managed mediation now supports terminal-on-success tools: a tool
+annotated `"x-claw.terminalOnSuccess": true` in its descriptor ends the
+mediated turn after a successful call instead of requesting another model
+round. The annotation flows through the existing generic annotations
+projection (descriptor → tool registry → generated `tools.json`) untouched.
+
+Clawdapus adds compile-time validation only: cllama ignores and logs non-bool
+values at runtime, so `claw up` fails closed when a descriptor declares the
+key with any non-boolean value. Unknown annotation keys continue to pass
+through unvalidated — the namespace remains open for service authors.

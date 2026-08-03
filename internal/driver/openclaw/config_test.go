@@ -1345,3 +1345,45 @@ func TestGenerateConfigHandleNilMeansNoChannels(t *testing.T) {
 		t.Error("expected no channels key when Handles is nil")
 	}
 }
+
+func TestGenerateConfigModelFallbackChainKeepsDeclaredOrder(t *testing.T) {
+	rc := &driver.ResolvedClaw{
+		Models: map[string]string{
+			"primary":     "openai/gpt-5.6",
+			"fallback":    "openai/gpt-5.1",
+			"fallback-2":  "anthropic/claude-sonnet-5",
+			"fallback-10": "anthropic/claude-haiku-4-5",
+		},
+		Configures: []string{},
+	}
+
+	data, err := GenerateConfig(rc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	model := config["agents"].(map[string]interface{})["defaults"].(map[string]interface{})["model"].(map[string]interface{})
+	fallbacks, ok := model["fallbacks"].([]interface{})
+	if !ok {
+		t.Fatalf("expected fallbacks array, got %T: %v", model["fallbacks"], model["fallbacks"])
+	}
+	want := []string{"openai/gpt-5.1", "anthropic/claude-sonnet-5", "anthropic/claude-haiku-4-5"}
+	if len(fallbacks) != len(want) {
+		t.Fatalf("fallbacks = %v, want %v", fallbacks, want)
+	}
+	for i, ref := range want {
+		if fallbacks[i] != ref {
+			t.Errorf("fallbacks[%d] = %v, want %q", i, fallbacks[i], ref)
+		}
+	}
+	for _, key := range []string{"fallback", "fallback-2", "fallback-10"} {
+		if _, exists := model[key]; exists {
+			t.Errorf("agents.defaults.model.%s must not leak as a config key", key)
+		}
+	}
+}

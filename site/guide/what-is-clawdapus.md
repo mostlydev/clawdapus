@@ -66,8 +66,8 @@ $ claw audit --since 24h
 Pod: research-pod
 Events: 460
 CLAW        REQ  RESP  ERR  INT  TOOLS  TOOL_ERR  TOK_IN  TOK_OUT  COST_USD  MODELS
-analyst     142  142   0    3    18     0         284011  39402    1.8742    anthropic/claude-sonnet-4
-researcher  88   87    1    0    5      0         151233  20118    0.9931    anthropic/claude-sonnet-4
+analyst     142  142   0    3    18     0         284011  39402    1.8742    anthropic/claude-sonnet-5
+researcher  88   87    1    0    5      0         151233  20118    0.9931    anthropic/claude-sonnet-5
 
 Totals: req=230 resp=229 err=1 int=3 tools=23/23 tokens=435244/59520 cost=$2.8673
 ```

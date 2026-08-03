@@ -27,11 +27,10 @@ func Translate(src Descriptor, opts Options) (Plan, error) {
 		}
 	}
 	if model.Provider == "" {
-		model = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4"}
+		model = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-5"}
 	}
 	if len(fallbacks) > 1 {
-		notes.Action = append(notes.Action, fmt.Sprintf("additional source fallback models are not emitted because current runtimes use only MODEL fallback: %s", strings.Join(modelRefStrings(fallbacks[1:]), ", ")))
-		fallbacks = fallbacks[:1]
+		notes.Action = append(notes.Action, fmt.Sprintf("source fallback chain preserved at pod level via x-claw.models.fallback: %s", strings.Join(modelRefStrings(fallbacks), ", ")))
 	}
 	if isCllamaDisabled(opts.CllamaOverride) && model.BaseURL != "" {
 		return Plan{}, fmt.Errorf("--cllama=no cannot import source model base_url %q; pass --model <provider/model> to use a native route or omit --cllama=no", model.BaseURL)

@@ -66,7 +66,7 @@ type rawClawBlock struct {
 	Persona      string                 `yaml:"persona"`
 	DescribeFile string                 `yaml:"describe-file"`
 	Cllama       interface{}            `yaml:"cllama"`
-	Models       map[string]string      `yaml:"models"`
+	Models       ModelSlots             `yaml:"models"`
 	CllamaEnv    map[string]string      `yaml:"cllama-env"`
 	Count        int                    `yaml:"count"`
 	Handles      map[string]interface{} `yaml:"handles"`

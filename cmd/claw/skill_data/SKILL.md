@@ -87,8 +87,8 @@ FROM openclaw:latest
 CLAW_TYPE openclaw                          # REQUIRED: selects runtime driver
 AGENT AGENTS.md                             # behavioral contract — must exist on host
 
-MODEL primary openrouter/anthropic/claude-sonnet-4
-MODEL fallback anthropic/claude-haiku-3-5
+MODEL primary openrouter/anthropic/claude-sonnet-5
+MODEL fallback anthropic/claude-haiku-4-5
 
 CLLAMA passthrough                          # governance proxy type
 PERSONA ./personas/trader                   # identity materialization (local or OCI)
@@ -391,9 +391,9 @@ The proxy sits between agents and LLM providers. Agents get bearer tokens, proxy
 
 | Provider | Auth | Model format |
 |----------|------|-------------|
-| OpenAI | Bearer | `openai/gpt-4o` |
-| Anthropic | X-Api-Key | `anthropic/claude-sonnet-4` |
-| OpenRouter | Bearer | `openrouter/anthropic/claude-sonnet-4` |
+| OpenAI | Bearer | `openai/gpt-5.6` |
+| Anthropic | X-Api-Key | `anthropic/claude-sonnet-5` |
+| OpenRouter | Bearer | `openrouter/anthropic/claude-sonnet-5` |
 | xAI | Bearer | `xai/grok-3` |
 | Ollama | None | `ollama/llama3` |
 

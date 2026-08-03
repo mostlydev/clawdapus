@@ -248,3 +248,24 @@ func TestGenerateConfigConfigureOverride(t *testing.T) {
 		t.Fatalf("expected discord enabled override from CONFIGURE, got %v", v)
 	}
 }
+
+// Fallback-family slots must order numerically (fallback, fallback-2, ...,
+// fallback-10), not lexically, so picoclaw's model_list preserves chain order.
+func TestSortedModelSlotsOrdersFallbackChainNumerically(t *testing.T) {
+	got := sortedModelSlots(map[string]string{
+		"fallback-10": "j",
+		"analysis":    "x",
+		"fallback-2":  "b",
+		"primary":     "p",
+		"fallback":    "a",
+	})
+	want := []string{"primary", "fallback", "fallback-2", "fallback-10", "analysis"}
+	if len(got) != len(want) {
+		t.Fatalf("slots = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("slots = %v, want %v", got, want)
+		}
+	}
+}

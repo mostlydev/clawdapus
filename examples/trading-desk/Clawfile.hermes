@@ -3,7 +3,7 @@ FROM alpine:3.20
 CLAW_TYPE hermes
 AGENT AGENTS.md
 
-MODEL primary anthropic/claude-sonnet-4
+MODEL primary anthropic/claude-sonnet-5
 
 HANDLE discord
 

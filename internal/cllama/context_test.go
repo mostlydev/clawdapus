@@ -398,3 +398,52 @@ func TestGenerateContextDirNilToolPolicyUsesDefault(t *testing.T) {
 		t.Fatalf("tools.json policy: got %+v, want default %+v", manifest.Policy, DefaultToolPolicy)
 	}
 }
+
+// The x-claw.terminalOnSuccess annotation must survive the full projection
+// into the generated tools.json manifest — cllama's mediation reads it there.
+func TestGenerateContextDirPreservesTerminalOnSuccessAnnotation(t *testing.T) {
+	dir := t.TempDir()
+	agents := []AgentContextInput{{
+		AgentID:  "octopus",
+		AgentsMD: "# contract",
+		Metadata: map[string]any{"token": "tok"},
+		Tools: []ToolManifestEntry{{
+			Name:        "hand_off",
+			Description: "Hand off to a human",
+			InputSchema: map[string]interface{}{"type": "object"},
+			Annotations: map[string]interface{}{
+				"x-claw.terminalOnSuccess": true,
+				"vendor.custom":            map[string]interface{}{"keep": "me"},
+			},
+			Execution: ToolExecution{Transport: "http", Service: "svc", BaseURL: "http://svc", Method: "POST", Path: "/hand-off"},
+		}},
+	}}
+
+	if err := GenerateContextDir(dir, agents); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "context", "octopus", "tools.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Tools []struct {
+			Annotations map[string]interface{} `json:"annotations"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Tools) != 1 {
+		t.Fatalf("unexpected manifest: %s", raw)
+	}
+	annotations := manifest.Tools[0].Annotations
+	if annotations["x-claw.terminalOnSuccess"] != true {
+		t.Fatalf("terminalOnSuccess lost in projection: %v", annotations)
+	}
+	custom, ok := annotations["vendor.custom"].(map[string]interface{})
+	if !ok || custom["keep"] != "me" {
+		t.Fatalf("unknown annotations must pass through untouched: %v", annotations)
+	}
+}

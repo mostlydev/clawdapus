@@ -5,9 +5,15 @@ x-claw:
     proxy: [passthrough]
     env:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4
-    fallback: anthropic/claude-haiku-4-5
+    primary: openrouter/anthropic/claude-sonnet-5
+    # Ordered failover chain: cllama walks these in order when a provider
+    # is exhausted. A service-level fallback replaces the whole chain.
+    fallback:
+      - openai/gpt-5.6
+      - google/gemini-3.6-flash
 
 services:
   worker-a:
@@ -46,7 +52,7 @@ services:
     x-claw:
       agent: ./agents/GOVERNOR.md
       models:
-        primary: openrouter/anthropic/claude-opus-4-1
+        primary: openrouter/anthropic/claude-opus-5
       feeds: [fleet-alerts]
       surfaces:
         - "service://claw-api"

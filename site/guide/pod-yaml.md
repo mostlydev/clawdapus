@@ -14,7 +14,7 @@ x-claw:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4
+    primary: openrouter/anthropic/claude-sonnet-5
     fallback: anthropic/claude-haiku-4-5
   surfaces-defaults:
     - "service://operations-api"
@@ -195,7 +195,7 @@ Image `MODEL` labels still define the base slot map, but pod YAML can retarget s
 ```yaml
 x-claw:
   models-defaults:
-    primary: openrouter/anthropic/claude-sonnet-4
+    primary: openrouter/anthropic/claude-sonnet-5
     fallback: anthropic/claude-haiku-4-5
 
 services:
@@ -204,7 +204,7 @@ services:
     x-claw:
       agent: ./agents/analyst/AGENTS.md
       models:
-        primary: openrouter/google/gemini-2.5-flash
+        primary: openrouter/google/gemini-3.6-flash
 ```
 
 Precedence is:
@@ -214,6 +214,41 @@ Precedence is:
 - image `MODEL` labels
 
 `x-claw.models` merges additively over `models-defaults`, so overriding `primary` still inherits `fallback` unless you explicitly suppress pod defaults. `models: {}` and `models: null` both suppress pod defaults only; image-declared slots still apply.
+
+### Ordered Fallback Chains
+
+The `fallback` slot accepts an ordered list. cllama walks the chain in
+declared order when a provider is exhausted:
+
+```yaml
+x-claw:
+  models-defaults:
+    primary: openai/gpt-5.6
+    fallback:
+      - openai/gpt-5.1
+      - openrouter/anthropic/claude-sonnet-5
+      - google/gemini-3.6-flash
+```
+
+Chain rules:
+
+- The fallback family replaces **atomically**: any service-level `fallback`
+  declaration (scalar or list) replaces the entire default chain — chains
+  never interleave across layers. The same rule applies to image `MODEL
+  fallback` labels: a pod-declared chain replaces the image's fallback.
+- Only `fallback` accepts a list. Other slots (`primary`, `analysis`, ...)
+  are scalar, and non-fallback slots never participate in failover.
+- Clawfile images declare at most one `MODEL fallback`; longer chains are
+  pod-level deployment policy.
+- Every candidate must be reachable through the runner's request format.
+  OpenAI-format runners use `/v1/chat/completions`; an `anthropic/...` ref on
+  that path is bridged through OpenRouter only when OpenRouter is configured.
+  Anthropic-format runners use `/v1/messages`, where every candidate must be
+  `anthropic/...`. For cross-vendor failover from an OpenAI-format runner, use
+  explicit OpenAI-compatible refs such as `openrouter/anthropic/...` and seed
+  every provider key in `x-claw.cllama-env`.
+
+See ADR-019 for the full failover contract.
 
 ## Mixed Cognitive and Non-Cognitive Services
 

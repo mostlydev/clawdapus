@@ -268,3 +268,13 @@ func TestParseHandleNotPresentMeansEmpty(t *testing.T) {
 		t.Errorf("expected 0 handles, got %d", len(result.Config.Handles))
 	}
 }
+
+func TestParseDuplicateFallbackModelPointsAtPodChains(t *testing.T) {
+	_, err := Parse(strings.NewReader("FROM alpine\nCLAW_TYPE hermes\nMODEL fallback openai/gpt-5.1\nMODEL fallback anthropic/claude-sonnet-5\n"))
+	if err == nil {
+		t.Fatal("expected duplicate MODEL fallback to fail")
+	}
+	if !strings.Contains(err.Error(), "x-claw.models.fallback") {
+		t.Fatalf("error should point at pod-level fallback chains, got %v", err)
+	}
+}

@@ -18,7 +18,7 @@ import (
 const (
 	defaultAgentName  = "assistant"
 	defaultClawType   = "openclaw"
-	defaultModel      = "openrouter/anthropic/claude-sonnet-4"
+	defaultModel      = "openrouter/anthropic/claude-sonnet-5"
 	defaultPlatform   = "discord"
 	defaultCllamaType = "passthrough"
 )

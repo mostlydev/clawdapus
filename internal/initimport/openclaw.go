@@ -66,7 +66,7 @@ func readOpenClaw(configPath string) (Descriptor, error) {
 		}
 	}
 	if desc.Models.Primary.Provider == "" {
-		desc.Models.Primary = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-4"}
+		desc.Models.Primary = ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet-5"}
 	}
 	if providers, ok := nestedMap(raw, "models", "providers"); ok {
 		if providerCfg, ok := providers[desc.Models.Primary.Provider].(map[string]any); ok {
