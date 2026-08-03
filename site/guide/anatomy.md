@@ -26,11 +26,8 @@ Supported runners today:
 |--------|---------|
 | `openclaw` | [OpenClaw](https://openclaw.ai) |
 | `hermes` | [Hermes](https://github.com/NousResearch/hermes-agent) |
-| `nanoclaw` | NanoClaw / Claude Code-compatible orchestrator |
 | `nanobot` | [Nanobot](https://github.com/HKUDS/nanobot) |
 | `picoclaw` | [PicoClaw](https://github.com/sipeed/picoclaw) |
-| `nullclaw` | [NullClaw](https://github.com/nullclaw/nullclaw) |
-| `microclaw` | [MicroClaw](https://github.com/microclaw/microclaw) |
 
 Pick a runner based on what you need. Swap it without touching the persona or the contract. A 400-line Python script with brokerage API access needs the exact same purpose contract and governance proxy as a massive agent OS.
 

@@ -107,9 +107,6 @@ func TestSpikeRollCall(t *testing.T) {
 		alwaysRebuild bool   // true for stubs that embed discord-responder.sh
 	}{
 		{"openclaw:latest", "Dockerfile.openclaw-base", "", true},
-		{"nullclaw:latest", "Dockerfile.nullclaw-base", "", true},
-		{"microclaw:latest", "Dockerfile.microclaw-base", "", true},
-		{"nanoclaw-orchestrator:latest", "Dockerfile.nanoclaw-base", "", true},
 		{"nanobot:latest", "Dockerfile.nanobot-base", "", true},
 		{"picoclaw:latest", "Dockerfile.picoclaw-base", "", true},
 		// Hermes is a real runtime — build from the canonical dockerfiles dir so
@@ -136,9 +133,6 @@ func TestSpikeRollCall(t *testing.T) {
 		dockerfile string
 	}{
 		{"rollcall-openclaw:latest", "agents/oc-roll/Clawfile"},
-		{"rollcall-nullclaw:latest", "agents/nc-roll/Clawfile"},
-		{"rollcall-microclaw:latest", "agents/mc-roll/Clawfile"},
-		{"rollcall-nanoclaw:latest", "agents/nano-roll/Clawfile"},
 		{"rollcall-nanobot:latest", "agents/nb-roll/Clawfile"},
 		{"rollcall-picoclaw:latest", "agents/pc-roll/Clawfile"},
 		{"rollcall-hermes:latest", "agents/hm-roll/Clawfile"},
@@ -186,39 +180,19 @@ func TestSpikeRollCall(t *testing.T) {
 			requireKeys:     []string{"GEMINI_API_KEY"},
 		},
 		{
-			// Stubs send the bare provider/model ref directly via curl, so we
-			// must use a model name that Anthropic actually recognises today
+			// nb-roll carries the anthropic-messages ingress surface for the
+			// default run. The retired nullclaw/nanoclaw stubs used to cover
+			// it (ADR-026); pc-roll also exercises it but is gated behind
+			// CLAW_SPIKE_ENABLE_PICOCLAW while #137 is open. Stubs send the
+			// bare provider/model ref directly via curl, so we must use a
+			// model name that Anthropic actually recognises today
 			// (claude-sonnet-4 alone is no longer a valid alias upstream).
-			name:            "nc-roll",
-			runtime:         "nullclaw",
-			proxyFormat:     "anthropic",
-			proxyModel:      "anthropic/claude-sonnet-4-6",
-			expectedSurface: "anthropic-messages",
-			requireKeys:     []string{"ANTHROPIC_API_KEY"},
-		},
-		{
-			name:            "mc-roll",
-			runtime:         "microclaw",
-			proxyFormat:     "openai",
-			proxyModel:      "openrouter/anthropic/claude-sonnet-4",
-			expectedSurface: "openai-chat-completions",
-			requireKeys:     []string{"OPENROUTER_API_KEY"},
-		},
-		{
-			name:            "nano-roll",
-			runtime:         "nanoclaw",
-			proxyFormat:     "anthropic",
-			proxyModel:      "anthropic/claude-sonnet-4-6",
-			expectedSurface: "anthropic-messages",
-			requireKeys:     []string{"ANTHROPIC_API_KEY"},
-		},
-		{
 			name:            "nb-roll",
 			runtime:         "nanobot",
-			proxyFormat:     "openai",
-			proxyModel:      "openrouter/anthropic/claude-sonnet-4",
-			expectedSurface: "openai-chat-completions",
-			requireKeys:     []string{"OPENROUTER_API_KEY"},
+			proxyFormat:     "anthropic",
+			proxyModel:      "anthropic/claude-sonnet-4-6",
+			expectedSurface: "anthropic-messages",
+			requireKeys:     []string{"ANTHROPIC_API_KEY"},
 		},
 		{
 			// pc-roll is currently broken upstream — picoclaw's gateway binary
@@ -633,12 +607,7 @@ func rollcallResolveContainerID(t *testing.T, composePath, serviceName string) s
 }
 
 func rollcallExpectedRuntimeKeywords(runtime string) []string {
-	switch strings.ToLower(runtime) {
-	case "nanoclaw":
-		return []string{"nanoclaw", "claude agent"}
-	default:
-		return []string{strings.ToLower(runtime)}
-	}
+	return []string{strings.ToLower(runtime)}
 }
 
 func rollcallWaitForRuntimeResponse(t *testing.T, token, channelID, afterMessageID string, wantKeywords []string, timeout time.Duration) string {

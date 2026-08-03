@@ -186,10 +186,10 @@ services:
       handles:
         discord: "999000111"
 
-  nc-roll:
-    image: nullclaw:latest
+  nb-roll:
+    image: nanobot:latest
     x-claw:
-      agent: ./NC.md
+      agent: ./NB.md
       handles:
         discord: "999000111"
 `

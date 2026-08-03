@@ -142,11 +142,11 @@ Driver directories currently in-tree:
 - `internal/driver/openclaw`
 - `internal/driver/hermes`
 - `internal/driver/nanobot`
-- `internal/driver/nanoclaw`
 - `internal/driver/picoclaw`
-- `internal/driver/microclaw`
-- `internal/driver/nullclaw`
 - `internal/driver/shared`
+
+NanoClaw, MicroClaw, and NullClaw were retired in ADR-026; their `CLAW_TYPE`s fail
+closed with a migration message.
 
 Do not assume older docs mentioning only a subset are current.
 
@@ -162,13 +162,13 @@ Do not assume older docs mentioning only a subset are current.
 
 ## Repo-Specific Gotchas
 
-- Bug fixes in one driver often apply to all 7. When fixing driver behavior (permissions, config defaults, env vars), check all drivers in `internal/driver/*/driver.go` and `config.go` — not just the one mentioned in the issue.
+- Bug fixes in one driver often apply to all 4. When fixing driver behavior (permissions, config defaults, env vars), check all drivers in `internal/driver/*/driver.go` and `config.go` — not just the one mentioned in the issue.
 - Runtime directories created by `Materialize()` use `0o777` (not `0o700`) so container users with different uids can write. Do not regress this.
 - All drivers set `mention_only` (or equivalent like `requireMention`, `DISCORD_REQUIRE_MENTION`) for Discord channels. Without this, multi-agent pods enter feedback loops.
 - All drivers explicitly set `HOME` in the container env map to match their config mount path. Container base images may run as root or a different user than expected.
 - `cllama/` is a git submodule pointing to a public SSH repo. Fresh `git clone` leaves it empty. Infra images (cllama, clawdash) are published to ghcr.io as public packages to avoid this for end users. `cllama/` has its own `.git` — changes require two commits: one inside `cllama/` (for feeds/proxy code), then `git add cllama && git commit` in the repo root to update the pointer. Shell working directory can silently drift to `cllama/` between commands — use absolute paths for git operations or verify with `pwd` first.
 - `internal/feeds/` and other cllama internals live at `cllama/internal/`, not at the repo root.
-- Infra image remediation is explicit now: `claw pull` owns pinned infra freshness *and* built-in local runner alias freshness (`openclaw:latest`, `nanobot:latest`, `nanoclaw-orchestrator:latest`, etc.) refreshed via `docker build --pull --no-cache`; `claw build` owns pod `build:` services and consumes an already-refreshed runner alias; `claw up` points at one or the other when something is missing. `claw up --fix` is the opt-in auto-remediation path. Use `claw pull --no-runners` for the fast pinned-infra-only path. See ADR-024.
+- Infra image remediation is explicit now: `claw pull` owns pinned infra freshness *and* built-in local runner alias freshness (`openclaw:latest`, `nanobot:latest`, `picoclaw:latest`, etc.) refreshed via `docker build --pull --no-cache`; `claw build` owns pod `build:` services and consumes an already-refreshed runner alias; `claw up` points at one or the other when something is missing. `claw up --fix` is the opt-in auto-remediation path. Use `claw pull --no-runners` for the fast pinned-infra-only path. See ADR-024.
 - Runner base provenance: `claw build` rewrites `FROM <alias>:latest` to `FROM <alias>:v<version>` in `Dockerfile.generated` and stamps three labels (`claw.runner.built-against`, `claw.runner.image-id`, `claw.runner.recipe-sha`). `claw up` reads `claw.runner.image-id` and prints a soft drift hint when the local alias has moved on; it does not auto-rebuild. Service images built with a manual `docker build` of a runner base must also create a versioned sibling tag, otherwise `claw build` will fail-closed with a `claw pull` remediation hint.
 - Managed services require `claw up -d` because post-apply verification is fail-closed.
 - Multi-proxy cllama is represented in the data model but runtime currently fails fast if more than one proxy type is declared.

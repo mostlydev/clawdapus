@@ -48,7 +48,7 @@ cmd/clawdash/node_modules/
 testdata/*
 !testdata/openclaw-stub/
 !testdata/openclaw-stub-nonroot/
-!testdata/microclaw-stub/
+!testdata/nanobot-stub/
 !testdata/tool-stub/
 *-notes.md
 .claude/settings.local.json

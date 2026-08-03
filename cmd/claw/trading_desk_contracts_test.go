@@ -10,7 +10,6 @@ import (
 func TestTradingDeskContractsDoNotContainInstructionPlaceholders(t *testing.T) {
 	agentDir := filepath.Join("..", "..", "examples", "trading-desk", "agents")
 	files := []string{
-		"SYSTEMS-MONITOR.md",
 		"SOCIAL-TRADER.md",
 		"NEWS-ROUTER.md",
 		"MACRO-TRADER.md",

@@ -2,7 +2,7 @@
 
 End-to-end driver parity fixture for Clawdapus.
 
-This fixture reuses one Discord bot identity across seven runtime families, so
+This fixture reuses one Discord bot identity across four runtime families, so
 the spike now materializes one runtime at a time rather than pretending to be a
 concurrent social-topology test. Each subtest wires one runtime through
 `cllama` passthrough, exposes `clawdash`, posts a Discord mention, and verifies
@@ -11,9 +11,6 @@ that the runtime replies identifying itself.
 ## What It Covers
 
 - `openclaw`
-- `nullclaw`
-- `microclaw`
-- `nanoclaw`
 - `nanobot`
 - `picoclaw`
 - `hermes`
@@ -25,7 +22,7 @@ conformance only. It is not a valid concurrent topology example.
 
 ## Files
 
-- `claw-pod.yml`: spike template containing the seven runtime service definitions
+- `claw-pod.yml`: spike template containing the four runtime service definitions
 - `agents/*/Clawfile`: one Clawfile per runtime
 - `agents/*/AGENTS.md`: minimal runtime-specific self-identification contract
 - `Dockerfile.*-base`: local base images used by the spike test
@@ -76,15 +73,12 @@ go test -tags spike -v -run TestSpikeCapabilityWaveLive ./cmd/claw/...
 The test should:
 
 1. Build the base images for each runtime family if needed.
-2. Build the seven rollcall agent images.
+2. Build the four rollcall agent images.
 3. Materialize and run one single-service pod per runtime.
 4. Wait for each runtime container to become healthy or running.
 5. Post a Discord mention through the webhook for that runtime.
-6. Observe seven AI-generated replies across the full test run mentioning:
+6. Observe four AI-generated replies across the full test run mentioning:
    - `openclaw`
-   - `nullclaw`
-   - `microclaw`
-   - `nanoclaw` (or `Claude Agent SDK`)
    - `nanobot`
    - `picoclaw`
    - `hermes`

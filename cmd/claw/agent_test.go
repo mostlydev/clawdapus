@@ -220,9 +220,6 @@ func TestAgentAddTypeDefaults(t *testing.T) {
 	}{
 		{name: "generic", agentName: "genericone", clawType: "generic", baseImage: "alpine:3.20"},
 		{name: "hermes", agentName: "hermesone", clawType: "hermes", baseImage: hermes.BaseImageTag},
-		{name: "nanoclaw", agentName: "nanoclawone", clawType: "nanoclaw", baseImage: "nanoclaw-orchestrator:latest"},
-		{name: "microclaw", agentName: "microclawone", clawType: "microclaw", baseImage: "microclaw:latest"},
-		{name: "nullclaw", agentName: "nullclawone", clawType: "nullclaw", baseImage: "nullclaw:latest"},
 		{name: "nanobot", agentName: "nanobotone", clawType: "nanobot", baseImage: "nanobot:latest"},
 		{name: "picoclaw", agentName: "picoclawone", clawType: "picoclaw", baseImage: "picoclaw:latest"},
 	}
@@ -266,7 +263,7 @@ func TestAgentAddTypeFlagUsageListsAllScaffoldTypes(t *testing.T) {
 	}
 
 	usage := flag.Usage
-	for _, typ := range []string{"openclaw", "hermes", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic"} {
+	for _, typ := range []string{"openclaw", "hermes", "nanobot", "picoclaw", "generic"} {
 		if !strings.Contains(usage, typ) {
 			t.Fatalf("expected agent add --type usage to include %q, got: %s", typ, usage)
 		}

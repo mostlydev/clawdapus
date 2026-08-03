@@ -445,10 +445,9 @@ When the aggregate cap drops a feed the model sees an explicit `--- FEED: <name>
 | OpenClaw | `openclaw` | OpenClaw | JSON5 Go-native patching -> `openclaw.json` | Primary driver. Read-only container. Docker exec health probe. |
 | Hermes | `hermes` | Hermes (Python) | `config.yaml` + `.env` | Discord/Telegram/Slack. `HERMES_TOOL_ONLY_MODE`. Requires at least one handle. |
 | NanoBot | `nanobot` | Nanobot (Node.js) | `config.json` | Cron via `jobs.json`. Merged AGENTS.md. |
-| NanoClaw | `nanoclaw` | Claude Agent SDK | Combined `CLAUDE.md` | Requires `PRIVILEGE docker-socket true`. Mounts Docker socket. |
 | PicoClaw | `picoclaw` | PicoClaw | `config.json` | HTTP `/health` + `/ready` probe. Read-only container. |
-| MicroClaw | `microclaw` | MicroClaw (YAML) | `microclaw.config.yaml` | Built-in web UI on port 10961. No INVOKE support. |
-| NullClaw | `nullclaw` | NullClaw (HTTP) | `config.json` | Cron via `PostApply` exec (not pre-written). Read-only container. |
+
+Retired (ADR-026): `nanoclaw`, `microclaw`, `nullclaw` — these `CLAW_TYPE`s fail `claw up` with a migration message.
 
 All drivers set `CLAW_MANAGED=true`, explicit `HOME`, and `DISCORD_REQUIRE_MENTION` (or equivalent) to prevent feedback loops.
 

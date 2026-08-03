@@ -6,18 +6,25 @@ New to Hermes? Start with the dedicated [Hermes quickstart](/guide/hermes).
 
 ## Feature Matrix
 
-| | `openclaw` | `hermes` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Runtime** | [OpenClaw](https://openclaw.ai) | [Hermes](https://github.com/NousResearch/hermes-agent) | NanoClaw / Claude Code-compatible orchestrator | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [NullClaw](https://github.com/nullclaw/nullclaw) | [MicroClaw](https://github.com/microclaw/microclaw) |
-| `claw init` scaffold | yes | yes | yes | yes | yes | yes | yes |
-| HANDLE: Discord | yes | yes | -- | yes | yes | yes | yes |
-| HANDLE: Telegram | yes | yes | -- | yes | yes | yes | yes |
-| HANDLE: Slack | yes | yes | -- | yes | yes | yes | yes |
-| HANDLE: long-tail | -- | -- | -- | -- | yes | -- | -- |
-| INVOKE (cron) | yes | yes | -- | yes | yes | yes | -- |
-| Structured health | yes | yes | yes | yes | yes | yes | yes |
-| Read-only rootfs | yes | yes | no | yes | yes | yes | no |
-| Non-root container | -- | -- | -- | -- | yes | -- | -- |
+| | `openclaw` | `hermes` | `nanobot` | `picoclaw` |
+|---|:---:|:---:|:---:|:---:|
+| **Runtime** | [OpenClaw](https://openclaw.ai) | [Hermes](https://github.com/NousResearch/hermes-agent) | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) |
+| `claw init` scaffold | yes | yes | yes | yes |
+| HANDLE: Discord | yes | yes | yes | yes |
+| HANDLE: Telegram | yes | yes | yes | yes |
+| HANDLE: Slack | yes | yes | yes | yes |
+| HANDLE: long-tail | -- | -- | -- | yes |
+| INVOKE (cron) | yes | yes | yes | yes |
+| Structured health | yes | yes | yes | yes |
+| Read-only rootfs | yes | yes | yes | yes |
+| Non-root container | -- | -- | -- | yes |
+
+::: info Retired drivers
+`nanoclaw`, `microclaw`, and `nullclaw` were retired in
+[ADR-026](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/026-runner-adoption-and-retirement.md).
+Their `CLAW_TYPE`s fail `claw up` with a migration message naming the closest
+supported runner.
+:::
 
 **PicoClaw long-tail platforms:** WhatsApp, Feishu, LINE, QQ, DingTalk, OneBot, WeCom, WeCom App, Pico, MaixCam.
 
@@ -93,10 +100,6 @@ as channel prose; set `HERMES_CHAT_STATUS_DELIVERY=on` or configure
 that runtime telemetry. Unset `HERMES_CHAT_STATUS_DELIVERY` preserves upstream
 Hermes behavior; the quiet default is applied by the Clawdapus driver.
 
-### nanoclaw
-
-NanoClaw / Claude Code-compatible orchestrator driver. It does not currently support HANDLE or INVOKE, and it requires `PRIVILEGE docker-socket true` because the runtime spawns agent containers through Docker. It has a structured health probe and uses a writable root filesystem.
-
 ### nanobot
 
 Nanobot driver with generated config and Discord/Telegram/Slack handle wiring. Supports INVOKE scheduling and read-only rootfs.
@@ -105,19 +108,11 @@ Nanobot driver with generated config and Discord/Telegram/Slack handle wiring. S
 
 PicoClaw is the most platform-diverse driver, supporting the long-tail of chat platforms beyond Discord/Telegram/Slack. Supports model-list config, non-root containers, and structured health probes.
 
-### nullclaw
-
-NullClaw supports CONFIGURE for fine-grained runtime config mutations. Use `CONFIGURE nullclaw config set <path> <value>` to pin guild IDs, set mention requirements, configure Telegram allowlists, or select Slack transport modes.
-
-### microclaw
-
-Minimal driver supporting Discord, Telegram, and Slack handles. Does not support INVOKE scheduling. It has a structured health probe and uses a writable root filesystem.
-
 ## Choosing a Driver
 
 - **Need Discord routing controls?** `openclaw` has the richest Discord config support.
-- **Need Telegram or Slack?** `openclaw`, `hermes`, `nanobot`, `picoclaw`, `nullclaw`, or `microclaw`.
+- **Need Telegram or Slack?** `openclaw`, `hermes`, `nanobot`, or `picoclaw`.
 - **Need WhatsApp, LINE, or other platforms?** `picoclaw` is the only option.
 - **Need non-root containers?** `picoclaw`.
-- **Need fine-grained runtime config?** `nullclaw` with `CONFIGURE`.
+- **Need fine-grained runtime config?** every driver supports `CONFIGURE <runner> config set <path> <value>`.
 - **Just need a governed container?** `generic` type gives you an alpine base with no driver enforcement.

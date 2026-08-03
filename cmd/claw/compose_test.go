@@ -219,7 +219,7 @@ func TestComposePassthroughAllowsStaleGeneratedOnlyForBuild(t *testing.T) {
 }
 
 func TestBuiltinDriversRegistered(t *testing.T) {
-	for _, clawType := range []string{"openclaw", "hermes", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw"} {
+	for _, clawType := range []string{"openclaw", "hermes", "nanobot", "picoclaw"} {
 		if _, err := driver.Lookup(clawType); err != nil {
 			t.Fatalf("expected driver %q to be registered in CLI package: %v", clawType, err)
 		}

@@ -67,11 +67,11 @@ func TestSpikeChannelDigestGeneratedPod(t *testing.T) {
 	spikeBuildImage(t, repoRoot, channelMemoryImage, "examples/channel-memory/Dockerfile")
 
 	rollcallDir := filepath.Join(repoRoot, "examples", "rollcall")
-	spikeBuildImage(t, rollcallDir, "nullclaw:latest", "Dockerfile.nullclaw-base")
+	spikeBuildImage(t, rollcallDir, "nanobot:latest", "Dockerfile.nanobot-base")
 	spikeWriteFile(t, filepath.Join(workDir, "AGENTS.md"), "# Digest Spike Agent\n\nUse runtime channel context.")
-	spikeWriteFile(t, filepath.Join(workDir, "Clawfile"), `FROM nullclaw:latest
+	spikeWriteFile(t, filepath.Join(workDir, "Clawfile"), `FROM nanobot:latest
 
-CLAW_TYPE nullclaw
+CLAW_TYPE nanobot
 AGENT AGENTS.md
 MODEL primary openai/gpt-4o
 HANDLE discord

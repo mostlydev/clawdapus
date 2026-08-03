@@ -11,9 +11,6 @@ func TestParseClawTypeAcceptsSupportedValues(t *testing.T) {
 	tests := []string{
 		"openclaw",
 		"hermes",
-		"nanoclaw",
-		"microclaw",
-		"nullclaw",
 		"nanobot",
 		"picoclaw",
 		"generic",
@@ -53,9 +50,6 @@ func TestDefaultBaseImageForClawType(t *testing.T) {
 	}{
 		{name: "openclaw", clawType: "openclaw", want: "openclaw:latest"},
 		{name: "hermes", clawType: "hermes", want: hermes.BaseImageTag},
-		{name: "nanoclaw", clawType: "nanoclaw", want: "nanoclaw-orchestrator:latest"},
-		{name: "microclaw", clawType: "microclaw", want: "microclaw:latest"},
-		{name: "nullclaw", clawType: "nullclaw", want: "nullclaw:latest"},
 		{name: "nanobot", clawType: "nanobot", want: "nanobot:latest"},
 		{name: "picoclaw", clawType: "picoclaw", want: "picoclaw:latest"},
 		{name: "generic", clawType: "generic", want: "alpine:3.20"},

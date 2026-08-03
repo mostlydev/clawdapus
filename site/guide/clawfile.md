@@ -43,7 +43,7 @@ This declares an OpenClaw agent that:
 
 | Directive | Purpose |
 |-----------|---------|
-| `CLAW_TYPE` | Selects the runtime driver (`openclaw`, `hermes`, `nanobot`, `picoclaw`, `nanoclaw`, `microclaw`, `nullclaw`) |
+| `CLAW_TYPE` | Selects the runtime driver (`openclaw`, `hermes`, `nanobot`, `picoclaw`) |
 | `AGENT` | Names the behavioral contract file to be bind-mounted read-only |
 | `PERSONA` | Imports a persona workspace -- local path or OCI artifact ref |
 | `MODEL` | Binds named model slots (e.g., `primary`, `fallback`) to providers |
@@ -160,14 +160,14 @@ For example, `CLAW_TYPE openclaw` becomes a label on the image. `MODEL primary o
 
 The `CLAW_TYPE` directive selects which runtime driver handles the agent. All drivers support `MODEL`, `AGENT`, `CLLAMA`, and `CONFIGURE`. Platform support varies:
 
-| Capability | `openclaw` | `hermes` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| HANDLE: Discord | yes | yes | -- | yes | yes | yes | yes |
-| HANDLE: Telegram | yes | yes | -- | yes | yes | yes | yes |
-| HANDLE: Slack | yes | yes | -- | yes | yes | yes | yes |
-| INVOKE (cron) | yes | yes | -- | yes | yes | yes | -- |
-| Structured health | yes | yes | yes | yes | yes | yes | yes |
-| Read-only rootfs | yes | yes | no | yes | yes | yes | no |
+| Capability | `openclaw` | `hermes` | `nanobot` | `picoclaw` |
+|---|:---:|:---:|:---:|:---:|
+| HANDLE: Discord | yes | yes | yes | yes |
+| HANDLE: Telegram | yes | yes | yes | yes |
+| HANDLE: Slack | yes | yes | yes | yes |
+| INVOKE (cron) | yes | yes | yes | yes |
+| Structured health | yes | yes | yes | yes |
+| Read-only rootfs | yes | yes | yes | yes |
 
 ## MODEL Slots
 
@@ -192,11 +192,11 @@ Clawfile `MODEL` labels are the base slot map, but `claw-pod.yml` can retarget s
 ```dockerfile
 HANDLE discord
 
-# Pin to one guild
-CONFIGURE nullclaw config set channels.discord.accounts.main.guild_id "123456789012345678"
+# Enable a channel beyond HANDLE defaults
+CONFIGURE picoclaw config set channels.discord.enabled true
 
-# Require mention in group chats
-CONFIGURE nullclaw config set channels.discord.accounts.main.require_mention true
+# Override the gateway port
+CONFIGURE picoclaw config set gateway.port 19000
 ```
 
 ::: tip Defaults First, Then Override
@@ -234,11 +234,9 @@ PRIVILEGE worker root
 PRIVILEGE runtime claw-user
 ```
 
-The syntax is `PRIVILEGE <mode> <user-spec>`. The compiler emits labels such as `claw.privilege.runtime=claw-user`; enforcement depends on the selected driver. NanoClaw currently requires an explicit Docker-socket grant because it spawns nested agent containers:
+The syntax is `PRIVILEGE <mode> <user-spec>`. The compiler emits labels such as `claw.privilege.runtime=claw-user`; enforcement depends on the selected driver. A driver that spawns nested agent containers would require an explicit Docker-socket grant:
 
 ```dockerfile
-CLAW_TYPE nanoclaw
-AGENT AGENTS.md
 PRIVILEGE docker-socket true
 ```
 

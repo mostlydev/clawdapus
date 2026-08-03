@@ -285,9 +285,6 @@ func TestInitScaffoldTypeDefaults(t *testing.T) {
 	}{
 		{name: "generic", clawType: "generic", baseImage: "alpine:3.20"},
 		{name: "hermes", clawType: "hermes", baseImage: hermes.BaseImageTag},
-		{name: "nanoclaw", clawType: "nanoclaw", baseImage: "nanoclaw-orchestrator:latest"},
-		{name: "microclaw", clawType: "microclaw", baseImage: "microclaw:latest"},
-		{name: "nullclaw", clawType: "nullclaw", baseImage: "nullclaw:latest"},
 		{name: "nanobot", clawType: "nanobot", baseImage: "nanobot:latest"},
 		{name: "picoclaw", clawType: "picoclaw", baseImage: "picoclaw:latest"},
 	}
@@ -362,7 +359,7 @@ func TestInitTypeFlagUsageListsAllScaffoldTypes(t *testing.T) {
 	}
 
 	usage := flag.Usage
-	for _, typ := range []string{"openclaw", "hermes", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic"} {
+	for _, typ := range []string{"openclaw", "hermes", "nanobot", "picoclaw", "generic"} {
 		if !strings.Contains(usage, typ) {
 			t.Fatalf("expected init --type usage to include %q, got: %s", typ, usage)
 		}

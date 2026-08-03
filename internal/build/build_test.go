@@ -75,34 +75,6 @@ AGENT CONTRACT.md
 	}
 }
 
-func TestGenerateAcceptsMicroclawType(t *testing.T) {
-	dir := t.TempDir()
-	clawfilePath := filepath.Join(dir, "Clawfile")
-
-	input := `FROM alpine:latest
-
-CLAW_TYPE microclaw
-AGENT AGENTS.md
-MODEL primary anthropic/claude-sonnet-4
-`
-	if err := os.WriteFile(clawfilePath, []byte(input), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	generatedPath, err := Generate(clawfilePath)
-	if err != nil {
-		t.Fatalf("expected microclaw CLAW_TYPE to be accepted, got error: %v", err)
-	}
-
-	content, err := os.ReadFile(generatedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(content), `LABEL claw.type="microclaw"`) {
-		t.Fatal("missing claw.type=microclaw label in generated output")
-	}
-}
-
 func TestGenerateAcceptsNanobotType(t *testing.T) {
 	dir := t.TempDir()
 	clawfilePath := filepath.Join(dir, "Clawfile")

@@ -21,7 +21,7 @@ func TestAgentsListFiltersByServiceScopeAndLiveContext(t *testing.T) {
 	})
 	writeAgentContextFixture(t, contextRoot, "analyst-0", map[string]string{
 		"service": "analyst",
-		"type":    "nanoclaw",
+		"type":    "nanobot",
 	})
 
 	var sawAuth string
