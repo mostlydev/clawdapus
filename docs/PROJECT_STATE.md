@@ -7,7 +7,7 @@ of them — do not duplicate their content, point to them.
 
 Maintenance: when a capability lands or a release cuts, update the relevant row here in the
 same change. Trust order when sources disagree: current code → tests → examples → ADRs → plans.
-Last reconciled: 2026-05-31 (against `master` @ v0.21.0, issue #280).
+Last reconciled: 2026-08-03 (issue #353 runner-retirement audit).
 
 Status legend: **Shipped** (implemented and in use) · **Partial** (some shipped; gap noted) ·
 **Planned** (designed, not implemented) · **External** (depends on an out-of-tree component,
@@ -42,6 +42,7 @@ e.g. an org's Master Claw policy).
 | 022 | Infra Image Lifecycle & Four-Verb Surface | Shipped | `claw pull/build/up/down`; `internal/infraimages/release_manifest.go` |
 | 023 | Explicit cllama Ingress Surface Matrix | Shipped | `internal/cllama/ingress.go` compiles OpenAI Chat Completions at `/v1/chat/completions` and Anthropic Messages at `/v1/messages`. Anthropic-surface providers: `anthropic`, `synthetic`, `minimax-portal`, `kimi-coding`, `cloudflare-ai-gateway`, `xiaomi`; other providers default to OpenAI chat. Runtime dispatch treats `/v1/messages` as Anthropic and other POST paths as OpenAI. |
 | 024 | Runner Base Refresh from Upstream | Shipped | `claw pull` runner refresh; `built-against`/`image-id`/`recipe-sha` labels |
+| 026 | Runner Adoption and Retirement | Shipped | four retained drivers; retired types fail closed with Hermes migration guidance |
 
 *(ADR-005 does not exist.)*
 
@@ -65,7 +66,7 @@ e.g. an org's Master Claw policy).
 | claw-api + Master Claw (ADR-012/015) | Partial | manifesto, what-is, architecture | Budget caps enforced by cllama; policy decisions external; model-restrict enforcement partial |
 | Social topology / HANDLE (ADR-003/016) | Shipped | social-topology | No |
 | Persona materialization | Shipped | anatomy | No |
-| 7 runner drivers | Shipped | drivers | No |
+| 4 runner drivers | Shipped | drivers | No |
 | Context feeds (ADR-013) | Shipped | surfaces-and-skills, cllama, social-topology | No |
 | `TRACK` / recipe / bake | **Planned** | what-is roadmap, architecture | Correctly future, label it clearly |
 | Drift scoring | **External/Planned** | what-is, cllama, cli, README, manifesto, architecture | No built-in score; docs mark it external/planned |

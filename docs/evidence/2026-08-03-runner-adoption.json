@@ -1,0 +1,185 @@
+{
+  "captured_at": "2026-08-03T01:58:23.798226Z",
+  "window_days": 30,
+  "window_count": 4,
+  "limitations": [
+    "GitHub /stargazers with the star+json media type returns 404 for external repositories from this environment; it is not rate limiting and not a token scope issue. Stargazer time series are unavailable.",
+    "Per-release downloads normalized by release age is confounded by post-publication download decay and must not be read as a growth trend.",
+    "ghcr.io publishes no public pull counts, so image pulls are only comparable for docker.io-hosted runners.",
+    "No metric here measures Clawdapus-side usage. All of it is upstream popularity."
+  ],
+  "runners": [
+    {
+      "driver": "openclaw",
+      "repo": "openclaw/openclaw",
+      "stars": 384960,
+      "forks": 80906,
+      "pushed_at": "2026-08-03T01:58:22Z",
+      "latest_release": "2026-08-02T08:11:31Z",
+      "fork_windows": [
+        1807,
+        2182,
+        3756,
+        6980
+      ],
+      "commit_windows_90d": [
+        34524,
+        32475
+      ],
+      "release_count": 229,
+      "release_asset_downloads": 1825617
+    },
+    {
+      "driver": "hermes",
+      "repo": "NousResearch/hermes-agent",
+      "stars": 224342,
+      "forks": 43387,
+      "pushed_at": "2026-08-03T01:53:26Z",
+      "latest_release": "2026-07-30T23:45:37Z",
+      "fork_windows": [
+        6036,
+        7587,
+        10442,
+        16307
+      ],
+      "commit_windows_90d": [
+        13124,
+        7074
+      ],
+      "release_count": 23,
+      "release_asset_downloads": 25561
+    },
+    {
+      "driver": "nanobot",
+      "repo": "HKUDS/nanobot",
+      "pypi": "nanobot-ai",
+      "stars": 46522,
+      "forks": 8231,
+      "pushed_at": "2026-08-03T01:51:35Z",
+      "latest_release": "2026-07-25T08:08:47Z",
+      "fork_windows": [
+        366,
+        314,
+        480,
+        813
+      ],
+      "commit_windows_90d": [
+        1479,
+        2192
+      ],
+      "release_count": 19,
+      "pypi_monthly": [
+        {
+          "period": "2026-02",
+          "count": 49581
+        },
+        {
+          "period": "2026-03",
+          "count": 79326
+        },
+        {
+          "period": "2026-04",
+          "count": 53246
+        },
+        {
+          "period": "2026-05",
+          "count": 33854
+        },
+        {
+          "period": "2026-06",
+          "count": 33446
+        },
+        {
+          "period": "2026-07",
+          "count": 68201
+        },
+        {
+          "period": "2026-08",
+          "count": 2135
+        }
+      ]
+    },
+    {
+      "driver": "nanoclaw",
+      "repo": "nanocoai/nanoclaw",
+      "note": "canonical repo redirected from qwibitai/nanoclaw",
+      "stars": 30411,
+      "forks": 12871,
+      "pushed_at": "2026-08-02T14:13:24Z",
+      "latest_release": "2026-08-01T20:46:31Z",
+      "fork_windows": [
+        167,
+        222,
+        413,
+        2346
+      ],
+      "commit_windows_90d": [
+        888,
+        1310
+      ],
+      "release_count": 5
+    },
+    {
+      "driver": "picoclaw",
+      "repo": "sipeed/picoclaw",
+      "docker_hub": "sipeed/picoclaw",
+      "stars": 29799,
+      "forks": 4381,
+      "pushed_at": "2026-07-30T18:32:36Z",
+      "latest_release": "2026-07-02T01:26:53Z",
+      "fork_windows": [
+        315,
+        102,
+        154,
+        306
+      ],
+      "commit_windows_90d": [
+        506,
+        2077
+      ],
+      "release_count": 16,
+      "release_asset_downloads": 227049,
+      "docker_hub_pulls": 210807
+    },
+    {
+      "driver": "microclaw",
+      "repo": "microclaw/microclaw",
+      "stars": 730,
+      "forks": 132,
+      "pushed_at": "2026-08-02T02:09:14Z",
+      "latest_release": "2026-08-01T21:26:19Z",
+      "fork_windows": [
+        0,
+        3,
+        10,
+        8
+      ],
+      "commit_windows_90d": [
+        91,
+        996
+      ],
+      "release_count": 161,
+      "release_asset_downloads": 12161
+    },
+    {
+      "driver": "nullclaw",
+      "repo": "nullclaw/nullclaw",
+      "stars": 7987,
+      "forks": 929,
+      "pushed_at": "2026-07-19T04:20:06Z",
+      "latest_release": "2026-05-29T13:41:10Z",
+      "fork_windows": [
+        32,
+        22,
+        44,
+        44
+      ],
+      "commit_windows_90d": [
+        260,
+        2475
+      ],
+      "release_count": 30,
+      "release_asset_downloads": 13229
+    }
+  ]
+}

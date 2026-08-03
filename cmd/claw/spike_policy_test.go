@@ -54,7 +54,7 @@ func TestSpikePolicyEvaluatorGeneratedPod(t *testing.T) {
 	agentImage := fmt.Sprintf("policy-spike-agent:%d", time.Now().UnixNano())
 	spikeEnsurePulledImage(t, pythonImage)
 	rollcallDir := filepath.Join(repoRoot, "examples", "rollcall")
-	spikeBuildImage(t, rollcallDir, "nullclaw:latest", "Dockerfile.nullclaw-base")
+	spikeBuildImage(t, rollcallDir, "nanobot:latest", "Dockerfile.nanobot-base")
 	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawdash)
 	spikeEnsureCllamaPassthroughImage(t, repoRoot)
 	t.Cleanup(func() {
@@ -62,9 +62,9 @@ func TestSpikePolicyEvaluatorGeneratedPod(t *testing.T) {
 	})
 
 	spikeWriteFile(t, filepath.Join(workDir, "AGENTS.md"), "# Policy Spike Agent\n\nUse the configured model.")
-	spikeWriteFile(t, filepath.Join(workDir, "Clawfile"), `FROM nullclaw:latest
+	spikeWriteFile(t, filepath.Join(workDir, "Clawfile"), `FROM nanobot:latest
 
-CLAW_TYPE nullclaw
+CLAW_TYPE nanobot
 AGENT AGENTS.md
 MODEL primary openai/gpt-4o
 `)

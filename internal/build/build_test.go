@@ -5,11 +5,26 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
+
+func TestBuiltInDriverSetMatchesSupportedContract(t *testing.T) {
+	registered := driver.Registered()
+	got := make([]string, 0, len(registered))
+	for name := range registered {
+		got = append(got, name)
+	}
+	sort.Strings(got)
+	want := []string{"hermes", "nanobot", "openclaw", "picoclaw"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("registered built-in drivers = %v, want %v", got, want)
+	}
+}
 
 func TestGenerateWritesDockerfile(t *testing.T) {
 	dir := t.TempDir()
@@ -75,31 +90,26 @@ AGENT CONTRACT.md
 	}
 }
 
-func TestGenerateAcceptsMicroclawType(t *testing.T) {
-	dir := t.TempDir()
-	clawfilePath := filepath.Join(dir, "Clawfile")
+func TestGenerateRejectsRetiredClawTypesWithMigrationGuidance(t *testing.T) {
+	for _, clawType := range []string{"nanoclaw", "microclaw", "nullclaw"} {
+		t.Run(clawType, func(t *testing.T) {
+			dir := t.TempDir()
+			clawfilePath := filepath.Join(dir, "Clawfile")
+			input := "FROM alpine:latest\nCLAW_TYPE " + clawType + "\nAGENT AGENTS.md\n"
+			if err := os.WriteFile(clawfilePath, []byte(input), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	input := `FROM alpine:latest
-
-CLAW_TYPE microclaw
-AGENT AGENTS.md
-MODEL primary anthropic/claude-sonnet-4
-`
-	if err := os.WriteFile(clawfilePath, []byte(input), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	generatedPath, err := Generate(clawfilePath)
-	if err != nil {
-		t.Fatalf("expected microclaw CLAW_TYPE to be accepted, got error: %v", err)
-	}
-
-	content, err := os.ReadFile(generatedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(content), `LABEL claw.type="microclaw"`) {
-		t.Fatal("missing claw.type=microclaw label in generated output")
+			_, err := Generate(clawfilePath)
+			if err == nil {
+				t.Fatalf("expected Generate to reject retired CLAW_TYPE %q", clawType)
+			}
+			for _, want := range []string{clawType, "retired", "ADR-026", `CLAW_TYPE "hermes"`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("retirement error %q does not contain %q", err, want)
+				}
+			}
+		})
 	}
 }
 

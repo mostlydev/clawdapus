@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stub nanobot process for integration/spike tests.
+# Keep this script alive so `pgrep -f 'nanobot gateway'` healthcheck passes.
+
+echo "nanobot-stub: running $* (pid $$)" >&2
+while true; do
+  sleep 3600
+done

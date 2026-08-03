@@ -27,15 +27,15 @@ func TestSpikeMixedManagedTypesCoexist(t *testing.T) {
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 
 	openFixture := filepath.Join(repoRoot, "testdata", "openclaw-stub")
-	microFixture := filepath.Join(repoRoot, "testdata", "microclaw-stub")
+	nanoFixture := filepath.Join(repoRoot, "testdata", "nanobot-stub")
 
 	openTag := fmt.Sprintf("claw-spike-openclaw:%d", time.Now().UnixNano())
-	microTag := fmt.Sprintf("claw-spike-microclaw:%d", time.Now().UnixNano())
+	nanoTag := fmt.Sprintf("claw-spike-nanobot:%d", time.Now().UnixNano())
 	spikeBuildImage(t, openFixture, openTag, "Clawfile")
-	spikeBuildImage(t, microFixture, microTag, "Clawfile")
+	spikeBuildImage(t, nanoFixture, nanoTag, "Clawfile")
 
 	t.Cleanup(func() {
-		_, _ = exec.Command("docker", "image", "rm", "-f", openTag, microTag).CombinedOutput()
+		_, _ = exec.Command("docker", "image", "rm", "-f", openTag, nanoTag).CombinedOutput()
 	})
 
 	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawdash)
@@ -48,8 +48,8 @@ func TestSpikeMixedManagedTypesCoexist(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(agentsDir, "OPEN.md"), []byte("# Open Agent\n\nYou are open."), 0o644); err != nil {
 		t.Fatalf("write OPEN.md: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(agentsDir, "MICRO.md"), []byte("# Micro Agent\n\nYou are micro."), 0o644); err != nil {
-		t.Fatalf("write MICRO.md: %v", err)
+	if err := os.WriteFile(filepath.Join(agentsDir, "NANO.md"), []byte("# Nano Agent\n\nYou are nano."), 0o644); err != nil {
+		t.Fatalf("write NANO.md: %v", err)
 	}
 
 	podPath := filepath.Join(workDir, "claw-pod.yml")
@@ -62,13 +62,13 @@ services:
     x-claw:
       agent: ./agents/OPEN.md
 
-  micro:
+  nano:
     image: %s
     x-claw:
-      agent: ./agents/MICRO.md
+      agent: ./agents/NANO.md
     environment:
       ANTHROPIC_API_KEY: sk-spike-anthropic
-`, openTag, microTag)
+`, openTag, nanoTag)
 	if err := os.WriteFile(podPath, []byte(podYAML), 0o644); err != nil {
 		t.Fatalf("write pod file: %v", err)
 	}
@@ -92,28 +92,27 @@ services:
 	if _, err := os.Stat(openConfig); err != nil {
 		t.Fatalf("openclaw config not generated: %v", err)
 	}
-	microConfig := filepath.Join(workDir, ".claw-runtime", "micro", "config", "microclaw.config.yaml")
-	if _, err := os.Stat(microConfig); err != nil {
-		t.Fatalf("microclaw config not generated: %v", err)
+	nanoConfig := filepath.Join(workDir, ".claw-runtime", "nano", "nanobot-home", "config.json")
+	if _, err := os.Stat(nanoConfig); err != nil {
+		t.Fatalf("nanobot config not generated: %v", err)
 	}
-	microSeed := filepath.Join(workDir, ".claw-runtime", "micro", "data", "runtime", "groups", "AGENTS.md")
-	if _, err := os.Stat(microSeed); err != nil {
-		t.Fatalf("microclaw seeded AGENTS.md not generated: %v", err)
+	nanoSeed := filepath.Join(workDir, ".claw-runtime", "nano", "nanobot-home", "workspace", "AGENTS.md")
+	if _, err := os.Stat(nanoSeed); err != nil {
+		t.Fatalf("nanobot seeded AGENTS.md not generated: %v", err)
 	}
 
-	microBytes, err := os.ReadFile(microConfig)
+	nanoBytes, err := os.ReadFile(nanoConfig)
 	if err != nil {
-		t.Fatalf("read microclaw config: %v", err)
+		t.Fatalf("read nanobot config: %v", err)
 	}
-	var micro map[string]interface{}
-	if err := yaml.Unmarshal(microBytes, &micro); err != nil {
-		t.Fatalf("parse microclaw config yaml: %v", err)
+	var nano map[string]interface{}
+	if err := yaml.Unmarshal(nanoBytes, &nano); err != nil {
+		t.Fatalf("parse nanobot config json: %v", err)
 	}
-	if got := micro["llm_provider"]; got != "anthropic" {
-		t.Fatalf("expected microclaw llm_provider=anthropic, got %v", got)
-	}
-	if got := micro["model"]; got != "claude-sonnet-4" {
-		t.Fatalf("expected microclaw model=claude-sonnet-4, got %v", got)
+	agents, _ := nano["agents"].(map[string]interface{})
+	defaults, _ := agents["defaults"].(map[string]interface{})
+	if got := defaults["model"]; got != "anthropic/claude-sonnet-4" {
+		t.Fatalf("expected nanobot agents.defaults.model=anthropic/claude-sonnet-4, got %v", got)
 	}
 
 	composeBytes, err := os.ReadFile(composePath)
@@ -142,18 +141,21 @@ services:
 		t.Fatalf("unexpected open OPENCLAW_CONFIG_PATH: %q", openSvc.Environment["OPENCLAW_CONFIG_PATH"])
 	}
 
-	microSvc, ok := compose.Services["micro"]
+	nanoSvc, ok := compose.Services["nano"]
 	if !ok {
-		t.Fatalf("compose missing micro service")
+		t.Fatalf("compose missing nano service")
 	}
-	if microSvc.ReadOnly {
-		t.Fatalf("expected micro service to be writable")
+	if !nanoSvc.ReadOnly {
+		t.Fatalf("expected nano service to remain read_only")
 	}
-	if microSvc.Environment["MICROCLAW_CONFIG"] != "/app/config/microclaw.config.yaml" {
-		t.Fatalf("unexpected micro MICROCLAW_CONFIG: %q", microSvc.Environment["MICROCLAW_CONFIG"])
+	if nanoSvc.Environment["CLAW_MANAGED"] != "true" {
+		t.Fatalf("unexpected nano CLAW_MANAGED: %q", nanoSvc.Environment["CLAW_MANAGED"])
+	}
+	if nanoSvc.Environment["HOME"] != "/root" {
+		t.Fatalf("unexpected nano HOME: %q", nanoSvc.Environment["HOME"])
 	}
 
-	for _, service := range []string{"open", "micro"} {
+	for _, service := range []string{"open", "nano"} {
 		out, err := exec.Command("docker", "compose", "-f", composePath, "ps", "-q", service).Output()
 		if err != nil {
 			t.Fatalf("docker compose ps %s: %v", service, err)

@@ -265,7 +265,7 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 
 | Directive | Purpose |
 |---|---|
-| `CLAW_TYPE` | Selects the runtime driver (openclaw, hermes, nanobot, picoclaw, nanoclaw, microclaw, nullclaw) |
+| `CLAW_TYPE` | Selects the runtime driver (openclaw, hermes, nanobot, picoclaw) |
 | `AGENT` | Names the behavioral contract file |
 | `PERSONA` | Imports a persona workspace — local path or OCI artifact ref |
 | `MODEL` | Binds named model slots to providers |
@@ -285,18 +285,21 @@ The Clawfile extends the Dockerfile with directives that the `claw build` prepro
 
 Pick a driver based on what you need. All drivers support `MODEL`, `AGENT`, `CLLAMA`, and `CONFIGURE`.
 
-| | `openclaw` | `hermes` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Runtime** | [OpenClaw](https://openclaw.ai) | [Hermes](https://github.com/NousResearch/hermes-agent) | NanoClaw / Claude Code-compatible orchestrator | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [NullClaw](https://github.com/nullclaw/nullclaw) | [MicroClaw](https://github.com/microclaw/microclaw) |
-| `claw init` scaffold | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HANDLE: Discord | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
-| HANDLE: Telegram | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
-| HANDLE: Slack | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
-| HANDLE: long-tail ¹ | — | — | — | — | ✅ | — | — |
-| INVOKE (cron) | ✅ | ✅ | — | ✅ | ✅ | ✅ | — |
-| Structured health | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Read-only rootfs | ✅ | ✅ | no | ✅ | ✅ | ✅ | no |
-| Non-root container | — | — | — | — | ✅ | — | — |
+| | `openclaw` | `hermes` | `nanobot` | `picoclaw` |
+|---|:---:|:---:|:---:|:---:|
+| **Runtime** | [OpenClaw](https://openclaw.ai) | [Hermes](https://github.com/NousResearch/hermes-agent) | [Nanobot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) |
+| `claw init` scaffold | ✅ | ✅ | ✅ | ✅ |
+| HANDLE: Discord | ✅ | ✅ | ✅ | ✅ |
+| HANDLE: Telegram | ✅ | ✅ | ✅ | ✅ |
+| HANDLE: Slack | ✅ | ✅ | ✅ | ✅ |
+| HANDLE: long-tail ¹ | — | — | — | ✅ |
+| INVOKE (cron) | ✅ | ✅ | ✅ | ✅ |
+| Structured health | ✅ | ✅ | ✅ | ✅ |
+| Read-only rootfs | ✅ | ✅ | ✅ | ✅ |
+| Non-root container | — | — | — | ✅ |
+
+Retired drivers (`nanoclaw`, `microclaw`, `nullclaw`) fail `claw up` with a migration
+message; see [ADR-026](docs/decisions/026-runner-adoption-and-retirement.md).
 
 ¹ PicoClaw long-tail: WhatsApp, Feishu, LINE, QQ, DingTalk, OneBot, WeCom, WeCom App, Pico, MaixCam.
 `claw init` scaffolds `generic` (alpine:3.20, no driver enforcement) for custom runtimes.
@@ -319,7 +322,7 @@ The OpenClaw driver now maps the supported `channel://discord` routing controls 
 
 ---
 
-## Nullclaw `CONFIGURE` Examples
+## Driver `CONFIGURE` Examples
 
 Use these when you want high-level `HANDLE` defaults, but need runtime-specific policy details.
 
@@ -327,21 +330,18 @@ Use these when you want high-level `HANDLE` defaults, but need runtime-specific 
 # Base identity on a platform:
 HANDLE discord
 
-# "Can talk on" -> pin to one guild/server
-CONFIGURE nullclaw config set channels.discord.accounts.main.guild_id "123456789012345678"
+# Enable/adjust a channel beyond HANDLE defaults
+CONFIGURE picoclaw config set channels.discord.enabled true
 
-# "Can talk to" -> require mention in group chats
-CONFIGURE nullclaw config set channels.discord.accounts.main.require_mention true
+# Override the gateway port
+CONFIGURE picoclaw config set gateway.port 19000
 
-# Telegram allowlist for DMs
-CONFIGURE nullclaw config set channels.telegram.accounts.main.allow_from ["111111111","222222222"]
-
-# Slack transport mode selection
-CONFIGURE nullclaw config set channels.slack.accounts.main.mode "socket"
+# Pin a fallback model name
+CONFIGURE picoclaw config set agents.defaults.model_name "fallback"
 ```
 
 Notes:
-- `CONFIGURE` is driver-side DSL here (`nullclaw config set <path> <value>`), applied to generated `config.json`.
+- `CONFIGURE` is driver-side DSL (`<runner> config set <path> <value>`), applied to the generated config.
 - Values are parsed as JSON when possible: booleans/numbers/arrays/objects should be unquoted; strings should be quoted.
 - `CONFIGURE` runs after defaults, so it overrides what `HANDLE` generated.
 
@@ -353,7 +353,7 @@ Notes:
 block-beta
   columns 1
   contract["Behavioral Contract\nread-only bind mount\nAGENTS.md — purpose, on the host\nSurvives full container compromise"]
-  runner["Runner\nOpenClaw · NanoClaw · Claude Code · custom"]
+  runner["Runner\nOpenClaw · Hermes · Nanobot · PicoClaw"]
   persona["Persona\nMemory · history · style · knowledge"]
   proxy["cllama — governance proxy\nIntercepts prompts outbound + responses inbound\nRunner never knows it's there"]
 

@@ -107,7 +107,7 @@ func buildScheduleManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw)
 
 func supportsExternalScheduler(clawType string) bool {
 	switch strings.TrimSpace(clawType) {
-	case "openclaw", "hermes", "nanobot", "picoclaw", "nullclaw":
+	case "openclaw", "hermes", "nanobot", "picoclaw":
 		return true
 	default:
 		return false
@@ -150,12 +150,6 @@ func resolveWakeAdapter(clawType, target string, inv driver.Invocation) (schedul
 			Target:  target,
 			Command: []string{"picoclaw", "agent", "-m", inv.Message},
 		}, nil
-	case "nullclaw":
-		return schedule.Wake{
-			Adapter: "nullclaw-exec",
-			Target:  target,
-			Command: []string{"nullclaw", "agent", "-m", inv.Message},
-		}, nil
 	default:
 		return schedule.Wake{}, fmt.Errorf("unsupported wake adapter for driver %q", clawType)
 	}
@@ -166,7 +160,7 @@ func scheduleWakeWarning(serviceName, clawType string, inv driver.Invocation) st
 		return ""
 	}
 	switch strings.TrimSpace(clawType) {
-	case "picoclaw", "nullclaw":
+	case "picoclaw":
 		return fmt.Sprintf("service %q: driver %q external scheduler wake does not support invoke.to=%q; firing direct agent message without delivery routing", serviceName, clawType, inv.To)
 	default:
 		return ""

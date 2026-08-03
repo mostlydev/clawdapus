@@ -107,7 +107,7 @@ func TestBuildScheduleManifestUsesServiceTimezoneWithoutCalendar(t *testing.T) {
 	manifest, err := buildScheduleManifest(&pod.Pod{Name: "ops"}, map[string]*driver.ResolvedClaw{
 		"bot": {
 			ServiceName: "bot",
-			ClawType:    "nullclaw",
+			ClawType:    "picoclaw",
 			Timezone:    "America/New_York",
 			Invocations: []driver.Invocation{
 				{
@@ -134,7 +134,7 @@ func TestBuildScheduleManifestFallsBackToUTCWithoutServiceTimezone(t *testing.T)
 	manifest, err := buildScheduleManifest(&pod.Pod{Name: "ops"}, map[string]*driver.ResolvedClaw{
 		"bot": {
 			ServiceName: "bot",
-			ClawType:    "nullclaw",
+			ClawType:    "picoclaw",
 			Invocations: []driver.Invocation{
 				{
 					ID:       "podjob01",

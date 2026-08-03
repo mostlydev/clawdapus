@@ -28,7 +28,7 @@ features:
     details: Clawfile extends Dockerfile. claw-pod.yml extends docker-compose.yml. Eject anytime — you still have working OCI images and compose files.
   - icon: "\U0001F3AD"
     title: 7 Runner Drivers
-    details: "OpenClaw, Hermes, NanoClaw, Nanobot, PicoClaw, NullClaw, MicroClaw. Pick your runtime. Same governance layer wraps them all."
+    details: "OpenClaw, Hermes, Nanobot, PicoClaw. Pick your runtime. Same governance layer wraps them all."
   - icon: "\U0001F4E1"
     title: Social Topology
     details: "HANDLE declares platform identity. Every agent's Discord/Telegram/Slack IDs are broadcast pod-wide. Services can @mention bots without hardcoding."

@@ -6,7 +6,7 @@ A running Claw splits cognition into two independent layers: **internal executio
 block-beta
   columns 1
   contract["Behavioral Contract\nread-only bind mount\nAGENTS.md — purpose, on the host\nSurvives full container compromise"]
-  runner["Runner\nOpenClaw · Hermes · NanoClaw · custom"]
+  runner["Runner\nOpenClaw · Hermes · Nanobot · PicoClaw"]
   persona["Persona\nStyle · knowledge · workspace state"]
   proxy["cllama — governance proxy\nRoutes model calls, injects context, mediates tools\nRunner never sees provider keys"]
 
@@ -26,11 +26,8 @@ Supported runners today:
 |--------|---------|
 | `openclaw` | [OpenClaw](https://openclaw.ai) |
 | `hermes` | [Hermes](https://github.com/NousResearch/hermes-agent) |
-| `nanoclaw` | NanoClaw / Claude Code-compatible orchestrator |
 | `nanobot` | [Nanobot](https://github.com/HKUDS/nanobot) |
 | `picoclaw` | [PicoClaw](https://github.com/sipeed/picoclaw) |
-| `nullclaw` | [NullClaw](https://github.com/nullclaw/nullclaw) |
-| `microclaw` | [MicroClaw](https://github.com/microclaw/microclaw) |
 
 Pick a runner based on what you need. Swap it without touching the persona or the contract. A 400-line Python script with brokerage API access needs the exact same purpose contract and governance proxy as a massive agent OS.
 

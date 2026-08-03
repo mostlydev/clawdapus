@@ -327,7 +327,7 @@ When run interactively (no flags), prompts for project name, agent name, claw ty
 | `--source <openclaw\|hermes>` | Source runtime override when `--from` autodetection is ambiguous. |
 | `--project <name>` | Project name (used for `x-claw.pod` and image prefix). |
 | `--agent <name>` | Primary agent name. |
-| `--type <type>` | Claw type (openclaw, hermes, nanoclaw, nanobot, picoclaw, nullclaw, microclaw, generic). |
+| `--type <type>` | Claw type (openclaw, hermes, nanobot, picoclaw, generic). |
 | `--model <provider/model>` | Primary model. |
 | `--cllama <yes\|no>` | Enable cllama proxy. |
 | `--platform <name>` | Platform handle (discord, slack, telegram, none). |

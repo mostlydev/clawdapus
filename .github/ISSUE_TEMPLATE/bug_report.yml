@@ -18,11 +18,8 @@ body:
       options:
         - openclaw
         - hermes
-        - nanoclaw
         - nanobot
         - picoclaw
-        - nullclaw
-        - microclaw
         - generic / none
         - not driver-related
     validations:

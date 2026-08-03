@@ -122,12 +122,12 @@ services:
 
 An agent can have handles on multiple platforms simultaneously. Platform support varies by driver:
 
-| Platform | `openclaw` | `hermes` | `nanoclaw` | `nanobot` | `picoclaw` | `nullclaw` | `microclaw` |
-|----------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Discord | yes | yes | -- | yes | yes | yes | yes |
-| Telegram | yes | yes | -- | yes | yes | yes | yes |
-| Slack | yes | yes | -- | yes | yes | yes | yes |
-| Long-tail chat | -- | -- | -- | -- | yes | -- | -- |
+| Platform | `openclaw` | `hermes` | `nanobot` | `picoclaw` |
+|----------|:---:|:---:|:---:|:---:|
+| Discord | yes | yes | yes | yes |
+| Telegram | yes | yes | yes | yes |
+| Slack | yes | yes | yes | yes |
+| Long-tail chat | -- | -- | -- | yes |
 
 PicoClaw additionally supports WhatsApp, Feishu, LINE, QQ, DingTalk, OneBot, WeCom, and other long-tail platforms.
 

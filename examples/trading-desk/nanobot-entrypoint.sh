@@ -13,15 +13,15 @@ send_greeting() {
             -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$payload" >/dev/null; then
-            echo "[microclaw-entrypoint] greeting sent"
+            echo "[nanobot-entrypoint] greeting sent"
             return 0
         fi
         i=$((i + 1))
         sleep 3
     done
 
-    echo "[microclaw-entrypoint] warning: failed to send greeting after retries"
+    echo "[nanobot-entrypoint] warning: failed to send greeting after retries"
 }
 
 send_greeting
-exec microclaw run
+exec nanobot gateway

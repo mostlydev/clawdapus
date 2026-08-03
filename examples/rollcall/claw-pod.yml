@@ -43,84 +43,6 @@ services:
       ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
       CLAW_RUNTIME: "openclaw"
 
-  nc-roll:
-    image: rollcall-nullclaw:latest
-    build:
-      context: .
-      dockerfile: agents/nc-roll/Clawfile
-    x-claw:
-      agent: ./agents/nc-roll/AGENTS.md
-      cllama: passthrough
-      cllama-env:
-        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
-      handles:
-        discord:
-          id: "${DISCORD_BOT_ID}"
-          username: "nc-roll"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Roll Call"
-              channels:
-                - id: "${ROLLCALL_CHANNEL_ID}"
-                  name: roll-call
-    environment:
-      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
-      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
-      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
-      CLAW_RUNTIME: "nullclaw"
-
-  mc-roll:
-    image: rollcall-microclaw:latest
-    build:
-      context: .
-      dockerfile: agents/mc-roll/Clawfile
-    x-claw:
-      agent: ./agents/mc-roll/AGENTS.md
-      cllama: passthrough
-      cllama-env:
-        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
-      handles:
-        discord:
-          id: "${DISCORD_BOT_ID}"
-          username: "mc-roll"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Roll Call"
-              channels:
-                - id: "${ROLLCALL_CHANNEL_ID}"
-                  name: roll-call
-    environment:
-      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
-      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
-      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
-      CLAW_RUNTIME: "microclaw"
-
-  nano-roll:
-    image: rollcall-nanoclaw:latest
-    build:
-      context: .
-      dockerfile: agents/nano-roll/Clawfile
-    x-claw:
-      agent: ./agents/nano-roll/AGENTS.md
-      cllama: passthrough
-      cllama-env:
-        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
-      handles:
-        discord:
-          id: "${DISCORD_BOT_ID}"
-          username: "nano-roll"
-          guilds:
-            - id: "${DISCORD_GUILD_ID}"
-              name: "Roll Call"
-              channels:
-                - id: "${ROLLCALL_CHANNEL_ID}"
-                  name: roll-call
-    environment:
-      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
-      DISCORD_BOT_ID: "${DISCORD_BOT_ID}"
-      ROLLCALL_CHANNEL_ID: "${ROLLCALL_CHANNEL_ID}"
-      CLAW_RUNTIME: "nanoclaw"
-
   nb-roll:
     image: rollcall-nanobot:latest
     build:
@@ -129,8 +51,10 @@ services:
     x-claw:
       agent: ./agents/nb-roll/AGENTS.md
       cllama: passthrough
+      # nb-roll carries the anthropic-messages ingress surface now that the
+      # nullclaw/nanoclaw stubs are retired (ADR-026).
       cllama-env:
-        OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
       handles:
         discord:
           id: "${DISCORD_BOT_ID}"

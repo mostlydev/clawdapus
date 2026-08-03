@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/hermes"
 )
 
@@ -24,7 +25,7 @@ const (
 
 var validNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
-var scaffoldClawTypes = []string{"openclaw", "hermes", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic"}
+var scaffoldClawTypes = []string{"openclaw", "hermes", "nanobot", "picoclaw", "generic"}
 
 func shouldPromptInteractively() bool {
 	info, err := os.Stdin.Stat()
@@ -157,9 +158,12 @@ func parseClawType(value string) (string, error) {
 	switch v {
 	case "":
 		return "", fmt.Errorf("claw type is required")
-	case "openclaw", "hermes", "nanoclaw", "microclaw", "nullclaw", "nanobot", "picoclaw", "generic":
+	case "openclaw", "hermes", "nanobot", "picoclaw", "generic":
 		return v, nil
 	default:
+		if err := driver.RetirementError(v); err != nil {
+			return "", err
+		}
 		return "", fmt.Errorf("invalid claw type %q (allowed: %s)", value, strings.Join(scaffoldClawTypes, ", "))
 	}
 }
@@ -170,12 +174,6 @@ func defaultBaseImageForClawType(clawType string) string {
 		return "openclaw:latest"
 	case "hermes":
 		return hermes.BaseImageTag
-	case "nanoclaw":
-		return "nanoclaw-orchestrator:latest"
-	case "microclaw":
-		return "microclaw:latest"
-	case "nullclaw":
-		return "nullclaw:latest"
 	case "nanobot":
 		return "nanobot:latest"
 	case "picoclaw":

@@ -64,9 +64,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	}
 	for _, key := range []string{
 		"MOMENTUM_TRADER_BOT_TOKEN",
-		"SYSTEMS_MONITOR_BOT_TOKEN",
 		"VALUE_TRADER_BOT_TOKEN",
-		"MICRO_BOT_TOKEN",
 		"HERMES_BOT_TOKEN",
 	} {
 		if env[key] == "" {
@@ -76,9 +74,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	requiredIDs := []string{
 		"DESK_MANAGER_DISCORD_ID",
 		"MOMENTUM_TRADER_DISCORD_ID",
-		"SYSTEMS_MONITOR_DISCORD_ID",
 		"VALUE_TRADER_DISCORD_ID",
-		"MICRO_DISCORD_ID",
 		"HERMES_DISCORD_ID",
 		"DISCORD_GUILD_ID",
 		"DISCORD_TRADING_FLOOR_CHANNEL",
@@ -100,14 +96,8 @@ func TestSpikeComposeUp(t *testing.T) {
 	if !spikeImageExists("openclaw:latest") {
 		spikeBuildImage(t, dir, "openclaw:latest", "Dockerfile.openclaw-base")
 	}
-	if !spikeImageExists("nanoclaw-orchestrator:latest") {
-		rollcallDir := filepath.Join(repoRoot, "examples", "rollcall")
-		spikeBuildImage(t, rollcallDir, "nanoclaw-orchestrator:latest", "Dockerfile.nanoclaw-base")
-	}
 	spikeBuildImage(t, dir, "trading-desk:latest", "Clawfile")
-	spikeBuildImage(t, dir, "trading-desk-nanoclaw:latest", "Clawfile.nanoclaw")
-	spikeBuildImage(t, dir, "trading-desk-nullclaw:latest", "Clawfile.nullclaw")
-	spikeBuildImage(t, dir, "trading-desk-microclaw:latest", "Clawfile.microclaw")
+	spikeBuildImage(t, dir, "trading-desk-nanobot:latest", "Clawfile.nanobot")
 	spikeBuildImage(t, dir, "trading-desk-hermes:latest", "Clawfile.hermes")
 	spikeBuildImage(t, dir, "trading-api:latest", "Dockerfile.trading-api")
 	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawAPI, infraComponentClawdash, infraComponentClawWall)
@@ -158,7 +148,7 @@ func TestSpikeComposeUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse expanded spike pod: %v", err)
 	}
-	for _, svcName := range []string{"desk-manager", "momentum-trader", "systems-monitor", "value-trader", "micro", "hermes"} {
+	for _, svcName := range []string{"desk-manager", "momentum-trader", "value-trader", "hermes"} {
 		svc := parsedPod.Services[svcName]
 		if svc == nil || svc.Claw == nil {
 			t.Fatalf("parsed pod: missing claw service %q", svcName)
@@ -200,7 +190,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// teardown runs the compose down and dumps logs.
 	teardown := func() {
-		for _, svc := range []string{"desk-manager", "momentum-trader", "systems-monitor", "value-trader", "micro", "hermes", "trading-api"} {
+		for _, svc := range []string{"desk-manager", "momentum-trader", "value-trader", "hermes", "trading-api"} {
 			name := fmt.Sprintf("trading-desk-%s-1", svc)
 			out, _ := exec.Command("docker", "logs", "--tail", "100", name).CombinedOutput()
 			t.Logf("=== %s logs ===\n%s", name, string(out))
@@ -385,7 +375,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// ── Verify cllama context artifacts ─────────────────────────────────────
 
-	for _, agent := range []string{"desk-manager", "momentum-trader", "systems-monitor", "value-trader", "micro", "hermes"} {
+	for _, agent := range []string{"desk-manager", "momentum-trader", "value-trader", "hermes"} {
 		agentDir := filepath.Join(runtimeDir, "context", agent)
 		for _, rel := range []string{"AGENTS.md", "CLAWDAPUS.md", "metadata.json"} {
 			if _, err := os.Stat(filepath.Join(agentDir, rel)); err != nil {
@@ -457,161 +447,48 @@ func TestSpikeComposeUp(t *testing.T) {
 	healthOut, _ := exec.Command("docker", "exec", containerName, "openclaw", "health", "--json").Output()
 	t.Logf("openclaw health --json: %s", strings.TrimSpace(string(healthOut)))
 
-	// ── Verify Systems-Monitor (nanoclaw orchestrator) container artifacts ───
+	// ── Verify Value-Trader (nanobot) artifacts ──────────────────────────────
 
-	systemsMonitorContainer := spikeContainerName("systems-monitor")
-	spikeWaitRunning(t, systemsMonitorContainer, 45*time.Second)
-
-	// Combined CLAUDE.md at /workspace/groups/main/CLAUDE.md (agent contract + CLAWDAPUS.md)
-	systemsMonitorClaude, errA := exec.Command("docker", "exec", systemsMonitorContainer, "cat", "/workspace/groups/main/CLAUDE.md").Output()
-	if errA != nil {
-		t.Errorf("systems-monitor: docker exec cat /workspace/groups/main/CLAUDE.md: %v", errA)
-	} else {
-		claudeStr := string(systemsMonitorClaude)
-		if !strings.Contains(claudeStr, "Systems-Monitor") {
-			t.Errorf("systems-monitor: CLAUDE.md doesn't mention Systems-Monitor: %q", claudeStr[:min(200, len(claudeStr))])
-		}
-		if !strings.Contains(claudeStr, "trading-desk") {
-			t.Errorf("systems-monitor: CLAUDE.md doesn't reference pod name 'trading-desk'")
-		}
-		t.Logf("systems-monitor CLAUDE.md: %d bytes", len(systemsMonitorClaude))
-	}
-
-	// Docker socket must be mounted
-	systemsMonitorSock, errS := exec.Command("docker", "exec", systemsMonitorContainer, "ls", "-la", "/var/run/docker.sock").Output()
-	if errS != nil {
-		t.Errorf("systems-monitor: Docker socket not mounted at /var/run/docker.sock: %v", errS)
-	} else {
-		t.Logf("systems-monitor docker.sock: %s", strings.TrimSpace(string(systemsMonitorSock)))
-	}
-
-	// Skills must use directory layout at orchestrator path
-	systemsMonitorSkills, errSk := exec.Command("docker", "exec", systemsMonitorContainer, "find", "/workspace/container/skills", "-name", "SKILL.md").Output()
-	if errSk != nil {
-		t.Errorf("systems-monitor: failed to list skills at /workspace/container/skills: %v", errSk)
-	} else if strings.TrimSpace(string(systemsMonitorSkills)) == "" {
-		t.Error("systems-monitor: no SKILL.md files found in /workspace/container/skills/")
-	} else {
-		t.Logf("systems-monitor skills (directory layout):\n%s", strings.TrimSpace(string(systemsMonitorSkills)))
-	}
-
-	// .env file with cllama bearer token (orchestrator's readEnvFile passes to agent-runners)
-	systemsMonitorEnvFile, errEF := exec.Command("docker", "exec", systemsMonitorContainer, "cat", "/workspace/.env").Output()
-	if errEF != nil {
-		t.Errorf("systems-monitor: .env not mounted at /workspace/.env: %v", errEF)
-	} else if !strings.Contains(string(systemsMonitorEnvFile), "ANTHROPIC_API_KEY=") {
-		t.Errorf("systems-monitor: .env should contain ANTHROPIC_API_KEY, got %q", string(systemsMonitorEnvFile))
-	} else {
-		t.Logf("systems-monitor .env: %d bytes", len(systemsMonitorEnvFile))
-	}
-
-	// Verify compose.generated.yml has nanoclaw-specific markers
-	if !strings.Contains(composeSrc, "/var/run/docker.sock") {
-		t.Error("compose.generated.yml: expected Docker socket mount for nanoclaw service")
-	}
-	if !strings.Contains(composeSrc, "ANTHROPIC_BASE_URL") {
-		t.Error("compose.generated.yml: expected ANTHROPIC_BASE_URL for nanoclaw cllama wiring")
-	}
-	if !strings.Contains(composeSrc, "/app/config/microclaw.config.yaml") {
-		t.Error("compose.generated.yml: expected microclaw config mount")
-	}
-	if !strings.Contains(composeSrc, "/root/.hermes") {
-		t.Error("compose.generated.yml: expected hermes home mount")
-	}
-	if !strings.Contains(composeSrc, "HERMES_HOME") {
-		t.Error("compose.generated.yml: expected HERMES_HOME env for hermes service")
-	}
-
-	// ANTHROPIC_BASE_URL env var points to cllama proxy
-	systemsMonitorEnvOut, errE := exec.Command("docker", "exec", systemsMonitorContainer, "printenv", "ANTHROPIC_BASE_URL").Output()
-	if errE != nil {
-		t.Errorf("systems-monitor: ANTHROPIC_BASE_URL not set: %v", errE)
-	} else {
-		systemsMonitorBaseURL := strings.TrimSpace(string(systemsMonitorEnvOut))
-		if !strings.Contains(systemsMonitorBaseURL, "cllama") {
-			t.Errorf("systems-monitor: ANTHROPIC_BASE_URL should point to cllama proxy, got %q", systemsMonitorBaseURL)
-		} else {
-			t.Logf("systems-monitor ANTHROPIC_BASE_URL: %s", systemsMonitorBaseURL)
-		}
-	}
-
-	// CLAW_NETWORK env var is set for agent-runner pod connectivity
-	systemsMonitorNetwork, errN := exec.Command("docker", "exec", systemsMonitorContainer, "printenv", "CLAW_NETWORK").Output()
-	if errN != nil {
-		t.Errorf("systems-monitor: CLAW_NETWORK not set: %v", errN)
-	} else {
-		t.Logf("systems-monitor CLAW_NETWORK: %s", strings.TrimSpace(string(systemsMonitorNetwork)))
-	}
-
-	// ── Verify Value-Trader (nullclaw) artifacts ─────────────────────────────
-
-	valueTraderConfigPath := filepath.Join(runtimeDir, "value-trader", "nullclaw-home", "config.json")
+	valueTraderConfigPath := filepath.Join(runtimeDir, "value-trader", "nanobot-home", "config.json")
 	valueTraderConfigData := spikeReadFile(t, valueTraderConfigPath)
 	var valueTraderCfg map[string]interface{}
 	if err := json.Unmarshal([]byte(valueTraderConfigData), &valueTraderCfg); err != nil {
-		t.Fatalf("parse value-trader nullclaw config.json: %v", err)
+		t.Fatalf("parse value-trader nanobot config.json: %v", err)
 	}
 
-	valueTraderChannels, ok := valueTraderCfg["channels"].(map[string]interface{})
+	valueTraderAgents, ok := valueTraderCfg["agents"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("value-trader config.json: missing channels object")
+		t.Fatalf("value-trader config.json: missing agents object")
 	}
-	valueTraderDiscord, ok := valueTraderChannels["discord"].(map[string]interface{})
+	valueTraderDefaults, ok := valueTraderAgents["defaults"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("value-trader config.json: missing channels.discord object")
+		t.Fatalf("value-trader config.json: missing agents.defaults object")
 	}
-	valueTraderAccounts, ok := valueTraderDiscord["accounts"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("value-trader config.json: missing channels.discord.accounts object")
+	if got, _ := valueTraderDefaults["model"].(string); got != "anthropic/claude-sonnet-4" {
+		t.Errorf("value-trader config.json: expected agents.defaults.model=anthropic/claude-sonnet-4, got %v", valueTraderDefaults["model"])
 	}
-	valueTraderMainAccount, ok := valueTraderAccounts["main"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("value-trader config.json: missing channels.discord.accounts.main object")
-	}
-	if tok, _ := valueTraderMainAccount["token"].(string); tok == "" {
-		t.Errorf("value-trader config.json: expected channels.discord.accounts.main.token to be set")
-	}
-	if gid, _ := valueTraderMainAccount["guild_id"].(string); gid != env["DISCORD_GUILD_ID"] {
-		t.Errorf("value-trader config.json: expected guild_id=%q, got %q", env["DISCORD_GUILD_ID"], gid)
-	}
-	if models, ok := valueTraderCfg["models"].(map[string]interface{}); ok {
-		if providers, ok := models["providers"].(map[string]interface{}); ok {
-			if anthropic, ok := providers["anthropic"].(map[string]interface{}); ok {
-				if got := anthropic["base_url"]; got != "http://cllama-passthrough:8080/v1" {
-					t.Errorf("value-trader config.json: expected anthropic.base_url=http://cllama-passthrough:8080/v1, got %v", got)
-				}
+	if providers, ok := valueTraderCfg["providers"].(map[string]interface{}); ok {
+		if anthropic, ok := providers["anthropic"].(map[string]interface{}); ok {
+			if got, _ := anthropic["base_url"].(string); !strings.Contains(got, "cllama") {
+				t.Errorf("value-trader config.json: expected providers.anthropic.base_url to point at cllama, got %v", anthropic["base_url"])
 			}
+		} else {
+			t.Errorf("value-trader config.json: missing providers.anthropic for cllama wiring")
 		}
+	} else {
+		t.Errorf("value-trader config.json: missing providers object")
+	}
+
+	valueTraderSeedPath := filepath.Join(runtimeDir, "value-trader", "nanobot-home", "workspace", "AGENTS.md")
+	valueTraderSeed := spikeReadFile(t, valueTraderSeedPath)
+	if !strings.Contains(valueTraderSeed, "Value-Trader") {
+		t.Errorf("value-trader seeded AGENTS.md doesn't mention Value-Trader")
 	}
 
 	valueTraderContainer := spikeContainerName("value-trader")
 	spikeWaitHealthy(t, valueTraderContainer, 60*time.Second)
-	if out, err := exec.Command("docker", "exec", valueTraderContainer, "cat", "/root/.nullclaw/config.json").CombinedOutput(); err != nil {
-		t.Errorf("value-trader: expected /root/.nullclaw/config.json in container: %v (%s)", err, strings.TrimSpace(string(out)))
-	}
-
-	// ── Verify Micro (microclaw) artifacts ───────────────────────────────────
-
-	microConfigPath := filepath.Join(runtimeDir, "micro", "config", "microclaw.config.yaml")
-	microConfigData := spikeReadFile(t, microConfigPath)
-	var microCfg map[string]interface{}
-	if err := yaml.Unmarshal([]byte(microConfigData), &microCfg); err != nil {
-		t.Fatalf("parse microclaw.config.yaml: %v", err)
-	}
-	if got := microCfg["llm_provider"]; got != "anthropic" {
-		t.Errorf("microclaw.config.yaml: expected llm_provider=anthropic, got %v", got)
-	}
-	if got := microCfg["model"]; got != "claude-sonnet-4" {
-		t.Errorf("microclaw.config.yaml: expected model=claude-sonnet-4, got %v", got)
-	}
-	if got := microCfg["llm_base_url"]; got != "http://cllama:8080/v1" {
-		t.Errorf("microclaw.config.yaml: expected llm_base_url=http://cllama:8080/v1, got %v", got)
-	}
-
-	microContainer := spikeContainerName("micro")
-	spikeWaitHealthy(t, microContainer, 60*time.Second)
-	if out, err := exec.Command("docker", "exec", microContainer, "test", "-f", "/app/config/microclaw.config.yaml").CombinedOutput(); err != nil {
-		t.Errorf("micro: expected /app/config/microclaw.config.yaml in container: %v (%s)", err, strings.TrimSpace(string(out)))
+	if out, err := exec.Command("docker", "exec", valueTraderContainer, "cat", "/root/.nanobot/config.json").CombinedOutput(); err != nil {
+		t.Errorf("value-trader: expected /root/.nanobot/config.json in container: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
 
 	// ── Verify Hermes artifacts ──────────────────────────────────────────────
@@ -685,7 +562,6 @@ func TestSpikeComposeUp(t *testing.T) {
 	spikeVerifyDiscordGreeting(t, env["DESK_MANAGER_BOT_TOKEN"], channelID, "desk-manager online", 10*time.Second)
 	spikeVerifyDiscordGreeting(t, env["MOMENTUM_TRADER_BOT_TOKEN"], channelID, "momentum-trader online", 10*time.Second)
 	spikeVerifyDiscordGreeting(t, env["DESK_MANAGER_BOT_TOKEN"], channelID, "value-trader online", 15*time.Second)
-	spikeVerifyDiscordGreeting(t, env["DESK_MANAGER_BOT_TOKEN"], channelID, "microclaw online", 15*time.Second)
 	spikeVerifyDiscordGreeting(t, env["DESK_MANAGER_BOT_TOKEN"], channelID, "hermes online", 15*time.Second)
 
 	// trading-api posts its own startup message to Discord via webhook — this
@@ -696,8 +572,8 @@ func TestSpikeComposeUp(t *testing.T) {
 	// The startup message must contain Discord mentions for openclaw agents.
 	// CLAW_HANDLE_* vars are broadcast to all pod services by claw, so trading-api
 	// picks up the agent IDs and includes <@ID> mentions in its webhook message.
-	// Note: Systems-Monitor (nanoclaw) has no greeting mechanism — the mock_server.py only
-	// formats mentions for agents it knows about (desk-manager, momentum-trader).
+	// Note: the mock_server.py only formats mentions for agents it knows about
+	// (desk-manager, momentum-trader).
 	if deskManagerID := env["DESK_MANAGER_DISCORD_ID"]; deskManagerID != "" {
 		spikeVerifyDiscordGreeting(t, env["DESK_MANAGER_BOT_TOKEN"], channelID, "<@"+deskManagerID+">", 5*time.Second)
 	}
@@ -871,9 +747,6 @@ func spikeTagRunnerBaseImage(t *testing.T, tag string) {
 func spikeIsRunnerBaseTag(tag string) bool {
 	switch tag {
 	case "openclaw:latest",
-		"nullclaw:latest",
-		"microclaw:latest",
-		"nanoclaw-orchestrator:latest",
 		"nanobot:latest",
 		"picoclaw:latest":
 		return true

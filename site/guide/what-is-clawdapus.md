@@ -28,7 +28,7 @@ Any valid Dockerfile is a valid Clawfile. Any valid `docker-compose.yml` is a va
 
 ## What It Is NOT
 
-Clawdapus is **not an agent framework**. It does not define how agents reason, plan, or execute code. It supports seven different runner types today -- OpenClaw, Hermes, NanoClaw, Nanobot, PicoClaw, NullClaw, MicroClaw -- and treats them all the same way.
+Clawdapus is **not an agent framework**. It does not define how agents reason, plan, or execute code. It supports four runner types today -- OpenClaw, Hermes, Nanobot, and PicoClaw -- and treats them all the same way.
 
 Clawdapus is **not a bot-building tool**. It helps you deploy, govern, monitor, and evolve bots that already exist. You bring the agent; Clawdapus brings the infrastructure that makes it safe to run in production.
 

@@ -30,15 +30,15 @@ x-trading-desk:
     - ./policy/approval-workflow.md
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Trading Desk Pod (desk-manager + momentum-trader + systems-monitor + value-trader + micro + hermes)
+# Trading Desk Pod (desk-manager + momentum-trader + value-trader + hermes)
 #
-# Mixed-driver pod: openclaw + nanoclaw + nullclaw + microclaw + hermes agents
+# Mixed-driver pod: openclaw + nanobot + hermes agents
 # coordinating via Discord and a shared research volume.
 #
 # Required environment variables (.env or Docker secrets):
 #   POSTGRES_PASSWORD, SECRET_KEY_BASE
-#   DESK_MANAGER_BOT_TOKEN, MOMENTUM_TRADER_BOT_TOKEN, SYSTEMS_MONITOR_BOT_TOKEN, VALUE_TRADER_BOT_TOKEN, MICRO_BOT_TOKEN, HERMES_BOT_TOKEN
-#   DESK_MANAGER_DISCORD_ID, MOMENTUM_TRADER_DISCORD_ID, SYSTEMS_MONITOR_DISCORD_ID, VALUE_TRADER_DISCORD_ID, MICRO_DISCORD_ID, HERMES_DISCORD_ID
+#   DESK_MANAGER_BOT_TOKEN, MOMENTUM_TRADER_BOT_TOKEN, VALUE_TRADER_BOT_TOKEN, HERMES_BOT_TOKEN
+#   DESK_MANAGER_DISCORD_ID, MOMENTUM_TRADER_DISCORD_ID, VALUE_TRADER_DISCORD_ID, HERMES_DISCORD_ID
 #   DISCORD_GUILD_ID, DISCORD_TRADING_FLOOR_CHANNEL
 #   OPENROUTER_API_KEY, ANTHROPIC_API_KEY (proxy-side provider keys for cllama)
 # Note: claw resolves ${...} in x-claw metadata from the pod-local .env before
@@ -163,31 +163,13 @@ services:
       CLAW_GREETING_CHANNEL: "${DISCORD_TRADING_FLOOR_CHANNEL}"
       CLAW_GREETING_MESSAGE: "momentum-trader online."
 
-  # ── Systems-Monitor — Systems Monitor (NanoClaw) ──────────────────────────
-
-  systems-monitor:
-    image: trading-desk-nanoclaw:latest
-    build:
-      context: .
-      dockerfile: Clawfile.nanoclaw
-    x-claw:
-      <<: *cllama_agent
-      agent: ./agents/SYSTEMS-MONITOR.md
-      handles:
-        discord:
-          id: "${SYSTEMS_MONITOR_DISCORD_ID}"
-          username: "systems-monitor"
-      surfaces: *shared_trading_surfaces
-    environment:
-      DISCORD_BOT_TOKEN: "${SYSTEMS_MONITOR_BOT_TOKEN}"
-
-  # ── Value-Trader — Counterparty Sanity Check (NullClaw) ───────────────────
+  # ── Value-Trader — Counterparty Sanity Check (Nanobot) ────────────────────
 
   value-trader:
-    image: trading-desk-nullclaw:latest
+    image: trading-desk-nanobot:latest
     build:
       context: .
-      dockerfile: Clawfile.nullclaw
+      dockerfile: Clawfile.nanobot
     x-claw:
       <<: *cllama_agent
       agent: ./agents/VALUE-TRADER.md
@@ -201,26 +183,6 @@ services:
       DISCORD_BOT_TOKEN: "${VALUE_TRADER_BOT_TOKEN}"
       CLAW_GREETING_CHANNEL: "${DISCORD_TRADING_FLOOR_CHANNEL}"
       CLAW_GREETING_MESSAGE: "value-trader online."
-
-  # ── Micro — Operations Monitor (MicroClaw) ───────────────────────────────
-
-  micro:
-    image: trading-desk-microclaw:latest
-    build:
-      context: .
-      dockerfile: Clawfile.microclaw
-    x-claw:
-      <<: *cllama_agent
-      agent: ./agents/MICRO.md
-      handles:
-        discord:
-          id: "${MICRO_DISCORD_ID}"
-          username: "micro"
-      surfaces: *shared_trading_surfaces
-    environment:
-      DISCORD_BOT_TOKEN: "${MICRO_BOT_TOKEN}"
-      CLAW_GREETING_CHANNEL: "${DISCORD_TRADING_FLOOR_CHANNEL}"
-      CLAW_GREETING_MESSAGE: "microclaw online."
 
   # ── Hermes — Desk Communications (Hermes) ─────────────────────────────────
 

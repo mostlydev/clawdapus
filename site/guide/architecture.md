@@ -123,7 +123,7 @@ operator policy, not built-in behavior — see [Roadmap](#what-ships-today-vs-ro
 | Capability | State |
 |------------|-------|
 | Four-verb operator surface; `claw up` compiler | Shipped |
-| 7 runner drivers (OpenClaw, Hermes, NanoClaw, Nanobot, PicoClaw, MicroClaw, NullClaw) | Shipped → [Drivers](/guide/drivers) |
+| 4 runner drivers (OpenClaw, Hermes, Nanobot, PicoClaw) | Shipped → [Drivers](/guide/drivers) |
 | cllama: credential starvation, compiled tool mediation, normalized telemetry, `claw audit` | Shipped |
 | Memory plane: session history, portable memory, ambient recall | Shipped |
 | Context feeds, channel-awareness + channel-memory retrieval | Shipped |
