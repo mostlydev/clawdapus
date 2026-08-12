@@ -21,6 +21,7 @@ type job struct {
 	ID              string      `json:"id"`
 	Name            string      `json:"name"`
 	Prompt          string      `json:"prompt"`
+	Workdir         string      `json:"workdir"`
 	Skills          []string    `json:"skills"`
 	Skill           *string     `json:"skill"`
 	Model           *string     `json:"model"`
@@ -90,6 +91,7 @@ func GenerateJobsJSON(rc *driver.ResolvedClaw) ([]byte, error) {
 			ID:              id,
 			Name:            name,
 			Prompt:          message,
+			Workdir:         hermesWorkspaceDir,
 			Skills:          []string{},
 			Schedule:        schedule{Kind: "cron", Expr: expr, Display: expr},
 			ScheduleDisplay: expr,

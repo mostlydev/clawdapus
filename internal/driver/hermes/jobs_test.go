@@ -36,6 +36,9 @@ func TestGenerateJobsJSONUsesWrapperAndLocalDelivery(t *testing.T) {
 	if got := job["deliver"]; got != "local" {
 		t.Fatalf("expected local deliver target, got %#v", got)
 	}
+	if got := job["workdir"]; got != hermesWorkspaceDir {
+		t.Fatalf("expected scheduled job workdir %q, got %#v", hermesWorkspaceDir, got)
+	}
 	if _, ok := job["next_run_at"].(string); !ok {
 		t.Fatalf("expected next_run_at string, got %#v", job["next_run_at"])
 	}
