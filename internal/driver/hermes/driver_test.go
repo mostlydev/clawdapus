@@ -70,6 +70,30 @@ func TestValidateRequiresSupportedHandle(t *testing.T) {
 	}
 }
 
+func TestValidateAllowsScheduledLocalOnlyServiceWithoutHandle(t *testing.T) {
+	rc, _ := newTestRC(t)
+	rc.Handles = map[string]*driver.HandleInfo{}
+	rc.Invocations = []driver.Invocation{{Schedule: "0 12 * * 1-5", Message: "Run local task"}}
+
+	if err := (&Driver{}).Validate(rc); err != nil {
+		t.Fatalf("expected local-only scheduled service to validate: %v", err)
+	}
+}
+
+func TestValidateRejectsHandlelessRoutedInvocation(t *testing.T) {
+	rc, _ := newTestRC(t)
+	rc.Handles = map[string]*driver.HandleInfo{}
+	rc.Invocations = []driver.Invocation{{Schedule: "0 12 * * 1-5", Message: "Route task", To: "alerts"}}
+
+	err := (&Driver{}).Validate(rc)
+	if err == nil {
+		t.Fatal("expected routed invocation without a handle to fail")
+	}
+	if !strings.Contains(err.Error(), "handle-less INVOKE") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateAcceptsComposeEnvTokenReference(t *testing.T) {
 	t.Setenv("ALLEN_BOT_TOKEN", "")
 

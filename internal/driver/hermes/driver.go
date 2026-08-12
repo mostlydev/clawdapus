@@ -61,7 +61,14 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 		}
 	}
 	if supported == 0 {
-		return fmt.Errorf("hermes driver: no supported HANDLE platforms enabled (add at least one of: %s)", strings.Join(supportedPlatforms, ", "))
+		if len(rc.Invocations) == 0 {
+			return fmt.Errorf("hermes driver: no supported HANDLE platforms enabled (add at least one of: %s, or configure a local-only INVOKE)", strings.Join(supportedPlatforms, ", "))
+		}
+		for i, inv := range rc.Invocations {
+			if strings.TrimSpace(inv.To) != "" {
+				return fmt.Errorf("hermes driver: handle-less INVOKE %d cannot route to %q; omit to for local-only delivery", i+1, inv.To)
+			}
+		}
 	}
 
 	for i, inv := range rc.Invocations {

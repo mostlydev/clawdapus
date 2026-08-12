@@ -13,9 +13,7 @@ func TestGenerateJobsJSONUsesWrapperAndLocalDelivery(t *testing.T) {
 		Invocations: []driver.Invocation{
 			{Schedule: "*/5 * * * *", Message: "Check status", Name: "status"},
 		},
-		Handles: map[string]*driver.HandleInfo{
-			"discord": {},
-		},
+		Handles: map[string]*driver.HandleInfo{},
 	}
 
 	data, err := GenerateJobsJSON(rc)
