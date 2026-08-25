@@ -220,6 +220,9 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    credential resolved from the matching deployment `auth_ref`; lifecycle and
    controller routes remain local-client-only. Standalone mode uses the private
    pod-network origin. `claw-api` never accepts a caller-selected callback URL.
+   The zero-TTL round trip—member request to central cllama to `claw-api`, whose
+   controller-scoped list returns to cllama—is an accepted v1 cost and is
+   covered by latency/load measurements before any caching proposal.
 7. **claw-api and clawdash read invocations.** `cmd/claw-api/agent_context.go` and the
    clawdash agents view move to `GET /control/v1/invocations[/{id}]` (secrets never
    returned); central cllama scopes the controller issuer to this organization
@@ -237,9 +240,10 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    A live container whose invocation is missing, expired, revoked, or belongs to
    another pod is handled by membership kind: a declared
    (`claw.declared=true`) member is replaced from its declared template with a
-   new Invocation, while a dynamic member is stopped, its bearer revoked, and
-   its Flux run reported failed; it is never recreated and its stopped
-   container follows the acknowledged-result cleanup in decision 10. An
+   new Invocation. A dynamic member is stopped, its bearer revoked, and never
+   recreated: one carrying `claw.flux-run` reports failure and follows the
+   acknowledged-result cleanup in decision 10, while an operator-spawned
+   dynamic member without that label is removed immediately. An
    Invocation with no matching container is revoked. Duplicate
    member identities and mismatched parent labels are quarantined and surfaced
    by `claw doctor`; the controller never guesses. The template store is an
@@ -259,9 +263,9 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    infrastructure only after warning that outstanding Invocations must be
    revoked or allowed to expire.
    Declared templates default to a seven-day Invocation TTL, bounded by the
-   organization's maximum. Replacement at the TTL boundary is an intentional
-   rolling restart; urgent revocation still takes effect on the bounded
-   reconciliation interval.
+   selected role entry's `max_invocation_ttl`. Replacement at the TTL boundary
+   is an intentional rolling restart; urgent revocation still takes effect on
+   the bounded reconciliation interval.
 10. **Clawdapus owns execution lifecycle, not durable business work.** Flux
     owns tasks, waits, wakes, retries, recurrence, checkpoints, and approval
     requests for Flux-managed work. For autonomous pod work, a controller-side
@@ -367,7 +371,9 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   controller-side Flux poll/claim assignment checks; and mutual exclusion of
   Flux-managed versus standalone `INVOKE` scheduling; declared-member
   replacement after revoke/expiry; and removal without resurrection of
-  wake-started dynamic members.
+  wake-started dynamic members, plus immediate removal of invalid non-Flux
+  dynamic members; seven-day declared default capped by the selected role's
+  `max_invocation_ttl`.
 - Unit: credential-scoped Invocation list/get used by `claw-api`; central
   `pod-members` ingress accepts only the bundle-declared HTTPS origin and
   matching ADR-013 credential; arbitrary feed, memory, and tool endpoints are
@@ -416,7 +422,8 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   later, the departure; no env rewrite; no socket in workloads. Its
   organization-managed variant runs cllama outside the pod, reaches only the
   authenticated bundle-declared HTTPS feed route, and rejects an unlisted URL
-  and wrong feed credential.
+  and wrong feed credential. A redirect response fails with no request to its
+  target.
 - `TestSpikeMemoryViews` (S6, Docker, fake memory service): metadata and isolation.
 - `TestSpikeRoleOnboarding` (S8, cross-repository, Docker): consume the same
   published billing role as my-cli; prove matching role/contract/skill/tool
