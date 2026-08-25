@@ -1,6 +1,6 @@
 # Invocation-registered claws and live membership (2026-08-24)
 
-**Status:** DRAFT — plan branch `plan/invocation-membership`; ADR-027 (amending ADR-002) is written with PR-3; an issue must be opened and
+**Status:** DRAFT — plan branch `plan/invocation-membership`; ADR-027 (amending ADR-002) will be written with PR-3; an issue must be opened and
 the branch renamed `issue-<n>-invocation-membership` before implementation (issue-first
 workflow). Consumes the contract in cllama `docs/plans/2026-08-24-invocations.md`; this plan
 does not re-decide it.
@@ -29,7 +29,8 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   `claw up` materializes container topology; the trusted controller requests one invocation
   per running member and injects only the proxy URL and bearer. Acceptance: all four retained
   drivers reach cllama with a bearer and no provider credential; `claw audit` shows role and
-  purpose; no plaintext bearer at rest in the runtime tree; the effective upstream request for
+  purpose; no workload invocation bearer remains in the runtime tree after container creation;
+  the effective upstream request for
   `examples/trading-desk` is semantically equivalent to today's (cllama's legacy-adapter
   parity test extended with clawdapus fixtures); `TestSpikeRollCall` stays green.
 - **S3 — an operator spawns and retires a member live.** `claw spawn analyst --role
@@ -61,11 +62,17 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    brings up the cllama service(s) first and waits for `/health`, registers one invocation
    per cllama-enabled service (per ordinal for `count > 1`) with the pod-scoped controller
    credential minted into the cllama environment at compile time
-   (`.claw-runtime/control.token`, 0600), writes each service's bearer into
-   `.claw-runtime/env/<service>.env` referenced by `env_file:`, then brings up the remaining
-   services. Re-running `claw up` revokes and re-registers only services whose input digest
-   changed. There is no filesystem transport; the context mount disappears when the legacy
-   adapter is retired.
+   (`.claw-runtime/control.token`, 0600). It writes each workload bearer to a
+   uniquely named 0600 temporary env file, lets Compose create the target
+   container, verifies the container carries the new invocation id, and deletes
+   the temporary file immediately. The bearer remains only in the workload's
+   process environment and Docker's protected container configuration; it is
+   never a durable context artifact. Re-running `claw up` leaves unchanged
+   services alone. For a changed input digest it creates the replacement
+   invocation first, recreates and verifies only that service, then revokes the
+   old invocation; failure revokes the replacement and reports the exact
+   reconciliation state. There is no filesystem context transport; the context
+   mount disappears when the legacy adapter is retired.
 2. **`internal/cllama` submits trusted inputs; it does not compile context.** `AgentContextInput`
    and `GenerateContextDir` are replaced by `BuildInvocationRequest(rc *driver.ResolvedClaw, ...)`
    emitting the v1 request: subject `{kind: member, id: <pod>/<service>[/<ordinal>]}`, role,
@@ -88,11 +95,18 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    injects `claw-api` whenever any cllama-enabled service exists (today only for
    `x-claw.master`). ADR-027 records the amendment: the SDK is read-only *except* inside the
    controller for dynamic members, which must carry the labels above and be reconstructible
-   after controller restart.
+   after controller restart. The controller accepts a declared member-template
+   id plus the narrow role, purpose, labels, and parent fields only. Image,
+   command, mounts, networks, privileged mode, socket mounts, and host paths
+   come from a `claw up`-compiled controller template and cannot be supplied by
+   either an operator request or a workload.
 5. **`pod-members` feed.** `claw-api` serves `GET /feeds/pod-members` (ADR-013 shape) built
-   from Docker labels plus cllama's invocation list: member id, role, purpose, handles and
-   routing metadata, join/leave times. `claw up` subscribes every claw by default
-   (`feeds-defaults` gains `pod-members`; opt out per service).
+   from Docker labels plus cllama's invocation list: current member id, role,
+   purpose, handles, routing metadata, and container creation time. It is a
+   current-state snapshot, so a departure is represented by absence rather than
+   an event ledger. The feed has zero cache TTL so the next turn observes the
+   current set. `claw up` subscribes every claw by default (`feeds-defaults`
+   gains `pod-members`; opt out per service).
 6. **claw-api and clawdash read invocations.** `cmd/claw-api/agent_context.go` and the
    clawdash agents view move to `GET /control/v1/invocations[/{id}]` (secrets never
    returned). `claw audit` gains `ROLE`/`PURPOSE` columns and `--role`/`--label` filters.
@@ -100,13 +114,23 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
 7. **Drivers unchanged in behaviour.** They already point runners at the proxy with a bearer
    from `rc.CllamaToken`; the bearer now comes from registration, so `Materialize` runs after
    phase one. No driver ever receives a subscription-kind credential.
+8. **Controller reconciliation is fail-closed.** At startup, `claw-api`
+   compares labeled dynamic containers with cllama's redacted invocation list.
+   A live container whose invocation is missing, expired, revoked, or belongs to
+   another pod is stopped and recreated from its declared template with a new
+   invocation. An invocation with no matching container is revoked. Duplicate
+   member identities and mismatched parent labels are quarantined and surfaced
+   by `claw doctor`; the controller never guesses. `claw down` asks the
+   controller to revoke and remove the complete dynamic descendant tree before
+   Compose removes the base pod.
 
 ## Delete or demote
 
 - `GenerateContextDir` and the loose-file context tree: behind the legacy adapter for one
   release, then removed with the context mount.
-- Plaintext bearer in `metadata.json` and `cllama.GenerateToken`: removed; bearers live only
-  in per-service env files written by the controller.
+- Plaintext bearer in `metadata.json` and `cllama.GenerateToken`: removed.
+  Per-service env files are single-use 0600 launch inputs and are deleted after
+  the container is verified; they are not retained as runtime state.
 - Compile-time `CLAW_HANDLE_*` for claws: demoted to non-claw services only.
 - Duplicate `internal/cllama` manifest types: replaced by cllama's v1 wire types pinned by
   the conformance fixture.
@@ -122,8 +146,12 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
 ## Tests
 
 - Unit: `BuildInvocationRequest` goldens (trading-desk, quickstart); two-phase up ordering
-  with a fake compose runner; env-file emission and permissions; label-derived membership
-  reconstruction with a fake Docker client; controller create/remove request shapes; parser tests for `role`/`labels`/`purpose`/`labels-defaults`; audit
+  and failure injection with a fake compose runner; env-file permissions and
+  guaranteed cleanup; unchanged-member no-op and changed-member create,
+  verify, revoke ordering; label-derived membership and orphan reconciliation
+  with a fake Docker client; controller create/remove request shapes and
+  rejection of caller-supplied image, command, mount, network, privilege, and
+  host-path changes; parser tests for `role`/`labels`/`purpose`/`labels-defaults`; audit
   columns/filters; `pod-members` feed rendering from fixtures; claw-api/clawdash on a fake
   control API.
 - Integration (`-tags integration`): register against the released cllama binary with an
@@ -132,18 +160,34 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
 
 ## Spikes (hermetic first; live drills as extra evidence)
 
-- `TestSpikeRegistration` (S2, Docker, fake provider): two-phase up; four drivers reach cllama
-  with bearers only; semantic parity via adapter; no plaintext bearer at rest; audit columns.
-- `TestSpikeRollCall` (S2, live): unchanged green.
+- `TestSpikeRegistration` (S2, Docker, fake provider): two-phase up; pinned real
+  images for all four retained drivers reach a real cllama with invocation
+  bearers only; Anthropic Messages and OpenAI Responses requests reach the fake
+  provider; one managed-tool loop completes; semantic parity holds; temporary
+  bearer files are gone; audit columns are correct.
+- `TestSpikeRegistrationFailureRecovery` (S2, Docker): inject failure after
+  registration, after container creation, and before old-token revocation;
+  assert no unreported orphan, no mixed invocation, deterministic recovery,
+  and unchanged member container ids.
+- `TestSpikeRollCall` (S2, live evidence): unchanged green.
 - `TestSpikeSpawnRetire` (S3, Docker): CLI → `claw-api` → Docker API; no restarts of
-  existing containers; labels-derived `ps`; controller restart recovery; `invocation_revoked`
-  after retire; `claw down` removes dynamic members; no socket in any workload.
-- `TestSpikeChildDelegation` (S4, Docker): child within ceiling succeeds; widening fails with
-  no container and no record.
+  existing containers; declared-template enforcement; labels-derived `ps`;
+  controller restart recovery from missing-container, missing-invocation, and
+  duplicate-member cases; `invocation_revoked` after retire; `claw down`
+  removes and revokes the descendant tree; no socket in any workload.
+- `TestSpikeChildDelegation` (S4, Docker): child within ceiling succeeds;
+  attempts to widen role, tool, model, memory view, budget, TTL, channel, or
+  further delegation fail with no container and no record; caller-supplied
+  Docker settings fail at the controller boundary.
 - `TestSpikeMembershipFeed` (S5, Docker): existing members' next turn contains the join and,
   later, the departure; no env rewrite; no socket in workloads.
 - `TestSpikeMemoryViews` (S6, Docker, fake memory service): metadata and isolation.
 - Existing quickstart/docs spikes unchanged.
+
+Every credential-free spike above is a required CI check and fails, rather than
+skips, when Docker, the pinned cllama binary, a retained driver image, or a fake
+dependency is unavailable. Credentialed Discord/provider drills remain extra
+release evidence.
 
 ## Sequencing
 
