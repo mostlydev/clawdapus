@@ -217,6 +217,29 @@ producer, likely `claw-channel-memory`, aligned with #164's salience-memory
 model. The digest should preserve provenance and make exact-source retrieval
 cheap when a summary references a specific message.
 
+The detailed Phase 2 design now lives in
+`docs/plans/2026-05-21-channel-memory-adapter.md`.
+
+Phase 2 keeps the existing #232 surfaces rather than creating a new feed:
+
+- `channel-awareness` remains the model-visible room-awareness feed.
+- the Phase 2 context kind is `raw_window+digest`.
+- claw-wall owns Discord channel ingest, message identity, ACL checks, and feed
+  serving.
+- `claw-channel-memory` or an equivalent channel-memory adapter owns durable
+  channel-message retention, deterministic hard-event/telemetry processing, and
+  asynchronous LLM-backed digest generation.
+- cllama remains the context-aware injection and telemetry layer, including
+  `channel_context_op` events.
+- exact-source retrieval continues through `search_channel_context` and
+  `get_channel_messages`.
+
+Before digest-backed awareness can land safely, Phase 1 needs a tight follow-up:
+`channel-awareness` and the retrieval tools must expose stable Discord message
+IDs, or an equivalent stable source handle, so digest provenance can round-trip
+to exact messages. Timestamp-only references are insufficient for chunked
+reports and busy same-minute channel bursts.
+
 #232 stays open until that digest-backed phase lands.
 
 ## Non-Goals
