@@ -113,7 +113,34 @@ For an interactive/debug service, opt visible status back in with
 `HERMES_CHAT_STATUS_DELIVERY` preserves upstream Hermes behavior; Clawdapus
 sets it to `off` for managed chat services.
 
-### 6. gateway.log: the first diagnostic surface
+### 6. Native tool policy
+
+Hermes ships native tools in its own toolsets. Restrict those tools at compile
+time in the service's `x-claw.hermes` block:
+
+```yaml
+services:
+  assistant:
+    x-claw:
+      hermes:
+        disable-tools: [skill_manage, session_search]
+```
+
+The driver writes the resolved list into both the container environment and the
+Hermes `.env`; no cllama rule or image patch is needed. `allow-tools` subtracts
+from the disabled set and wins if a tool appears in both lists:
+
+```yaml
+      hermes:
+        disable-tools: [skill_manage, session_search]
+        allow-tools: [session_search]
+```
+
+This leaves `skill_manage` disabled and enables `session_search`. Explicit
+`disable-tools` entries apply even when the service has no Discord or Slack
+handle.
+
+### 7. gateway.log: the first diagnostic surface
 
 ```bash
 claw compose exec assistant cat /root/.hermes/logs/gateway.log

@@ -676,6 +676,38 @@ func TestMaterializeHonorsHermesAllowToolsOptIn(t *testing.T) {
 	}
 }
 
+func TestMaterializeWritesExplicitDisabledToolsForTelegramOnlyService(t *testing.T) {
+	rc, tmp := newTestRC(t)
+	rc.Handles = map[string]*driver.HandleInfo{"telegram": {}}
+	rc.Environment["TELEGRAM_BOT_TOKEN"] = "telegram-token"
+	rc.Hermes = &driver.HermesConfig{DisableTools: []string{"skill_manage"}}
+	runtimeDir := filepath.Join(tmp, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (&Driver{}).Validate(rc); err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: runtimeDir, PodName: "test"})
+	if err != nil {
+		t.Fatalf("Materialize returned error: %v", err)
+	}
+
+	if got := result.Environment[clawdapusDisabledToolsEnv]; got != "skill_manage" {
+		t.Fatalf("expected %s=skill_manage in container env, got %q", clawdapusDisabledToolsEnv, got)
+	}
+
+	envData, err := os.ReadFile(filepath.Join(runtimeDir, "hermes-home", ".env"))
+	if err != nil {
+		t.Fatalf("read .env: %v", err)
+	}
+	if !strings.Contains(string(envData), clawdapusDisabledToolsEnv+"=skill_manage\n") {
+		t.Fatalf("expected explicit disabled tool in .env, got:\n%s", envData)
+	}
+}
+
 func TestMaterializeWritesAllowSilentEnv(t *testing.T) {
 	rc, tmp := newTestRC(t)
 	rc.Hermes = &driver.HermesConfig{AllowSilent: true}

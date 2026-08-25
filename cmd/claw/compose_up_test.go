@@ -59,6 +59,28 @@ func TestMergeResolvedSkills(t *testing.T) {
 	}
 }
 
+func TestCloneHermesConfigPreservesAllPodSettings(t *testing.T) {
+	source := &driver.HermesConfig{
+		AllowTools:   []string{"terminal"},
+		DisableTools: []string{"skill_manage", "session_search"},
+		AllowSilent:  true,
+	}
+
+	got := cloneHermesConfig(source)
+	if got == nil {
+		t.Fatal("expected cloned Hermes config")
+	}
+	if !reflect.DeepEqual(got, source) {
+		t.Fatalf("cloned Hermes config lost settings: got %+v, want %+v", got, source)
+	}
+
+	got.AllowTools[0] = "changed"
+	got.DisableTools[0] = "changed"
+	if source.AllowTools[0] != "terminal" || source.DisableTools[0] != "skill_manage" {
+		t.Fatal("cloneHermesConfig must not alias source slices")
+	}
+}
+
 func TestMergeModelSlots(t *testing.T) {
 	tests := []struct {
 		name  string

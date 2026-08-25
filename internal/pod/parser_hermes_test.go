@@ -30,6 +30,31 @@ services:
 	}
 }
 
+func TestParseHermesDisableTools(t *testing.T) {
+	p, err := Parse(strings.NewReader(`
+services:
+  analyst:
+    image: ghcr.io/example/analyst:latest
+    x-claw:
+      agent: ./AGENTS.md
+      hermes:
+        disable-tools:
+          - skill_manage
+          - session_search
+`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	hermes := p.Services["analyst"].Claw.Hermes
+	if hermes == nil {
+		t.Fatal("expected Hermes config")
+	}
+	if len(hermes.DisableTools) != 2 || hermes.DisableTools[0] != "skill_manage" || hermes.DisableTools[1] != "session_search" {
+		t.Fatalf("unexpected Hermes disable-tools: %+v", hermes.DisableTools)
+	}
+}
+
 func TestParseHermesAllowSilent(t *testing.T) {
 	p, err := Parse(strings.NewReader(`
 services:
@@ -93,6 +118,26 @@ services:
 		t.Fatal("expected empty allow-tools item to fail")
 	}
 	if !strings.Contains(err.Error(), "allow-tools[1] must not be empty") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseHermesDisableToolsRejectsEmptyItem(t *testing.T) {
+	_, err := Parse(strings.NewReader(`
+services:
+  analyst:
+    image: ghcr.io/example/analyst:latest
+    x-claw:
+      agent: ./AGENTS.md
+      hermes:
+        disable-tools:
+          - skill_manage
+          - " "
+`))
+	if err == nil {
+		t.Fatal("expected empty disable-tools item to fail")
+	}
+	if !strings.Contains(err.Error(), "disable-tools[1] must not be empty") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

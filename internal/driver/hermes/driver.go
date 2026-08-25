@@ -200,9 +200,6 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		env["HERMES_TOOL_ONLY_MODE"] = "1"
 		env[hermesAllowSilentFinalEnv] = "1"
 		env[hermesToolProgressModeEnv] = "off"
-		if disabled := resolveDisabledHermesTools(rc); len(disabled) > 0 {
-			env[clawdapusDisabledToolsEnv] = strings.Join(disabled, ",")
-		}
 		value, err := resolvedEnvValue(rc, hermesToolProgressModeEnv)
 		if err != nil {
 			return nil, fmt.Errorf("hermes driver: %w", err)
@@ -210,6 +207,9 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		if value != "" {
 			env[hermesToolProgressModeEnv] = value
 		}
+	}
+	if disabled := resolveDisabledHermesTools(rc); len(disabled) > 0 {
+		env[clawdapusDisabledToolsEnv] = strings.Join(disabled, ",")
 	}
 	if hasManagedChatHandle(rc) {
 		env[hermesChatStatusDeliveryEnv] = "off"
