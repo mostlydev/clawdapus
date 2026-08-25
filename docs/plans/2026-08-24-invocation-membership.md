@@ -1,6 +1,8 @@
 # Invocation-registered claws and live membership (2026-08-24)
 
-**Status:** DRAFT — plan branch `plan/invocation-membership`; ADR-027 (amending ADR-002) will be written with PR-2; an issue must be opened and
+**Status:** DRAFT — plan branch `plan/invocation-membership`; ADR-027
+(amending ADR-002, ADR-010, ADR-015, and ADR-022) will be written with PR-2;
+an issue must be opened and
 the branch renamed `issue-<n>-invocation-membership` before implementation (issue-first
 workflow). Consumes the contract in cllama `docs/plans/2026-08-24-invocations.md`; this plan
 does not re-decide it.
@@ -31,6 +33,8 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   bearer. Acceptance: all four retained
   drivers reach cllama with a bearer and no provider credential; `claw audit` shows role and
   purpose; no workload invocation bearer remains in the runtime tree after container creation;
+  declared Compose runtime semantics plus `claw ps`/logs/health/exec remain
+  intact and the secret-free member descriptor renders as valid eject output;
   the effective upstream request for
   `examples/trading-desk` is semantically equivalent to today's (cllama's legacy-adapter
   parity test extended with clawdapus fixtures); `TestSpikeRollCall` stays green.
@@ -63,7 +67,14 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    for infrastructure and non-claw services only, including cllama and
    `claw-api`, and waits for health. The pod-scoped cllama control credential is
    generated in memory and passed to those two trusted containers through the
-   Compose process environment; it is not written into `.claw-runtime`.
+   Compose process environment via required-value interpolation in the
+   secret-free descriptor; it is not written into `.claw-runtime` or the
+   generated YAML.
+   It intentionally rotates on each `claw up`: the existing force-recreate
+   step replaces cllama and `claw-api` together with the same new credential,
+   while the persistent Invocation store and unchanged member containers
+   survive. If either trusted container fails to become healthy, phase two does
+   not run and the exact recovery command is reported.
    Phase two sends the complete desired set of declared member templates through
    the existing `docker compose exec claw-api` local-client path. Host Docker
    access remains pod-admin authority; no new host credential or public
@@ -94,7 +105,7 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    digests). `claw-api` is the only component with the Docker socket and the only writer for
    declared and dynamic claw containers. Reconcile, operator `claw spawn`/`claw retire`, and
    agent child spawn all use that controller. Compose remains the infrastructure/non-claw
-   lifecycle writer; there is no lease log and no overlay. `claw ps` reads labels. `claw up`
+   lifecycle writer; there is no lease log or authoritative lifecycle overlay. `claw ps` reads labels. `claw up`
    injects `claw-api` whenever any cllama-enabled service exists (today only for
    `x-claw.master`). ADR-027 records the amendment: the SDK is read-only *except* inside the
    controller for all members, which must carry the labels above and be reconstructible
@@ -110,23 +121,51 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    Existing `claw-api` principals remain for unrelated fleet surfaces, but no
    second per-member spawn credential is created. ADR-027 records this narrow
    exception to ADR-015's separate-credential rule.
-5. **`pod-members` feed.** `claw-api` serves `GET /feeds/pod-members` (ADR-013 shape) built
+   The normalized template includes the complete runtime-relevant Compose
+   service configuration. The controller attaches each member to the pod's
+   declared Compose networks with the same aliases, waits for declared
+   dependencies/health gates, and applies the canonical Compose project,
+   service, ordinal, and other labels required by the repository's pinned
+   minimum Compose version in addition to `claw.*` labels. A conformance test
+   compares Docker inspect output for controller creation with normalized
+   `docker compose config` output rather than relying on two labels as a proxy
+   for compatibility.
+5. **Compose remains an operator and eject surface, not a second writer.**
+   `claw up` emits a secret-free, non-authoritative `compose.members.yml` from
+   declared member templates, including empty-default Invocation-bearer
+   placeholders. Clawdapus never applies this file for lifecycle. Together
+   with `compose.generated.yml`, it remains a standard Compose description for
+   inspection/debugging and can be rendered as an eject artifact once the
+   operator supplies credentials, just as today's eject path depends on its
+   `.env`.
+
+   `claw ps`, `claw logs`, and `claw health` discover both infrastructure and
+   members from canonical labels through the Docker SDK. The documented `claw
+   compose exec <member> ...` path resolves a controller-owned member and execs
+   it without recreating it; read-only Compose-compatible operations may use
+   both descriptors. Lifecycle-mutating Compose passthrough remains available
+   for infrastructure/non-claw services, but is rejected for member targets
+   with remediation to the controller operation. ADR-027 amends ADR-002,
+   ADR-010, and ADR-022 explicitly: one controller remains the only member
+   writer, while the four-verb loop, debug/exec paths, network semantics, and
+   inspectable/ejectable artifacts remain supported.
+6. **`pod-members` feed.** `claw-api` serves `GET /feeds/pod-members` (ADR-013 shape) built
    from Docker labels plus cllama's invocation list: current member id, role,
    purpose, handles, routing metadata, and container creation time. It is a
    current-state snapshot, so a departure is represented by absence rather than
    an event ledger. The feed has zero cache TTL so the next turn observes the
    current set. `claw up` subscribes every claw by default (`feeds-defaults`
    gains `pod-members`; opt out per service).
-6. **claw-api and clawdash read invocations.** `cmd/claw-api/agent_context.go` and the
+7. **claw-api and clawdash read invocations.** `cmd/claw-api/agent_context.go` and the
    clawdash agents view move to `GET /control/v1/invocations[/{id}]` (secrets never
    returned). `claw audit` gains `ROLE`/`PURPOSE` columns and `--role`/`--label` filters.
    `X-Claw-ID` stays equal to the subject id for compatibility.
-7. **Drivers emit controller templates.** Driver-visible runtime behavior stays
+8. **Drivers emit controller templates.** Driver-visible runtime behavior stays
    the same, but `Materialize` returns a normalized container template rather
    than a Compose member service. The controller adds the registered bearer and
    common labels before Docker creation. No driver receives a provider or
    subscription credential.
-8. **Controller reconciliation is fail-closed.** At startup, `claw-api`
+9. **Controller reconciliation is fail-closed.** At startup, `claw-api`
    loads its rebuildable, private normalized-template store and compares every
    labeled member container with cllama's redacted invocation list.
    A live container whose invocation is missing, expired, revoked, or belongs to
@@ -153,8 +192,10 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
 - Plaintext bearer in `metadata.json` and `cllama.GenerateToken`: removed.
   Bearers pass from cllama to the controller in memory and then directly into
   Docker container configuration; no bearer file is emitted.
-- Generated Compose services for claws: replaced by controller member
-  templates. Compose output remains for infrastructure and non-claw services.
+- Authoritative generated Compose services for claws: replaced by controller
+  member templates. A secret-free `compose.members.yml` remains as a
+  non-authoritative inspection/eject descriptor and is never applied by
+  Clawdapus lifecycle commands.
 - Compile-time `CLAW_HANDLE_*` for claws: demoted to non-claw services only.
 - Duplicate `internal/cllama` manifest types: replaced by cllama's v1 wire types pinned by
   the conformance fixture.
@@ -164,6 +205,9 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
 - ADR-002 as amended by ADR-027: Compose owns infrastructure/non-claw
   services; only `claw-api` creates or removes claw/member containers;
   workloads never receive the socket.
+- ADR-010/022 as amended by ADR-027: the four-verb operator loop, member
+  logs/health/exec, declared network semantics, and standard eject descriptors
+  remain available without granting Compose member-lifecycle authority.
 - ADR-013/017/019/020/021/023/025: feeds, pod defaults, model policy, tools, memory,
   ingress and policy semantics move inside the invocation unchanged.
 - Release discipline; public artifacts never name downstream deployments; workloads never
@@ -180,7 +224,12 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   membership, missing/corrupt template-store behavior, and orphan reconciliation
   with a fake Docker client; controller create/remove request shapes and
   rejection of caller-supplied image, command, mount, network, privilege, and
-  host-path changes; parser tests for `role`/`labels`/`purpose`/`labels-defaults`; audit
+  host-path changes; normalized Compose-config versus Docker-create
+  conformance for networks, aliases, mounts, ports, health checks, user,
+  command/entrypoint, restart policy, and canonical labels; control-credential
+  rotation across repeated up; secret-free `compose.members.yml`; member
+  targeting for ps/logs/health/exec; rejection of member-targeted Compose
+  lifecycle mutations; parser tests for `role`/`labels`/`purpose`/`labels-defaults`; audit
   columns/filters; `pod-members` feed rendering from fixtures; claw-api/clawdash on a fake
   control API.
 - Integration (`-tags integration`): register against the released cllama binary with an
@@ -195,7 +244,11 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   bearers only; every protocol those drivers use (OpenAI Chat, OpenAI Responses,
   and Anthropic Messages as applicable) reaches the fake provider; one
   managed-tool loop completes; semantic parity holds; no bearer file exists;
-  audit columns are correct.
+  audit columns are correct. Each controller-created member has the expected
+  Compose networks/aliases and canonical labels; `claw ps`, `claw logs`,
+  `claw health`, and `claw compose exec` work; the combined secret-free Compose
+  descriptors validate and render as an eject artifact, while attempting a
+  member lifecycle mutation through Compose fails with remediation.
 - `TestSpikeRegistrationFailureRecovery` (S2, Docker): inject failure after
   registration, after container creation, and before old-token revocation;
   assert no unreported orphan, no mixed invocation, deterministic recovery,
@@ -207,7 +260,8 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   controller restart recovery from missing-container, missing-invocation, and
   duplicate-member cases; `invocation_revoked` after retire; `claw down`
   removes and revokes the descendant tree; unavailable-controller down fails
-  closed; no socket in any workload.
+  closed; spawned members retain network/label semantics and work through
+  ps/logs/health/exec; no socket in any workload.
 - `TestSpikeChildDelegation` (S4, Docker): child within ceiling succeeds;
   attempts to widen role, tool, model, memory view, budget, TTL, channel, or
   further delegation fail with no container and no record; caller-supplied
