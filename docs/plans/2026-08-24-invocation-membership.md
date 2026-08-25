@@ -84,10 +84,13 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    value. A standalone pod also starts a local cllama. The host uses a
    bootstrap bundle-admin credential to publish one explicit flat pod-local
    bundle, then creates a distinct controller issuer for `claw-api`; the
-   controller never receives the bundle-admin credential. Required credential
+   controller never receives the bundle-admin credential. If the local bundle
+   declares the isolated evaluator grant, the host also mints its separate
+   `policy-evaluator/` controller issuer and delivers it only to the MGL
+   adapter's secret destination. Required credential
    references are passed through Compose interpolation and neither raw value is
-   written into `.claw-runtime` or generated YAML. The host stores the two
-   locators in separate OS-keychain/1Password entries, with separately scoped
+   written into `.claw-runtime` or generated YAML. The host stores each locator
+   in a separate OS-keychain/1Password entry, with separately scoped
    0600 files as the documented fallback. If a trusted service fails
    health or either credential is absent, phase two does not run and the exact
    recovery command is reported.
@@ -378,7 +381,8 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   `pod-members` ingress accepts only the bundle-declared HTTPS origin and
   matching ADR-013 credential; arbitrary feed, memory, and tool endpoints are
   rejected; Flux result-report retry survives controller restart without
-  recreating a dynamic member.
+  recreating a dynamic member; standalone evaluator issuer creation is separate
+  from both bundle-admin and `claw-api` controller credentials.
 - Integration (`-tags integration`): register against the released cllama binary with an
   httptest upstream; revoke → 403; unchanged digest plus a live Invocation → no
   re-registration; conformance fixture
