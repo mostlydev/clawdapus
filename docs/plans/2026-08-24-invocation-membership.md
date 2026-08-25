@@ -60,6 +60,12 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   the single configured memory service receives subject, role, purpose/view and invocation
   provenance. Compaction and scheduling are the memory implementation's concern; the pod
   example uses `examples/reference-memory` with a deterministic derived view.
+- **S8 — an organization role onboards a claw exactly as it onboards a
+  human-operated harness.** The pod names a declared effective organization
+  role. `claw-api` selects the same cllama bundle entry a my-cli launch selects;
+  it may add member identity, pod topology, a Flux task reference, and other
+  bounded late runtime context, but it cannot author or replace the stable role
+  contract, skills, tools, rules, memory, model policy, budget, or channels.
 
 ## Decisions
 
@@ -87,18 +93,29 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    revoke old Invocation; removed declared members are retired. A failed
    replacement revokes the new Invocation and reports the exact state. There is
    no context or bearer file transport.
-2. **`internal/cllama` submits trusted inputs; it does not compile context.** `AgentContextInput`
-   and `GenerateContextDir` are replaced by `BuildInvocationRequest(rc *driver.ResolvedClaw, ...)`
-   emitting the v1 request: subject `{kind: member, id: <pod>/<service>[/<ordinal>]}`, role,
-   labels, purpose, expiry; input modules by kind (effective contract incl. `enforce`/`guide`
-   includes, infrastructure map, context blocks); feeds (including `pod-members`); tools
-   (ADR-020); memory (ADR-021); rules; model policy (ADR-019); budget; channel allowlist.
-   The existing builders in `compose_up.go` move behind this function unchanged. Goldens
-   assert semantic equivalence through cllama's adapter, not byte equality.
-3. **Pod schema.** Service `x-claw.role` (must exist in pod-level `x-claw.roles[]` when that
-   list is declared), `x-claw.labels` (map, keys `[a-z0-9_.-]`), `x-claw.purpose`; pod-level
+2. **`internal/cllama` submits a role selection and runtime envelope; it does
+   not author the role loadout or compile context.** `AgentContextInput` and
+   `GenerateContextDir` are replaced by `BuildInvocationSelection(rc
+   *driver.ResolvedClaw, ...)` emitting the v1 selection: subject `{kind:
+   member, id: <pod>/<service>[/<ordinal>]}`, organization, declared effective
+   role, labels, purpose, harness, expiry, pod/service/ordinal/image identity,
+   and bounded late pod/Flux-task context. Stable contract modules, skills,
+   business tools, memory policy, rules, models, budget, channels, and
+   delegation resolve from the published role entry. `pod-members`, child-spawn,
+   and other controller/runtime surfaces are an audited runtime envelope and do
+   not alter the role-entry digest. Goldens assert the selection/late-input
+   boundary and semantic equivalence through cllama's adapter, not byte
+   equality.
+3. **Pod schema.** Pod-level `x-claw.organization` identifies the published
+   organization bundle. Service `x-claw.role` must name one declared effective
+   role; arbitrary role arrays and attribute-derived unions are invalid.
+   `x-claw.labels` (map, keys `[a-z0-9_.-]`) and `x-claw.purpose`; pod-level
    `labels-defaults` merges additively. `metadata.json` is no longer a file; `claw inspect`
    and clawdash show the invocation.
+   An organization-managed pod uses the bundle already published by my-cli's
+   organization control plane. A standalone pod may compile and publish one
+   `pod-local`-provenance bundle through the same cllama API; it does not regain
+   a complete-input create path.
 4. **Live membership: one controller, Docker labels as state (ADR-002 amended by ADR-027).**
    Every member container carries labels (`claw.pod`, `claw.member`, `claw.declared`,
    `claw.role`, `claw.purpose`, `claw.invocation`, `claw.parent`, and input/template
@@ -121,6 +138,10 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    Existing `claw-api` principals remain for unrelated fleet surfaces, but no
    second per-member spawn credential is created. ADR-027 records this narrow
    exception to ADR-015's separate-credential rule.
+   The controller issuer is scoped to one pod subject namespace and an allowed
+   set of published roles, so a dynamically spawned member does not require an
+   organization-bundle republish or a static `members` row. cllama still
+   resolves the selected role entry and records its digest.
    The normalized template includes the complete runtime-relevant Compose
    service configuration. The controller attaches each member to the pod's
    declared Compose networks with the same aliases, waits for declared
@@ -184,6 +205,21 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    stops and reports remediation; an explicit `--force` may remove
    infrastructure only after warning that outstanding Invocations must be
    revoked or allowed to expire.
+10. **Clawdapus owns execution lifecycle, not durable business work.** Flux
+    owns tasks, waits, wakes, retries, recurrence, checkpoints, and approval
+    requests for Flux-managed work. Its runtime adapter asks `claw-api` to start
+    a member/run; `claw-api` creates the container and selection-based
+    Invocation. Clawdapus does not copy Flux state. Existing `INVOKE` scheduling
+    remains for standalone pod-local jobs only. A job is configured in exactly
+    one mode: a Flux-managed job cannot also be independently scheduled by
+    `INVOKE`.
+11. **External portals and gated effects are ordinary services.** An API or
+    UI-only browser broker is exposed through managed tools; its credential or
+    session never reaches the claw. Flux Gate owns short-lived access grants.
+    Flux owns approval state but performs no effect. The accounting, mail,
+    source-control, payment, or other effect-owning service validates the exact
+    release receipt. No `access[]`, approval state machine, or effect ledger is
+    added to Clawdapus.
 
 ## Delete or demote
 
@@ -199,6 +235,9 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
 - Compile-time `CLAW_HANDLE_*` for claws: demoted to non-claw services only.
 - Duplicate `internal/cllama` manifest types: replaced by cllama's v1 wire types pinned by
   the conformance fixture.
+- Pod-authored stable role inputs and grants: replaced by published effective
+  role selection. Standalone pod definitions compile into an explicit
+  pod-local bundle rather than bypassing the bundle contract.
 
 ## Invariants preserved
 
@@ -210,12 +249,15 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   remain available without granting Compose member-lifecycle authority.
 - ADR-013/017/019/020/021/023/025: feeds, pod defaults, model policy, tools, memory,
   ingress and policy semantics move inside the invocation unchanged.
+- Organization-managed claws and human launchers resolve the same effective
+  role entry. Runtime-envelope tools and topology are separately provenance
+  tagged and cannot widen the business loadout.
 - Release discipline; public artifacts never name downstream deployments; workloads never
   receive the Docker socket.
 
 ## Tests
 
-- Unit: `BuildInvocationRequest` and normalized member-template goldens
+- Unit: `BuildInvocationSelection` and normalized member-template goldens
   (trading-desk, quickstart); two-phase infra/reconcile ordering and failure
   injection with fake Compose and controller clients; proof that no cllama
   control or Invocation bearer file is emitted; host operations use only the
@@ -232,6 +274,10 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   lifecycle mutations; parser tests for `role`/`labels`/`purpose`/`labels-defaults`; audit
   columns/filters; `pod-members` feed rendering from fixtures; claw-api/clawdash on a fake
   control API.
+- Unit: organization/effective-role selection, controller-issuer pod namespace
+  and role scope, rejection of caller-authored stable inputs/grants, bounded
+  late Flux task context, explicit pod-local bundle provenance, and mutual
+  exclusion of Flux-managed versus standalone `INVOKE` scheduling.
 - Integration (`-tags integration`): register against the released cllama binary with an
   httptest upstream; revoke → 403; unchanged digest → no re-registration; conformance fixture
   pinned.
@@ -270,6 +316,12 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
 - `TestSpikeMembershipFeed` (S5, Docker): existing members' next turn contains the join and,
   later, the departure; no env rewrite; no socket in workloads.
 - `TestSpikeMemoryViews` (S6, Docker, fake memory service): metadata and isolation.
+- `TestSpikeRoleOnboarding` (S8, cross-repository, Docker): consume the same
+  published billing role as my-cli; prove matching role/contract/skill/tool
+  digests with distinct member runtime/principal binding; exercise fake
+  accounting and browser-broker tools with no secret exposure; create a fake
+  Flux approval wait; start a new Invocation after its wake; and prove the fake
+  effect service rejects missing or mismatched receipts.
 - Existing quickstart/docs spikes unchanged.
 
 Every credential-free spike above is a required CI check and fails, rather than
@@ -281,7 +333,7 @@ release evidence.
 
 ```
 cllama tag (v1 types/client, control API, delegation ceiling, pod-members feed contract, legacy adapter, fixture)
-   └─► PR-1 BuildInvocationRequest + controller member templates + two-phase infra/reconcile (semantic goldens; pin bump in the same release)
+   └─► PR-1 BuildInvocationSelection + controller member templates + two-phase infra/reconcile (semantic goldens; pin bump in the same release)
          └─► PR-2 ADR-027 + controller ownership of all claw containers + declared reconcile/recovery
                └─► PR-3 role/labels/purpose schema + audit + claw-api/clawdash reads + pod-members feed
                      └─► PR-4 `claw spawn/retire` + child delegation through the same controller
