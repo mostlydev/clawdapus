@@ -70,17 +70,19 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
 ## Decisions
 
 1. **Two-phase `claw up`, one member-lifecycle writer.** Phase one uses Compose
-   for infrastructure and non-claw services only, including cllama and
-   `claw-api`, and waits for health. The pod-scoped cllama control credential is
-   generated in memory and passed to those two trusted containers through the
-   Compose process environment via required-value interpolation in the
-   secret-free descriptor; it is not written into `.claw-runtime` or the
-   generated YAML.
-   It intentionally rotates on each `claw up`: the existing force-recreate
-   step replaces cllama and `claw-api` together with the same new credential,
-   while the persistent Invocation store and unchanged member containers
-   survive. If either trusted container fails to become healthy, phase two does
-   not run and the exact recovery command is reported.
+   for infrastructure and non-claw services only and waits for health. An
+   organization-managed pod starts `claw-api` against the organization's
+   central cllama URL; it does not start a pod-local cllama or publish an
+   organization bundle. Its deployment `auth_ref` resolves an
+   administrator-provisioned controller issuer bound to the pod's stable
+   controller id. A standalone pod also starts a local cllama. The host uses a
+   bootstrap bundle-admin credential to publish one explicit flat pod-local
+   bundle, then creates a distinct controller issuer for `claw-api`; the
+   controller never receives the bundle-admin credential. Required credential
+   references are passed through Compose interpolation and neither raw value is
+   written into `.claw-runtime` or generated YAML. If a trusted service fails
+   health or either credential is absent, phase two does not run and the exact
+   recovery command is reported.
    Phase two sends the complete desired set of declared member templates through
    the existing `docker compose exec claw-api` local-client path. Host Docker
    access remains pod-admin authority; no new host credential or public
@@ -112,10 +114,13 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    `x-claw.labels` (map, keys `[a-z0-9_.-]`) and `x-claw.purpose`; pod-level
    `labels-defaults` merges additively. `metadata.json` is no longer a file; `claw inspect`
    and clawdash show the invocation.
-   An organization-managed pod uses the bundle already published by my-cli's
-   organization control plane. A standalone pod may compile and publish one
-   `pod-local`-provenance bundle through the same cllama API; it does not regain
-   a complete-input create path.
+   An organization-managed pod uses the bundle already published to central
+   cllama by my-cli's organization control plane. A standalone pod may publish
+   one `pod-local`-provenance bundle through the same cllama API. Each local
+   role entry is an explicit flat, single-source loadout containing its complete
+   dependency set. Clawdapus does not resolve inheritance, invoke MGL, compose
+   roles, infer transitive dependencies, or regain a complete-input create
+   path; this limited bootstrap is not a second organization compiler.
 4. **Live membership: one controller, Docker labels as state (ADR-002 amended by ADR-027).**
    Every member container carries labels (`claw.pod`, `claw.member`, `claw.declared`,
    `claw.role`, `claw.purpose`, `claw.invocation`, `claw.parent`, and input/template
@@ -138,10 +143,14 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    Existing `claw-api` principals remain for unrelated fleet surfaces, but no
    second per-member spawn credential is created. ADR-027 records this narrow
    exception to ADR-015's separate-credential rule.
-   The controller issuer is scoped to one pod subject namespace and an allowed
-   set of published roles, so a dynamically spawned member does not require an
-   organization-bundle republish or a static `members` row. cllama still
-   resolves the selected role entry and records its digest.
+   The organization bundle's canonical `controllers` map binds the stable
+   controller id to one member-subject namespace and an allowed set of
+   published roles. An administrator may issue the controller credential only
+   for an entry in the current bundle, and cllama rechecks that entry on every
+   create; issuer self-claims never confer scope. Thus a dynamically spawned
+   member does not require an organization-bundle republish or a static
+   `members` row. cllama still resolves the selected role entry and records its
+   digest.
    The normalized template includes the complete runtime-relevant Compose
    service configuration. The controller attaches each member to the pod's
    declared Compose networks with the same aliases, waits for declared
@@ -207,19 +216,31 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    revoked or allowed to expire.
 10. **Clawdapus owns execution lifecycle, not durable business work.** Flux
     owns tasks, waits, wakes, retries, recurrence, checkpoints, and approval
-    requests for Flux-managed work. Its runtime adapter asks `claw-api` to start
-    a member/run; `claw-api` creates the container and selection-based
-    Invocation. Clawdapus does not copy Flux state. Existing `INVOKE` scheduling
-    remains for standalone pod-local jobs only. A job is configured in exactly
-    one mode: a Flux-managed job cannot also be independently scheduled by
-    `INVOKE`.
+    requests for Flux-managed work. For autonomous pod work, a controller-side
+    Flux runtime adapter in `claw-api` uses its own `auth_ref` to poll and claim
+    wakes assigned to that declared pod runtime, then starts a declared member
+    template and requests a selection-based Invocation. This is a pull adapter,
+    not a public `claw-api` endpoint: Flux receives no controller credential,
+    and the adapter owns no copied readiness or workflow state. Missing or
+    mismatched runtime assignment, template, role, task, or Flux credential
+    fails closed before Invocation creation. A human laptop is not a daemon;
+    Flux puts the task in the person's work queue and the person explicitly
+    runs `my ai --flux-task <id>`, which creates a new Invocation. Existing
+    `INVOKE` scheduling remains for standalone pod-local jobs only. A job is
+    configured in exactly one mode: a Flux-managed job cannot also be
+    independently scheduled by `INVOKE`.
 11. **External portals and gated effects are ordinary services.** An API or
     UI-only browser broker is exposed through managed tools; its credential or
     session never reaches the claw. Flux Gate owns short-lived access grants.
     Flux owns approval state but performs no effect. The accounting, mail,
-    source-control, payment, or other effect-owning service validates the exact
-    release receipt. No `access[]`, approval state machine, or effect ledger is
-    added to Clawdapus.
+    source-control, payment, or other effect-owning service defines the
+    canonical proposal schema and digest. It, or an isolated executor acting
+    for it, issues an audience-bound, expiring, single-use signed release token
+    after approval. The effect service validates issuer, signature, audience,
+    proposal digest, expiry, and nonce, then consumes the nonce atomically.
+    Flux stores only proposal/approval/wait/result references and never the
+    signing key or effect authority. No `access[]`, approval state machine, or
+    effect ledger is added to Clawdapus.
 
 ## Delete or demote
 
@@ -274,13 +295,18 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   lifecycle mutations; parser tests for `role`/`labels`/`purpose`/`labels-defaults`; audit
   columns/filters; `pod-members` feed rendering from fixtures; claw-api/clawdash on a fake
   control API.
-- Unit: organization/effective-role selection, controller-issuer pod namespace
-  and role scope, rejection of caller-authored stable inputs/grants, bounded
-  late Flux task context, explicit pod-local bundle provenance, and mutual
-  exclusion of Flux-managed versus standalone `INVOKE` scheduling.
+- Unit: organization/effective-role selection; controller scope from the
+  current bundle's `controllers` entry rather than issuer self-claims;
+  rejection of stale, unknown, or disallowed controller ids; separation of
+  bundle-admin and controller credentials; central-cllama organization mode
+  with no local bundle transport; rejection of caller-authored stable
+  inputs/grants; bounded late Flux task context; flat, explicit pod-local
+  bundle provenance with inheritance/composition/inferred closure rejected;
+  controller-side Flux poll/claim assignment checks; and mutual exclusion of
+  Flux-managed versus standalone `INVOKE` scheduling.
 - Integration (`-tags integration`): register against the released cllama binary with an
   httptest upstream; revoke → 403; unchanged digest → no re-registration; conformance fixture
-  pinned.
+  pinned from cllama's canonical testdata rather than copied locally.
 
 ## Spikes (hermetic first; live drills as extra evidence)
 
@@ -320,8 +346,10 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   published billing role as my-cli; prove matching role/contract/skill/tool
   digests with distinct member runtime/principal binding; exercise fake
   accounting and browser-broker tools with no secret exposure; create a fake
-  Flux approval wait; start a new Invocation after its wake; and prove the fake
-  effect service rejects missing or mismatched receipts.
+  Flux approval wait; let the controller adapter poll and claim its assigned
+  wake, then start a new Invocation; and prove the fake effect service rejects
+  a missing, mismatched, changed, forged, expired, replayed, or wrong-audience
+  release token.
 - Existing quickstart/docs spikes unchanged.
 
 Every credential-free spike above is a required CI check and fails, rather than
