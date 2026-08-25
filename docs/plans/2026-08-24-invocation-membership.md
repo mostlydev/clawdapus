@@ -78,7 +78,10 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    central cllama URL; it does not start a pod-local cllama or publish an
    organization bundle. Its deployment `auth_ref` resolves an
    administrator-provisioned controller issuer bound to the pod's stable
-   controller id. A standalone pod also starts a local cllama. The host uses a
+   controller id. If its bundle grant enables `pod-members`, the deployment
+   resolves a distinct feed-verifier `auth_ref` into `claw-api`; central cllama
+   holds the corresponding server-side alias, and no workload receives either
+   value. A standalone pod also starts a local cllama. The host uses a
    bootstrap bundle-admin credential to publish one explicit flat pod-local
    bundle, then creates a distinct controller issuer for `claw-api`; the
    controller never receives the bundle-admin credential. Required credential
@@ -91,7 +94,8 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    Phase two sends the complete desired set of declared member templates through
    the existing `docker compose exec claw-api` local-client path. Host Docker
    access remains pod-admin authority; no new host credential or public
-   controller endpoint is introduced. The controller registers an Invocation
+   lifecycle/controller endpoint is introduced. Decision 6's authenticated
+   feed-only ingress is not a control surface. The controller registers an Invocation
    per member and creates every claw container through the Docker API, injecting
    the proxy URL and bearer directly into the container environment. It stores
    no raw Invocation bearer. Re-running `claw up` compares template
@@ -112,11 +116,15 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    business tools, memory policy, rules, models, budget, channels, and
    delegation resolve from the published role entry. `pod-members`, child-spawn,
    and other controller/runtime surfaces are an audited runtime envelope and do
-   not alter the role-entry digest. Goldens assert the selection/late-input
+   not alter the role-entry digest. A selection can enable the reserved
+   `pod-members` subscription only when it exists in the current controller
+   grant; it cannot submit or override a feed, memory, or tool endpoint. Goldens
+   assert the selection/late-input
    boundary and semantic equivalence through cllama's adapter, not byte
    equality.
 3. **Pod schema.** Pod-level `x-claw.organization` identifies the published
-   organization bundle. Service `x-claw.role` must name one declared effective
+   organization bundle, and an organization-managed pod declares its stable
+   `x-claw.controller-id`. Service `x-claw.role` must name one declared effective
    role; arbitrary role arrays and attribute-derived unions are invalid.
    `x-claw.labels` (map, keys `[a-z0-9_.-]`) and `x-claw.purpose`; pod-level
    `labels-defaults` merges additively. `metadata.json` is no longer a file; `claw inspect`
@@ -135,6 +143,8 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    explicit skill assets; they are not role inheritance. Organization-managed
    pods reject role-affecting local includes and direct the operator to publish
    them through the governed role contract or skill.
+   A standalone pod may declare `policy_exempt` only for the same isolated
+   internal evaluator shape and only when it runs its own MGL policy evaluator.
 4. **Live membership: one controller, Docker labels as state (ADR-002 amended by ADR-027).**
    Every member container carries labels (`claw.pod`, `claw.member`, `claw.declared`,
    `claw.role`, `claw.purpose`, `claw.invocation`, `claw.parent`, and input/template
@@ -204,24 +214,33 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    an event ledger. The feed has zero cache TTL so the next turn observes the
    current set. `claw up` subscribes every claw by default (`feeds-defaults`
    gains `pod-members`; opt out per service).
+   In organization-managed mode, deployment ingress exposes only this feed
+   route at the HTTPS origin declared for the controller in the organization
+   bundle. It authenticates central cllama with the existing ADR-013 feed
+   credential resolved from the matching deployment `auth_ref`; lifecycle and
+   controller routes remain local-client-only. Standalone mode uses the private
+   pod-network origin. `claw-api` never accepts a caller-selected callback URL.
 7. **claw-api and clawdash read invocations.** `cmd/claw-api/agent_context.go` and the
    clawdash agents view move to `GET /control/v1/invocations[/{id}]` (secrets never
-   returned). `claw audit` gains `ROLE`/`PURPOSE` columns and `--role`/`--label` filters.
+   returned); central cllama scopes the controller issuer to this organization
+   and member namespace. `claw audit` gains `ROLE`/`PURPOSE` columns and `--role`/`--label` filters.
    `X-Claw-ID` stays equal to the subject id for compatibility.
 8. **Drivers emit controller templates.** Driver-visible runtime behavior stays
    the same, but `Materialize` returns a normalized container template rather
    than a Compose member service. The controller adds the registered bearer and
    common labels before Docker creation. No driver receives a provider or
    subscription credential.
-9. **Controller reconciliation is fail-closed.** At startup, on every `claw
-   up`, and on a bounded interval, `claw-api`
+9. **Controller reconciliation is fail-closed.** At startup, on every
+   `claw up`, and on a bounded interval, `claw-api`
    loads its rebuildable, private normalized-template store and compares every
    labeled member container with cllama's redacted invocation list.
    A live container whose invocation is missing, expired, revoked, or belongs to
    another pod is handled by membership kind: a declared
    (`claw.declared=true`) member is replaced from its declared template with a
-   new Invocation, while a dynamic member is revoked and removed, never
-   recreated. An Invocation with no matching container is revoked. Duplicate
+   new Invocation, while a dynamic member is stopped, its bearer revoked, and
+   its Flux run reported failed; it is never recreated and its stopped
+   container follows the acknowledged-result cleanup in decision 10. An
+   Invocation with no matching container is revoked. Duplicate
    member identities and mismatched parent labels are quarantined and surfaced
    by `claw doctor`; the controller never guesses. The template store is an
    atomic controller-private volume containing no credentials and is never
@@ -229,12 +248,20 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
    templates; `claw up` can rebuild the store. If the store is missing or
    corrupt, the controller fails closed and asks for `claw up` rather than
    reconstructing authority from caller-controlled input or Docker labels.
+   If central cllama denies the controller-scoped list because the current
+   bundle grant or issuer was removed, reconciliation stops all pod members,
+   creates none, and reports admin remediation; it never treats an unreadable
+   authorization view as valid state.
    `claw down` asks the controller to revoke and remove every declared and
    dynamic member, including the descendant tree, before Compose removes the
    infrastructure pod. If the controller is unavailable, normal `claw down`
    stops and reports remediation; an explicit `--force` may remove
    infrastructure only after warning that outstanding Invocations must be
    revoked or allowed to expire.
+   Declared templates default to a seven-day Invocation TTL, bounded by the
+   organization's maximum. Replacement at the TTL boundary is an intentional
+   rolling restart; urgent revocation still takes effect on the bounded
+   reconciliation interval.
 10. **Clawdapus owns execution lifecycle, not durable business work.** Flux
     owns tasks, waits, wakes, retries, recurrence, checkpoints, and approval
     requests for Flux-managed work. For autonomous pod work, a controller-side
@@ -244,17 +271,19 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
     selection-based Invocation scoped to that Flux run. The Flux administrator
     owns the runtime registration that maps its stable runtime id to the target
     pod, template, and role; Clawdapus only verifies the claimed assignment.
-    This is a pull adapter,
-    not a public `claw-api` endpoint: Flux receives no controller credential,
+    This is a pull adapter, not a public lifecycle/control endpoint: Flux
+    receives no controller credential,
     and the adapter owns no copied readiness or workflow state. Missing or
     mismatched runtime assignment, template, role, task, or Flux credential
-    fails closed before Invocation creation. The adapter retires the dynamic
-    member by revoking its Invocation and removing its container when the
-    one-shot container exits, after reporting success/failure to the claimed
-    Flux run. Its `claw.flux-run` label lets controller restart reattach the
-    monitor against Flux's current run state. Periodic reconciliation performs
-    the same cleanup on completed, expired, or revoked dynamic runs and never
-    resurrects them. A human laptop is not a daemon;
+    fails closed before Invocation creation. When the one-shot container exits,
+    the adapter revokes its Invocation immediately, reports success/failure to
+    Flux with the run id as an idempotency key, and removes the stopped
+    container only after Flux acknowledges the terminal result. If reporting
+    fails, the `claw.flux-run` label lets controller restart retry against
+    Flux's current run state; Flux's own timeout/reclaim remains the safety net.
+    Periodic reconciliation retries reports for stopped unacknowledged runs,
+    removes acknowledged or reclaimed runs, and never resurrects a dynamic
+    member. A human laptop is not a daemon;
     Flux puts the task in the person's work queue and the person explicitly
     runs `my ai --flux-task <id>`, which creates a new Invocation. Existing
     `INVOKE` scheduling remains for standalone pod-local jobs only. A job is
@@ -339,6 +368,11 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   Flux-managed versus standalone `INVOKE` scheduling; declared-member
   replacement after revoke/expiry; and removal without resurrection of
   wake-started dynamic members.
+- Unit: credential-scoped Invocation list/get used by `claw-api`; central
+  `pod-members` ingress accepts only the bundle-declared HTTPS origin and
+  matching ADR-013 credential; arbitrary feed, memory, and tool endpoints are
+  rejected; Flux result-report retry survives controller restart without
+  recreating a dynamic member.
 - Integration (`-tags integration`): register against the released cllama binary with an
   httptest upstream; revoke → 403; unchanged digest plus a live Invocation → no
   re-registration; conformance fixture
@@ -379,7 +413,10 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   Docker settings fail at the controller boundary; the parent is derived from
   the Invocation bearer and no second member credential is accepted.
 - `TestSpikeMembershipFeed` (S5, Docker): existing members' next turn contains the join and,
-  later, the departure; no env rewrite; no socket in workloads.
+  later, the departure; no env rewrite; no socket in workloads. Its
+  organization-managed variant runs cllama outside the pod, reaches only the
+  authenticated bundle-declared HTTPS feed route, and rejects an unlisted URL
+  and wrong feed credential.
 - `TestSpikeMemoryViews` (S6, Docker, fake memory service): metadata and isolation.
 - `TestSpikeRoleOnboarding` (S8, cross-repository, Docker): consume the same
   published billing role as my-cli; prove matching role/contract/skill/tool
@@ -389,7 +426,8 @@ proxy's private persistence. Clawdapus therefore stops materializing runtime con
   wake, then start a one-shot dynamic member with a new Invocation and retire
   it on exit; and prove the fake effect service rejects
   a missing, mismatched, changed, forged, expired, replayed, or wrong-audience
-  release token.
+  release token. Central cllama also reaches only this controller grant's
+  authenticated membership-feed route and rejects a selected URL.
 - Existing quickstart/docs spikes unchanged.
 
 Every credential-free spike above is a required CI check and fails, rather than
@@ -400,7 +438,7 @@ release evidence.
 ## Sequencing
 
 ```
-cllama tag (v1 types/client, control API, delegation ceiling, pod-members feed contract, legacy adapter, fixture)
+cllama tag (v1 types/client, control API, delegation ceiling, zero-TTL feed subscription, legacy adapter, fixture)
    └─► PR-1 BuildInvocationSelection + controller member templates + two-phase infra/reconcile (semantic goldens; pin bump in the same release)
          └─► PR-2 ADR-027 + controller ownership of all claw containers + declared reconcile/recovery
                └─► PR-3 role/labels/purpose schema + audit + claw-api/clawdash reads + pod-members feed
