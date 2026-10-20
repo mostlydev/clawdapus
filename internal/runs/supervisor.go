@@ -1241,3 +1241,23 @@ func (s *Supervisor) FinalizeWithoutProxy(ctx context.Context, k Key, proxyGone 
 	rec.LastError = ""
 	return s.persist(rec)
 }
+
+// RemoveOrphan removes one orphaned run worker through Compose. The project
+// must be a run project of this pod's namespace (clawrun-<ns>-<key>); the
+// executor passes an empty project on stdin, never an ambient file.
+func (s *Supervisor) RemoveOrphan(ctx context.Context, c Container) error {
+	project := c.Labels["com.docker.compose.project"]
+	if c.Labels[LabelPodNS] != s.podNS || !strings.HasPrefix(project, "clawrun-"+s.podNS+"-") || c.Labels[LabelRunKey] == "" {
+		return fmt.Errorf("container %s is not a run worker of this pod", c.ID)
+	}
+	recs, err := s.ledger.All()
+	if err != nil {
+		return err
+	}
+	for _, r := range recs {
+		if r.RunKey == c.Labels[LabelRunKey] {
+			return fmt.Errorf("container %s belongs to a known run; it is not an orphan", c.ID)
+		}
+	}
+	return s.cfg.Executor.Down(ctx, project, "")
+}

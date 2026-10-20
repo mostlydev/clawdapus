@@ -47,6 +47,14 @@ type Event struct {
 	Action        string `json:"action,omitempty"`
 	Reason        string `json:"reason,omitempty"`
 	CooldownUntil string `json:"cooldown_until,omitempty"`
+	// tool_dispatch / revocation event fields (cllama#54). Dispatch records
+	// carry infrastructure IDs and fence status only, never call content, and
+	// are not tool-call completions.
+	DispatchID           string  `json:"dispatch_id,omitempty"`
+	DispatchStatus       string  `json:"dispatch_status,omitempty"`
+	RevocationGeneration *uint64 `json:"revocation_generation,omitempty"`
+	AdmittedBeforeRevoke *uint64 `json:"admitted_before_revoke,omitempty"`
+	RefusedAfterRevoke   *uint64 `json:"refused_after_revoke,omitempty"`
 	// failover event fields
 	FromProvider string `json:"from_provider,omitempty"`
 	ToProvider   string `json:"to_provider,omitempty"`

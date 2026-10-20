@@ -27,11 +27,12 @@ var (
 	runsHeartbeat      time.Duration
 	runsServerUID      int
 
-	runsGeneration   uint64
-	runsSpecFile     string
-	runsAuthorityTTL time.Duration
-	runsCredentialFn string
-	runsWait         string
+	runsGeneration    uint64
+	runsSpecFile      string
+	runsAuthorityTTL  time.Duration
+	runsCredentialFn  string
+	runsWait          string
+	runsRemoveOrphans bool
 )
 
 var runsCmd = &cobra.Command{
@@ -255,8 +256,17 @@ var runsDoctorCmd = &cobra.Command{
 			fmt.Fprintf(out, "  container %s installation=%s run=%s key=%s\n",
 				shortContainerIDForPostApply(o.ID), o.Labels[runs.LabelInstall], o.Labels[runs.LabelRunID], o.Labels[runs.LabelRunKey])
 		}
-		fmt.Fprintln(out, "Inspect each with `docker inspect <container>`; once you have confirmed it is not live work, remove it with `docker rm -f <container>`.")
-		return fmt.Errorf("orphaned run workers found")
+		if !runsRemoveOrphans {
+			fmt.Fprintln(out, "Inspect each with `docker inspect <container>`; once confirmed, remove them through Compose with `claw runs doctor --remove-orphans`.")
+			return fmt.Errorf("orphaned run workers found")
+		}
+		for _, o := range orphans {
+			if err := sup.RemoveOrphan(cmd.Context(), o); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "  removed %s\n", shortContainerIDForPostApply(o.ID))
+		}
+		return nil
 	},
 }
 
@@ -365,6 +375,7 @@ func init() {
 	for _, c := range []*cobra.Command{runsStatusCmd, runsCancelCmd} {
 		c.Flags().StringVar(&runsWait, "wait", "", "Long-poll until this state (running, revoked, stopped, failed)")
 	}
+	runsDoctorCmd.Flags().BoolVar(&runsRemoveOrphans, "remove-orphans", false, "Remove orphaned run workers of this pod through Compose")
 	runsCmd.AddCommand(runsServeCmd, runsLaunchCmd, runsStatusCmd, runsCancelCmd, runsResultCmd, runsDoctorCmd)
 	rootCmd.AddCommand(runsCmd)
 }

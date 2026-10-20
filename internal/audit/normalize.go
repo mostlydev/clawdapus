@@ -98,6 +98,20 @@ func NormalizeLine(line []byte) (*Event, error) {
 	event.Action = strings.TrimSpace(stringField(raw, "action"))
 	event.Reason = strings.TrimSpace(stringField(raw, "reason"))
 	event.CooldownUntil = strings.TrimSpace(stringField(raw, "cooldown_until"))
+	event.DispatchID = strings.TrimSpace(stringField(raw, "dispatch_id"))
+	event.DispatchStatus = strings.TrimSpace(stringField(raw, "dispatch_status"))
+	if value, ok := int64Field(raw, "revocation_generation"); ok && value >= 0 {
+		v := uint64(value)
+		event.RevocationGeneration = &v
+	}
+	if value, ok := int64Field(raw, "admitted_before_revoke"); ok && value >= 0 {
+		v := uint64(value)
+		event.AdmittedBeforeRevoke = &v
+	}
+	if value, ok := int64Field(raw, "refused_after_revoke"); ok && value >= 0 {
+		v := uint64(value)
+		event.RefusedAfterRevoke = &v
+	}
 	// failover event fields
 	event.FromProvider = strings.TrimSpace(stringField(raw, "from_provider"))
 	event.ToProvider = strings.TrimSpace(stringField(raw, "to_provider"))

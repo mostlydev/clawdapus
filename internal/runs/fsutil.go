@@ -117,7 +117,13 @@ func syncDir(dir string) error {
 // tightens its mode to 0700. Durable fences (the run ledger, cllama's
 // revocation ledger) must not be writable by other host users.
 func EnsurePrivateDir(path string) error {
-	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+	if err := os.Mkdir(path, 0o700); err == nil {
+		// Make the new directory entry durable before anything is written
+		// inside it.
+		if err := syncDir(filepath.Dir(path)); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrExist) {
 		return err
 	}
 	info, err := os.Lstat(path)
