@@ -50,13 +50,18 @@ func TestSpikePerRunWorkers(t *testing.T) {
 	})
 
 	// cllama from the working tree at a unique tag: no released tag is moved.
+	// CLAW_SPIKE_PINNED_CLLAMA=1 instead proves the published, pinned image.
 	unique := fmt.Sprintf("issue372-spike-%d", time.Now().UnixNano())
-	prevTag := infraCllamaTag
-	infraCllamaTag = unique
-	t.Cleanup(func() { infraCllamaTag = prevTag })
-	cllamaRef := "ghcr.io/mostlydev/cllama:" + unique
-	spikeBuildImage(t, filepath.Join(repoRoot, "cllama"), cllamaRef, "Dockerfile")
-	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "-f", cllamaRef).Run() })
+	if os.Getenv("CLAW_SPIKE_PINNED_CLLAMA") == "1" {
+		spikeEnsurePulledImage(t, infraImageSpecFor(infraComponentCllama).ExpectedRef)
+	} else {
+		prevTag := infraCllamaTag
+		infraCllamaTag = unique
+		t.Cleanup(func() { infraCllamaTag = prevTag })
+		cllamaRef := "ghcr.io/mostlydev/cllama:" + unique
+		spikeBuildImage(t, filepath.Join(repoRoot, "cllama"), cllamaRef, "Dockerfile")
+		t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "-f", cllamaRef).Run() })
+	}
 	// Use the published dashboard image; never build local bytes under a
 	// released tag.
 	spikeEnsurePulledImage(t, infraImageSpecFor(infraComponentClawdash).ExpectedRef)
