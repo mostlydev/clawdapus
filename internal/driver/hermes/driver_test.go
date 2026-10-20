@@ -784,7 +784,7 @@ func TestEnvDerivesDiscordChannelAllowlist(t *testing.T) {
 }
 
 func TestDiscordAllowAllOnlyCountsWhenEnabled(t *testing.T) {
-	for value, want := range map[string]bool{"false": false, "0": false, "no": false, "true": true, "1": true, "ON": true} {
+	for value, want := range map[string]bool{"false": false, "0": false, "no": false, "on": false, "true": true, "1": true, "YES": true} {
 		rc, _ := newTestRC(t)
 		rc.Environment["DISCORD_ALLOW_ALL_USERS"] = value
 		got, err := hasExplicitDiscordAllowlist(rc)

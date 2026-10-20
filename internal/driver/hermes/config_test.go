@@ -909,7 +909,7 @@ func TestGenerateEnvFileDisablesTTSForMultiPlatformWithDiscord(t *testing.T) {
 }
 
 func TestConfigureCannotRerouteGovernedModel(t *testing.T) {
-	for _, path := range []string{"model.base_url", "model.api_key", "model.provider", "providers.openai.api_key", "custom_providers", "fallback_model.provider", "auxiliary.vision.base_url", "delegation.base_url", "moa.aggregator.provider", "model_overrides"} {
+	for _, path := range []string{"model.base_url", "model.api_key", "model.provider", "providers.openai.api_key", "custom_providers", "fallback_model.provider", "auxiliary.vision.base_url", "delegation.base_url", "delegation.provider", "moa.aggregator.provider", "model_overrides", "auxiliary.vision.api_key"} {
 		rc := &driver.ResolvedClaw{
 			Models:      map[string]string{"primary": "anthropic/claude-sonnet-5"},
 			Cllama:      []string{"passthrough"},
@@ -928,7 +928,12 @@ func TestConfigureCannotRerouteGovernedModel(t *testing.T) {
 		Models:      map[string]string{"primary": "anthropic/claude-sonnet-5"},
 		Cllama:      []string{"passthrough"},
 		CllamaToken: "svc:tok",
-		Configures:  []string{"hermes config set display.busy_input_mode queue"},
+		Configures: []string{
+			"hermes config set display.busy_input_mode queue",
+			"hermes config set openrouter.response_cache false",
+			"hermes config set delegation.max_iterations 5",
+			"hermes config set auxiliary.vision.timeout 30",
+		},
 	}
 	modelCfg, _ := resolveModelConfig(rc)
 	if _, err := GenerateConfig(rc, modelCfg); err != nil {

@@ -533,7 +533,8 @@ func hasExplicitDiscordAllowlist(rc *driver.ResolvedClaw) (bool, error) {
 			// Only an enabled grant replaces the derived allowlist; an explicit
 			// false must not leave the runner denying everything.
 			switch strings.ToLower(value) {
-			case "1", "true", "yes", "on":
+			// Matches Hermes' own truth set exactly (adapter.py, v0.22.2).
+			case "1", "true", "yes":
 				return true, nil
 			}
 			continue
@@ -569,20 +570,39 @@ func discordHandleChannelIDs(rc *driver.ResolvedClaw) []string {
 	return out
 }
 
-// isGovernedModelPath reports config paths that select the model provider,
-// endpoint or credentials, or add alternative providers.
+// isGovernedModelPath reports config paths that select a model provider,
+// endpoint or credentials. Provider registries and credential pools are
+// reserved whole; elsewhere only routing leaves are, so behavioural controls
+// (for example openrouter.response_cache or delegation.max_iterations) stay
+// available.
 func isGovernedModelPath(path string) bool {
 	path = strings.ToLower(strings.TrimSpace(path))
-	// Sections of the v0.22 config that carry a provider, endpoint or key.
 	for _, prefix := range []string{
 		"model.provider", "model.base_url", "model.api_key", "model.api_mode",
 		"providers", "custom_providers", "fallback", "fallback_providers", "fallback_model",
-		"credential_pool_strategies", "openrouter", "bedrock", "auxiliary", "delegation",
-		"moa", "model_overrides",
+		"credential_pool_strategies", "bedrock", "model_overrides",
 	} {
 		if path == prefix || strings.HasPrefix(path, prefix+".") {
 			return true
 		}
+	}
+	// Nested sections that may route a sub-agent or auxiliary call.
+	for _, section := range []string{"auxiliary.", "delegation.", "moa."} {
+		if !strings.HasPrefix(path, section) {
+			continue
+		}
+		leaf := path[strings.LastIndex(path, ".")+1:]
+		switch leaf {
+		case "provider", "model", "base_url", "api_key", "api_mode", "model_provider", "aggregator", "reference_models":
+			return true
+		}
+		if path == "delegation" || path == "auxiliary" || path == "moa" {
+			return true
+		}
+	}
+	switch path {
+	case "auxiliary", "delegation", "moa":
+		return true
 	}
 	return false
 }
