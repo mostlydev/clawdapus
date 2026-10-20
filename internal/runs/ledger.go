@@ -68,8 +68,23 @@ func (k Key) Hash() string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// ProjectName is the deterministic Compose project for a run.
-func (k Key) ProjectName() string { return "clawrun-" + k.Hash() }
+// PodNamespace is the server-owned identity of a pod on this host, derived
+// from its absolute directory. Two pods with the same name (or the same run
+// keys) never share a Compose project, label value or worker network.
+func PodNamespace(podDir string) string {
+	abs, err := filepath.Abs(podDir)
+	if err != nil {
+		abs = podDir
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return hex.EncodeToString(sum[:6])
+}
+
+// RunKey is the pod-scoped, label-safe identity of a run's containers.
+func (k Key) RunKey(podNS string) string {
+	sum := sha256.Sum256([]byte(podNS + "\x00" + k.Installation + "/" + k.RunID))
+	return hex.EncodeToString(sum[:16])
+}
 
 // Spec is the immutable, digest-covered launch request body.
 type Spec struct {
@@ -99,6 +114,15 @@ type Timestamps struct {
 	Stopped  *time.Time `json:"stopped,omitempty"`
 }
 
+// Revocation proofs. A run is revoked only with one of these.
+const (
+	// ProofCllamaAck: cllama durably revoked the identity and drained it.
+	ProofCllamaAck = "cllama_ack"
+	// ProofProxyStopped: the whole pod (proxy included) was removed and the
+	// run's context deleted, so no process can hold or regain its authority.
+	ProofProxyStopped = "proxy_stopped"
+)
+
 // Credential custody states reported to the orchestrator.
 const (
 	CredentialNone    = "none"
@@ -116,10 +140,12 @@ type Record struct {
 	TemplateID         string      `json:"template_id,omitempty"`
 	ImageID            string      `json:"image_id,omitempty"`
 	RunAgentID         string      `json:"run_agent_id,omitempty"`
+	RunKey             string      `json:"run_key,omitempty"` // pod-scoped container label value
 	Project            string      `json:"project,omitempty"`
 	State              State       `json:"state"`
 	Cancelled          bool        `json:"cancelled"`
 	Revoked            bool        `json:"revoked"`
+	RevocationProof    string      `json:"revocation_proof,omitempty"`
 	SpawnAttempted     bool        `json:"spawn_attempted"`
 	Exit               *ExitInfo   `json:"exit_observed,omitempty"`
 	Failure            string      `json:"failure,omitempty"`
@@ -169,12 +195,12 @@ const recordVersion = 1
 
 // OpenLedger opens (creating if absent) the ledger under podDir.
 func OpenLedger(podDir string) (*Ledger, error) {
-	dir := filepath.Join(podDir, StateDirName, "ledger")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create ledger: %w", err)
+	if err := EnsurePrivateDir(filepath.Join(podDir, StateDirName)); err != nil {
+		return nil, fmt.Errorf("run state dir: %w", err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return nil, err
+	dir := filepath.Join(podDir, StateDirName, "ledger")
+	if err := EnsurePrivateDir(dir); err != nil {
+		return nil, fmt.Errorf("ledger: %w", err)
 	}
 	return &Ledger{dir: dir}, nil
 }

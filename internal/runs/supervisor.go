@@ -79,6 +79,7 @@ type Config struct {
 // merged whenever advancement persists.
 type Supervisor struct {
 	cfg        Config
+	podNS      string
 	ledger     *Ledger
 	runtimeDir string
 	admitLocks sync.Map // key hash -> *sync.Mutex
@@ -126,6 +127,7 @@ func NewSupervisor(cfg Config) (*Supervisor, error) {
 	}
 	return &Supervisor{
 		cfg:        cfg,
+		podNS:      PodNamespace(cfg.PodDir),
 		ledger:     ledger,
 		runtimeDir: filepath.Join(cfg.PodDir, ".claw-runtime"),
 		changed:    make(chan struct{}, 1),
@@ -246,7 +248,8 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 		TemplateID:         tpl.ID,
 		ImageID:            tpl.ImageID,
 		RunAgentID:         tpl.Name + "-run-" + idSuffix,
-		Project:            req.Key.ProjectName(),
+		RunKey:             req.Key.RunKey(s.podNS),
+		Project:            "clawrun-" + s.podNS + "-" + req.Key.RunKey(s.podNS)[:16],
 		State:              StateAccepted,
 		AuthorityExpiresAt: req.AuthorityExpiresAt.UTC(),
 		Credential:         CredentialNone,
@@ -668,7 +671,7 @@ func (s *Supervisor) step(ctx context.Context, rec *Record) (bool, error) {
 }
 
 func (s *Supervisor) stepSpawn(ctx context.Context, rec *Record, now time.Time) (bool, error) {
-	containers, err := s.cfg.Executor.Containers(ctx, rec.Key.Hash())
+	containers, err := s.cfg.Executor.Containers(ctx, rec.RunKey)
 	if err != nil {
 		return false, fmt.Errorf("list containers: %w", err)
 	}
@@ -768,7 +771,7 @@ func verifyContainers(rec *Record, containers []Container) string {
 	}
 	c := containers[0]
 	l := c.Labels
-	if l[LabelRunKey] != rec.Key.Hash() || l[LabelInstall] != rec.Key.Installation || l[LabelRunID] != rec.Key.RunID ||
+	if l[LabelRunKey] != rec.RunKey || l[LabelPodNS] != podNamespaceOf(rec) || l[LabelInstall] != rec.Key.Installation || l[LabelRunID] != rec.Key.RunID ||
 		l[LabelTemplateID] != rec.TemplateID || l[LabelDigest] != rec.SpecDigest || c.ImageID != rec.ImageID {
 		return ReasonMismatch
 	}
@@ -779,7 +782,7 @@ func verifyContainers(rec *Record, containers []Container) string {
 }
 
 func (s *Supervisor) stepMonitor(ctx context.Context, rec *Record, now time.Time) (bool, error) {
-	containers, err := s.cfg.Executor.Containers(ctx, rec.Key.Hash())
+	containers, err := s.cfg.Executor.Containers(ctx, rec.RunKey)
 	if err != nil {
 		return false, fmt.Errorf("list containers: %w", err)
 	}
@@ -919,6 +922,7 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 		}
 		if revokeErr == nil {
 			rec.Revoked = true
+			rec.RevocationProof = ProofCllamaAck
 			if rec.Cancelled {
 				rec.State = StateRevoked
 				rec.Timestamps.Revoked = &now
@@ -926,7 +930,7 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 			return true, nil
 		}
 	}
-	containers, err := s.cfg.Executor.Containers(ctx, rec.Key.Hash())
+	containers, err := s.cfg.Executor.Containers(ctx, rec.RunKey)
 	if err != nil {
 		return false, fmt.Errorf("list containers: %w", err)
 	}
@@ -939,7 +943,7 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 		if err := s.cfg.Executor.Down(ctx, rec.Project, s.projectFile(rec.Key)); err != nil {
 			return false, fmt.Errorf("compose down failed")
 		}
-		remaining, err := s.cfg.Executor.Containers(ctx, rec.Key.Hash())
+		remaining, err := s.cfg.Executor.Containers(ctx, rec.RunKey)
 		if err != nil {
 			return false, fmt.Errorf("list containers: %w", err)
 		}
@@ -1052,7 +1056,7 @@ func writeRunContext(runtimeDir string, ctxTpl *ContextTemplate, rec *Record, to
 		meta[k] = v
 	}
 	meta["token"] = token
-	meta["run_key"] = rec.Key.Hash()
+	meta["run_key"] = rec.RunKey
 	meta["run_installation"] = rec.Key.Installation
 	meta["run_id"] = rec.Key.RunID
 	in.Metadata = meta
@@ -1122,18 +1126,18 @@ func randomHex(n int) (string, error) {
 
 // WorkerLister lists every run-worker container for a pod.
 type WorkerLister interface {
-	RunWorkers(ctx context.Context, pod string) ([]Container, error)
+	RunWorkers(ctx context.Context, podNS string) ([]Container, error)
 }
 
 // Orphans returns labelled run workers with no ledger record or tombstone.
 // They can only exist after ledger loss, because a run's project is recorded
 // before `compose create`; the supervisor refuses to serve while any exist.
-func (s *Supervisor) Orphans(ctx context.Context, pod string) ([]Container, error) {
+func (s *Supervisor) Orphans(ctx context.Context) ([]Container, error) {
 	lister, ok := s.cfg.Executor.(WorkerLister)
 	if !ok {
 		return nil, nil
 	}
-	workers, err := lister.RunWorkers(ctx, pod)
+	workers, err := lister.RunWorkers(ctx, s.podNS)
 	if err != nil {
 		return nil, err
 	}
@@ -1143,7 +1147,9 @@ func (s *Supervisor) Orphans(ctx context.Context, pod string) ([]Container, erro
 	}
 	known := make(map[string]struct{}, len(recs))
 	for _, r := range recs {
-		known[r.Key.Hash()] = struct{}{}
+		if r.RunKey != "" {
+			known[r.RunKey] = struct{}{}
+		}
 	}
 	var orphans []Container
 	for _, w := range workers {
@@ -1167,4 +1173,71 @@ func (s *Supervisor) LiveKeys() ([]Key, error) {
 		}
 	}
 	return out, nil
+}
+
+// FinalizeWithoutProxy ends a run whose cllama acknowledgement is unavailable
+// during a full pod teardown. The caller must have removed the pod (proxy
+// included) and verified it is gone; proxyGone re-checks that. With no worker
+// container and no proxy process, nothing can hold the run's authority, and
+// deleting its context means a restarted proxy cannot authenticate it.
+// Remote effects that were already dispatched are not undone.
+func (s *Supervisor) FinalizeWithoutProxy(ctx context.Context, k Key, proxyGone func(context.Context) (bool, error)) error {
+	mu := keyMutex(&s.stepLocks, k)
+	mu.Lock()
+	defer mu.Unlock()
+	defer s.notifyWatchers(k)
+	rec, err := s.loadForStep(k)
+	if err != nil || rec == nil || rec.State.Terminal() {
+		return err
+	}
+	if !rec.Cancelled {
+		return fmt.Errorf("run %s/%s is not cancelled", k.Installation, k.RunID)
+	}
+	containers, err := s.cfg.Executor.Containers(ctx, rec.RunKey)
+	if err != nil {
+		return err
+	}
+	if len(containers) > 0 {
+		return fmt.Errorf("run %s/%s still has %d worker container(s)", k.Installation, k.RunID, len(containers))
+	}
+	gone, err := proxyGone(ctx)
+	if err != nil {
+		return err
+	}
+	if !gone {
+		return fmt.Errorf("the pod's proxy is still present; it must be removed before finalizing without its acknowledgement")
+	}
+	now := s.cfg.Now().UTC()
+	if !rec.Revoked {
+		rec.Revoked = true
+		rec.RevocationProof = ProofProxyStopped
+		rec.Timestamps.Revoked = &now
+	}
+	if rec.RunAgentID != "" {
+		if err := os.RemoveAll(s.contextDir(rec.RunAgentID)); err != nil {
+			return err
+		}
+	}
+	_ = os.RemoveAll(filepath.Dir(s.projectFile(k)))
+	if err := s.ledger.DeleteSecret(k, "cllama"); err != nil {
+		return err
+	}
+	if err := s.ledger.DeleteSecret(k, "credential"); err != nil {
+		return err
+	}
+	if rec.Callbacks.End == "" {
+		rec.Callbacks.End = CallbackSkipped
+	}
+	if rec.Callbacks.Start == "" {
+		rec.Callbacks.Start = CallbackSkipped
+	}
+	rec.Credential = CredentialNone
+	if rec.Failure != "" {
+		rec.State = StateFailed
+	} else {
+		rec.State = StateStopped
+	}
+	rec.Timestamps.Stopped = &now
+	rec.LastError = ""
+	return s.persist(rec)
 }

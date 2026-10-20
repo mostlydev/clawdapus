@@ -196,13 +196,14 @@ func exitSummary(err error) string {
 	return "failed to run"
 }
 
-// RunWorkers lists every run-worker container labelled for pod.
-func (d *DockerExecutor) RunWorkers(ctx context.Context, pod string) ([]Container, error) {
+// RunWorkers lists every run-worker container labelled for this pod's
+// namespace.
+func (d *DockerExecutor) RunWorkers(ctx context.Context, podNS string) ([]Container, error) {
 	ctx, cancel := context.WithTimeout(ctx, dockerReadTimeout)
 	defer cancel()
 	list, err := d.cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.Arg("label", LabelRole+"="+RoleRunWorker), filters.Arg("label", LabelPod+"="+pod)),
+		Filters: filters.NewArgs(filters.Arg("label", LabelRole+"="+RoleRunWorker), filters.Arg("label", LabelPodNS+"="+podNS)),
 	})
 	if err != nil {
 		return nil, err

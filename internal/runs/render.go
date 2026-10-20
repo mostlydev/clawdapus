@@ -23,6 +23,7 @@ const (
 	LabelTemplate   = "claw.run.template"
 	LabelTemplateID = "claw.run.template-id"
 	LabelDigest     = "claw.run.spec-digest"
+	LabelPodNS      = "claw.run.pod-ns"
 	RoleRunWorker   = "run-worker"
 
 	workerService = "worker"
@@ -86,7 +87,8 @@ func renderProject(tpl *Template, rec *Record) ([]byte, error) {
 	labels := map[string]string{
 		LabelPod:        composeLiteral(tpl.Pod),
 		LabelRole:       RoleRunWorker,
-		LabelRunKey:     rec.Key.Hash(),
+		LabelRunKey:     rec.RunKey,
+		LabelPodNS:      podNamespaceOf(rec),
 		LabelInstall:    rec.Key.Installation,
 		LabelRunID:      rec.Key.RunID,
 		LabelGeneration: strconv.FormatUint(rec.Generation, 10),
@@ -132,7 +134,7 @@ func renderProject(tpl *Template, rec *Record) ([]byte, error) {
 func inputEnv(tpl *Template, rec *Record, task, cllamaToken string) map[string]string {
 	repl := strings.NewReplacer(
 		driver.RunPlaceholderTask, task,
-		driver.RunPlaceholderSession, "run-"+rec.Key.Hash(),
+		driver.RunPlaceholderSession, "run-"+rec.RunKey,
 		driver.RunPlaceholderCllamaToken, cllamaToken,
 	)
 	out := make(map[string]string, len(tpl.Worker.Inputs))
@@ -152,4 +154,13 @@ func inputEnv(tpl *Template, rec *Record, task, cllamaToken string) map[string]s
 		out[name] = repl.Replace(value)
 	}
 	return out
+}
+
+// podNamespaceOf recovers the pod namespace recorded in a run's project name.
+func podNamespaceOf(rec *Record) string {
+	parts := strings.Split(rec.Project, "-")
+	if len(parts) == 3 {
+		return parts[1]
+	}
+	return ""
 }

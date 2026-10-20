@@ -747,9 +747,11 @@ func runComposeUp(podFile string) (err error) {
 		if err != nil {
 			return err
 		}
-		revocationDir, err := ensurePersistentCllamaDir(podDir, runs.RevocationDirName)
-		if err != nil {
-			return err
+		// Unlike runner-writable dirs, the revocation fence is private: only
+		// this user (and the root-run proxy) may change it.
+		revocationDir := filepath.Join(podDir, runs.RevocationDirName)
+		if err := runs.EnsurePrivateDir(revocationDir); err != nil {
+			return fmt.Errorf("revocation dir: %w", err)
 		}
 
 		// Compile seed keys from all service CllamaEnv into providers.json.
@@ -891,8 +893,17 @@ func runComposeUp(podFile string) (err error) {
 	}
 
 	generatedPath := filepath.Join(podDir, "compose.generated.yml")
-	if err := os.WriteFile(generatedPath, []byte(output), 0644); err != nil {
+	generatedMode := os.FileMode(0644)
+	if p.RunNetwork != "" {
+		// The generated file carries CLLAMA_UI_TOKEN, which can revoke run
+		// identities; per-run pods keep it private to this user.
+		generatedMode = 0600
+	}
+	if err := os.WriteFile(generatedPath, []byte(output), generatedMode); err != nil {
 		return fmt.Errorf("write compose.generated.yml: %w", err)
+	}
+	if err := os.Chmod(generatedPath, generatedMode); err != nil {
+		return fmt.Errorf("chmod compose.generated.yml: %w", err)
 	}
 	fmt.Printf("[claw] wrote %s\n", generatedPath)
 

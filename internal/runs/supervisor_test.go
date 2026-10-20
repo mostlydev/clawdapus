@@ -264,7 +264,7 @@ func TestRunLifecycleNaturalExit(t *testing.T) {
 		t.Fatalf("unexpected accepted record %+v", rec)
 	}
 	rec = h.advance("r1")
-	if rec.State != StateRunning || h.exec.count(rec.Key.Hash()) != 1 {
+	if rec.State != StateRunning || h.exec.count(rec.RunKey) != 1 {
 		t.Fatalf("expected running with one container, got %s", rec.State)
 	}
 
@@ -300,13 +300,13 @@ func TestRunLifecycleNaturalExit(t *testing.T) {
 	}
 
 	h.exec.stdout = []byte("BANNER\r\n\n>> the answer with >> inside and more bytes\n")
-	h.exec.exit(rec.Key.Hash(), 0)
+	h.exec.exit(rec.RunKey, 0)
 	rec = h.advance("r1")
 	if rec.State != StateStopped || !rec.Revoked || rec.Exit == nil || rec.Failure != "" {
 		t.Fatalf("expected stopped after natural exit, got %+v", rec)
 	}
-	if h.exec.count(rec.Key.Hash()) != 0 || len(h.rev.calls) != 1 || h.rev.calls[0] != rec.RunAgentID {
-		t.Fatalf("expected revoke then teardown; containers=%d revokes=%v", h.exec.count(rec.Key.Hash()), h.rev.calls)
+	if h.exec.count(rec.RunKey) != 0 || len(h.rev.calls) != 1 || h.rev.calls[0] != rec.RunAgentID {
+		t.Fatalf("expected revoke then teardown; containers=%d revokes=%v", h.exec.count(rec.RunKey), h.rev.calls)
 	}
 	if _, err := os.Stat(ctxDir); !os.IsNotExist(err) {
 		t.Fatalf("per-run context must be removed at terminal state")
@@ -324,7 +324,7 @@ func TestRunNonZeroExitFails(t *testing.T) {
 	h := newHarness(t, false)
 	rec, _ := h.launch("r1", 1, "x")
 	h.advance("r1")
-	h.exec.exit(rec.Key.Hash(), 1)
+	h.exec.exit(rec.RunKey, 1)
 	rec = h.advance("r1")
 	if rec.State != StateFailed || rec.Failure != ReasonExitNonZero || rec.Exit.Code != 1 {
 		t.Fatalf("got %+v", rec)
@@ -347,7 +347,7 @@ func TestRunCancelMidRun(t *testing.T) {
 	if rec.State != StateRevoking || rec.Revoked || rec.State.Terminal() {
 		t.Fatalf("revoked claimed without cllama ack: %+v", rec)
 	}
-	if h.exec.count(rec.Key.Hash()) != 0 {
+	if h.exec.count(rec.RunKey) != 0 {
 		t.Fatalf("worker must be removed even while revoke is unacknowledged")
 	}
 	var tools cllama.ToolManifest
@@ -398,7 +398,7 @@ func TestRunDuplicateLaunchIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.advance("r1")
-	if h.exec.ups != 1 || h.exec.count(first.Key.Hash()) != 1 {
+	if h.exec.ups != 1 || h.exec.count(first.RunKey) != 1 {
 		t.Fatalf("expected exactly one up and one container, got ups=%d", h.exec.ups)
 	}
 }
@@ -417,7 +417,7 @@ func TestRunAdoptsContainerAfterCrashBeforeRunningRecorded(t *testing.T) {
 	sup2, _ := NewSupervisor(h.sup.cfg)
 	sup2.Advance(context.Background(), rec.Key)
 	got, _ := sup2.Get(rec.Key)
-	if got.State != StateRunning || h.exec.ups != 1 || h.exec.count(rec.Key.Hash()) != 1 {
+	if got.State != StateRunning || h.exec.ups != 1 || h.exec.count(rec.RunKey) != 1 {
 		t.Fatalf("expected adoption without a second up: state=%s ups=%d", got.State, h.exec.ups)
 	}
 }
@@ -500,7 +500,7 @@ func TestRunAuthorityExpiryTearsDown(t *testing.T) {
 	h.advance("r1")
 	h.now = h.now.Add(31 * time.Minute)
 	rec = h.advance("r1")
-	if rec.State != StateFailed || rec.Failure != ReasonAuthorityExpired || !rec.Revoked || h.exec.count(rec.Key.Hash()) != 0 {
+	if rec.State != StateFailed || rec.Failure != ReasonAuthorityExpired || !rec.Revoked || h.exec.count(rec.RunKey) != 0 {
 		t.Fatalf("got %+v", rec)
 	}
 }
@@ -527,10 +527,10 @@ func TestRunReconcileMismatchTearsDown(t *testing.T) {
 	rec, _ := h.launch("r1", 1, "x")
 	h.advance("r1")
 	h.exec.mu.Lock()
-	h.exec.containers[rec.Key.Hash()][0].ImageID = "sha256:other"
+	h.exec.containers[rec.RunKey][0].ImageID = "sha256:other"
 	h.exec.mu.Unlock()
 	rec = h.advance("r1")
-	if rec.State != StateFailed || rec.Failure != ReasonMismatch || h.exec.count(rec.Key.Hash()) != 0 {
+	if rec.State != StateFailed || rec.Failure != ReasonMismatch || h.exec.count(rec.RunKey) != 0 {
 		t.Fatalf("got %+v", rec)
 	}
 }
@@ -559,7 +559,7 @@ func TestRunCallbacksAndAuthorityRejection(t *testing.T) {
 	h.notify.err = ErrAuthority
 	h.now = h.now.Add(2 * time.Minute)
 	rec = h.advance("r1")
-	if rec.State != StateFailed || rec.Failure != ReasonAuthorityExpired || h.exec.count(rec.Key.Hash()) != 0 {
+	if rec.State != StateFailed || rec.Failure != ReasonAuthorityExpired || h.exec.count(rec.RunKey) != 0 {
 		t.Fatalf("got %+v", rec)
 	}
 	if _, ok, _ := h.sup.ledger.Secret(rec.Key, "credential"); ok {
@@ -573,7 +573,7 @@ func TestRunEndCallbackOnNaturalExit(t *testing.T) {
 	rec, _, _ := h.sup.Launch(context.Background(), LaunchRequest{Key: Key{"inst", "r1"}, Generation: 1, SpecDigest: digest, Spec: raw, Credential: "orch-token", AuthorityExpiresAt: h.now.Add(30 * time.Minute)})
 	h.advance("r1")
 	h.exec.stdout = []byte("\n>> ok\n")
-	h.exec.exit(rec.Key.Hash(), 0)
+	h.exec.exit(rec.RunKey, 0)
 	rec = h.advance("r1")
 	if rec.State != StateStopped || h.notify.ended != 1 || h.notify.lastOutcome != "succeeded" || rec.Callbacks.End != EndAcked {
 		t.Fatalf("got %+v ended=%d", rec, h.notify.ended)
@@ -600,7 +600,7 @@ func TestRunCredentialRecoveryNoDuplicate(t *testing.T) {
 	}
 	h.now = h.now.Add(2 * time.Minute)
 	h.advance("r1")
-	if h.exec.ups != 1 || h.exec.count(rec.Key.Hash()) != 1 || h.notify.lastCred != "new" {
+	if h.exec.ups != 1 || h.exec.count(rec.RunKey) != 1 || h.notify.lastCred != "new" {
 		t.Fatalf("expected one container and new credential in use; ups=%d cred=%q", h.exec.ups, h.notify.lastCred)
 	}
 }
@@ -680,7 +680,7 @@ func TestRunEndCallbackRejectedIsRecordedNotAcked(t *testing.T) {
 	h.advance("r1")
 	h.advance("r1")
 	h.exec.stdout = []byte("\n>> ok\n")
-	h.exec.exit(rec.Key.Hash(), 0)
+	h.exec.exit(rec.RunKey, 0)
 	h.notify.err = ErrAuthority
 	rec = h.advance("r1")
 	if rec.State != StateStopped || rec.Callbacks.End != EndRejected {
@@ -695,7 +695,7 @@ func TestRunEndCallbackTransientRetriesUntilExpiry(t *testing.T) {
 	h.advance("r1")
 	h.advance("r1")
 	h.exec.stdout = []byte("\n>> ok\n")
-	h.exec.exit(rec.Key.Hash(), 0)
+	h.exec.exit(rec.RunKey, 0)
 	h.notify.err = errors.New("connection refused")
 	rec = h.advance("r1")
 	if rec.State.Terminal() || rec.Callbacks.End != "" {
@@ -936,7 +936,7 @@ func TestRestartAdoptedExitedContainerSendsStartBeforeEnd(t *testing.T) {
 	_ = h.sup.ledger.Put(stored)
 	h.notify.order = nil
 	h.exec.stdout = []byte("\n>> done\n")
-	h.exec.exit(rec.Key.Hash(), 0)
+	h.exec.exit(rec.RunKey, 0)
 	sup2, _ := NewSupervisor(h.sup.cfg)
 	sup2.Advance(context.Background(), rec.Key)
 	h.sup = sup2
@@ -961,8 +961,8 @@ func TestRestartWithCreatedOnlyContainerDoesNotClaimRunning(t *testing.T) {
 	stored.Callbacks = Callbacks{}
 	_ = h.sup.ledger.Put(stored)
 	h.exec.mu.Lock()
-	for i := range h.exec.containers[rec.Key.Hash()] {
-		h.exec.containers[rec.Key.Hash()][i].Running = false // created, never started
+	for i := range h.exec.containers[rec.RunKey] {
+		h.exec.containers[rec.RunKey][i].Running = false // created, never started
 	}
 	h.exec.mu.Unlock()
 	h.notify.order = nil
@@ -972,8 +972,8 @@ func TestRestartWithCreatedOnlyContainerDoesNotClaimRunning(t *testing.T) {
 	if got.State != StateFailed || got.Failure != ReasonSpawnError || got.Timestamps.Running != nil {
 		t.Fatalf("created-only container must fail closed, got state=%s failure=%s", got.State, got.Failure)
 	}
-	if h.exec.count(rec.Key.Hash()) != 0 || h.exec.ups != 1 {
-		t.Fatalf("container must be removed without a second up; count=%d ups=%d", h.exec.count(rec.Key.Hash()), h.exec.ups)
+	if h.exec.count(rec.RunKey) != 0 || h.exec.ups != 1 {
+		t.Fatalf("container must be removed without a second up; count=%d ups=%d", h.exec.count(rec.RunKey), h.exec.ups)
 	}
 	for _, ev := range h.notify.order {
 		if ev == "start" {
@@ -1009,7 +1009,7 @@ func TestResultMissingMarkerFailsExplicitly(t *testing.T) {
 	rec, _ := h.launch("r1", 1, "x")
 	h.advance("r1")
 	h.exec.stdout = []byte("BANNER only, no marker\n")
-	h.exec.exit(rec.Key.Hash(), 0)
+	h.exec.exit(rec.RunKey, 0)
 	rec = h.advance("r1")
 	if rec.State != StateFailed || rec.Failure != ReasonResultMissing || rec.Result != nil {
 		t.Fatalf("got %+v", rec)
@@ -1021,7 +1021,7 @@ func TestResultMarkerBeyondPreambleIsMissing(t *testing.T) {
 	rec, _ := h.launch("r1", 1, "x")
 	h.advance("r1")
 	h.exec.stdout = []byte(strings.Repeat("b", resultPreambleBytes+64) + "\n>> late answer\n")
-	h.exec.exit(rec.Key.Hash(), 0)
+	h.exec.exit(rec.RunKey, 0)
 	rec = h.advance("r1")
 	if rec.Failure != ReasonResultMissing {
 		t.Fatalf("marker past the read bound must be result_missing, got %+v", rec)
@@ -1034,9 +1034,83 @@ func TestResultSourceTruncationIsReported(t *testing.T) {
 	h.advance("r1")
 	// Answer fits the result limit only because the source stream was cut.
 	h.exec.stdout = []byte(strings.Repeat("b", resultPreambleBytes) + "\n>> abc" + strings.Repeat("z", 64))
-	h.exec.exit(rec.Key.Hash(), 0)
+	h.exec.exit(rec.RunKey, 0)
 	rec = h.advance("r1")
 	if rec.Result == nil || !rec.Result.Truncated {
 		t.Fatalf("source truncation must be reported, got %+v", rec.Result)
+	}
+}
+
+// Two pods on one daemon accepting the same run key use separate projects
+// and container queries; one never touches the other's worker.
+func TestTwoPodsSameKeyAreIsolated(t *testing.T) {
+	a := newHarness(t, false)
+	b := newHarness(t, false)
+	b.exec = a.exec
+	b.sup.cfg.Executor = a.exec
+	ra, _ := a.launch("same", 1, "x")
+	rb, _ := b.launch("same", 1, "x")
+	if ra.Project == rb.Project || ra.RunKey == rb.RunKey {
+		t.Fatalf("same key in two pods must not share project %q or run key", ra.Project)
+	}
+	a.advance("same")
+	b.advance("same")
+	if a.exec.count(ra.RunKey) != 1 || a.exec.count(rb.RunKey) != 1 {
+		t.Fatalf("expected one container per pod")
+	}
+	if _, err := a.sup.Cancel(context.Background(), ra.Key, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.advance("same"); got.State != StateStopped {
+		t.Fatalf("pod a run: %s", got.State)
+	}
+	if a.exec.count(rb.RunKey) != 1 {
+		t.Fatalf("cancelling pod a's run removed pod b's worker")
+	}
+	if got := b.advance("same"); got.State != StateRunning {
+		t.Fatalf("pod b run must keep running, got %s", got.State)
+	}
+}
+
+func TestFinalizeWithoutProxy(t *testing.T) {
+	h := newHarness(t, false)
+	rec, _ := h.launch("r1", 1, "x")
+	h.advance("r1")
+	if _, err := h.sup.Cancel(context.Background(), rec.Key, 1); err != nil {
+		t.Fatal(err)
+	}
+	h.rev.err = errors.New("cllama unreachable")
+	ctx := context.Background()
+	gone := func(context.Context) (bool, error) { return true, nil }
+	present := func(context.Context) (bool, error) { return false, nil }
+	// The worker is removed by teardown even without the ACK.
+	rec = h.advance("r1")
+	if rec.State != StateRevoking || h.exec.count(rec.RunKey) != 0 {
+		t.Fatalf("got %+v", rec)
+	}
+	if err := h.sup.FinalizeWithoutProxy(ctx, rec.Key, present); err == nil {
+		t.Fatalf("must refuse while the proxy is present")
+	}
+	h.exec.mu.Lock()
+	h.exec.containers[rec.RunKey] = []Container{{ID: "stray"}}
+	h.exec.mu.Unlock()
+	if err := h.sup.FinalizeWithoutProxy(ctx, rec.Key, gone); err == nil {
+		t.Fatalf("must refuse while a worker container exists")
+	}
+	h.exec.mu.Lock()
+	delete(h.exec.containers, rec.RunKey)
+	h.exec.mu.Unlock()
+	if err := h.sup.FinalizeWithoutProxy(ctx, rec.Key, gone); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := h.sup.Get(rec.Key)
+	if got.State != StateStopped || !got.Revoked || got.RevocationProof != ProofProxyStopped {
+		t.Fatalf("got %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(h.podDir, ".claw-runtime", "context", got.RunAgentID)); !os.IsNotExist(err) {
+		t.Fatalf("run context must be deleted")
+	}
+	if live, _ := HasLiveRuns(h.podDir); live {
+		t.Fatalf("a later claw up must not be blocked")
 	}
 }

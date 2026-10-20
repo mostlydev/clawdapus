@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -137,20 +138,54 @@ func (srv *Server) Listen(ctx context.Context, dir string) error {
 	for _, uid := range srv.AllowedUID {
 		allowed[uid] = struct{}{}
 	}
+	// Every handler is tracked so Listen returns only once none can still
+	// mutate state; the caller releases the pod lock after that.
+	var inflight sync.WaitGroup
+	var admission sync.Mutex
+	closing := false
+	api := srv.Handler()
+	tracked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admission.Lock()
+		if closing {
+			admission.Unlock()
+			writeError(w, apiErr(http.StatusServiceUnavailable, "shutting_down", "supervisor is shutting down"), nil)
+			return
+		}
+		inflight.Add(1)
+		admission.Unlock()
+		defer inflight.Done()
+		api.ServeHTTP(w, r)
+	})
 	hs := &http.Server{
-		Handler:           srv.Handler(),
+		Handler:           tracked,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       requestDeadline,
 		WriteTimeout:      maxWait + requestDeadline,
 		MaxHeaderBytes:    16 << 10,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
+	serveCtx, stopServe := context.WithCancel(ctx)
+	defer stopServe()
+	shutdownDone := make(chan struct{})
 	go func() {
-		<-ctx.Done()
+		defer close(shutdownDone)
+		<-serveCtx.Done()
+		admission.Lock()
+		closing = true
+		admission.Unlock()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = hs.Shutdown(shutdown)
+		if err := hs.Shutdown(shutdown); err != nil {
+			_ = hs.Close()
+		}
 	}()
 	err = hs.Serve(&peerListener{UnixListener: ln, allowed: allowed, logf: srv.Logf})
+	stopServe()
+	<-shutdownDone
+	admission.Lock()
+	closing = true
+	admission.Unlock()
+	inflight.Wait()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
@@ -352,6 +387,7 @@ type StatusView struct {
 	State              State       `json:"state"`
 	Cancelled          bool        `json:"cancelled"`
 	Revoked            bool        `json:"revoked"`
+	RevocationProof    string      `json:"revocation_proof,omitempty"`
 	ExitCode           *int        `json:"exit_code"`
 	Failure            string      `json:"failure,omitempty"`
 	Result             *ResultInfo `json:"result,omitempty"`
@@ -370,7 +406,7 @@ func statusView(rec *Record) *StatusView {
 	v := &StatusView{
 		Installation: rec.Key.Installation, RunID: rec.Key.RunID, Generation: rec.Generation,
 		SpecDigest: rec.SpecDigest, RunAgentID: rec.RunAgentID, State: rec.State, Cancelled: rec.Cancelled,
-		Revoked: rec.Revoked, Failure: rec.Failure, Result: rec.Result, Credential: rec.Credential,
+		Revoked: rec.Revoked, RevocationProof: rec.RevocationProof, Failure: rec.Failure, Result: rec.Result, Credential: rec.Credential,
 		Callbacks: rec.Callbacks, Deadline: rec.Deadline, Timestamps: rec.Timestamps, Pending: rec.LastError,
 	}
 	if rec.Spec != nil {

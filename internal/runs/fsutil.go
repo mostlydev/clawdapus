@@ -111,3 +111,30 @@ func syncDir(dir string) error {
 	}
 	return nil
 }
+
+// EnsurePrivateDir creates path as a 0700 directory, or verifies an existing
+// one is a real directory (not a symlink) owned by the current user, and
+// tightens its mode to 0700. Durable fences (the run ledger, cllama's
+// revocation ledger) must not be writable by other host users.
+func EnsurePrivateDir(path string) error {
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s must be a directory, not a symlink or file", path)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || st.Uid != uint32(os.Geteuid()) {
+		return fmt.Errorf("%s must be owned by uid %d", path, os.Geteuid())
+	}
+	if info.Mode().Perm() != 0o700 {
+		if err := os.Chmod(path, 0o700); err != nil {
+			return err
+		}
+	}
+	return nil
+}

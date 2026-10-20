@@ -2,11 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -72,12 +71,7 @@ func acquirePodRunGuard(podDir string, p *pod.Pod, refuseLiveRuns bool) (*runs.P
 // runNetworkName derives the pod's per-run network name from its absolute
 // directory, so two pods with the same name never share a worker network.
 func runNetworkName(podDir string) string {
-	abs, err := filepath.Abs(podDir)
-	if err != nil {
-		abs = podDir
-	}
-	sum := sha256.Sum256([]byte(abs))
-	return "claw-runs-" + hex.EncodeToString(sum[:6])
+	return "claw-runs-" + runs.PodNamespace(podDir)
 }
 
 // validatePerRunResolution applies checks that need the resolved claw.
@@ -176,4 +170,106 @@ func mergeResolvedWithPerRun(resolved map[string]*driver.ResolvedClaw, templates
 		out[name] = t.rc
 	}
 	return out
+}
+
+// finalizeRunsBeforeDown takes the pod run lock (refusing while `claw runs
+// serve` holds it) and cancels every unfinished run while cllama is still up,
+// so tool authority is revoked with cllama's acknowledgement. Runs whose
+// acknowledgement is unavailable are finished by the returned afterDown: once
+// Compose has removed the whole pod (proxy included) and that is verified,
+// their contexts are deleted and they end with revocation proof
+// proxy_stopped. claw down therefore always completes.
+func finalizeRunsBeforeDown(podDir, generatedPath string) (afterDown func() error, release func(), err error) {
+	noop := func() {}
+	none := func() error { return nil }
+	if _, err := os.Stat(filepath.Join(podDir, runs.StateDirName)); errors.Is(err, os.ErrNotExist) {
+		return none, noop, nil
+	}
+	lock, err := runs.AcquirePodLock(podDir)
+	if errors.Is(err, runs.ErrPodLocked) {
+		return none, noop, fmt.Errorf("`claw runs serve` is running for this pod; stop it before claw down")
+	}
+	if err != nil {
+		return none, noop, err
+	}
+	release = func() { lock.Release() }
+	live, err := runs.HasLiveRuns(podDir)
+	if err != nil {
+		release()
+		return none, noop, fmt.Errorf("per-run ledger unreadable: %w", err)
+	}
+	if !live {
+		return none, release, nil
+	}
+	exec, err := runs.NewDockerExecutor()
+	if err != nil {
+		release()
+		return none, noop, err
+	}
+	sup, err := runs.NewSupervisor(runs.Config{
+		PodDir:   podDir,
+		Executor: exec,
+		Revoker:  &runs.CllamaRevoker{PodDir: podDir},
+		Logf:     func(format string, args ...any) { fmt.Printf(format+"\n", args...) },
+	})
+	if err != nil {
+		exec.Close()
+		release()
+		return none, noop, err
+	}
+	keys, err := sup.LiveKeys()
+	if err != nil {
+		exec.Close()
+		release()
+		return none, noop, err
+	}
+	fmt.Printf("[claw] cancelling %d unfinished per-run worker(s) before down\n", len(keys))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for _, k := range keys {
+		rec, err := sup.Get(k)
+		if err != nil || rec == nil {
+			continue
+		}
+		if _, err := sup.Cancel(ctx, k, rec.Generation); err != nil {
+			exec.Close()
+			release()
+			return none, noop, fmt.Errorf("cancel run %s/%s: %w", k.Installation, k.RunID, err)
+		}
+	}
+	for ctx.Err() == nil {
+		sup.AdvanceAll(ctx)
+		if remaining, err := sup.LiveKeys(); err == nil && len(remaining) == 0 {
+			exec.Close()
+			return none, release, nil
+		}
+		time.Sleep(time.Second)
+	}
+	afterDown = func() error {
+		defer exec.Close()
+		remaining, err := sup.LiveKeys()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("[claw] %d per-run worker(s) had no cllama acknowledgement; finalizing with the pod removed\n", len(remaining))
+		proxyGone := func(ctx context.Context) (bool, error) {
+			out, err := exec2Output(ctx, "docker", "compose", "-f", generatedPath, "ps", "-a", "-q")
+			if err != nil {
+				return false, err
+			}
+			return strings.TrimSpace(out) == "", nil
+		}
+		for _, k := range remaining {
+			if err := sup.FinalizeWithoutProxy(context.Background(), k, proxyGone); err != nil {
+				return fmt.Errorf("finalize run %s/%s: %w", k.Installation, k.RunID, err)
+			}
+		}
+		return nil
+	}
+	return afterDown, release, nil
+}
+
+func exec2Output(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := osexec.CommandContext(ctx, name, args...).Output()
+	return string(out), err
 }

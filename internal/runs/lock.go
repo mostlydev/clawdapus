@@ -21,8 +21,8 @@ type PodLock struct {
 // AcquirePodLock takes the pod's exclusive run lock without blocking.
 func AcquirePodLock(podDir string) (*PodLock, error) {
 	dir := filepath.Join(podDir, StateDirName)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create %s: %w", dir, err)
+	if err := EnsurePrivateDir(dir); err != nil {
+		return nil, fmt.Errorf("run state dir: %w", err)
 	}
 	f, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
