@@ -46,3 +46,17 @@ func TestSummarizeDoesNotCountDispatchRecordsAsToolCalls(t *testing.T) {
 		t.Fatalf("tool_dispatch must not inflate tool call counts, got %d", s.ToolCalls)
 	}
 }
+
+func TestRevocationGenerationIsExactForLargeValues(t *testing.T) {
+	for _, gen := range []string{"9007199254740993", "18446744073709551615"} {
+		line := `{"ts":"2026-10-20T10:00:01Z","claw_id":"w","type":"revocation","revocation_generation":` + gen + `,"admitted_before_revoke":0,"refused_after_revoke":0}`
+		event, err := NormalizeLine([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(event)
+		if !strings.Contains(string(raw), `"revocation_generation":`+gen) {
+			t.Fatalf("generation %s not preserved: %s", gen, raw)
+		}
+	}
+}
