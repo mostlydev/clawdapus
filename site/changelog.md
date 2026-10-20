@@ -41,7 +41,7 @@ outline: deep
   - Optional credential custody drives a start/heartbeat/end callback contract against a configured origin.
   - `claw up` and `claw down` share the supervisor's pod lock. `claw down` can recover from an unavailable proxy through verified full-pod termination.
   - PicoClaw only in v1, with the one-shot contract pinned on v0.2.7. See the [per-run workers guide](/guide/per-run-workers).
-  - **Requires** the cllama revocation fence ([cllama#54](https://github.com/mostlydev/cllama/issues/54)). It ships in the next cllama release and must be pinned before this feature is usable from a release build.
+  - **cllama moves to [v0.11.0](https://github.com/mostlydev/cllama/releases/tag/v0.11.0)**: the durable revocation fence ([cllama#54](https://github.com/mostlydev/cllama/issues/54)) on both listeners, content-free dispatch audit, and the managed duplicate-failure retry fix.
 - **`claw audit` keeps cllama revocation evidence**: `tool_dispatch` and `revocation` events retain `dispatch_id`, `dispatch_status`, `revocation_generation`, `admitted_before_revoke` and `refused_after_revoke` as exact integers. Dispatch records do not count as tool calls.
 
 ## v0.28.1 <Badge type="tip" text="Latest" /> {#v0-28-1}
