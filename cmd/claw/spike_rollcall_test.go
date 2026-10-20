@@ -114,6 +114,8 @@ func TestSpikeRollCall(t *testing.T) {
 		{"hermes:latest", "Dockerfile", filepath.Join(repoRoot, "dockerfiles", "hermes-base"), false},
 		// Memory stub — shared infrastructure service used by capability-wave agents.
 		{"rollcall-memory-stub:latest", "Dockerfile", filepath.Join(repoRoot, "testdata", "memory-stub"), false},
+		// The pod's mem-svc uses the reference memory service.
+		{"rollcall-reference-memory:latest", "Dockerfile", filepath.Join(repoRoot, "examples", "reference-memory"), true},
 	}
 	for _, b := range baseImages {
 		if b.alwaysRebuild || !spikeImageExists(b.tag) {
