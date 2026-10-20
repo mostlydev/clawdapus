@@ -89,6 +89,11 @@ func GenerateConfig(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, err
 		if err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
 		}
+		if len(rc.Cllama) > 0 && isGovernedModelPath(path) {
+			// The proxy is the routing and credential boundary; a CONFIGURE
+			// that rewrites it would silently bypass governance.
+			return nil, fmt.Errorf("config generation: CONFIGURE %q conflicts with cllama-governed model routing; remove the directive, or remove cllama to route directly", path)
+		}
 		if err := shared.SetPath(config, path, value); err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
 		}
@@ -168,6 +173,22 @@ func GenerateEnvFile(rc *driver.ResolvedClaw, modelCfg *modelConfig) ([]byte, er
 		if _, set := env[hermesDiscordReplyMentionEnv]; !set {
 			env[hermesDiscordReplyMentionEnv] = "false"
 		}
+	}
+	if hasDiscordHandle(rc) {
+		// Hermes v0.22 denies every Discord message unless an allowlist is
+		// set. Absent an operator allowlist, admit exactly the channels the
+		// HANDLE declares; this gate also applies to permitted bots.
+		explicit, err := hasExplicitDiscordAllowlist(rc)
+		if err != nil {
+			return nil, err
+		}
+		if channels := discordHandleChannelIDs(rc); !explicit && len(channels) > 0 {
+			env["DISCORD_ALLOWED_CHANNELS"] = strings.Join(channels, ",")
+		}
+		// Default: no slash-command sync, so startup never blocks on Discord's
+		// command API and pods expose no slash commands. An operator
+		// DISCORD_COMMAND_SYNC_POLICY (passthrough below) wins.
+		env["DISCORD_COMMAND_SYNC_POLICY"] = "off"
 	}
 	if disabled := resolveDisabledHermesTools(rc); len(disabled) > 0 {
 		env[clawdapusDisabledToolsEnv] = strings.Join(disabled, ",")
@@ -368,8 +389,12 @@ func allowedEnvPassthroughKeys() []string {
 		"ANTHROPIC_TOKEN",
 		"CLAW_API_TOKEN",
 		"CLAW_API_URL",
+		"DISCORD_ALLOW_ALL_USERS",
 		"DISCORD_ALLOW_BOTS",
+		"DISCORD_ALLOWED_CHANNELS",
+		"DISCORD_ALLOWED_ROLES",
 		"DISCORD_ALLOWED_USERS",
+		"DISCORD_COMMAND_SYNC_POLICY",
 		hermesDiscordReplyMentionEnv,
 		"DISCORD_AUTO_THREAD",
 		"DISCORD_BOT_TOKEN",
@@ -488,4 +513,76 @@ func dotenvValue(value string) string {
 		return strconv.Quote(value)
 	}
 	return value
+}
+
+// discordAllowlistKeys are operator allowlists that replace the derived
+// channel allowlist.
+var discordAllowlistKeys = []string{
+	"DISCORD_ALLOWED_USERS", "DISCORD_ALLOWED_ROLES", "DISCORD_ALLOWED_CHANNELS",
+	"DISCORD_ALLOW_ALL_USERS", "GATEWAY_ALLOWED_USERS", "GATEWAY_ALLOW_ALL_USERS",
+}
+
+func hasExplicitDiscordAllowlist(rc *driver.ResolvedClaw) (bool, error) {
+	for _, key := range discordAllowlistKeys {
+		value, err := resolvedEnvValue(rc, key)
+		if err != nil {
+			return false, err
+		}
+		value = strings.TrimSpace(value)
+		if strings.HasSuffix(key, "_ALLOW_ALL_USERS") {
+			// Only an enabled grant replaces the derived allowlist; an explicit
+			// false must not leave the runner denying everything.
+			switch strings.ToLower(value) {
+			case "1", "true", "yes", "on":
+				return true, nil
+			}
+			continue
+		}
+		if value != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// discordHandleChannelIDs returns the sorted channel IDs declared under the
+// Discord HANDLE's guilds.
+func discordHandleChannelIDs(rc *driver.ResolvedClaw) []string {
+	seen := map[string]struct{}{}
+	for platform, h := range rc.Handles {
+		if !strings.EqualFold(strings.TrimSpace(platform), "discord") || h == nil {
+			continue
+		}
+		for _, g := range h.Guilds {
+			for _, c := range g.Channels {
+				if id := strings.TrimSpace(c.ID); id != "" {
+					seen[id] = struct{}{}
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// isGovernedModelPath reports config paths that select the model provider,
+// endpoint or credentials, or add alternative providers.
+func isGovernedModelPath(path string) bool {
+	path = strings.ToLower(strings.TrimSpace(path))
+	// Sections of the v0.22 config that carry a provider, endpoint or key.
+	for _, prefix := range []string{
+		"model.provider", "model.base_url", "model.api_key", "model.api_mode",
+		"providers", "custom_providers", "fallback", "fallback_providers", "fallback_model",
+		"credential_pool_strategies", "openrouter", "bedrock", "auxiliary", "delegation",
+		"moa", "model_overrides",
+	} {
+		if path == prefix || strings.HasPrefix(path, prefix+".") {
+			return true
+		}
+	}
+	return false
 }

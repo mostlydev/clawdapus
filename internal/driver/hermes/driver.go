@@ -41,6 +41,13 @@ func (d *Driver) Validate(rc *driver.ResolvedClaw) error {
 			if !hasServiceEnvValue(rc.Environment, "DISCORD_BOT_TOKEN") {
 				return fmt.Errorf("hermes driver: HANDLE discord requires DISCORD_BOT_TOKEN in service environment")
 			}
+			explicit, err := hasExplicitDiscordAllowlist(rc)
+			if err != nil {
+				return fmt.Errorf("hermes driver: %w", err)
+			}
+			if !explicit && len(discordHandleChannelIDs(rc)) == 0 {
+				return fmt.Errorf("hermes driver: HANDLE discord admits no channels; Hermes denies Discord messages without an allowlist. Declare channels under the handle's guilds, or set DISCORD_ALLOWED_USERS, DISCORD_ALLOWED_ROLES or DISCORD_ALLOWED_CHANNELS (DISCORD_ALLOW_ALL_USERS=true for open access)")
+			}
 		case "telegram":
 			supported++
 			if !hasServiceEnvValue(rc.Environment, "TELEGRAM_BOT_TOKEN") {
@@ -133,16 +140,6 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	}
 	if _, err := WriteEffectiveAgents(workspaceDir, rc.AgentHostPath, clawdapusMD); err != nil {
 		return nil, fmt.Errorf("hermes driver: %w", err)
-	}
-
-	if len(rc.Invocations) > 0 {
-		jobsData, err := GenerateJobsJSON(rc)
-		if err != nil {
-			return nil, fmt.Errorf("hermes driver: generate jobs.json: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(homeDir, "cron", "jobs.json"), jobsData, 0o644); err != nil {
-			return nil, fmt.Errorf("hermes driver: write jobs.json: %w", err)
-		}
 	}
 
 	mounts := []driver.Mount{
@@ -293,6 +290,18 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		},
 		Environment: env,
 	}, nil
+}
+
+// Scheduled Hermes turns are owned by claw-api's compiled schedule: the
+// baked claw-hermes-wake helper runs one bounded, fresh-session turn per
+// fire. Hermes' native cron no longer runs disabled jobs (v0.22), so no
+// native job store is seeded.
+const defaultInvocationTimeoutSeconds = 300
+
+func (d *Driver) WakeHelper() string { return "/usr/local/bin/claw-hermes-wake" }
+
+func (d *Driver) InvocationTimeoutSeconds(*driver.ResolvedClaw) (int, error) {
+	return defaultInvocationTimeoutSeconds, nil
 }
 
 func (d *Driver) PostApply(rc *driver.ResolvedClaw, opts driver.PostApplyOpts) error {

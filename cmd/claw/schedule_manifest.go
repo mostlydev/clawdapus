@@ -139,15 +139,6 @@ func resolveWakeAdapter(rc *driver.ResolvedClaw, target string, inv driver.Invoc
 	clawType := rc.ClawType
 	nativeID := strings.TrimSpace(inv.ID)
 	switch strings.TrimSpace(clawType) {
-	case "hermes":
-		if nativeID == "" {
-			return schedule.Wake{}, fmt.Errorf("missing native invocation id")
-		}
-		return schedule.Wake{
-			Adapter: "hermes-exec",
-			Target:  target,
-			Command: []string{"hermes", "cron", "run", nativeID},
-		}, nil
 	case "nanobot":
 		if nativeID == "" {
 			return schedule.Wake{}, fmt.Errorf("missing native invocation id")

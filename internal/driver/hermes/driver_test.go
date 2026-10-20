@@ -44,7 +44,7 @@ func TestValidateRequiresAgentPath(t *testing.T) {
 func TestValidateRejectsUnsupportedHandle(t *testing.T) {
 	rc, _ := newTestRC(t)
 	rc.Handles = map[string]*driver.HandleInfo{
-		"discord": {},
+		"discord": {Guilds: []driver.GuildInfo{{ID: "g1", Channels: []driver.ChannelInfo{{ID: "c1"}}}}},
 		"signal":  {},
 	}
 
@@ -168,8 +168,10 @@ func TestMaterializeWritesRuntimeLayout(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(runtimeDir, "hermes-home", ".env")); err != nil {
 		t.Fatalf("expected .env: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(runtimeDir, "hermes-home", "cron", "jobs.json")); err != nil {
-		t.Fatalf("expected jobs.json: %v", err)
+	// Scheduled turns are compiled into claw-api's schedule; Hermes' native
+	// cron store is never seeded.
+	if _, err := os.Stat(filepath.Join(runtimeDir, "hermes-home", "cron", "jobs.json")); !os.IsNotExist(err) {
+		t.Fatalf("jobs.json must not be generated: %v", err)
 	}
 	agentsData, err := os.ReadFile(filepath.Join(runtimeDir, "workspace", "AGENTS.md"))
 	if err != nil {
@@ -716,7 +718,7 @@ func newTestRC(t *testing.T) (*driver.ResolvedClaw, string) {
 		AgentHostPath: agentPath,
 		Models:        map[string]string{"primary": "openrouter/anthropic/claude-sonnet-4"},
 		Handles: map[string]*driver.HandleInfo{
-			"discord": {},
+			"discord": {Guilds: []driver.GuildInfo{{ID: "g1", Channels: []driver.ChannelInfo{{ID: "c1"}}}}},
 		},
 		Environment: map[string]string{
 			"DISCORD_BOT_TOKEN":  "discord-token",
@@ -725,4 +727,81 @@ func newTestRC(t *testing.T) (*driver.ResolvedClaw, string) {
 			"SLACK_APP_TOKEN":    "slack-app",
 		},
 	}, tmp
+}
+
+func TestHermesIsDirectTurnWaker(t *testing.T) {
+	var d any = &Driver{}
+	w, ok := d.(driver.DirectTurnWaker)
+	if !ok {
+		t.Fatal("hermes driver must implement DirectTurnWaker")
+	}
+	if w.WakeHelper() != "/usr/local/bin/claw-hermes-wake" {
+		t.Fatalf("helper = %q", w.WakeHelper())
+	}
+	if n, err := w.InvocationTimeoutSeconds(&driver.ResolvedClaw{}); err != nil || n != 300 {
+		t.Fatalf("timeout = %d, %v", n, err)
+	}
+}
+
+func TestValidateRequiresDiscordAllowlist(t *testing.T) {
+	rc, _ := newTestRC(t)
+	rc.Handles = map[string]*driver.HandleInfo{"discord": {}}
+	if err := (&Driver{}).Validate(rc); err == nil || !strings.Contains(err.Error(), "admits no channels") {
+		t.Fatalf("a Discord handle with no channels and no allowlist must fail closed, got %v", err)
+	}
+	rc.Environment["DISCORD_ALLOWED_USERS"] = "42"
+	if err := (&Driver{}).Validate(rc); err != nil {
+		t.Fatalf("an explicit user allowlist must be accepted: %v", err)
+	}
+}
+
+func TestEnvDerivesDiscordChannelAllowlist(t *testing.T) {
+	rc, _ := newTestRC(t)
+	rc.Handles["discord"] = &driver.HandleInfo{Guilds: []driver.GuildInfo{
+		{ID: "g1", Channels: []driver.ChannelInfo{{ID: "c2"}, {ID: "c1"}}},
+		{ID: "g2", Channels: []driver.ChannelInfo{{ID: "c1"}}},
+	}}
+	modelCfg, err := resolveModelConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := GenerateEnvFile(rc, modelCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(env)
+	if !strings.Contains(text, "DISCORD_ALLOWED_CHANNELS=c1,c2\n") || !strings.Contains(text, "DISCORD_COMMAND_SYNC_POLICY=off\n") {
+		t.Fatalf("env missing derived allowlist or sync policy:\n%s", text)
+	}
+	if strings.Contains(text, "ALLOW_ALL_USERS") {
+		t.Fatalf("no open-access default may be emitted:\n%s", text)
+	}
+	rc.Environment["DISCORD_ALLOWED_ROLES"] = "r1"
+	env, _ = GenerateEnvFile(rc, modelCfg)
+	if strings.Contains(string(env), "DISCORD_ALLOWED_CHANNELS=") || !strings.Contains(string(env), "DISCORD_ALLOWED_ROLES=r1") {
+		t.Fatalf("an operator allowlist must replace the derived channels:\n%s", env)
+	}
+}
+
+func TestDiscordAllowAllOnlyCountsWhenEnabled(t *testing.T) {
+	for value, want := range map[string]bool{"false": false, "0": false, "no": false, "true": true, "1": true, "ON": true} {
+		rc, _ := newTestRC(t)
+		rc.Environment["DISCORD_ALLOW_ALL_USERS"] = value
+		got, err := hasExplicitDiscordAllowlist(rc)
+		if err != nil || got != want {
+			t.Fatalf("DISCORD_ALLOW_ALL_USERS=%s: explicit=%v want %v (err %v)", value, got, want, err)
+		}
+	}
+	rc, _ := newTestRC(t)
+	rc.Environment["DISCORD_ALLOW_ALL_USERS"] = "false"
+	modelCfg, _ := resolveModelConfig(rc)
+	env, _ := GenerateEnvFile(rc, modelCfg)
+	if !strings.Contains(string(env), "DISCORD_ALLOWED_CHANNELS=c1\n") {
+		t.Fatalf("an explicit false must keep the derived channel allowlist:\n%s", env)
+	}
+	rc.Environment["DISCORD_COMMAND_SYNC_POLICY"] = "safe"
+	env, _ = GenerateEnvFile(rc, modelCfg)
+	if !strings.Contains(string(env), "DISCORD_COMMAND_SYNC_POLICY=safe\n") {
+		t.Fatalf("operator sync policy must win:\n%s", env)
+	}
 }

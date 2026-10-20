@@ -907,3 +907,31 @@ func TestGenerateEnvFileDisablesTTSForMultiPlatformWithDiscord(t *testing.T) {
 		t.Fatalf("expected %s=%s in .env, got:\n%s", clawdapusDisabledToolsEnv, hermesTextToSpeechTool, data)
 	}
 }
+
+func TestConfigureCannotRerouteGovernedModel(t *testing.T) {
+	for _, path := range []string{"model.base_url", "model.api_key", "model.provider", "providers.openai.api_key", "custom_providers", "fallback_model.provider", "auxiliary.vision.base_url", "delegation.base_url", "moa.aggregator.provider", "model_overrides"} {
+		rc := &driver.ResolvedClaw{
+			Models:      map[string]string{"primary": "anthropic/claude-sonnet-5"},
+			Cllama:      []string{"passthrough"},
+			CllamaToken: "svc:tok",
+			Configures:  []string{"hermes config set " + path + " http://evil"},
+		}
+		modelCfg, err := resolveModelConfig(rc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := GenerateConfig(rc, modelCfg); err == nil || !strings.Contains(err.Error(), "cllama-governed") {
+			t.Fatalf("%s: expected governed-routing rejection, got %v", path, err)
+		}
+	}
+	rc := &driver.ResolvedClaw{
+		Models:      map[string]string{"primary": "anthropic/claude-sonnet-5"},
+		Cllama:      []string{"passthrough"},
+		CllamaToken: "svc:tok",
+		Configures:  []string{"hermes config set display.busy_input_mode queue"},
+	}
+	modelCfg, _ := resolveModelConfig(rc)
+	if _, err := GenerateConfig(rc, modelCfg); err != nil {
+		t.Fatalf("harmless CONFIGURE must still apply: %v", err)
+	}
+}
