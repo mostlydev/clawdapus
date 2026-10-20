@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -130,10 +131,18 @@ type Record struct {
 	LastError          string      `json:"last_error,omitempty"`
 }
 
-// Callbacks records lifecycle callback acknowledgement.
+// End callback outcomes. Only EndAcked means the orchestrator acknowledged.
+const (
+	EndAcked     = "acked"
+	EndRejected  = "rejected"  // 401/403: the orchestrator's authority ended
+	EndAbandoned = "abandoned" // undeliverable before authority expired
+	EndSkipped   = "skipped"   // no credential held, or the run was cancelled
+)
+
+// Callbacks records lifecycle callback delivery.
 type Callbacks struct {
 	Started       bool       `json:"started"`
-	Ended         bool       `json:"ended"`
+	End           string     `json:"end,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 }
 
@@ -198,8 +207,14 @@ func (l *Ledger) All() ([]*Record, error) {
 	var out []*Record
 	for _, e := range entries {
 		name := e.Name()
-		if !e.Type().IsRegular() || !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, ".") {
+		if strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".cllama") || strings.HasSuffix(name, ".credential") || strings.HasSuffix(name, ".tombstone") {
+			// Atomic-write temp files and 0600 secret files.
 			continue
+		}
+		if !strings.HasSuffix(name, ".json") || !e.Type().IsRegular() {
+			// Anything else in the ledger dir is unexpected; never let a
+			// replaced or foreign entry silently drop a live run.
+			return nil, fmt.Errorf("ledger entry %s is not a regular run record", name)
 		}
 		var rec Record
 		if err := readJSONFile(filepath.Join(l.dir, name), &rec); err != nil {
@@ -258,4 +273,48 @@ func (l *Ledger) DeleteSecret(k Key, kind string) error {
 		return nil
 	}
 	return err
+}
+
+// PutTombstone durably records a cancel. It never lowers a recorded
+// generation. Tombstones are written without the run's key lock so a cancel
+// is never delayed behind a slow lifecycle operation.
+func (l *Ledger) PutTombstone(k Key, generation uint64) error {
+	if old, ok, err := l.Tombstone(k); err != nil {
+		return err
+	} else if ok && old >= generation {
+		return nil
+	}
+	return writeFileAtomic(l.secretPath(k, "tombstone"), []byte(strconv.FormatUint(generation, 10)), 0o600)
+}
+
+// Tombstone reports whether k was cancelled, and at which generation.
+func (l *Ledger) Tombstone(k Key) (uint64, bool, error) {
+	raw, err := readRegularFile(l.secretPath(k, "tombstone"), 32)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	gen, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 64)
+	if err != nil || gen == 0 {
+		return 0, false, fmt.Errorf("tombstone for %s is corrupt", k.Hash())
+	}
+	return gen, true, nil
+}
+
+// Tombstoned lists keys hashes with a tombstone but no record.
+func (l *Ledger) orphanTombstones() ([]string, error) {
+	entries, err := os.ReadDir(l.dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasSuffix(name, ".tombstone") && !strings.HasPrefix(name, ".") {
+			out = append(out, strings.TrimSuffix(name, ".tombstone"))
+		}
+	}
+	return out, nil
 }

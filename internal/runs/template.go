@@ -61,9 +61,12 @@ type Template struct {
 	CllamaURL    string `json:"cllama_url"`
 	CllamaAPIURL string `json:"cllama_api_url"`
 	// ToolsGrant is the sorted set of managed tool names a run may enable.
-	ToolsGrant []string             `json:"tools_grant"`
-	Limits     Limits               `json:"limits"`
-	Worker     driver.RunWorkerSpec `json:"worker"`
+	ToolsGrant []string `json:"tools_grant"`
+	// ContextDigest binds the cllama context (tools, models, policy, rules,
+	// with credentials redacted) into the template identity.
+	ContextDigest string               `json:"context_digest"`
+	Limits        Limits               `json:"limits"`
+	Worker        driver.RunWorkerSpec `json:"worker"`
 }
 
 // computeID digests every field except the ID itself.
@@ -83,6 +86,52 @@ func (t *Template) computeID() (string, error) {
 // worker. Each run receives a copy with its own identity and allowlist.
 type ContextTemplate struct {
 	Input cllama.AgentContextInput `json:"input"`
+}
+
+// digest hashes the context with every credential value redacted, so token
+// rotation does not change the template identity but any change to tools,
+// endpoints, models, policy or rules does.
+func (c *ContextTemplate) digest() (string, error) {
+	in := c.Input
+	in.Metadata = make(map[string]interface{}, len(c.Input.Metadata))
+	for k, v := range c.Input.Metadata {
+		if k != "token" {
+			in.Metadata[k] = v
+		}
+	}
+	in.Tools = append([]cllama.ToolManifestEntry(nil), c.Input.Tools...)
+	for i := range in.Tools {
+		if a := in.Tools[i].Execution.Auth; a != nil {
+			redacted := *a
+			redacted.Token = ""
+			in.Tools[i].Execution.Auth = &redacted
+		}
+	}
+	in.Feeds = append([]cllama.FeedManifestEntry(nil), c.Input.Feeds...)
+	for i := range in.Feeds {
+		if in.Feeds[i].Auth != "" {
+			in.Feeds[i].Auth = "redacted"
+		}
+	}
+	in.ServiceAuth = append([]cllama.ServiceAuthEntry(nil), c.Input.ServiceAuth...)
+	for i := range in.ServiceAuth {
+		in.ServiceAuth[i].Token = ""
+	}
+	if in.Memory != nil {
+		m := *in.Memory
+		if m.Auth != nil {
+			redacted := *m.Auth
+			redacted.Token = ""
+			m.Auth = &redacted
+		}
+		in.Memory = &m
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 // TemplateDir returns the pod's template directory.
@@ -105,6 +154,15 @@ func WriteTemplates(podDir string, templates []*Template, contexts map[string]*C
 	for _, tpl := range templates {
 		tpl.Version = templateVersion
 		sort.Strings(tpl.ToolsGrant)
+		ctx := contexts[tpl.Name]
+		if ctx == nil {
+			return fmt.Errorf("template %q: missing cllama context", tpl.Name)
+		}
+		digest, err := ctx.digest()
+		if err != nil {
+			return fmt.Errorf("template %q: context digest: %w", tpl.Name, err)
+		}
+		tpl.ContextDigest = digest
 		id, err := tpl.computeID()
 		if err != nil {
 			return fmt.Errorf("template %q: digest: %w", tpl.Name, err)
@@ -112,10 +170,6 @@ func WriteTemplates(podDir string, templates []*Template, contexts map[string]*C
 		tpl.ID = id
 		if err := writeJSONFile(filepath.Join(stage, tpl.Name+".json"), tpl); err != nil {
 			return fmt.Errorf("template %q: %w", tpl.Name, err)
-		}
-		ctx := contexts[tpl.Name]
-		if ctx == nil {
-			return fmt.Errorf("template %q: missing cllama context", tpl.Name)
 		}
 		if err := writeJSONFile(filepath.Join(stage, tpl.Name+".context.json"), ctx); err != nil {
 			return fmt.Errorf("template %q: context: %w", tpl.Name, err)
@@ -160,6 +214,13 @@ func LoadTemplate(podDir, name string) (*Template, *ContextTemplate, error) {
 	var ctx ContextTemplate
 	if err := readJSONFile(filepath.Join(dir, name+".context.json"), &ctx); err != nil {
 		return nil, nil, err
+	}
+	ctxDigest, err := ctx.digest()
+	if err != nil {
+		return nil, nil, err
+	}
+	if ctxDigest != tpl.ContextDigest {
+		return nil, nil, fmt.Errorf("template %q: context digest mismatch; rerun claw up", name)
 	}
 	return &tpl, &ctx, nil
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"syscall"
 )
 
 const maxStateFileBytes = 8 << 20
@@ -55,9 +56,20 @@ func writeJSONFile(path string, v any) error {
 	return writeFileAtomic(path, append(raw, '\n'), 0o600)
 }
 
-// readRegularFile refuses symlinks and oversized files.
+// readRegularFile refuses symlinks, FIFOs and other non-regular files, and
+// oversized files. The open itself refuses a final-component symlink and never
+// blocks, and the checks run on the opened descriptor, so a swap between check
+// and open cannot redirect the read.
 func readRegularFile(path string, limit int64) ([]byte, error) {
-	info, err := os.Lstat(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			return nil, fmt.Errorf("%s is a symlink", path)
+		}
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
@@ -67,11 +79,6 @@ func readRegularFile(path string, limit int64) ([]byte, error) {
 	if info.Size() > limit {
 		return nil, fmt.Errorf("%s exceeds %d bytes", path, limit)
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
 	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
