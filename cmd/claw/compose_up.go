@@ -426,6 +426,9 @@ func runComposeUp(podFile string) (err error) {
 			if err != nil {
 				return err
 			}
+			if err := rejectImageVolumes(name, imageRef); err != nil {
+				return err
+			}
 			// Bind the template to the exact image validated here; a moved
 			// tag before templates are written is refused, not followed.
 			imageID, _ := discoveryImageIdentity(context.Background(), imageRef)

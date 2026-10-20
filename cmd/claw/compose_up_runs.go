@@ -95,6 +95,21 @@ func validatePerRunResolution(name string, rc *driver.ResolvedClaw, d driver.Dri
 	return compiler, nil
 }
 
+// rejectImageVolumes refuses images that declare VOLUME: Docker would give
+// every worker an anonymous writable volume, breaking the tmpfs-only worker
+// contract and outliving the run.
+func rejectImageVolumes(name, imageRef string) error {
+	out, err := osexec.Command("docker", "image", "inspect", "--format", "{{json .Config.Volumes}}", imageRef).Output()
+	if err != nil {
+		return fmt.Errorf("service %q: inspect image volumes: %w", name, err)
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw != "" && raw != "null" && raw != "{}" {
+		return fmt.Errorf("service %q: image %q declares VOLUME %s; per-run workers write only tmpfs (rebuild without VOLUME)", name, imageRef, raw)
+	}
+	return nil
+}
+
 // writePerRunTemplates compiles and installs every per-run template. It runs
 // only after the pod applied successfully, under the pod run lock.
 func writePerRunTemplates(podDir string, p *pod.Pod, templates map[string]*perRunTemplate, proxyType, dashboardPort string) error {

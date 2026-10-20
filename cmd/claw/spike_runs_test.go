@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -191,10 +192,13 @@ services:
 	}
 	runsSpikeAssertNoContainers(t, runs.Key{Installation: "inst", RunID: "c"}.RunKey(runs.PodNamespace(workDir)))
 
-	// 4. A lost ACK and a duplicate launch give exactly one container.
-	runsSpikeLaunch(t, client, "d", 1, "SLOW dup", 20*time.Minute, "")
-	runsSpikeLaunch(t, client, "d", 1, "SLOW dup", 20*time.Minute, "")
+	// 4. A lost ACK and a duplicate launch give exactly one container. The
+	// first launch is sent over a raw authenticated connection whose response
+	// is never read.
+	runsSpikeLaunchUnread(t, sockDir, "d", "SLOW dup")
 	view = runsSpikeWait(t, client, "d", "running")
+	runsSpikeLaunch(t, client, "d", 1, "SLOW dup", 20*time.Minute, "")
+	runsSpikeAssertIsolation(t, view, tpl.RunNetwork)
 	runsSpikeLaunch(t, client, "d", 1, "SLOW dup", 20*time.Minute, "")
 	if n := runsSpikeContainerCount(t, view); n != 1 {
 		t.Fatalf("case 4: expected exactly one container, got %d", n)
@@ -236,7 +240,8 @@ services:
 	}
 	runsSpikeAssertNoWorker(t, view)
 
-	// 9. Credential recovery after a crash gives no duplicate worker.
+	// 9. Credential recovery: the custody file is lost across a supervisor
+	// restart; a reissue under the same run identity gives no duplicate.
 	runsSpikeLaunch(t, client, "f", 1, "SLOW custody", 20*time.Minute, "cred-old")
 	view = runsSpikeWait(t, client, "f", "running")
 	runsSpikeWaitCallback(t, cb, "f", "start", "cred-old")
@@ -554,4 +559,104 @@ func spikeRunsCleanup(podDir, generatedPath string) {
 	}
 	_ = exec.Command("docker", "compose", "-f", generatedPath, "down", "-v", "--remove-orphans").Run()
 	_ = exec.Command("docker", "network", "rm", "claw-runs-"+ns).Run()
+}
+
+// runsSpikeLaunchUnread sends a launch and closes the connection without
+// reading the response, as an orchestrator whose ACK was lost would.
+func runsSpikeLaunchUnread(t *testing.T, sockDir, runID, task string) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{"template": "worker", "task": task, "tools": []string{}})
+	_, _, digest, _ := runs.CanonicalSpec(raw)
+	body, _ := json.Marshal(map[string]any{"installation": "inst", "run_id": runID, "generation": 1, "spec_digest": digest,
+		"spec": json.RawMessage(raw), "authority_expires_at": time.Now().Add(20 * time.Minute)})
+	conn, err := net.Dial("unix", filepath.Join(sockDir, runs.SocketName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(conn, "POST /v1/runs HTTP/1.1\r\nHost: claw-runs\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
+	time.Sleep(500 * time.Millisecond)
+	conn.Close()
+}
+
+// runsSpikeAssertIsolation inspects a live worker container.
+func runsSpikeAssertIsolation(t *testing.T, view runs.StatusView, runNetwork string) {
+	t.Helper()
+	ids := runsSpikeContainers(t, runsSpikeRunKey(t, view))
+	if len(ids) != 1 {
+		t.Fatalf("expected one worker, got %v", ids)
+	}
+	out, err := exec.Command("docker", "inspect", ids[0]).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info []struct {
+		Config struct {
+			User string
+		}
+		HostConfig struct {
+			ReadonlyRootfs bool
+			CapDrop        []string
+			SecurityOpt    []string
+			PidMode        string
+			Privileged     bool
+			Binds          []string
+		}
+		Mounts          []struct{ Type, Source string }
+		NetworkSettings struct {
+			Networks map[string]any
+		}
+	}
+	if err := json.Unmarshal(out, &info); err != nil || len(info) != 1 {
+		t.Fatalf("inspect: %v", err)
+	}
+	c := info[0]
+	if c.Config.User != "65534:65534" || !c.HostConfig.ReadonlyRootfs || c.HostConfig.Privileged || c.HostConfig.PidMode == "host" {
+		t.Fatalf("worker isolation: user=%q ro=%v priv=%v pid=%q", c.Config.User, c.HostConfig.ReadonlyRootfs, c.HostConfig.Privileged, c.HostConfig.PidMode)
+	}
+	if strings.Join(c.HostConfig.CapDrop, ",") != "ALL" || !strings.Contains(strings.Join(c.HostConfig.SecurityOpt, ","), "no-new-privileges") {
+		t.Fatalf("worker caps/security: %v %v", c.HostConfig.CapDrop, c.HostConfig.SecurityOpt)
+	}
+	if len(c.Mounts) != 0 || len(c.HostConfig.Binds) != 0 {
+		t.Fatalf("worker must have no mounts or binds: %+v %v", c.Mounts, c.HostConfig.Binds)
+	}
+	if len(c.NetworkSettings.Networks) != 1 || c.NetworkSettings.Networks[runNetwork] == nil {
+		t.Fatalf("worker must be on exactly %s: %v", runNetwork, c.NetworkSettings.Networks)
+	}
+}
+
+// TestSpikePerRunRejectsImageVolumes proves an image VOLUME fails closed at
+// claw up instead of giving workers anonymous writable volumes.
+func TestSpikePerRunRejectsImageVolumes(t *testing.T) {
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		t.Skipf("docker not available: %v", err)
+	}
+	workDir := t.TempDir()
+	spikeEnsurePulledImage(t, "docker.io/sipeed/picoclaw:v0.2.7")
+	image := fmt.Sprintf("claw-runs-volume-spike:%d", time.Now().UnixNano())
+	_ = os.MkdirAll(filepath.Join(workDir, "img"), 0o755)
+	spikeWriteFile(t, filepath.Join(workDir, "img", "Dockerfile"), "FROM docker.io/sipeed/picoclaw:v0.2.7\nLABEL claw.type=picoclaw\nVOLUME /data\n")
+	spikeBuildImage(t, filepath.Join(workDir, "img"), image, "Dockerfile")
+	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "-f", image).Run() })
+	spikeWriteFile(t, filepath.Join(workDir, "AGENTS.md"), "# w")
+	spikeWriteFile(t, filepath.Join(workDir, "claw-pod.yml"), fmt.Sprintf(`name: runs-volume-spike
+x-claw:
+  pod: runs-volume-spike
+  cllama-defaults:
+    proxy: [passthrough]
+  models-defaults:
+    primary: openai/gpt-4o
+services:
+  worker:
+    image: %s
+    x-claw:
+      agent: ./AGENTS.md
+      lifecycle: per-run
+`, image))
+	prevDetach := composeUpDetach
+	composeUpDetach = true
+	defer func() { composeUpDetach = prevDetach }()
+	err := runComposeUp(filepath.Join(workDir, "claw-pod.yml"))
+	if err == nil || !strings.Contains(err.Error(), "declares VOLUME") {
+		t.Fatalf("expected VOLUME rejection, got %v", err)
+	}
 }
