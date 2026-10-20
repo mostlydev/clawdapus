@@ -82,15 +82,7 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Fatalf("config file mode = %o, want 666", got)
 	}
 
-	cronDirInfo, err := os.Stat(filepath.Join(dir, "cron"))
-	if err != nil {
-		t.Fatalf("stat cron dir: %v", err)
-	}
-	if got := cronDirInfo.Mode().Perm(); got != 0o777 {
-		t.Fatalf("cron dir mode = %o, want 777", got)
-	}
-
-	// Result should include config mount + cron mount + agent mount.
+	// Result should include durable home + config mount + agent mount.
 	if len(result.Mounts) < 3 {
 		t.Fatalf("expected at least 3 mounts, got %d", len(result.Mounts))
 	}
@@ -134,7 +126,7 @@ func TestMaterializeWritesConfigAndReturnsResult(t *testing.T) {
 		t.Errorf("expected writable /root tmpfs %q, got %v", openclawStateTmpfs, result.Tmpfs)
 	}
 	if !tmpfsSet[openclawHomeTmpfs] {
-		t.Errorf("expected writable ~/.openclaw tmpfs %q, got %v", openclawHomeTmpfs, result.Tmpfs)
+		t.Fatal("ephemeral home must remain writable for nonroot users")
 	}
 	if tmpfsSet["/app/state"] {
 		t.Error("unexpected legacy /app/state tmpfs")
@@ -214,8 +206,17 @@ func TestMaterializeStateTmpfsCoversParentRootAndHomeWritable(t *testing.T) {
 	if !rootCovered {
 		t.Fatalf("expected a tmpfs at /root so non-root runtime users can traverse into ~/.openclaw, got %v", result.Tmpfs)
 	}
+	for _, m := range result.Mounts {
+		if m.ContainerPath == openclawHomeDir {
+			info, err := os.Stat(m.HostPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			homeCovered = info.Mode().Perm() == 0777
+		}
+	}
 	if !homeCovered {
-		t.Fatalf("expected a tmpfs at %s so non-root runtime users can create ~/.openclaw/agents, got %v", openclawHomeDir, result.Tmpfs)
+		t.Fatal("missing writable durable home for nonroot runtime")
 	}
 }
 
@@ -329,63 +330,23 @@ func TestMaterializeInlinesClawdapusContextIntoMountedContract(t *testing.T) {
 	}
 }
 
-func TestMaterializeWritesJobsUnderCronDir(t *testing.T) {
+func TestMaterializeDoesNotSeedRetiredNativeCron(t *testing.T) {
 	dir := t.TempDir()
-	agentFile := filepath.Join(dir, "AGENTS.md")
-	os.WriteFile(agentFile, []byte("# Contract"), 0644)
-
-	d := &Driver{}
-	rc := &driver.ResolvedClaw{
-		ClawType:      "openclaw",
-		Agent:         "AGENTS.md",
-		AgentHostPath: agentFile,
-		Models:        make(map[string]string),
-		Configures:    make([]string, 0),
-		ServiceName:   "testsvc",
-		Invocations: []driver.Invocation{
-			{Schedule: "15 8 * * 1-5", Message: "Morning synthesis"},
-		},
+	agent := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agent, []byte("contract"), 0644); err != nil {
+		t.Fatal(err)
 	}
-	result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: dir})
+	rc := &driver.ResolvedClaw{ServiceName: "bot", AgentHostPath: agent, Invocations: []driver.Invocation{{Schedule: "0 * * * *", Message: "tick"}}}
+	result, err := (&Driver{}).Materialize(rc, driver.MaterializeOpts{RuntimeDir: dir})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
-
-	jobsPath := filepath.Join(dir, "cron", "jobs.json")
-	if _, err := os.Stat(jobsPath); err != nil {
-		t.Fatalf("jobs.json not written at cron/jobs.json: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "cron", "jobs.json")); !os.IsNotExist(err) {
+		t.Fatalf("retired native store seeded: %v", err)
 	}
-	jobsDirInfo, err := os.Stat(filepath.Join(dir, "cron"))
-	if err != nil {
-		t.Fatalf("stat jobs dir: %v", err)
-	}
-	if got := jobsDirInfo.Mode().Perm(); got != 0o777 {
-		t.Fatalf("jobs dir mode = %o, want 777", got)
-	}
-	jobsInfo, err := os.Stat(jobsPath)
-	if err != nil {
-		t.Fatalf("stat jobs.json: %v", err)
-	}
-	if got := jobsInfo.Mode().Perm(); got != 0o666 {
-		t.Fatalf("jobs.json mode = %o, want 666", got)
-	}
-
-	var cronMount *driver.Mount
-	for i := range result.Mounts {
-		if result.Mounts[i].ContainerPath == openclawCronDir {
-			cronMount = &result.Mounts[i]
-			break
-		}
-	}
-	if cronMount == nil {
-		t.Fatalf("expected %s mount to cover cron/jobs.json", openclawCronDir)
-	}
-	if cronMount.ReadOnly {
-		t.Errorf("%s must be read-write so openclaw can update cron job state", openclawCronDir)
-	}
-	for i := range result.Mounts {
-		if result.Mounts[i].ContainerPath == "/app/state/cron" {
-			t.Fatal("unexpected legacy /app/state/cron mount")
+	for _, m := range result.Mounts {
+		if m.ContainerPath == openclawCronDir {
+			t.Fatal("rotating cron mount hides durable state")
 		}
 	}
 }

@@ -318,17 +318,25 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				serviceOut["restart"] = result.Restart
 			}
 
+			if _, explicit := serviceOut["stop_grace_period"]; !explicit && result.StopGracePeriod != "" {
+				serviceOut["stop_grace_period"] = result.StopGracePeriod
+			}
+
 			// Healthcheck: user-defined healthcheck from claw-pod.yml takes precedence
 			// over the driver default. serviceOut already contains the user's compose
 			// keys (deep-copied in the parser), so we only apply the driver healthcheck
 			// when no user override is present.
 			if _, hasUserHealthcheck := serviceOut["healthcheck"]; !hasUserHealthcheck && result.Healthcheck != nil {
-				serviceOut["healthcheck"] = map[string]interface{}{
+				healthcheck := map[string]interface{}{
 					"test":     result.Healthcheck.Test,
 					"interval": result.Healthcheck.Interval,
 					"timeout":  result.Healthcheck.Timeout,
 					"retries":  result.Healthcheck.Retries,
 				}
+				if result.Healthcheck.StartPeriod != "" {
+					healthcheck["start_period"] = result.Healthcheck.StartPeriod
+				}
+				serviceOut["healthcheck"] = healthcheck
 			}
 
 			rootServices[serviceName] = serviceOut

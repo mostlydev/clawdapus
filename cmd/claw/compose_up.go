@@ -409,6 +409,9 @@ func runComposeUp(podFile string) (err error) {
 			if strings.TrimSpace(podInv.To) != "" {
 				resolved := resolveInvocationTarget(svc.Claw.Handles, podInv.To)
 				inv.To = resolved.To
+				if platform, _, explicit := splitInvocationTarget(podInv.To); explicit {
+					inv.Channel = platform
+				}
 				if resolved.Warning != "" {
 					fmt.Printf("[claw] warning: service %q: %s\n", name, resolved.Warning)
 				}
@@ -450,6 +453,11 @@ func runComposeUp(podFile string) (err error) {
 		fmt.Printf("[claw] %s: validated (%s driver)\n", name, rc.ClawType)
 	}
 
+	if hasDirectTurnInvocations(resolvedClaws) {
+		if err := ensureResolvedScheduler(p, runtimeDir, governanceDir); err != nil {
+			return err
+		}
+	}
 	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
 	perRunNames := sortedPerRunNames(perRun)
 	if len(perRun) > 0 {
@@ -2489,7 +2497,7 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		auto = append(auto, masterPrincipal)
 	}
 
-	if hasPodInvokeEntries(p) {
+	if hasPodInvokeEntries(p) || hasDirectTurnInvocations(resolvedClaws) {
 		schedulerPrincipal, err := clawapi.BuildSchedulerPrincipal(p.Name)
 		if err != nil {
 			return nil, err
@@ -5562,4 +5570,29 @@ func init() {
 	composeUpCmd.Flags().BoolVar(&composeUpFix, "fix", false, "Pull/build missing images before starting the pod")
 	composeUpCmd.Flags().BoolVar(&composeUpDiscoverTools, "discover-tools", false, "Discover missing or stale stdio MCP tool snapshots before compiling")
 	rootCmd.AddCommand(composeUpCmd)
+}
+
+// Image-level direct-turn INVOKE definitions are known only after inspection.
+func hasDirectTurnInvocations(resolved map[string]*driver.ResolvedClaw) bool {
+	for _, rc := range resolved {
+		if _, direct := directTurnWakerFor(rc); direct && len(rc.Invocations) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func ensureResolvedScheduler(p *pod.Pod, runtimeDir, governanceDir string) error {
+	if p.ClawAPI == nil {
+		if _, exists := p.Services["claw-api"]; exists {
+			return fmt.Errorf("service name claw-api is reserved when compiled scheduling is active")
+		}
+		p.ClawAPI = &pod.ClawAPIConfig{
+			Image: preferredInfraImageRef(infraComponentClawAPI), Addr: envOrDefault("CLAW_API_ADDR", ":8080"),
+			ManifestHostPath: filepath.Join(runtimeDir, "pod-manifest.json"), PrincipalsHostPath: filepath.Join(runtimeDir, "claw-api", "principals.json"),
+			DockerSockHostPath: "/var/run/docker.sock", GovernanceHostPath: governanceDir, PodName: p.Name, Environment: collectClawAlertEnv(),
+		}
+	}
+	p.ClawAPI.ScheduleHostPath = filepath.Join(runtimeDir, "schedule.json")
+	return nil
 }

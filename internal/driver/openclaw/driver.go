@@ -84,14 +84,6 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		return nil, fmt.Errorf("openclaw driver: chmod config file: %w", err)
 	}
 
-	cronDir := filepath.Join(opts.RuntimeDir, "cron")
-	if err := os.MkdirAll(cronDir, 0777); err != nil {
-		return nil, fmt.Errorf("openclaw driver: create cron dir: %w", err)
-	}
-	if err := os.Chmod(cronDir, 0o777); err != nil {
-		return nil, fmt.Errorf("openclaw driver: chmod cron dir: %w", err)
-	}
-
 	// Generate CLAWDAPUS.md — infrastructure context for the agent
 	podName := opts.PodName
 	if podName == "" {
@@ -108,7 +100,11 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		return nil, err
 	}
 
-	mounts := []driver.Mount{
+	stateMounts, err := prepareDurableState(rc, opts)
+	if err != nil {
+		return nil, err
+	}
+	mounts := append(stateMounts, []driver.Mount{
 		{
 			// Bind-mount the directory (not the file) so openclaw can write temp files
 			// alongside the config during atomic save operations.
@@ -117,14 +113,6 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			// explicit rather than inferred from OPENCLAW_STATE_DIR.
 			HostPath:      configDir,
 			ContainerPath: openclawConfigDir,
-			ReadOnly:      false,
-		},
-		{
-			// Cron definitions and run logs live under ~/.openclaw/cron in current
-			// OpenClaw builds. Mount the whole directory so the runner can atomically
-			// rewrite jobs.json and append run history under cron/runs/.
-			HostPath:      cronDir,
-			ContainerPath: openclawCronDir,
 			ReadOnly:      false,
 		},
 		{
@@ -138,7 +126,7 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			ContainerPath: shared.PortableMemoryDir,
 			ReadOnly:      false,
 		},
-	}
+	}...)
 	if rc.PersonaHostPath != "" {
 		mounts = append(mounts, driver.Mount{
 			HostPath:      rc.PersonaHostPath,
@@ -147,23 +135,8 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		})
 	}
 
-	// Generate jobs.json if there are scheduled invocations.
-	// OpenClaw resolves its cron store under ~/.openclaw/cron/jobs.json, separate
-	// from the config directory. Keep the cron dir writable because the runtime
-	// rewrites jobs atomically and appends run history below cron/runs/.
-	if len(rc.Invocations) > 0 {
-		jobsData, err := GenerateJobsJSON(rc)
-		if err != nil {
-			return nil, fmt.Errorf("openclaw driver: generate jobs.json: %w", err)
-		}
-		jobsPath := filepath.Join(cronDir, "jobs.json")
-		if err := os.WriteFile(jobsPath, jobsData, 0o666); err != nil {
-			return nil, fmt.Errorf("openclaw driver: write jobs.json: %w", err)
-		}
-		if err := os.Chmod(jobsPath, 0o666); err != nil {
-			return nil, fmt.Errorf("openclaw driver: chmod jobs.json: %w", err)
-		}
-	}
+	// INVOKE timing belongs to the compiled claw-api schedule manifest.
+	// Current OpenClaw no longer loads the retired cron/jobs.json format.
 
 	mounts = append(mounts, driver.Mount{
 		HostPath:      clawdapusPath,
@@ -184,8 +157,16 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		env["CLAW_PERSONA_DIR"] = "/claw/persona"
 	}
 
+	timeoutSeconds, err := resolvedInvocationTimeoutSeconds(rc)
+	if err != nil {
+		return nil, err
+	}
+	if timeoutSeconds > int(^uint(0)>>1)-35 {
+		return nil, fmt.Errorf("OpenClaw timeout exceeds supported stop-grace range")
+	}
 	return &driver.MaterializeResult{
-		Mounts: mounts,
+		StopGracePeriod: fmt.Sprintf("%ds", timeoutSeconds+35),
+		Mounts:          mounts,
 		Tmpfs: []string{
 			// /claw is the runner workspace. Keep it writable so agent turns can persist
 			// workspace artifacts like SOUL.md while read-only file mounts (AGENTS.md,
@@ -197,14 +178,17 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 			// with a writable mode-1777 directory so non-root runtime users can traverse
 			// into ~/.openclaw regardless of the image-baked /root permissions.
 			openclawStateTmpfs,
+			openclawHomeTmpfs,
+			openclawHomeDir + "/agents:mode=1777,uid=0,gid=0",
+			openclawHomeDir + "/agents/main:mode=1777,uid=0,gid=0",
 			// Tmpfs at ~/.openclaw keeps the canonical state root writable after Docker
 			// creates the nested config bind mount at ~/.openclaw/config.
-			openclawHomeTmpfs,
 		},
 		ReadOnly: true,
 		Restart:  "on-failure",
 		SkillDir: "/claw/skills",
 		Healthcheck: &driver.Healthcheck{
+			StartPeriod: "120s",
 			// Current OpenClaw gateways expose unauthenticated liveness and
 			// readiness JSON, while the CLI health RPC requires the gateway's
 			// runtime credential. Validate the JSON body rather than accepting an
@@ -351,4 +335,58 @@ func (d *Driver) HealthProbe(ref driver.ContainerRef) (*driver.Health, error) {
 		detail += fmt.Sprintf(" (stderr: %s)", stderr)
 	}
 	return &driver.Health{OK: result.OK, Detail: detail}, nil
+}
+
+// Keep database and transcripts durable, while credentials, model catalogs and
+// installed plugins retain their previous ephemeral lifetime.
+func prepareDurableState(rc *driver.ResolvedClaw, opts driver.MaterializeOpts) ([]driver.Mount, error) {
+	root := filepath.Join(shared.ResolveStateDir(opts.RuntimeDir, opts.StateDir), "openclaw-state")
+	count := rc.Count
+	if count < 1 {
+		count = 1
+	}
+	hosts := map[string]map[string]string{"state": {}, "sessions": {}}
+	for i := 0; i < count; i++ {
+		name := rc.ServiceName
+		if name == "" {
+			name = "main"
+		}
+		if rc.Count > 1 {
+			name = fmt.Sprintf("%s-%d", name, i)
+		}
+		ordinal := filepath.Join(root, name)
+		legacy := filepath.Join(ordinal, "cron", "jobs.json")
+		if info, err := os.Stat(legacy); err == nil && info.Size() > 0 {
+			return nil, fmt.Errorf("legacy OpenClaw jobs.json in durable state requires migration through OpenClaw 2026.9.7 Doctor before upgrading; preserve the original state")
+		} else if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		for kind, paths := range hosts {
+			path := filepath.Join(ordinal, kind)
+			if err := os.MkdirAll(path, 0777); err != nil {
+				return nil, fmt.Errorf("openclaw state: %w", err)
+			}
+			if err := os.Chmod(path, 0777); err != nil {
+				return nil, fmt.Errorf("openclaw state permissions: %w", err)
+			}
+			paths[name] = path
+		}
+	}
+	mounts := []driver.Mount{}
+	for _, kind := range []string{"state", "sessions"} {
+		target := openclawHomeDir + "/state"
+		if kind == "sessions" {
+			target = openclawHomeDir + "/agents/main/sessions"
+		}
+		m := driver.Mount{ContainerPath: target}
+		if count == 1 {
+			for _, path := range hosts[kind] {
+				m.HostPath = path
+			}
+		} else {
+			m.HostPathByService = hosts[kind]
+		}
+		mounts = append(mounts, m)
+	}
+	return mounts, nil
 }

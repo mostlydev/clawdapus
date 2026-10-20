@@ -1,14 +1,38 @@
 # Base image for openclaw agents.
 # Usage: docker build -t openclaw:latest -f Dockerfile.openclaw-base .
 
-FROM node:22-slim
+FROM node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash ca-certificates cron curl git jq tini \
     build-essential python3 make g++ cmake \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-prompt --no-onboard --method npm
+RUN curl -fsS https://registry.npmjs.org/openclaw/-/openclaw-2026.10.5.tgz -o /tmp/openclaw.tgz \
+    && echo 'f6b0ae5ccc1ea9529920adca06d19c2f37accfd1baf85990df496fc2899186670d58370eb65068a9d2db3dd8ada0932e4cfe798cfa97a6dd400342fcb52cc51e  /tmp/openclaw.tgz' | sha512sum --check - \
+    && npm install --global /tmp/openclaw.tgz \
+    && rm /tmp/openclaw.tgz \
+    && test "$(node -p 'require("/usr/local/lib/node_modules/openclaw/package.json").version')" = "2026.10.5"
+
+LABEL claw.runner.upstream.version="2026.10.5"
+
+RUN cat > /usr/local/bin/claw-openclaw-wake <<'CLAW_WAKE_EOF'
+#!/bin/sh
+set -eu
+[ "$#" -eq 5 ] || exit 64
+invocation_id=$1
+task=$2
+timeout_seconds=$3
+channel=$4
+target=$5
+session_id=$(node -e 'console.log(require("node:crypto").randomUUID())')
+set -- openclaw agent --agent main --session-id "$session_id" --message "$task" --timeout "$timeout_seconds" --json
+if [ -n "$channel" ] && [ -n "$target" ]; then
+    set -- "$@" --deliver --reply-channel "$channel" --reply-to "$target"
+fi
+exec "$@"
+CLAW_WAKE_EOF
+RUN chmod +x /usr/local/bin/claw-openclaw-wake
 
 RUN mkdir -p /claw
 

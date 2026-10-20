@@ -175,7 +175,7 @@ func openClawAdditiveWriteFixture(t *testing.T, dir, baseTag, model, nativeProof
 CLAW_TYPE openclaw
 AGENT AGENTS.md
 MODEL primary %s
-CONFIGURE openclaw config set agents.list [{"id":"main","name":"oc-additive"}]
+CONFIGURE openclaw config set agents.entries.main {"name":"oc-additive"}
 `, baseTag, model)
 
 	agents := `# oc-additive

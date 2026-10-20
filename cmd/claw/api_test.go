@@ -1,6 +1,7 @@
 package main
 
 import (
+	schedulepkg "github.com/mostlydev/clawdapus/internal/schedule"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -98,10 +99,10 @@ services:
 		t.Fatalf("callClawAPICompose: %v", err)
 	}
 	joined := strings.Join(gotArgs, " ")
-	if !strings.Contains(joined, "-request-timeout 2m5s") {
-		t.Fatalf("expected schedule fire to cover the two-minute runner wake budget, got %#v", gotArgs)
+	if !strings.Contains(joined, "-request-timeout "+schedulepkg.ManualFireRequestTimeout.String()) {
+		t.Fatalf("expected schedule fire to cover the maximum compiled runner wake budget, got %#v", gotArgs)
 	}
-	if gotTimeout != 2*time.Minute+10*time.Second {
+	if gotTimeout != schedulepkg.ManualFireTransportTimeout {
 		t.Fatalf("expected outer transport to outlive the request budget, got %v", gotTimeout)
 	}
 }

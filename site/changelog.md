@@ -29,6 +29,9 @@ outline: deep
 
 ## Unreleased
 
+- **Pinned OpenClaw refresh** — pins OpenClaw 2026.10.5 with Node 24.22.0, adopts keyed agent configuration and rejects overrides conflicting with cllama routing. SQLite state and transcripts persist per ordinal while writable plugins and auth profiles remain temporary. Image and pod INVOKE schedules use claw-api, adding that sidecar to image-only scheduled pods. (#373)
+
+
 - **Per-run workers** ([#372](https://github.com/mostlydev/clawdapus/issues/372)): one isolated, one-shot worker per unit of work for an external orchestrator. The orchestrator never touches Docker.
   - A pod service with `x-claw.lifecycle: per-run` compiles at `claw up` into a run template: a pinned image, a tool grant and limits.
   - `claw runs serve` launches, monitors and cancels workers over a Unix socket that authenticates the peer UID in both directions.

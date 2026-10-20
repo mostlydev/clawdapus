@@ -71,8 +71,8 @@ type dispatchOptions struct {
 }
 
 const defaultWakeExecTimeout = 30 * time.Second
-const openclawWakeExecTimeout = schedulepkg.MaxWakeExecTimeout
-const hermesWakeExecTimeout = schedulepkg.MaxWakeExecTimeout
+const openclawWakeExecTimeout = schedulepkg.LegacyWakeExecTimeout
+const hermesWakeExecTimeout = schedulepkg.LegacyWakeExecTimeout
 
 var errScheduleInvocationInFlight = errors.New("schedule invocation already in flight")
 
@@ -84,6 +84,9 @@ func newScheduler(manifest *schedulepkg.Manifest, docker *client.Client, state *
 	entries := make([]*scheduledInvocation, 0, len(manifest.Invocations))
 	now := time.Now().UTC()
 	for _, inv := range manifest.Invocations {
+		if inv.TimeoutSeconds < 0 || inv.TimeoutSeconds > schedulepkg.MaxInvocationTimeoutSeconds {
+			return nil, fmt.Errorf("invocation %q: timeout_seconds must be between 0 and %d", inv.ID, schedulepkg.MaxInvocationTimeoutSeconds)
+		}
 		locationName := strings.TrimSpace(inv.Timezone)
 		if locationName == "" {
 			locationName = "UTC"
@@ -555,7 +558,7 @@ func (s *scheduler) dispatchWithOptions(ctx context.Context, entry *scheduledInv
 		return result
 	}
 
-	execCtx, cancel := context.WithTimeout(ctx, wakeExecTimeout(entry.manifest.Wake.Adapter))
+	execCtx, cancel := context.WithTimeout(ctx, manifestWakeExecTimeout(entry.manifest))
 	defer cancel()
 	stdout, stderr, exitCode, err := shared.ExecInContainer(execCtx, s.docker, target.ID, entry.manifest.Wake.Command)
 	if err != nil {
@@ -875,4 +878,11 @@ func shouldAttemptDegraded(invocationID string, fireAt time.Time) bool {
 	_, _ = hasher.Write([]byte{':'})
 	_, _ = hasher.Write([]byte(fmt.Sprintf("%d", slot)))
 	return hasher.Sum32()%10 == 0
+}
+
+func manifestWakeExecTimeout(inv schedulepkg.ManifestInvocation) time.Duration {
+	if inv.TimeoutSeconds > 0 {
+		return schedulepkg.InvocationWakeTimeout(inv.TimeoutSeconds)
+	}
+	return wakeExecTimeout(inv.Wake.Adapter)
 }

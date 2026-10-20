@@ -49,12 +49,14 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 
 	if len(rc.Cllama) > 0 {
 		firstProxy := cllama.ProxyBaseURL(rc.Cllama[0])
+		_ = setPath(config, "models.mode", "replace")
 		providerModels, err := cllama.CollectProviderModels(rc.Models)
 		if err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
 		}
 		for provider, modelIDs := range providerModels {
 			basePath := "models.providers." + provider
+			_ = setPath(config, basePath+".agentRuntime.id", "openclaw")
 			if err := setPath(config, basePath+".baseUrl", firstProxy); err != nil {
 				return nil, fmt.Errorf("config generation: cllama provider %q baseUrl: %w", provider, err)
 			}
@@ -113,7 +115,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			// Collect all discord bot IDs: own + peers, sorted for determinism.
 			allBotIDs := discordBotIDs(rc)
 
-			// Collect mention patterns into the shared slice (agents.list written after loop).
+			// Collect mention patterns into the shared slice (agents.entries written after loop).
 			if h != nil {
 				if h.ID != "" {
 					allMentionPatterns = append(allMentionPatterns, fmt.Sprintf(`<@!?%s>`, h.ID))
@@ -162,7 +164,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 				return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
 			}
 
-			// Collect mention patterns into the shared slice (agents.list written after loop by Task 2.5)
+			// Collect mention patterns into the shared slice (agents.entries written after loop by Task 2.5)
 			if h != nil {
 				username := h.Username
 				if username == "" {
@@ -188,7 +190,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 				return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 			}
 
-			// Collect mention patterns into the shared slice (agents.list written after loop)
+			// Collect mention patterns into the shared slice (agents.entries written after loop)
 			if h != nil {
 				username := h.Username
 				if username == "" {
@@ -215,7 +217,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 	}
 
-	// Write agents.list and responseDelivery once after the platform loop.
+	// Write agents.entries and responseDelivery once after the platform loop.
 	if len(rc.Handles) > 0 {
 		// Deduplicate mention patterns
 		seen := make(map[string]struct{})
@@ -227,14 +229,14 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			}
 		}
 
-		agentEntry := map[string]interface{}{"id": "main", "name": agentName}
+		agentEntry := map[string]interface{}{"name": agentName}
 		if len(deduped) > 0 {
 			agentEntry["groupChat"] = map[string]interface{}{
 				"mentionPatterns": stringsToIface(deduped),
 			}
 		}
-		if err := setPath(config, "agents.list", []interface{}{agentEntry}); err != nil {
-			return nil, fmt.Errorf("config generation: agents.list: %w", err)
+		if err := setPath(config, "agents.entries.main", agentEntry); err != nil {
+			return nil, fmt.Errorf("config generation: agents.entries: %w", err)
 		}
 		// OpenClaw enforces tool-only communication natively when Discord handles are
 		// configured — no extra config key is needed or accepted.
@@ -245,6 +247,12 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		path, value, err := parseConfigSetCommand(cmd)
 		if err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
+		}
+		if path == "agents.list" || strings.HasPrefix(path, "agents.list.") {
+			return nil, fmt.Errorf("OpenClaw agents.list is retired; use agents.entries.main")
+		}
+		if path == "cron.store" {
+			return nil, fmt.Errorf("OpenClaw cron.store is retired; migrate native jobs through OpenClaw 2026.9.7 Doctor or use compiled INVOKE")
 		}
 		if err := setPath(config, path, value); err != nil {
 			return nil, fmt.Errorf("config generation: %w", err)
@@ -266,6 +274,11 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		}
 	}
 
+	if len(rc.Cllama) > 0 {
+		if err := validateManagedProviderPolicy(config, rc); err != nil {
+			return nil, err
+		}
+	}
 	return json.MarshalIndent(config, "", "  ")
 }
 
@@ -416,4 +429,80 @@ func firstRawEnvRef(env map[string]string, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// Managed routing is compiler-owned. Behavioral CONFIGURE overrides remain valid,
+// but a conflicting provider catalog must fail rather than bypass governance.
+func validateManagedProviderPolicy(config map[string]interface{}, rc *driver.ResolvedClaw) error {
+	fail := func() error {
+		return fmt.Errorf("CONFIGURE conflicts with cllama-managed provider routing, authentication or runtime; remove the conflicting override or disable cllama for direct routing")
+	}
+	models, ok := config["models"].(map[string]interface{})
+	if !ok || models["mode"] != "replace" {
+		return fail()
+	}
+	providers, ok := models["providers"].(map[string]interface{})
+	if !ok {
+		return fail()
+	}
+	expected, err := cllama.CollectProviderModels(rc.Models)
+	if err != nil {
+		return err
+	}
+	if len(providers) != len(expected) {
+		return fail()
+	}
+	for name := range expected {
+		p, ok := providers[name].(map[string]interface{})
+		if !ok {
+			return fail()
+		}
+		api, err := openclawModelAPIForIngress(cllama.IngressSurfaceForProvider(name))
+		if err != nil {
+			return err
+		}
+		if p["baseUrl"] != cllama.ProxyBaseURL(rc.Cllama[0]) || p["api"] != api {
+			return fail()
+		}
+		if rc.CllamaToken != "" && p["apiKey"] != rc.CllamaToken {
+			return fail()
+		}
+		rt, ok := p["agentRuntime"].(map[string]interface{})
+		if !ok || rt["id"] != "openclaw" {
+			return fail()
+		}
+	}
+	var check func(interface{}) bool
+	check = func(v interface{}) bool {
+		switch obj := v.(type) {
+		case map[string]interface{}:
+			for k, v := range obj {
+				if k == "runtime" {
+					if r, ok := v.(map[string]interface{}); ok && r["type"] == "acp" {
+						return false
+					}
+				}
+				if k == "agentRuntime" {
+					r, ok := v.(map[string]interface{})
+					if !ok || r["id"] != "openclaw" {
+						return false
+					}
+				}
+				if !check(v) {
+					return false
+				}
+			}
+		case []interface{}:
+			for _, v := range obj {
+				if !check(v) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if !check(config) {
+		return fail()
+	}
+	return nil
 }

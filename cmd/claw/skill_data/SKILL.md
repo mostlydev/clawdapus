@@ -131,7 +131,7 @@ PRIVILEGE runtime claw-user
 - Values are JSON-decoded when possible. Leave booleans, numbers, arrays, and objects unquoted; quote strings.
 - `CONFIGURE` applies after generated defaults, so it overrides what `HANDLE` and other driver defaults emitted.
 - For `openclaw`, Clawdapus applies `CONFIGURE` while generating `openclaw.json` during materialization. Do not assume downstream `openclaw config set ...` shell behavior is the same contract.
-- Dotted object paths are the supported shape today. Do not assume indexed list mutation like `agents.list[0].groupChat.mentionPatterns` is supported unless the code/docs explicitly say so.
+- Dotted object paths are the supported shape today. OpenClaw uses keyed `agents.entries.main`, not the retired `agents.list` array. Managed provider routing/authentication/runtime keys cannot be changed through CONFIGURE.
 
 ## Surface Taxonomy
 
@@ -433,7 +433,8 @@ When the aggregate cap drops a feed the model sees an explicit `--- FEED: <name>
 | `AGENTS.effective.md` | Merged contract + CLAWDAPUS.md (OpenClaw and Hermes cllama context) | Mounted into container or cllama context |
 | `openclaw.json` | Generated runner config (OpenClaw) | Bind-mounted directory |
 | `config.yaml` / `.env` | Generated runner config (Hermes) | Bind-mounted directory |
-| `jobs.json` | Cron schedule for INVOKE tasks | Runner state directory |
+| `schedule.json` | Compiled scheduler authority (all OpenClaw INVOKE and pod schedules) | `.claw-runtime/` |
+| `jobs.json` | Native schedule store for runners retaining that format; not OpenClaw | Runner state directory |
 | `tools.json` | Managed tool manifest per agent | cllama context directory |
 | `memory.json` | Memory service config per agent | cllama context directory |
 | `context-blocks.json` | Runtime context block manifest per agent | cllama context directory |
@@ -442,7 +443,7 @@ When the aggregate cap drops a feed the model sees an explicit `--- FEED: <name>
 
 | Driver | CLAW_TYPE | Runner | Config method | Notes |
 |--------|-----------|--------|--------------|-------|
-| OpenClaw | `openclaw` | OpenClaw | JSON5 Go-native patching -> `openclaw.json` | Primary driver. Read-only container. Docker exec health probe. |
+| OpenClaw | `openclaw` | OpenClaw | JSON5 Go-native patching -> `openclaw.json` | Pins OpenClaw 2026.10.5 + Node 24.22.0. Keyed agent config; per-ordinal durable SQLite/transcripts; compiled claw-api wakes. Read-only root. |
 | Hermes | `hermes` | Hermes (Python) | `config.yaml` + `.env` | Discord/Telegram/Slack. `HERMES_TOOL_ONLY_MODE`. Requires at least one handle. |
 | NanoBot | `nanobot` | Nanobot (Python) | `config.json` | Cron via `jobs.json`. Merged AGENTS.md. |
 | PicoClaw | `picoclaw` | PicoClaw | `config.json` | HTTP `/health` + `/ready` probe. Read-only container. |

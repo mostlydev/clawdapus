@@ -9,13 +9,14 @@ import (
 	"github.com/mostlydev/clawdapus/internal/schedule"
 )
 
-func TestBuildScheduleManifestIncludesOnlyPodOriginInvocations(t *testing.T) {
+func TestBuildScheduleManifestIncludesImageAndPodOpenClawInvocations(t *testing.T) {
 	p := &pod.Pod{Name: "trade-desk"}
 	resolved := map[string]*driver.ResolvedClaw{
 		"tiverton": {
 			ServiceName: "tiverton",
 			ClawType:    "openclaw",
 			Count:       2,
+			Handles:     map[string]*driver.HandleInfo{"discord": {ID: "123"}},
 			Invocations: []driver.Invocation{
 				{
 					ID:       "imagejob01",
@@ -28,7 +29,7 @@ func TestBuildScheduleManifestIncludesOnlyPodOriginInvocations(t *testing.T) {
 					Schedule: "15 8 * * 1-5",
 					Message:  "Pre-market synthesis",
 					Name:     "Pre-market synthesis",
-					To:       "alerts-chan",
+					To:       "123456789",
 					Origin:   driver.OriginPod,
 					When:     &schedule.When{Calendar: "us-equities", Session: schedule.SessionRegular},
 				},
@@ -43,11 +44,11 @@ func TestBuildScheduleManifestIncludesOnlyPodOriginInvocations(t *testing.T) {
 	if manifest.Pod != "trade-desk" {
 		t.Fatalf("expected pod name trade-desk, got %q", manifest.Pod)
 	}
-	if len(manifest.Invocations) != 2 {
-		t.Fatalf("expected one pod-origin invocation expanded across 2 ordinals, got %d", len(manifest.Invocations))
+	if len(manifest.Invocations) != 4 {
+		t.Fatalf("expected image and pod invocations expanded across 2 ordinals, got %d", len(manifest.Invocations))
 	}
 
-	first := manifest.Invocations[0]
+	first := manifest.Invocations[2]
 	if first.Service != "tiverton" {
 		t.Fatalf("expected service tiverton, got %q", first.Service)
 	}
@@ -57,7 +58,7 @@ func TestBuildScheduleManifestIncludesOnlyPodOriginInvocations(t *testing.T) {
 	if first.Wake.Adapter != "openclaw-exec" {
 		t.Fatalf("expected openclaw adapter, got %q", first.Wake.Adapter)
 	}
-	want := []string{"openclaw", "cron", "run", "podjob01"}
+	want := []string{"/usr/local/bin/claw-openclaw-wake", "podjob01", "Pre-market synthesis", "300", "discord", "123456789"}
 	if strings.Join(first.Wake.Command, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("expected openclaw cron wake command, got %v", first.Wake.Command)
 	}
@@ -65,7 +66,7 @@ func TestBuildScheduleManifestIncludesOnlyPodOriginInvocations(t *testing.T) {
 		t.Fatalf("expected first ordinal agent id tiverton-0, got %q", first.AgentID)
 	}
 
-	second := manifest.Invocations[1]
+	second := manifest.Invocations[3]
 	if second.AgentID != "tiverton-1" {
 		t.Fatalf("expected second ordinal agent id tiverton-1, got %q", second.AgentID)
 	}
@@ -74,7 +75,7 @@ func TestBuildScheduleManifestIncludesOnlyPodOriginInvocations(t *testing.T) {
 	}
 }
 
-func TestBuildScheduleManifestOpenClawWakeUsesNativeJobID(t *testing.T) {
+func TestBuildScheduleManifestOpenClawWakeIsDirectAndBounded(t *testing.T) {
 	manifest, err := buildScheduleManifest(&pod.Pod{Name: "ops"}, map[string]*driver.ResolvedClaw{
 		"bot": {
 			ServiceName: "bot",
@@ -96,10 +97,10 @@ func TestBuildScheduleManifestOpenClawWakeUsesNativeJobID(t *testing.T) {
 		t.Fatalf("expected one invocation, got %d", len(manifest.Invocations))
 	}
 	want := []string{
-		"openclaw", "cron", "run", "podjob01",
+		"/usr/local/bin/claw-openclaw-wake", "podjob01", "Heartbeat", "300", "", "",
 	}
 	if strings.Join(manifest.Invocations[0].Wake.Command, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("expected openclaw wake command to target native cron id, got %v", manifest.Invocations[0].Wake.Command)
+		t.Fatalf("expected direct isolated OpenClaw wake, got %v", manifest.Invocations[0].Wake.Command)
 	}
 }
 
@@ -180,5 +181,28 @@ func TestBuildScheduleManifestWarnsWhenPatternAWakeDropsToRouting(t *testing.T) 
 	}
 	if !strings.Contains(out, `driver "picoclaw" external scheduler wake does not support invoke.to="alerts"`) {
 		t.Fatalf("expected routing warning in output, got %q", out)
+	}
+}
+
+func TestDirectTurnDeliveryIsExplicitAndUnambiguous(t *testing.T) {
+	rc := &driver.ResolvedClaw{Handles: map[string]*driver.HandleInfo{"discord": {ID: "123"}}}
+	task := `do not execute $(touch /tmp/not-evaluated); "quoted"`
+	cmd, err := directTurnWakeCommand("/helper", rc, driver.Invocation{ID: "tick", Message: task, To: "123456"}, 300)
+	if err != nil || len(cmd) != 6 || cmd[2] != task || cmd[4] != "discord" || cmd[5] != "123456" {
+		t.Fatalf("positional task/ID delivery lost: %v %v", cmd, err)
+	}
+	if _, err := directTurnWakeCommand("/helper", rc, driver.Invocation{To: "unknown-name"}, 300); err == nil {
+		t.Fatal("unknown Discord name guessed")
+	}
+	if _, err := directTurnWakeCommand("/helper", rc, driver.Invocation{To: "unknown-name", Channel: "discord"}, 300); err == nil {
+		t.Fatal("explicit platform admitted unknown Discord name")
+	}
+	rc.Handles["slack"] = &driver.HandleInfo{ID: "456"}
+	if _, err := directTurnWakeCommand("/helper", rc, driver.Invocation{To: "123456"}, 300); err == nil {
+		t.Fatal("ambiguous platform guessed")
+	}
+	cmd, err = directTurnWakeCommand("/helper", rc, driver.Invocation{}, 300)
+	if err != nil || cmd[4] != "" || cmd[5] != "" {
+		t.Fatalf("empty delivery guessed a channel: %v %v", cmd, err)
 	}
 }

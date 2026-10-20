@@ -974,20 +974,20 @@ func TestGenerateConfigDiscordMentionPatterns(t *testing.T) {
 	}
 
 	agents := config["agents"].(map[string]interface{})
-	list, ok := agents["list"].([]interface{})
-	if !ok || len(list) == 0 {
-		t.Fatal("expected agents.list with at least one entry")
+	entries, ok := agents["entries"].(map[string]interface{})
+	if !ok || len(entries) == 0 {
+		t.Fatal("expected agents.entries with at least one entry")
 	}
-	entry := list[0].(map[string]interface{})
-	if entry["id"] != "main" {
-		t.Errorf("expected agents.list[0].id=main, got %v", entry["id"])
+	entry := entries["main"].(map[string]interface{})
+	if _, hasID := entry["id"]; hasID {
+		t.Errorf("expected keyed agent with no embedded id, got %v", entry["id"])
 	}
 	if entry["name"] != "Tiverton" {
-		t.Errorf("expected agents.list[0].name=Tiverton, got %v", entry["name"])
+		t.Errorf("expected agents.entries.main.name=Tiverton, got %v", entry["name"])
 	}
 	gc, ok := entry["groupChat"].(map[string]interface{})
 	if !ok {
-		t.Fatal("expected agents.list[0].groupChat")
+		t.Fatal("expected agents.entries.main.groupChat")
 	}
 	patterns, ok := gc["mentionPatterns"].([]interface{})
 	if !ok || len(patterns) == 0 {
@@ -1198,13 +1198,12 @@ func TestGenerateConfigHandleTelegram(t *testing.T) {
 		t.Error("expected plugins.entries.telegram.enabled=true")
 	}
 
-	// agents.list with mention patterns
-	agentsList, _ := getPath(config, "agents.list")
-	agents, ok := agentsList.([]interface{})
-	if !ok || len(agents) == 0 {
-		t.Fatal("expected agents.list to be populated")
+	// agents.entries with mention patterns
+	agentEntry, _ := getPath(config, "agents.entries.main")
+	agent, ok := agentEntry.(map[string]interface{})
+	if !ok || len(agent) == 0 {
+		t.Fatal("expected agents.entries to be populated")
 	}
-	agent := agents[0].(map[string]interface{})
 	if agent["name"] != "Newsbot" {
 		t.Errorf("expected agent name 'Newsbot', got %v", agent["name"])
 	}
@@ -1238,9 +1237,8 @@ func TestGenerateConfigHandleSlack(t *testing.T) {
 		t.Error("expected plugins.entries.slack.enabled=true")
 	}
 
-	agentsList, _ := getPath(config, "agents.list")
-	agents := agentsList.([]interface{})
-	agent := agents[0].(map[string]interface{})
+	agentEntry, _ := getPath(config, "agents.entries.main")
+	agent := agentEntry.(map[string]interface{})
 	if agent["name"] != "Opsbot" {
 		t.Errorf("expected agent name 'Opsbot', got %v", agent["name"])
 	}
@@ -1262,12 +1260,11 @@ func TestGenerateConfigMultiPlatformMentionPatterns(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	agentsList, _ := getPath(config, "agents.list")
-	agents, ok := agentsList.([]interface{})
-	if !ok || len(agents) == 0 {
-		t.Fatal("expected agents.list")
+	agentEntry, _ := getPath(config, "agents.entries.main")
+	agent, ok := agentEntry.(map[string]interface{})
+	if !ok || len(agent) == 0 {
+		t.Fatal("expected agents.entries")
 	}
-	agent := agents[0].(map[string]interface{})
 	gc, ok := agent["groupChat"].(map[string]interface{})
 	if !ok {
 		t.Fatal("expected groupChat")
@@ -1302,9 +1299,8 @@ func TestGenerateConfigTelegramPeerHandles(t *testing.T) {
 	}
 
 	// Verify mention patterns include peer patterns
-	agentsList, _ := getPath(config, "agents.list")
-	agents := agentsList.([]interface{})
-	agent := agents[0].(map[string]interface{})
+	agentEntry, _ := getPath(config, "agents.entries.main")
+	agent := agentEntry.(map[string]interface{})
 	gc, ok := agent["groupChat"].(map[string]interface{})
 	if !ok {
 		t.Fatal("expected groupChat to exist")

@@ -18,10 +18,10 @@ func TestBaseImageProvider(t *testing.T) {
 	if tag != "openclaw:latest" {
 		t.Fatalf("expected tag openclaw:latest, got %q", tag)
 	}
-	if !strings.HasPrefix(dockerfile, "FROM node:22-slim") {
-		t.Fatal("Dockerfile should start with FROM node:22-slim")
+	if !strings.HasPrefix(dockerfile, "FROM node:24.22.0-bookworm-slim@sha256:") {
+		t.Fatal("Dockerfile should start with FROM node:24.22.0-bookworm-slim@sha256:")
 	}
-	if !strings.Contains(dockerfile, "openclaw.ai/install.sh") {
+	if !strings.Contains(dockerfile, "https://registry.npmjs.org/openclaw/-/openclaw-"+UpstreamVersion+".tgz") {
 		t.Fatal("Dockerfile should install openclaw")
 	}
 	if !strings.Contains(dockerfile, "\nUSER root\n") {

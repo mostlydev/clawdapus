@@ -1,17 +1,45 @@
 package openclaw
 
+import "github.com/mostlydev/clawdapus/internal/driver"
+
+const UpstreamVersion = "2026.10.5"
+
 const baseImageTag = "openclaw:latest"
 
 // baseImageDockerfile is a self-contained Dockerfile for the openclaw base image.
 // It uses a heredoc to bake the entrypoint inline — no COPY needed.
-const baseImageDockerfile = `FROM node:22-slim
+const baseImageDockerfile = `FROM node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash ca-certificates cron curl git jq tini \
     build-essential python3 make g++ cmake \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-prompt --no-onboard --method npm
+RUN curl -fsS https://registry.npmjs.org/openclaw/-/openclaw-2026.10.5.tgz -o /tmp/openclaw.tgz \
+    && echo 'f6b0ae5ccc1ea9529920adca06d19c2f37accfd1baf85990df496fc2899186670d58370eb65068a9d2db3dd8ada0932e4cfe798cfa97a6dd400342fcb52cc51e  /tmp/openclaw.tgz' | sha512sum --check - \
+    && npm install --global /tmp/openclaw.tgz \
+    && rm /tmp/openclaw.tgz \
+    && test "$(node -p 'require("/usr/local/lib/node_modules/openclaw/package.json").version')" = "2026.10.5"
+
+LABEL claw.runner.upstream.version="2026.10.5"
+
+RUN cat > /usr/local/bin/claw-openclaw-wake <<'CLAW_WAKE_EOF'
+#!/bin/sh
+set -eu
+[ "$#" -eq 5 ] || exit 64
+invocation_id=$1
+task=$2
+timeout_seconds=$3
+channel=$4
+target=$5
+session_id=$(node -e 'console.log(require("node:crypto").randomUUID())')
+set -- openclaw agent --agent main --session-id "$session_id" --message "$task" --timeout "$timeout_seconds" --json
+if [ -n "$channel" ] && [ -n "$target" ]; then
+    set -- "$@" --deliver --reply-channel "$channel" --reply-to "$target"
+fi
+exec "$@"
+CLAW_WAKE_EOF
+RUN chmod +x /usr/local/bin/claw-openclaw-wake
 
 RUN mkdir -p /claw /usr/local/bin && cat > /usr/local/bin/openclaw-entrypoint.sh <<'ENTRYPOINT_EOF'
 #!/bin/sh
@@ -33,6 +61,17 @@ fi
 # handing off. Using & + wait keeps tini (PID 1) in control of the process.
 openclaw gateway --port 18789 --bind loopback &
 GATEWAY_PID=$!
+
+# Forward shutdown to the gateway and wait for it to release SQLite ownership.
+# Without this, container recreation leaves a fresh owner heartbeat behind.
+stop_gateway() {
+    trap - TERM INT
+    kill -TERM "$GATEWAY_PID" 2>/dev/null || true
+    set +e
+    wait "$GATEWAY_PID"
+    exit "$?"
+}
+trap stop_gateway TERM INT
 
 # If a startup greeting is configured, wait for the gateway to be healthy
 # (Discord connected), then send the message.
@@ -84,4 +123,9 @@ func (d *Driver) BaseImage() (string, string) {
 
 func (d *Driver) RunnerAlias() string {
 	return "openclaw"
+}
+
+func (d *Driver) WakeHelper() string { return "/usr/local/bin/claw-openclaw-wake" }
+func (d *Driver) InvocationTimeoutSeconds(rc *driver.ResolvedClaw) (int, error) {
+	return InvocationTimeoutSeconds(rc)
 }

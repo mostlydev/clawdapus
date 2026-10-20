@@ -57,6 +57,22 @@ cllama wiring for OpenClaw uses `models.providers.<provider>.{baseUrl, apiKey, a
 
 OpenClaw state uses its canonical home directory inside the container: `~/.openclaw` (`/root/.openclaw`). Clawdapus mounts the generated config at `/root/.openclaw/config/openclaw.json`. The runtime keeps writable tmpfs mounts at both `/root` and `/root/.openclaw` (mode 1777): the parent `/root` overlay guarantees non-root users can traverse into the home directory, and the nested `~/.openclaw` overlay guarantees Docker does not leave the state root behind as `0755 root:root` when it creates the config bind-mount target.
 
+#### Pinned runtime and durable state
+
+The built-in runner pins OpenClaw **2026.10.5** and Node **24.22.0**. The Node base is pinned by multi-platform digest and the npm tarball is checked against its published SHA512. Run `claw pull`, `claw build`, then `claw up -d` to refresh runner-derived service images. Custom bases need rebuilding for `agents.entries.main` and the compiled wake helper.
+
+Managed providers select the built-in OpenClaw runtime explicitly. Behavioral `CONFIGURE` settings still apply, but conflicting provider routing, credentials, catalogs or runtime selection fail compilation. Disable cllama explicitly for direct provider routing. Tool denials, pairing, mention requirements and upstream approval/sandbox safeguards remain in effect; the refresh does not grant Full Access or a broader tool profile.
+
+SQLite state and main-agent transcripts persist per compose identity under `.claw-memory/<service>/openclaw-state/<compose-service>/{state,sessions}`. Generated config remains a separate rotating mount. Plugins, model catalogs, auth profiles and caches stay temporary, so writable extensions from an earlier image do not survive recreation. Parent tmpfs mounts keep the layout writable for non-root users. The entrypoint forwards shutdown and drains the Gateway so SQLite ownership is released before recreation. These state directories use existing writable runner permissions: host UIDs are trusted and transcripts are not isolated from other host users.
+
+#### Compiled schedules
+
+Both image `INVOKE` and pod `invoke` entries compile into `schedule.json`, with `claw-api` owning their timing. Image-only schedules therefore add that sidecar even without a master. The retired OpenClaw `cron/jobs.json` is no longer generated. Each wake starts a Gateway-backed turn with a fresh session ID and positional task arguments. The existing 300-second turn default is preserved; `agents.defaults.timeoutSeconds` can select 1–900 seconds. The scheduler adds twenty seconds for process overhead, and manual-fire transports cover the maximum supported wake.
+
+An explicit `to` carries its resolved platform. Unknown Discord channel names and ambiguous platforms fail compilation; raw numeric Discord IDs remain supported. Without a target, the helper does not guess a channel or automatically deliver final text: the task can send through its configured messaging tool. Explicit final delivery uses OpenClaw's native delivery path.
+
+Previously generated schedule files do not block a normal recompile. Preserve operator-supplied native cron state and migrate it through OpenClaw **2026.9.7** Doctor before upgrading: current upstream no longer imports that retired JSON store. A legacy `cron/jobs.json` found in the new durable state root fails with migration guidance. See [upstream migration guidance](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/automation/cron-jobs/managing-jobs.md#legacy-store-migration).
+
 ### hermes
 
 The Hermes driver emits `HERMES_DEFAULT_AGENT_IDENTITY` so the Hermes runner starts its system prompt with a Clawdapus-managed identity instead of the upstream generic `You are Hermes Agent` block. It also writes a service-specific `SOUL.md`; when a persona is configured, the persona's SOUL.md takes priority.
