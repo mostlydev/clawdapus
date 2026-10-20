@@ -1,6 +1,7 @@
 package runs
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mostlydev/clawdapus/internal/cllama"
 )
@@ -35,7 +37,8 @@ type Executor interface {
 	Up(ctx context.Context, project, file string, env map[string]string) error
 	Down(ctx context.Context, project, file string) error
 	Containers(ctx context.Context, keyHash string) ([]Container, error)
-	Stdout(ctx context.Context, containerID string, limit int) ([]byte, error)
+	// Stdout returns at most limit bytes of stdout, and whether more existed.
+	Stdout(ctx context.Context, containerID string, limit int) ([]byte, bool, error)
 }
 
 // Revoker closes a run's cllama identity (cllama#54). It must return nil only
@@ -492,6 +495,18 @@ func (s *Supervisor) Wait(ctx context.Context, k Key) {
 	select {
 	case <-ch:
 	case <-ctx.Done():
+		s.watchMu.Lock()
+		list := s.watchers[k.Hash()]
+		for i, c := range list {
+			if c == ch {
+				s.watchers[k.Hash()] = append(list[:i], list[i+1:]...)
+				break
+			}
+		}
+		if len(s.watchers[k.Hash()]) == 0 {
+			delete(s.watchers, k.Hash())
+		}
+		s.watchMu.Unlock()
 	}
 }
 
@@ -664,6 +679,12 @@ func (s *Supervisor) stepSpawn(ctx context.Context, rec *Record, now time.Time) 
 			rec.Failure = reason
 			return true, nil
 		}
+		if !containers[0].Running && !containers[0].Exited {
+			// Created but never started (a crash between create and start):
+			// it never executed, so it is neither adopted nor started now.
+			rec.Failure = ReasonSpawnError
+			return true, nil
+		}
 		s.markRunning(rec, now)
 		return true, nil
 	}
@@ -771,6 +792,10 @@ func (s *Supervisor) stepMonitor(ctx context.Context, rec *Record, now time.Time
 		return true, nil
 	}
 	c := containers[0]
+	if !c.Running && !c.Exited {
+		rec.Failure = ReasonSpawnError
+		return true, nil
+	}
 	if c.Exited {
 		if err := s.captureResult(ctx, rec, c); err != nil {
 			return false, err
@@ -795,11 +820,11 @@ func (s *Supervisor) deliverProgress(ctx context.Context, rec *Record, now time.
 		// reissues; authority_expires_at still bounds the run.
 		return false, nil
 	}
-	if !rec.Callbacks.Started {
+	if rec.Callbacks.Start == "" {
 		if err := s.cfg.Notifier.Started(ctx, rec, credential); err != nil {
 			return s.callbackFailed(rec, err)
 		}
-		rec.Callbacks.Started = true
+		rec.Callbacks.Start = CallbackAcked
 		rec.Callbacks.LastHeartbeat = &now
 		return true, nil
 	}
@@ -823,7 +848,7 @@ func (s *Supervisor) callbackFailed(rec *Record, err error) (bool, error) {
 }
 
 func (s *Supervisor) captureResult(ctx context.Context, rec *Record, c Container) error {
-	if rec.Result != nil {
+	if rec.Result != nil || rec.Failure == ReasonResultMissing {
 		return nil
 	}
 	tpl, _, err := LoadTemplate(s.cfg.PodDir, rec.Spec.Template)
@@ -832,41 +857,53 @@ func (s *Supervisor) captureResult(ctx context.Context, rec *Record, c Container
 	}
 	limit := tpl.Limits.MaxResultBytes
 	// Read past the answer limit to allow for the runner banner, but bound it.
-	raw, err := s.cfg.Executor.Stdout(ctx, c.ID, limit+64<<10)
+	raw, sourceTruncated, err := s.cfg.Executor.Stdout(ctx, c.ID, limit+resultPreambleBytes)
 	if err != nil {
 		return fmt.Errorf("read worker stdout: %w", err)
 	}
-	answer, truncated := extractAnswer(raw, tpl.Worker.Result.Marker, limit)
+	answer, truncated, found := extractAnswer(raw, tpl.Worker.Result.Marker, limit)
+	if !found {
+		// No answer marker in the readable stream: the result is missing,
+		// never a known-complete empty answer.
+		if c.ExitCode == 0 {
+			rec.Failure = ReasonResultMissing
+		}
+		return nil
+	}
 	if err := writeFileAtomic(s.resultPath(rec.Key), answer, 0o600); err != nil {
 		return err
 	}
-	rec.Result = &ResultInfo{Bytes: len(answer), Truncated: truncated}
+	rec.Result = &ResultInfo{Bytes: len(answer), Truncated: truncated || sourceTruncated}
 	return nil
 }
 
+// resultPreambleBytes bounds runner output (banner, notices) read before the
+// answer marker.
+const resultPreambleBytes = 64 << 10
+
 // extractAnswer returns the bytes after the first marker. Markers inside the
-// answer itself are content, never control. Without a marker the stream has no
-// answer.
-func extractAnswer(stdout []byte, marker string, limit int) ([]byte, bool) {
-	answer := stdout
+// answer itself are content, never control. found is false when the stream
+// has no marker. An answer longer than limit is cut at a rune boundary.
+func extractAnswer(stdout []byte, marker string, limit int) (answer []byte, truncated, found bool) {
+	answer = stdout
 	if marker != "" {
-		idx := strings.Index(string(stdout), marker)
+		idx := bytes.Index(stdout, []byte(marker))
 		if idx < 0 {
-			return []byte{}, false
+			return nil, false, false
 		}
 		answer = stdout[idx+len(marker):]
 	}
-	answer = []byte(strings.TrimSuffix(string(answer), "\n"))
+	answer = bytes.TrimSuffix(answer, []byte("\n"))
 	if len(answer) > limit {
-		return answer[:limit], true
+		cut := limit
+		for cut > 0 && !utf8.RuneStart(answer[cut]) {
+			cut--
+		}
+		return append([]byte(nil), answer[:cut]...), true, true
 	}
-	return answer, false
+	return append([]byte(nil), answer...), false, true
 }
 
-// stepTeardown removes tool authority and the worker. Physical cleanup does
-// not wait for the cllama fence: the worker is stopped and removed even while
-// revoke is unacknowledged, but the run reports revoked, and becomes terminal,
-// only after cllama acknowledges.
 func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Time) (bool, error) {
 	if rec.Cancelled && rec.State != StateRevoking && rec.State != StateRevoked {
 		rec.State = StateRevoking
@@ -946,15 +983,42 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 	return true, nil
 }
 
-// deliverEnd sends the end callback for a run that ended on its own. It
-// returns "" to retry later.
+// deliverEnd resolves the start callback (for a worker that spawned) and
+// then the end callback for a run that ended on its own. It returns "" to
+// retry later.
 func (s *Supervisor) deliverEnd(ctx context.Context, rec *Record, now time.Time) string {
 	if rec.Cancelled || s.cfg.Notifier == nil || rec.Credential == CredentialNone || rec.Failure == ReasonAuthorityExpired {
-		return EndSkipped
+		if rec.Callbacks.Start == "" {
+			rec.Callbacks.Start = CallbackSkipped
+		}
+		return CallbackSkipped
 	}
 	credential, ok, err := s.ledger.Secret(rec.Key, "credential")
 	if err != nil || !ok {
-		return EndSkipped
+		if rec.Callbacks.Start == "" {
+			rec.Callbacks.Start = CallbackSkipped
+		}
+		return CallbackSkipped
+	}
+	expired := !now.Before(rec.AuthorityExpiresAt)
+	if rec.Callbacks.Start == "" {
+		if rec.Timestamps.Running == nil {
+			// The worker never ran (spawn failed or it was never started).
+			rec.Callbacks.Start = CallbackSkipped
+		} else {
+			switch err := s.cfg.Notifier.Started(ctx, rec, credential); {
+			case err == nil:
+				rec.Callbacks.Start = CallbackAcked
+			case errors.Is(err, ErrAuthority):
+				rec.Callbacks.Start = CallbackRejected
+				return CallbackRejected
+			case expired:
+				rec.Callbacks.Start = CallbackAbandoned
+				return CallbackAbandoned
+			default:
+				return ""
+			}
+		}
 	}
 	outcome, reason := "succeeded", ""
 	if rec.Failure != "" {
@@ -967,11 +1031,11 @@ func (s *Supervisor) deliverEnd(ctx context.Context, rec *Record, now time.Time)
 	err = s.cfg.Notifier.Ended(ctx, rec, credential, outcome, reason, summary)
 	switch {
 	case err == nil:
-		return EndAcked
+		return CallbackAcked
 	case errors.Is(err, ErrAuthority):
-		return EndRejected
-	case !now.Before(rec.AuthorityExpiresAt):
-		return EndAbandoned
+		return CallbackRejected
+	case expired:
+		return CallbackAbandoned
 	}
 	return ""
 }
@@ -1054,4 +1118,53 @@ func randomHex(n int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// WorkerLister lists every run-worker container for a pod.
+type WorkerLister interface {
+	RunWorkers(ctx context.Context, pod string) ([]Container, error)
+}
+
+// Orphans returns labelled run workers with no ledger record or tombstone.
+// They can only exist after ledger loss, because a run's project is recorded
+// before `compose create`; the supervisor refuses to serve while any exist.
+func (s *Supervisor) Orphans(ctx context.Context, pod string) ([]Container, error) {
+	lister, ok := s.cfg.Executor.(WorkerLister)
+	if !ok {
+		return nil, nil
+	}
+	workers, err := lister.RunWorkers(ctx, pod)
+	if err != nil {
+		return nil, err
+	}
+	recs, err := s.ledger.All()
+	if err != nil {
+		return nil, err
+	}
+	known := make(map[string]struct{}, len(recs))
+	for _, r := range recs {
+		known[r.Key.Hash()] = struct{}{}
+	}
+	var orphans []Container
+	for _, w := range workers {
+		if _, ok := known[w.Labels[LabelRunKey]]; !ok {
+			orphans = append(orphans, w)
+		}
+	}
+	return orphans, nil
+}
+
+// LiveKeys returns every unfinished run.
+func (s *Supervisor) LiveKeys() ([]Key, error) {
+	recs, err := s.ledger.All()
+	if err != nil {
+		return nil, err
+	}
+	var out []Key
+	for _, r := range recs {
+		if !r.State.Terminal() {
+			out = append(out, r.Key)
+		}
+	}
+	return out, nil
 }

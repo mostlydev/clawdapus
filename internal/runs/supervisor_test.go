@@ -79,10 +79,13 @@ func (f *fakeExec) Containers(_ context.Context, keyHash string) ([]Container, e
 	return append([]Container(nil), f.containers[keyHash]...), nil
 }
 
-func (f *fakeExec) Stdout(context.Context, string, int) ([]byte, error) {
+func (f *fakeExec) Stdout(_ context.Context, _ string, limit int) ([]byte, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.stdout, nil
+	if len(f.stdout) > limit {
+		return f.stdout[:limit], true, nil
+	}
+	return f.stdout, false, nil
 }
 
 func (f *fakeExec) exit(keyHash string, code int) {
@@ -118,6 +121,7 @@ func (r *fakeRevoker) Revoke(_ context.Context, agentID string, _ uint64) error 
 }
 
 type fakeNotifier struct {
+	order                 []string
 	mu                    sync.Mutex
 	started, beats, ended int
 	lastOutcome, lastCred string
@@ -131,6 +135,7 @@ func (n *fakeNotifier) Started(_ context.Context, _ *Record, cred string) error 
 	if n.err != nil {
 		return n.err
 	}
+	n.order = append(n.order, "start")
 	n.started++
 	return nil
 }
@@ -150,6 +155,7 @@ func (n *fakeNotifier) Ended(_ context.Context, _ *Record, cred string, outcome,
 	if n.err != nil {
 		return n.err
 	}
+	n.order = append(n.order, "end")
 	n.ended++
 	n.lastOutcome = outcome
 	return nil
@@ -355,7 +361,7 @@ func TestRunCancelMidRun(t *testing.T) {
 	if rec.State != StateStopped || !rec.Cancelled || !rec.Revoked || rec.Timestamps.Revoked == nil {
 		t.Fatalf("expected stopped after revoke, got %+v", rec)
 	}
-	if rec.Callbacks.End != EndSkipped {
+	if rec.Callbacks.End != CallbackSkipped {
 		t.Fatalf("cancelled runs send no end callback, got %q", rec.Callbacks.End)
 	}
 }
@@ -673,6 +679,7 @@ func TestRunEndCallbackRejectedIsRecordedNotAcked(t *testing.T) {
 	rec, _, _ := h.sup.Launch(context.Background(), LaunchRequest{Key: Key{"inst", "r1"}, Generation: 1, SpecDigest: digest, Spec: raw, Credential: "c", AuthorityExpiresAt: h.now.Add(30 * time.Minute)})
 	h.advance("r1")
 	h.advance("r1")
+	h.exec.stdout = []byte("\n>> ok\n")
 	h.exec.exit(rec.Key.Hash(), 0)
 	h.notify.err = ErrAuthority
 	rec = h.advance("r1")
@@ -687,6 +694,7 @@ func TestRunEndCallbackTransientRetriesUntilExpiry(t *testing.T) {
 	rec, _, _ := h.sup.Launch(context.Background(), LaunchRequest{Key: Key{"inst", "r1"}, Generation: 1, SpecDigest: digest, Spec: raw, Credential: "c", AuthorityExpiresAt: h.now.Add(30 * time.Minute)})
 	h.advance("r1")
 	h.advance("r1")
+	h.exec.stdout = []byte("\n>> ok\n")
 	h.exec.exit(rec.Key.Hash(), 0)
 	h.notify.err = errors.New("connection refused")
 	rec = h.advance("r1")
@@ -873,5 +881,162 @@ func TestCanonicalSpecGolden(t *testing.T) {
 		if _, _, _, err := CanonicalSpec(json.RawMessage(bad)); err == nil {
 			t.Fatalf("expected rejection for %q", bad)
 		}
+	}
+}
+
+// exitingExec creates containers that have already exited, as a fast
+// one-shot worker would before the first monitor step.
+type exitingExec struct{ *fakeExec }
+
+func (e exitingExec) Up(ctx context.Context, project, file string, env map[string]string) error {
+	if err := e.fakeExec.Up(ctx, project, file, env); err != nil {
+		return err
+	}
+	e.fakeExec.mu.Lock()
+	defer e.fakeExec.mu.Unlock()
+	for k, cs := range e.fakeExec.containers {
+		for i := range cs {
+			cs[i].Running, cs[i].Exited, cs[i].ExitCode = false, true, 0
+		}
+		e.fakeExec.containers[k] = cs
+	}
+	return nil
+}
+
+func TestFastExitSendsStartBeforeEnd(t *testing.T) {
+	h := newHarness(t, true)
+	h.sup.cfg.Executor = exitingExec{h.exec}
+	h.exec.stdout = []byte("\n>> done\n")
+	raw, digest := specJSON(t, "x")
+	_, _, err := h.sup.Launch(context.Background(), LaunchRequest{Key: Key{"inst", "r1"}, Generation: 1, SpecDigest: digest, Spec: raw, Credential: "c", AuthorityExpiresAt: h.now.Add(30 * time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := h.advance("r1")
+	if rec.State != StateStopped || strings.Join(h.notify.order, ",") != "start,end" {
+		t.Fatalf("state=%s order=%v", rec.State, h.notify.order)
+	}
+	if rec.Callbacks.Start != CallbackAcked || rec.Callbacks.End != CallbackAcked {
+		t.Fatalf("callbacks = %+v", rec.Callbacks)
+	}
+}
+
+func TestRestartAdoptedExitedContainerSendsStartBeforeEnd(t *testing.T) {
+	h := newHarness(t, true)
+	raw, digest := specJSON(t, "x")
+	rec, _, _ := h.sup.Launch(context.Background(), LaunchRequest{Key: Key{"inst", "r1"}, Generation: 1, SpecDigest: digest, Spec: raw, Credential: "c", AuthorityExpiresAt: h.now.Add(30 * time.Minute)})
+	// Crash right after compose up: the worker ran and exited while the
+	// supervisor was down, and the record still says accepted.
+	h.sup.testHookBeforeUp = func() { h.sup.testHookBeforeUp = nil }
+	h.sup.Advance(context.Background(), rec.Key)
+	stored, _ := h.sup.ledger.Get(rec.Key)
+	stored.State = StateAccepted
+	stored.Timestamps.Running = nil
+	stored.Callbacks = Callbacks{}
+	_ = h.sup.ledger.Put(stored)
+	h.notify.order = nil
+	h.exec.stdout = []byte("\n>> done\n")
+	h.exec.exit(rec.Key.Hash(), 0)
+	sup2, _ := NewSupervisor(h.sup.cfg)
+	sup2.Advance(context.Background(), rec.Key)
+	h.sup = sup2
+	if h.exec.ups != 1 {
+		t.Fatalf("adoption must not run compose up again, ups=%d", h.exec.ups)
+	}
+	got, _ := h.sup.Get(rec.Key)
+	if got.State != StateStopped || strings.Join(h.notify.order, ",") != "start,end" {
+		t.Fatalf("state=%s order=%v", got.State, h.notify.order)
+	}
+}
+
+func TestRestartWithCreatedOnlyContainerDoesNotClaimRunning(t *testing.T) {
+	h := newHarness(t, true)
+	raw, digest := specJSON(t, "x")
+	rec, _, _ := h.sup.Launch(context.Background(), LaunchRequest{Key: Key{"inst", "r1"}, Generation: 1, SpecDigest: digest, Spec: raw, Credential: "c", AuthorityExpiresAt: h.now.Add(30 * time.Minute)})
+	h.sup.testHookBeforeUp = func() { h.sup.testHookBeforeUp = nil }
+	h.sup.Advance(context.Background(), rec.Key)
+	stored, _ := h.sup.ledger.Get(rec.Key)
+	stored.State = StateAccepted
+	stored.Timestamps.Running = nil
+	stored.Callbacks = Callbacks{}
+	_ = h.sup.ledger.Put(stored)
+	h.exec.mu.Lock()
+	for i := range h.exec.containers[rec.Key.Hash()] {
+		h.exec.containers[rec.Key.Hash()][i].Running = false // created, never started
+	}
+	h.exec.mu.Unlock()
+	h.notify.order = nil
+	sup2, _ := NewSupervisor(h.sup.cfg)
+	sup2.Advance(context.Background(), rec.Key)
+	got, _ := sup2.Get(rec.Key)
+	if got.State != StateFailed || got.Failure != ReasonSpawnError || got.Timestamps.Running != nil {
+		t.Fatalf("created-only container must fail closed, got state=%s failure=%s", got.State, got.Failure)
+	}
+	if h.exec.count(rec.Key.Hash()) != 0 || h.exec.ups != 1 {
+		t.Fatalf("container must be removed without a second up; count=%d ups=%d", h.exec.count(rec.Key.Hash()), h.exec.ups)
+	}
+	for _, ev := range h.notify.order {
+		if ev == "start" {
+			t.Fatalf("no start callback may be acked for an unstarted worker: %v", h.notify.order)
+		}
+	}
+}
+
+func TestExtractAnswer(t *testing.T) {
+	cases := []struct {
+		name, in         string
+		limit            int
+		want             string
+		truncated, found bool
+	}{
+		{"simple", "BANNER\n>> hi\n", 16, "hi", false, true},
+		{"marker inside answer", "\n>> a\n>> b\n", 16, "a\n>> b", false, true},
+		{"missing marker", "no answer here\n", 16, "", false, false},
+		{"exact cap", "\n>> 0123456789abcdef\n", 16, "0123456789abcdef", false, true},
+		{"oversized", "\n>> 0123456789abcdefXYZ", 16, "0123456789abcdef", true, true},
+		{"multibyte boundary", "\n>> 012345678901234é", 16, "012345678901234", true, true},
+	}
+	for _, tc := range cases {
+		got, truncated, found := extractAnswer([]byte(tc.in), "\n>> ", tc.limit)
+		if string(got) != tc.want || truncated != tc.truncated || found != tc.found {
+			t.Fatalf("%s: got %q truncated=%v found=%v", tc.name, got, truncated, found)
+		}
+	}
+}
+
+func TestResultMissingMarkerFailsExplicitly(t *testing.T) {
+	h := newHarness(t, false)
+	rec, _ := h.launch("r1", 1, "x")
+	h.advance("r1")
+	h.exec.stdout = []byte("BANNER only, no marker\n")
+	h.exec.exit(rec.Key.Hash(), 0)
+	rec = h.advance("r1")
+	if rec.State != StateFailed || rec.Failure != ReasonResultMissing || rec.Result != nil {
+		t.Fatalf("got %+v", rec)
+	}
+}
+
+func TestResultMarkerBeyondPreambleIsMissing(t *testing.T) {
+	h := newHarness(t, false)
+	rec, _ := h.launch("r1", 1, "x")
+	h.advance("r1")
+	h.exec.stdout = []byte(strings.Repeat("b", resultPreambleBytes+64) + "\n>> late answer\n")
+	h.exec.exit(rec.Key.Hash(), 0)
+	rec = h.advance("r1")
+	if rec.Failure != ReasonResultMissing {
+		t.Fatalf("marker past the read bound must be result_missing, got %+v", rec)
+	}
+}
+
+func TestResultSourceTruncationIsReported(t *testing.T) {
+	h := newHarness(t, false)
+	rec, _ := h.launch("r1", 1, "x")
+	h.advance("r1")
+	// Answer fits the result limit only because the source stream was cut.
+	h.exec.stdout = []byte(strings.Repeat("b", resultPreambleBytes) + "\n>> abc" + strings.Repeat("z", 64))
+	h.exec.exit(rec.Key.Hash(), 0)
+	rec = h.advance("r1")
+	if rec.Result == nil || !rec.Result.Truncated {
+		t.Fatalf("source truncation must be reported, got %+v", rec.Result)
 	}
 }

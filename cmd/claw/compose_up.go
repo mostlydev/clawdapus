@@ -31,6 +31,7 @@ import (
 	"github.com/mostlydev/clawdapus/internal/inspect"
 	"github.com/mostlydev/clawdapus/internal/persona"
 	"github.com/mostlydev/clawdapus/internal/pod"
+	"github.com/mostlydev/clawdapus/internal/runs"
 	"github.com/mostlydev/clawdapus/internal/runtime"
 	"github.com/mostlydev/clawdapus/internal/schedule"
 )
@@ -122,6 +123,11 @@ func runComposeUp(podFile string) (err error) {
 	if err != nil {
 		return err
 	}
+	runGuard, err := acquirePodRunGuard(podDir, p, true)
+	if err != nil {
+		return err
+	}
+	defer runGuard.Release()
 
 	servicePlans, err := planPodServiceImages(p)
 	if err != nil {
@@ -225,6 +231,7 @@ func runComposeUp(podFile string) (err error) {
 	serviceImageRefs := make(map[string]string)
 	serviceInfos := make(map[string]*inspect.ClawInfo)
 	serviceDescriptors := make(map[string]*describe.ServiceDescriptor)
+	perRun := make(map[string]*perRunTemplate)
 
 	// Pre-collect all pod handles so each service can reference its peers.
 	// This is a cheap pass over the already-parsed pod YAML — no image inspection needed.
@@ -414,6 +421,22 @@ func runComposeUp(podFile string) (err error) {
 			return fmt.Errorf("service %q: %w", name, err)
 		}
 
+		if svc.IsPerRun() {
+			compiler, err := validatePerRunResolution(name, rc, d)
+			if err != nil {
+				return err
+			}
+			// Bind the template to the exact image validated here; a moved
+			// tag before templates are written is refused, not followed.
+			imageID, _ := discoveryImageIdentity(context.Background(), imageRef)
+			if imageID == "" {
+				return fmt.Errorf("service %q: cannot resolve image ID for %q", name, imageRef)
+			}
+			perRun[name] = &perRunTemplate{rc: rc, compiler: compiler, imageRef: imageRef, imageID: imageID}
+			fmt.Printf("[claw] %s: validated per-run template (%s driver)\n", name, rc.ClawType)
+			continue
+		}
+
 		if err := d.Validate(rc); err != nil {
 			return fmt.Errorf("service %q: validation failed: %w", name, err)
 		}
@@ -425,7 +448,15 @@ func runComposeUp(podFile string) (err error) {
 	}
 
 	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
-	if err := validateManagedCapabilityDeclarations(p, resolvedClaws); err != nil {
+	perRunNames := sortedPerRunNames(perRun)
+	if len(perRun) > 0 {
+		// Per-run workers always route through cllama.
+		cllamaEnabled = true
+		p.RunNetwork = runNetworkName(podDir)
+	}
+	cllamaGovernedServices := append(append([]string(nil), cllamaAgents...), perRunNames...)
+	activeProxyType := ""
+	if err := validateManagedCapabilityDeclarations(p, mergeResolvedWithPerRun(resolvedClaws, perRun)); err != nil {
 		return err
 	}
 	if err := injectConversationWall(p, resolvedClaws); err != nil {
@@ -441,7 +472,7 @@ func runComposeUp(podFile string) (err error) {
 	if err := attachCapabilityProvidersToInternalNetwork(p, resolvedTools, resolvedMemory); err != nil {
 		return err
 	}
-	for name, rc := range resolvedClaws {
+	for name, rc := range mergeResolvedWithPerRun(resolvedClaws, perRun) {
 		svc := p.Services[name]
 		if svc == nil || svc.Claw == nil {
 			continue
@@ -470,7 +501,7 @@ func runComposeUp(podFile string) (err error) {
 		if err != nil {
 			return err
 		}
-		proxyTypes := collectProxyTypes(resolvedClaws)
+		proxyTypes := collectProxyTypes(mergeResolvedWithPerRun(resolvedClaws, perRun))
 		if len(proxyTypes) > 1 {
 			return fmt.Errorf("multi-proxy chaining not yet supported: found proxy types %v; Phase 4 supports one proxy type per pod", proxyTypes)
 		}
@@ -505,7 +536,7 @@ func runComposeUp(podFile string) (err error) {
 		}
 
 		imageEnvCache := make(map[string]map[string]string)
-		for _, name := range cllamaAgents {
+		for _, name := range cllamaGovernedServices {
 			svc := p.Services[name]
 			if svc == nil {
 				continue
@@ -541,7 +572,7 @@ func runComposeUp(podFile string) (err error) {
 		proxyEnv := map[string]string{
 			"CLAW_POD": p.Name,
 		}
-		for _, name := range cllamaAgents {
+		for _, name := range cllamaGovernedServices {
 			svc := p.Services[name]
 			if svc == nil || svc.Claw == nil {
 				continue
@@ -667,6 +698,45 @@ func runComposeUp(podFile string) (err error) {
 				}, rc.Models), agentBudgetPolicy(p, name)),
 			})
 		}
+		for _, name := range perRunNames {
+			rc := perRun[name].rc
+			rc.Timezone = resolveAgentTimezone(rc.Environment, runtimeEnv)
+			agentContent, err := os.ReadFile(rc.AgentHostPath)
+			if err != nil {
+				return fmt.Errorf("service %q: read AGENTS.md for cllama context: %w", name, err)
+			}
+			rules, err := buildRulesManifestEntries(rc.Includes)
+			if err != nil {
+				return fmt.Errorf("service %q: build rules manifest: %w", name, err)
+			}
+			feeds, err := buildFeedManifestEntries(p, serviceDescriptors, runtimeEnv, name, name, nil)
+			if err != nil {
+				return fmt.Errorf("service %q: build feed manifest: %w", name, err)
+			}
+			tools, err := buildToolManifestEntries(p, serviceDescriptors, runtimeEnv, name, resolvedTools[name], nil)
+			if err != nil {
+				return fmt.Errorf("service %q: build tool manifest: %w", name, err)
+			}
+			// The template context carries no identity; the run supervisor
+			// stamps a fresh agent ID and token into each run's copy.
+			perRun[name].context = &cllama.AgentContextInput{
+				AgentID:       name,
+				AgentsMD:      string(agentContent),
+				ClawdapusMD:   augmentClawdapusMD(shared.GenerateClawdapusMD(rc, p.Name), tools, nil),
+				Feeds:         feeds,
+				Tools:         tools,
+				ToolPolicy:    agentToolPolicy(p, name),
+				Rules:         rules,
+				ContextBlocks: agentContextBlocks(p, name),
+				Metadata: injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
+					"service":   name,
+					"pod":       p.Name,
+					"type":      rc.ClawType,
+					"lifecycle": pod.LifecyclePerRun,
+					"timezone":  rc.Timezone,
+				}, rc.Models), agentBudgetPolicy(p, name)),
+			}
+		}
 		if err := cllama.GenerateContextDir(runtimeDir, contextInputs); err != nil {
 			return fmt.Errorf("generate cllama context dir: %w", err)
 		}
@@ -677,9 +747,13 @@ func runComposeUp(podFile string) (err error) {
 		if err != nil {
 			return err
 		}
+		revocationDir, err := ensurePersistentCllamaDir(podDir, runs.RevocationDirName)
+		if err != nil {
+			return err
+		}
 
 		// Compile seed keys from all service CllamaEnv into providers.json.
-		if err := mergeProviderSeeds(authDir, p, resolvedClaws); err != nil {
+		if err := mergeProviderSeeds(authDir, p, mergeResolvedWithPerRun(resolvedClaws, perRun)); err != nil {
 			return fmt.Errorf("write providers.json: %w", err)
 		}
 
@@ -713,6 +787,7 @@ func runComposeUp(podFile string) (err error) {
 				AuthHostDir:           authDir,
 				SessionHistoryHostDir: sessionHistoryDir,
 				GovernanceHostDir:     governanceDir,
+				RevocationHostDir:     revocationDir,
 				DashboardPort:         cllamaDashboardPort,
 				Environment:           finalProxyEnv,
 				PodName:               p.Name,
@@ -723,6 +798,7 @@ func runComposeUp(podFile string) (err error) {
 			p.ClawAPI.CllamaAPIURL = fmt.Sprintf("http://%s:8081", cllama.ProxyServiceName(proxyTypes[0]))
 			p.ClawAPI.CllamaAPIToken = uiToken
 		}
+		activeProxyType = proxyTypes[0]
 		fmt.Printf("[claw] cllama proxies enabled: %s (agents: %s)\n",
 			strings.Join(proxyTypes, ", "), strings.Join(cllamaAgents, ", "))
 	}
@@ -871,6 +947,12 @@ func runComposeUp(podFile string) (err error) {
 				}
 				fmt.Printf("[claw] %s (%s): post-apply verified\n", generatedService, shortContainerIDForPostApply(containerID))
 			}
+		}
+	}
+
+	if runGuard != nil {
+		if err := writePerRunTemplates(podDir, p, perRun, activeProxyType, cllamaDashboardPort); err != nil {
+			return fmt.Errorf("compile per-run templates: %w", err)
 		}
 	}
 

@@ -76,7 +76,7 @@ func TestParsePerRunRejections(t *testing.T) {
 	}{
 		{"unknown lifecycle", "      lifecycle: sometimes\n", "", "unknown value"},
 		{"run without per-run", "      run:\n        max-runtime: 1m\n", "", "requires x-claw.lifecycle"},
-		{"bad duration", "      lifecycle: per-run\n      run:\n        max-runtime: soon\n", "", "positive duration"},
+		{"bad duration", "      lifecycle: per-run\n      run:\n        max-runtime: soon\n", "", "whole number of seconds"},
 		{"task ceiling", "      lifecycle: per-run\n      run:\n        max-task-bytes: 999999999\n", "", "max-task-bytes"},
 		{"count", "      lifecycle: per-run\n      count: 2\n", "", "count"},
 		{"handles", "      lifecycle: per-run\n      handles:\n        discord:\n          id: \"1\"\n", "", "handles"},
@@ -87,6 +87,11 @@ func TestParsePerRunRejections(t *testing.T) {
 		{"claw-api", "      lifecycle: per-run\n      claw-api: self\n", "", "claw-api"},
 		{"volumes", "      lifecycle: per-run\n", "    volumes:\n      - ./data:/data\n", `"volumes"`},
 		{"privileged", "      lifecycle: per-run\n", "    privileged: true\n", `"privileged"`},
+		{"environment", "      lifecycle: per-run\n", "    environment:\n      A: b\n", `"environment"`},
+		{"command", "      lifecycle: per-run\n", "    command: [x]\n", `"command"`},
+		{"sub-second runtime", "      lifecycle: per-run\n      run:\n        max-runtime: 1ns\n", "", "whole number of seconds"},
+		{"fractional authority", "      lifecycle: per-run\n      run:\n        max-authority: 1500ms\n", "", "whole number of seconds"},
+		{"memory syntax", "      lifecycle: per-run\n      run:\n        memory: lots\n", "", "Docker memory size"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

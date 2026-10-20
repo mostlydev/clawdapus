@@ -2,6 +2,8 @@ package pod
 
 import (
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -67,6 +69,7 @@ func parseRunLifecycle(rawLifecycle string, raw *rawRunLimits) (string, *RunLimi
 		}
 		limits.MaxAuthority = d
 	}
+	// Zero byte and pid limits mean "use the default"; negatives are refused.
 	if raw.MaxTaskBytes != 0 {
 		if raw.MaxTaskBytes < 0 || raw.MaxTaskBytes > maxRunTaskBytesCeiling {
 			return "", nil, fmt.Errorf("x-claw.run.max-task-bytes must be between 1 and %d", maxRunTaskBytesCeiling)
@@ -80,7 +83,11 @@ func parseRunLifecycle(rawLifecycle string, raw *rawRunLimits) (string, *RunLimi
 		limits.MaxResultBytes = raw.MaxResultBytes
 	}
 	if strings.TrimSpace(raw.Memory) != "" {
-		limits.Memory = strings.TrimSpace(raw.Memory)
+		mem := strings.TrimSpace(raw.Memory)
+		if !dockerMemoryRe.MatchString(mem) {
+			return "", nil, fmt.Errorf("x-claw.run.memory must be a positive Docker memory size (e.g. 512m, 1g), got %q", raw.Memory)
+		}
+		limits.Memory = mem
 	}
 	if raw.Pids != 0 {
 		if raw.Pids < 0 {
@@ -91,13 +98,19 @@ func parseRunLifecycle(rawLifecycle string, raw *rawRunLimits) (string, *RunLimi
 	return lifecycle, limits, nil
 }
 
+// parsePositiveDuration accepts whole-second durations of at least 1s, so the
+// compiled template (which stores seconds) never truncates a limit to zero.
 func parsePositiveDuration(field, raw string) (time.Duration, error) {
 	d, err := time.ParseDuration(strings.TrimSpace(raw))
-	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("%s must be a positive duration (e.g. 30m), got %q", field, raw)
+	if err != nil || d < time.Second || d%time.Second != 0 {
+		return 0, fmt.Errorf("%s must be a whole number of seconds, at least 1s (e.g. 30m), got %q", field, raw)
 	}
 	return d, nil
 }
+
+var dockerMemoryRe = regexp.MustCompile(`^[1-9][0-9]*[bkmgBKMG]?$`)
+
+var perRunComposeKeys = map[string]struct{}{"image": {}, "build": {}}
 
 // validatePerRunService rejects declarations a one-shot per-run worker cannot
 // honour. Workers have no channel identity, schedule, mounts, persona or
@@ -127,9 +140,16 @@ func validatePerRunService(svc *Service) error {
 	case c.ClawAPIMode != "":
 		return fmt.Errorf("x-claw.lifecycle: %s does not support claw-api", LifecyclePerRun)
 	}
-	for _, key := range []string{"volumes", "ports", "container_name", "privileged", "pid", "network_mode", "devices", "cap_add"} {
-		if _, ok := svc.Compose[key]; ok {
-			return fmt.Errorf("x-claw.lifecycle: %s does not allow compose key %q; the worker container is generated", LifecyclePerRun, key)
+	// The worker container is generated from a fixed shape; any compose key
+	// the renderer would not honour is refused rather than silently dropped.
+	keys := make([]string, 0, len(svc.Compose))
+	for key := range svc.Compose {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if _, ok := perRunComposeKeys[key]; !ok {
+			return fmt.Errorf("x-claw.lifecycle: %s does not allow compose key %q; the worker container is generated (allowed: image, build)", LifecyclePerRun, key)
 		}
 	}
 	return nil

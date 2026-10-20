@@ -37,6 +37,7 @@ const (
 	ReasonContainerMissing = "container_missing"
 	ReasonDuplicate        = "duplicate"
 	ReasonMismatch         = "mismatch"
+	ReasonResultMissing    = "result_missing"
 )
 
 var (
@@ -131,17 +132,24 @@ type Record struct {
 	LastError          string      `json:"last_error,omitempty"`
 }
 
-// End callback outcomes. Only EndAcked means the orchestrator acknowledged.
+// Callback outcomes. Only CallbackAcked means the orchestrator acknowledged.
 const (
-	EndAcked     = "acked"
-	EndRejected  = "rejected"  // 401/403: the orchestrator's authority ended
-	EndAbandoned = "abandoned" // undeliverable before authority expired
-	EndSkipped   = "skipped"   // no credential held, or the run was cancelled
+	CallbackAcked     = "acked"
+	CallbackRejected  = "rejected"  // 401/403: the orchestrator's authority ended
+	CallbackAbandoned = "abandoned" // undeliverable before authority expired
+	CallbackSkipped   = "skipped"   // no credential held, or the run was cancelled
+
+	// End aliases kept for readability at end-callback call sites.
+	EndAcked     = CallbackAcked
+	EndRejected  = CallbackRejected
+	EndAbandoned = CallbackAbandoned
+	EndSkipped   = CallbackSkipped
 )
 
-// Callbacks records lifecycle callback delivery.
+// Callbacks records lifecycle callback delivery. Start is always resolved
+// before End for a worker that spawned.
 type Callbacks struct {
-	Started       bool       `json:"started"`
+	Start         string     `json:"start,omitempty"`
 	End           string     `json:"end,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 }
