@@ -116,7 +116,9 @@ func (r *fakeRevoker) Revoke(_ context.Context, agentID string, _ uint64) error 
 	if r.err != nil {
 		return r.err
 	}
-	r.calls = append(r.calls, agentID)
+	if !strings.HasPrefix(agentID, "_claw-runs-probe-") {
+		r.calls = append(r.calls, agentID)
+	}
 	return nil
 }
 
@@ -1112,5 +1114,41 @@ func TestFinalizeWithoutProxy(t *testing.T) {
 	}
 	if live, _ := HasLiveRuns(h.podDir); live {
 		t.Fatalf("a later claw up must not be blocked")
+	}
+}
+
+func TestSpawnRefusedWhenProxyCannotRevoke(t *testing.T) {
+	h := newHarness(t, false)
+	h.rev.err = errors.New("404")
+	rec, _ := h.launch("r1", 1, "x")
+	rec = h.advance("r1")
+	if rec.State != StateAccepted || h.exec.ups != 0 || rec.SpawnAttempted {
+		t.Fatalf("no worker may start without revocation support: %+v ups=%d", rec, h.exec.ups)
+	}
+	h.rev.err = nil
+	rec = h.advance("r1")
+	if rec.State != StateRunning || h.exec.ups != 1 {
+		t.Fatalf("spawn must proceed once the proxy supports revocation: %+v", rec)
+	}
+}
+
+// Struct-typed metadata (as claw up compiles it) must digest the same after a
+// disk round trip.
+func TestTemplateDigestStableAcrossRoundTrip(t *testing.T) {
+	h := newHarness(t, false)
+	tpl, ctx, err := LoadTemplate(h.podDir, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type policy struct {
+		Zeta  string `json:"zeta"`
+		Alpha int    `json:"alpha"`
+	}
+	ctx.Input.Metadata["model_policy"] = policy{Zeta: "z", Alpha: 1}
+	if err := WriteTemplates(h.podDir, []*Template{tpl}, map[string]*ContextTemplate{"worker": ctx}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadTemplate(h.podDir, "worker"); err != nil {
+		t.Fatalf("round trip changed the digest: %v", err)
 	}
 }

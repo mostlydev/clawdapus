@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -29,6 +30,28 @@ const (
 type DockerExecutor struct {
 	cli  *client.Client
 	Logf func(format string, args ...any)
+	// Hold, when set, is the pod lock file. Every lifecycle subprocess
+	// inherits it, so a SIGKILLed supervisor's in-flight compose command keeps
+	// writer authority until it exits.
+	Hold *os.File
+}
+
+// lifecycleCommand builds a compose command that inherits the pod lock and
+// runs in its own process group, killed as a whole on cancellation.
+func (d *DockerExecutor) lifecycleCommand(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 10 * time.Second
+	if d.Hold != nil {
+		cmd.ExtraFiles = []*os.File{d.Hold}
+	}
+	return cmd
 }
 
 func NewDockerExecutor() (*DockerExecutor, error) {
@@ -47,7 +70,7 @@ func (d *DockerExecutor) Close() error { return d.cli.Close() }
 func (d *DockerExecutor) Up(ctx context.Context, project, file string, env map[string]string) error {
 	ctx, cancel := context.WithTimeout(ctx, composeUpTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", project, "--project-directory", filepath.Dir(file), "-f", file, "up", "-d", "--no-build", "--pull", "never")
+	cmd := d.lifecycleCommand(ctx, "compose", "-p", project, "--project-directory", filepath.Dir(file), "-f", file, "up", "-d", "--no-build", "--pull", "never")
 	cmd.Env = composeEnv(env)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
@@ -81,7 +104,7 @@ func (d *DockerExecutor) Down(ctx context.Context, project, file string) error {
 		stdin = strings.NewReader("name: " + project + "\nservices: {}\n")
 	}
 	args = append(args, "down", "--remove-orphans", "--timeout", "10")
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.lifecycleCommand(ctx, args...)
 	cmd.Env = composeEnv(nil)
 	cmd.Stdin = stdin
 	cmd.Stdout = io.Discard

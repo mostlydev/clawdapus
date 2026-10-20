@@ -90,16 +90,25 @@ type ContextTemplate struct {
 
 // digest hashes the context with every credential value redacted, so token
 // rotation does not change the template identity but any change to tools,
-// endpoints, models, policy or rules does.
+// endpoints, models, policy or rules does. It digests the JSON-normalized
+// form, so a template compiled in memory and one loaded from disk agree.
 func (c *ContextTemplate) digest() (string, error) {
-	in := c.Input
-	in.Metadata = make(map[string]interface{}, len(c.Input.Metadata))
-	for k, v := range c.Input.Metadata {
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return "", err
+	}
+	var normalized ContextTemplate
+	if err := json.Unmarshal(raw, &normalized); err != nil {
+		return "", err
+	}
+	in := normalized.Input
+	in.Metadata = make(map[string]interface{}, len(normalized.Input.Metadata))
+	for k, v := range normalized.Input.Metadata {
 		if k != "token" {
 			in.Metadata[k] = v
 		}
 	}
-	in.Tools = append([]cllama.ToolManifestEntry(nil), c.Input.Tools...)
+	in.Tools = append([]cllama.ToolManifestEntry(nil), normalized.Input.Tools...)
 	for i := range in.Tools {
 		if a := in.Tools[i].Execution.Auth; a != nil {
 			redacted := *a
@@ -107,13 +116,13 @@ func (c *ContextTemplate) digest() (string, error) {
 			in.Tools[i].Execution.Auth = &redacted
 		}
 	}
-	in.Feeds = append([]cllama.FeedManifestEntry(nil), c.Input.Feeds...)
+	in.Feeds = append([]cllama.FeedManifestEntry(nil), normalized.Input.Feeds...)
 	for i := range in.Feeds {
 		if in.Feeds[i].Auth != "" {
 			in.Feeds[i].Auth = "redacted"
 		}
 	}
-	in.ServiceAuth = append([]cllama.ServiceAuthEntry(nil), c.Input.ServiceAuth...)
+	in.ServiceAuth = append([]cllama.ServiceAuthEntry(nil), normalized.Input.ServiceAuth...)
 	for i := range in.ServiceAuth {
 		in.ServiceAuth[i].Token = ""
 	}
@@ -126,11 +135,11 @@ func (c *ContextTemplate) digest() (string, error) {
 		}
 		in.Memory = &m
 	}
-	raw, err := json.Marshal(in)
+	out, err := json.Marshal(in)
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(raw)
+	sum := sha256.Sum256(out)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 

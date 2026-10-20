@@ -47,3 +47,14 @@ func (l *PodLock) Release() error {
 	l.f = nil
 	return err
 }
+
+// File returns the locked file so lifecycle subprocesses can inherit it: the
+// flock lives on the open file description, so writer authority cannot be
+// reacquired while any inheriting process still runs, even if this process
+// dies.
+func (l *PodLock) File() *os.File {
+	if l == nil {
+		return nil
+	}
+	return l.f
+}

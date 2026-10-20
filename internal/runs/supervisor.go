@@ -703,6 +703,11 @@ func (s *Supervisor) stepSpawn(ctx context.Context, rec *Record, now time.Time) 
 		rec.Failure = ReasonMismatch
 		return true, nil
 	}
+	// Never start a worker the proxy could not later revoke. The run stays
+	// accepted and retries until its authority expires.
+	if err := s.CheckRevocationSupport(ctx); err != nil {
+		return false, err
+	}
 	token, ok, err := s.ledger.Secret(rec.Key, "cllama")
 	if err != nil || !ok {
 		rec.Failure = ReasonSpawnError
@@ -1260,4 +1265,20 @@ func (s *Supervisor) RemoveOrphan(ctx context.Context, c Container) error {
 		}
 	}
 	return s.cfg.Executor.Down(ctx, project, "")
+}
+
+// probeAgentID is a reserved identity that can never belong to a worker or a
+// declared claw: agent IDs derive from Compose service names, which cannot
+// start with "_". Revoking it is idempotent and proves the proxy implements
+// the durable revocation fence.
+func (s *Supervisor) probeAgentID() string { return "_claw-runs-probe-" + s.podNS }
+
+// CheckRevocationSupport proves the running proxy acknowledges durable
+// revocation (cllama#54) before any worker is started. An older or
+// misconfigured proxy (no endpoint, no revocation dir) fails this check.
+func (s *Supervisor) CheckRevocationSupport(ctx context.Context) error {
+	if err := s.cfg.Revoker.Revoke(ctx, s.probeAgentID(), 1); err != nil {
+		return fmt.Errorf("the pod's cllama does not acknowledge durable revocation (needs cllama with revocation support and CLAW_REVOCATION_DIR): %w", err)
+	}
+	return nil
 }

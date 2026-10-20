@@ -206,6 +206,7 @@ func finalizeRunsBeforeDown(podDir, generatedPath string) (afterDown func() erro
 		release()
 		return none, noop, err
 	}
+	exec.Hold = lock.File()
 	sup, err := runs.NewSupervisor(runs.Config{
 		PodDir:   podDir,
 		Executor: exec,

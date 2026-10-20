@@ -85,6 +85,7 @@ Trust model: the socket authenticates peers by Unix UID. Every allowed UID
 			return err
 		}
 		defer exec.Close()
+		exec.Hold = lock.File()
 		logf := func(format string, args ...any) { fmt.Fprintf(cmd.ErrOrStderr(), format+"\n", args...) }
 		exec.Logf = logf
 		cfg := runs.Config{
@@ -113,6 +114,9 @@ Trust model: the socket authenticates peers by Unix UID. Every allowed UID
 		}
 		if len(orphans) > 0 {
 			return fmt.Errorf("%d labelled run worker(s) have no ledger record; refusing to serve (see `claw runs doctor`)", len(orphans))
+		}
+		if err := sup.CheckRevocationSupport(ctx); err != nil {
+			return err
 		}
 		// Restart reconciliation runs before the socket accepts connections.
 		sup.AdvanceAll(ctx)
