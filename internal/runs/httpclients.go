@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // CllamaRevoker calls cllama's operator revoke endpoint (cllama#54) on the
@@ -125,10 +126,15 @@ func (n *HTTPNotifier) Heartbeat(ctx context.Context, rec *Record, credential st
 }
 
 func (n *HTTPNotifier) Ended(ctx context.Context, rec *Record, credential, outcome, reason string, summary []byte) error {
+	truncated := rec.Result != nil && rec.Result.Truncated
 	if len(summary) > n.MaxSummary {
 		summary = summary[:n.MaxSummary]
+		for len(summary) > 0 && !utf8.Valid(summary) {
+			summary = summary[:len(summary)-1]
+		}
+		truncated = true
 	}
-	return n.post(ctx, rec, credential, "end", map[string]any{"outcome": outcome, "reason": reason, "summary": string(summary)})
+	return n.post(ctx, rec, credential, "end", map[string]any{"outcome": outcome, "reason": reason, "summary": string(summary), "summary_truncated": truncated})
 }
 
 func (n *HTTPNotifier) post(ctx context.Context, rec *Record, credential, verb string, extra map[string]any) error {

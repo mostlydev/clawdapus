@@ -121,3 +121,39 @@ func TestHTTPNotifierContract(t *testing.T) {
 		t.Fatalf("path without {run_id} must be rejected")
 	}
 }
+
+func TestEndCallbackReportsSummaryTruncation(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	notifier, err := NewHTTPNotifier(server.URL, "/runs/{run_id}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	notifier.MaxSummary = 3
+	record := &Record{Key: Key{"inst", "r1"}, Generation: 1}
+	if err := notifier.Ended(context.Background(), record, "credential", "succeeded", "", []byte("éé")); err != nil {
+		t.Fatal(err)
+	}
+	record.Result = &ResultInfo{Bytes: 2, Truncated: true}
+	if err := notifier.Ended(context.Background(), record, "credential", "succeeded", "", []byte("ok")); err != nil {
+		t.Fatal(err)
+	}
+	record.Result.Truncated = false
+	if err := notifier.Ended(context.Background(), record, "credential", "succeeded", "", []byte("ok")); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []bool{true, true, false} {
+		if bodies[i]["summary_truncated"] != want {
+			t.Fatalf("callback %d: %v", i, bodies[i])
+		}
+	}
+	if bodies[0]["summary"] != "é" {
+		t.Fatalf("split UTF-8 summary: %v", bodies[0])
+	}
+}

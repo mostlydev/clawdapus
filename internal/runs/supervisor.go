@@ -913,7 +913,7 @@ func extractAnswer(stdout []byte, marker string, limit int) (answer []byte, trun
 }
 
 func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Time) (bool, error) {
-	if rec.Cancelled && rec.State != StateRevoking && rec.State != StateRevoked {
+	if rec.State != StateRevoking && rec.State != StateRevoked {
 		rec.State = StateRevoking
 		return true, nil
 	}
@@ -928,10 +928,8 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 		if revokeErr == nil {
 			rec.Revoked = true
 			rec.RevocationProof = ProofCllamaAck
-			if rec.Cancelled {
-				rec.State = StateRevoked
-				rec.Timestamps.Revoked = &now
-			}
+			rec.State = StateRevoked
+			rec.Timestamps.Revoked = &now
 			return true, nil
 		}
 	}

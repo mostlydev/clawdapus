@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/mostlydev/clawdapus/internal/runs"
+	"gopkg.in/yaml.v3"
 )
 
 // TestSpikePerRunWorkers is the live acceptance for issue #372. It runs a real
@@ -34,14 +35,18 @@ func TestSpikePerRunWorkers(t *testing.T) {
 	repoRoot, _ := filepath.Abs(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 
 	workDir := t.TempDir()
+	var sup *runsSpikeSupervisor
 	generatedPath := filepath.Join(workDir, "compose.generated.yml")
 	podFile := filepath.Join(workDir, "claw-pod.yml")
 	t.Cleanup(func() {
+		if sup != nil {
+			sup.stop()
+		}
 		if t.Failed() {
 			out, _ := exec.Command("docker", "compose", "-f", generatedPath, "logs", "--tail", "120").CombinedOutput()
 			t.Logf("compose logs:\n%s", out)
 		}
-		spikeRunsCleanup(workDir, generatedPath)
+		spikeRunsCleanup(t, workDir, generatedPath)
 	})
 
 	// cllama from the working tree at a unique tag: no released tag is moved.
@@ -69,11 +74,20 @@ func TestSpikePerRunWorkers(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "-f", workerImage).Run() })
 
 	spikeWriteFile(t, filepath.Join(workDir, "AGENTS.md"), "# Run worker\n\nAnswer the task in one line.")
-	spikeWriteFile(t, filepath.Join(workDir, "fake_provider.py"), runsSpikeFakeProvider)
-	spikeWriteFile(t, podFile, fmt.Sprintf(`name: runs-spike
+	providerImage := "claw-runs-spike-provider:" + unique
+	providerCtx := filepath.Join(workDir, "provider-image")
+	if err := os.MkdirAll(providerCtx, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spikeWriteFile(t, filepath.Join(providerCtx, "fake_provider.py"), runsSpikeFakeProvider)
+	spikeWriteFile(t, filepath.Join(providerCtx, ".claw-describe.json"), runsSpikeToolDescriptor)
+	spikeWriteFile(t, filepath.Join(providerCtx, "Dockerfile"), "FROM "+pythonImage+"\nCOPY fake_provider.py /app/fake_provider.py\nCOPY .claw-describe.json /.claw-describe.json\nLABEL claw.describe=/.claw-describe.json\nCMD [\"python\",\"-u\",\"/app/fake_provider.py\"]\n")
+	spikeBuildImage(t, providerCtx, providerImage, "Dockerfile")
+	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "-f", providerImage).Run() })
+	spikeWriteFile(t, podFile, fmt.Sprintf(`name: %s
 
 x-claw:
-  pod: runs-spike
+  pod: %s
   cllama-defaults:
     proxy: [passthrough]
     env:
@@ -88,20 +102,18 @@ services:
     x-claw:
       agent: ./AGENTS.md
       lifecycle: per-run
+      tools: [fake-provider]
       run:
         max-runtime: 5m
         max-authority: 30m
 
   fake-provider:
     image: %s
-    command: ["python", "-u", "/app/fake_provider.py"]
-    volumes:
-      - ./fake_provider.py:/app/fake_provider.py:ro
     expose:
       - "8080"
     networks:
       - claw-internal
-`, workerImage, pythonImage))
+`, "runs-spike-"+unique, "runs-spike-"+unique, workerImage, providerImage))
 
 	t.Setenv("CLLAMA_UI_PORT", spikeFreePort(t))
 	t.Setenv("CLAWDASH_ADDR", ":"+spikeFreePort(t))
@@ -147,7 +159,7 @@ services:
 	defer os.RemoveAll(sockDir)
 	_ = os.Chmod(sockDir, 0o700)
 
-	sup := startRunsSpikeSupervisor(t, workDir, sockDir, cbServer.URL)
+	sup = startRunsSpikeSupervisor(t, workDir, sockDir, cbServer.URL)
 	client, err := runs.Dial(sockDir, uint32(os.Geteuid()))
 	if err != nil {
 		t.Fatal(err)
@@ -165,6 +177,37 @@ services:
 		t.Fatalf("case 1 result: %q %v", result, err)
 	}
 	runsSpikeAssertNoWorker(t, view)
+
+	// A nonempty compiled grant must support real managed dispatch, while an
+	// empty per-run subscription to that same template exposes no such tool.
+	if len(tpl.ToolsGrant) != 1 || tpl.ToolsGrant[0] != "fake-provider.echo" {
+		t.Fatalf("compiled tool grant: %v", tpl.ToolsGrant)
+	}
+	rawToolSpec, _ := json.Marshal(map[string]any{"template": "worker", "task": "MANAGED-PER-RUN-PROBE", "tools": []string{"fake-provider.echo"}})
+	_, _, toolDigest, _ := runs.CanonicalSpec(rawToolSpec)
+	if err := client.Do(ctx, "POST", "/v1/runs", map[string]any{"installation": "inst", "run_id": "tool-allowed", "generation": 1, "spec_digest": toolDigest, "spec": json.RawMessage(rawToolSpec), "authority_expires_at": time.Now().Add(20 * time.Minute)}, &view); err != nil {
+		t.Fatal(err)
+	}
+	allowed := runsSpikeWait(t, client, "tool-allowed", "stopped")
+	if allowed.State != runs.StateStopped || allowed.Failure != "" {
+		t.Fatalf("allowed tool run: %+v", allowed)
+	}
+	if err := client.Do(ctx, "GET", runs.RunPath(runs.Key{Installation: "inst", RunID: "tool-allowed"}, "/result"), nil, &result); err != nil || !strings.Contains(string(result), "SPIKE-ANSWER-TOOL") {
+		t.Fatalf("managed result: %q %v", result, err)
+	}
+	runsSpikeLaunch(t, client, "tool-empty", 1, "EMPTY-PER-RUN-PROBE", 20*time.Minute, "")
+	empty := runsSpikeWait(t, client, "tool-empty", "stopped")
+	if empty.State != runs.StateStopped || empty.Failure != "" {
+		t.Fatalf("empty tool run: %+v", empty)
+	}
+	events := runsSpikeToolEvents(t, generatedPath)
+	if !strings.Contains(events, "TOOL "+allowed.RunAgentID) || !strings.Contains(events, "MODEL EMPTY tools=[]") || strings.Contains(events, "TOOL "+empty.RunAgentID) {
+		t.Fatalf("allowlist dispatch evidence: %s", events)
+	}
+	proxyAudit, err := exec.Command("docker", "compose", "-f", generatedPath, "logs", "--no-log-prefix", "cllama").Output()
+	if err != nil || !runsSpikeHasDispatch(proxyAudit, allowed.RunAgentID) || runsSpikeHasDispatch(proxyAudit, empty.RunAgentID) {
+		t.Fatalf("per-run dispatch audit did not preserve allowlists: %v", err)
+	}
 
 	// 2. Cancel mid-run reaches revoked then stopped; the token is dead.
 	runsSpikeLaunch(t, client, "b", 1, "SLOW task", 20*time.Minute, "")
@@ -293,12 +336,34 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode("utf-8", "replace")
+        payload = json.loads(body)
+        if self.path.startswith("/tool/"):
+            print("TOOL " + self.path[len("/tool/"):], flush=True)
+            self.reply({"value": "TOOL-ANSWER"})
+            return
+        managed = [t["function"]["name"] for t in payload.get("tools", [])
+                   if "echo" in t.get("function", {}).get("name", "")]
+        if "EMPTY-PER-RUN-PROBE" in body:
+            print("MODEL EMPTY tools=" + json.dumps(managed), flush=True)
         print("REQUEST", "SLOW" if "SLOW" in body else "FAST", flush=True)
         if "SLOW" in body:
             time.sleep(600)
-        out = {"id": "chatcmpl-runs-spike", "object": "chat.completion", "created": 1, "model": "gpt-4o",
-               "choices": [{"index": 0, "message": {"role": "assistant", "content": "SPIKE-ANSWER"}, "finish_reason": "stop"}],
-               "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}
+        message = {"role": "assistant", "content": "SPIKE-ANSWER"}
+        finish = "stop"
+        if "MANAGED-PER-RUN-PROBE" in body:
+            if any(m.get("role") == "tool" and "TOOL-ANSWER" in str(m.get("content", "")) for m in payload.get("messages", [])):
+                message["content"] = "SPIKE-ANSWER-TOOL"
+            elif managed:
+                message = {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "call-spike", "type": "function", "function": {
+                        "name": managed[0], "arguments": json.dumps({"message": "hello"})}}]}
+                finish = "tool_calls"
+            else:
+                message["content"] = "MISSING-MANAGED-TOOL"
+        self.reply({"id": "chatcmpl-runs-spike", "object": "chat.completion", "created": 1, "model": "gpt-4o",
+                    "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}})
+    def reply(self, out):
         data = json.dumps(out).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -551,14 +616,61 @@ func runsSpikeWaitCallback(t *testing.T, cb *runsSpikeCallbacks, runID, verb, cr
 	t.Fatalf("callback %s never arrived; got %v", want, cb.calls)
 }
 
-func spikeRunsCleanup(podDir, generatedPath string) {
-	ns := runs.PodNamespace(podDir)
-	out, _ := exec.Command("docker", "ps", "-aq", "--filter", "label="+runs.LabelPodNS+"="+ns).Output()
-	for _, id := range strings.Fields(string(out)) {
-		_ = exec.Command("docker", "rm", "-f", id).Run()
+func spikeRunsCleanup(t *testing.T, podDir, generatedPath string) {
+	t.Helper()
+	lock, err := runs.AcquirePodLock(podDir)
+	if err != nil {
+		t.Errorf("cleanup cannot acquire writer authority: %v", err)
+		return
 	}
-	_ = exec.Command("docker", "compose", "-f", generatedPath, "down", "-v", "--remove-orphans").Run()
-	_ = exec.Command("docker", "network", "rm", "claw-runs-"+ns).Run()
+	defer lock.Release()
+	executor, err := runs.NewDockerExecutor()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer executor.Close()
+	executor.Hold = lock.File()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	ns := runs.PodNamespace(podDir)
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "label="+runs.LabelPodNS+"="+ns, "--format", `{{.Label "com.docker.compose.project"}}`).Output()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	seen := map[string]bool{}
+	for _, project := range strings.Fields(string(out)) {
+		if !strings.HasPrefix(project, "clawrun-"+ns+"-") {
+			t.Errorf("foreign cleanup project %q", project)
+			continue
+		}
+		if seen[project] {
+			continue
+		}
+		seen[project] = true
+		if err := executor.Down(ctx, project, filepath.Join(podDir, "absent-cleanup-project.yml")); err != nil {
+			t.Errorf("worker cleanup: %v", err)
+		}
+	}
+	raw, err := os.ReadFile(generatedPath)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	var doc struct {
+		Name string `yaml:"name"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil || !strings.HasPrefix(doc.Name, "runs-spike-") {
+		t.Errorf("invalid fixture project identity: %v", err)
+		return
+	}
+	if err := executor.Down(ctx, doc.Name, generatedPath); err != nil {
+		t.Errorf("pod cleanup: %v", err)
+	}
 }
 
 // runsSpikeLaunchUnread sends a launch and closes the connection without
@@ -573,9 +685,32 @@ func runsSpikeLaunchUnread(t *testing.T, sockDir, runID, task string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Fprintf(conn, "POST /v1/runs HTTP/1.1\r\nHost: claw-runs\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
-	time.Sleep(500 * time.Millisecond)
-	conn.Close()
+	_, err = fmt.Fprintf(conn, "POST /v1/runs HTTP/1.1\r\nHost: claw-runs\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
+	if err != nil {
+		conn.Close()
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	// Prove acceptance through the separate control path while the original
+	// client deliberately consumes none of its launch response.
+	check, err := runs.Dial(sockDir, uint32(os.Geteuid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for ctx.Err() == nil {
+		var view runs.StatusView
+		err := check.Do(ctx, "GET", runs.RunPath(runs.Key{Installation: "inst", RunID: runID}, ""), nil, &view)
+		if err == nil {
+			return
+		}
+		if runsSpikeCode(err) != "not_found" {
+			t.Fatal(err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("unread launch never became durably accepted")
 }
 
 // runsSpikeAssertIsolation inspects a live worker container.

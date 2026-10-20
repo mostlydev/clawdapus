@@ -1152,3 +1152,23 @@ func TestTemplateDigestStableAcrossRoundTrip(t *testing.T) {
 		t.Fatalf("round trip changed the digest: %v", err)
 	}
 }
+
+func TestExpiryWithUnavailableRevokeReportsRevoking(t *testing.T) {
+	h := newHarness(t, false)
+	record, err := h.launch("expiry-pending", 1, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.advance("expiry-pending")
+	h.now = h.now.Add(31 * time.Minute)
+	h.rev.err = errors.New("proxy unavailable")
+	record = h.advance("expiry-pending")
+	if record.State != StateRevoking || record.Cancelled || record.Revoked || record.Failure != ReasonAuthorityExpired || h.exec.count(record.RunKey) != 0 {
+		t.Fatalf("false running/terminal state: %+v", record)
+	}
+	h.rev.err = nil
+	record = h.advance("expiry-pending")
+	if record.State != StateFailed || record.Timestamps.Revoked == nil || record.Cancelled {
+		t.Fatalf("expiry cleanup: %+v", record)
+	}
+}

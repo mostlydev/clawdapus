@@ -54,12 +54,12 @@ A per-run service may declare only `image` or `build` as Compose keys; the worke
 - an image that declares `VOLUME`;
 - `x-claw.master` pointing at the template.
 
-Workers have no channel identity, schedule, mounts or persistent memory. Every business capability reaches them as a cllama-managed tool.
+Workers have no channel identity, schedule, host mounts or persistent memory. Every business capability reaches them as a cllama-managed tool.
 
 ## What `claw up` produces
 
-- **`compose.generated.yml`** does not contain the per-run service. It adds a `claw-runs-<pod-ns>` network with `internal: true` and attaches cllama to it. Workers join only that network, so they cannot reach tool services, other claws or the internet directly. Every tool call goes through cllama.
-  - Workers share this network, so they can reach each other at L3. One-shot workers expose no listeners, and each run has its own identity, so this is accepted.
+- **`compose.generated.yml`** does not contain the per-run service. It adds a `claw-runs-<pod-ns>` network with `internal: true` and attaches cllama to it. Workers join only that network, keeping them off the tool-service and outbound pod networks. Managed business tool calls go through cllama.
+  - Concurrent workers can reach each other at L3. Each run has a separate identity and tmpfs; this shared network boundary excludes the tool services and external routing.
   - For per-run pods the file is written `0600`, because it contains the cllama operator token.
 - **`.claw-runs/templates/<service>.json`** holds the pinned image ID, the PicoClaw one-shot contract, the tool grant, the limits and the run network. Its template ID digests all of these together with the compiled cllama context, with credentials redacted.
 - **`.claw-revocations/`** is mounted read-write into cllama as `CLAW_REVOCATION_DIR`. It is created `0700`, owned by the operator, and never rotated.
@@ -68,7 +68,7 @@ Workers have no channel identity, schedule, mounts or persistent memory. Every b
 
 - Both refuse to run while the supervisor holds the lock.
 - `claw up` also refuses while any run is unfinished. It would rotate `.claw-runtime` and recreate cllama under live workers.
-- `claw down` cancels unfinished runs first. If cllama cannot acknowledge a revocation, `claw down` removes the whole pod, proxy included, and verifies it is gone. Those runs then end with `revocation_proof: proxy_stopped` instead of `cllama_ack`. `claw down` always completes.
+- `claw down` cancels unfinished runs first. If cllama cannot acknowledge a revocation, `claw down` removes the whole pod, proxy included, and verifies it is gone. Those runs then end with `revocation_proof: proxy_stopped` instead of `cllama_ack`. If Docker cannot remove or verify the containers, teardown reports an error and retains unfinished state for recovery.
 
 ## Serving
 
@@ -106,8 +106,8 @@ This is a **trusted-host** design. A peer-UID check authenticates a Unix account
 The API is HTTP/1.1 over the Unix socket, with JSON bodies:
 
 - requests are at most 64 KiB, with unknown fields rejected;
-- each request has a 10 s deadline, except long-polls, which may wait up to 60 s;
-- errors are `{"error":{"code","message"},"run":{…}}` and never echo task text or credentials.
+- body reads have a 10 s deadline; long-polls wait up to 60 s, with a 70 s response write budget;
+- errors use the shape `{"error":{"code":"request_invalid","message":"..."},"run":null}` and never echo task text or credentials.
 
 A run is identified by `installation` (`[a-z0-9][a-z0-9-]{0,63}`) and `run_id` (`[A-Za-z0-9_-]{1,128}`).
 
@@ -165,11 +165,11 @@ accepted ─► running ─► stopped    (exit 0 and an answer was found)
    └─cancel──────────► revoking ─► revoked ─► stopped   (no container ever created)
 ```
 
-- **`revoked`** is reported only after both hold: cllama returned a terminal `200` for the run's agent ID, and the run's tool allowlist was emptied.
+- **`revoked`** requires a terminal cllama `200` plus an emptied tool allowlist. Full-pod teardown may instead prove the proxy and workers stopped and remove the run context, recorded as `revocation_proof: proxy_stopped`. Neither proof undoes an already-dispatched remote effect.
 - **`stopped` or `failed`** is reported only once no container carries the run's labels.
 - **A worker exiting is observed, not terminal.** The run reaches a terminal state only after revocation and removal.
 - **If revocation is unavailable**, the worker is still removed, but the run stays `revoking` (`revoked: false`) and keeps retrying.
-- **Every run's identity is revoked when it ends**, even on a natural exit, so no tool authority outlives a run. The `revoked` field records this for natural exits too.
+- **Every run's identity is revoked when it ends**, even on a natural exit. Cleanup passes through `revoking` and `revoked` for natural exits and failures too. `cancelled` records an explicit cancel; cleanup state alone does not imply cancellation.
 
 Status carries several fields beyond the state:
 
@@ -190,8 +190,10 @@ If the supervisor was started with `--callback-origin`, a launch may hand over a
 ```
 POST {origin}{path}/start      {installation, run_id, generation}
 POST {origin}{path}/heartbeat  {installation, run_id, generation}       every --heartbeat
-POST {origin}{path}/end        {installation, run_id, generation, outcome, reason, summary}
+POST {origin}{path}/end        {installation, run_id, generation, outcome, reason, summary, summary_truncated}
 ```
+
+`outcome` is `succeeded` or `failed`; `reason` is empty on success or the failure code. `summary` contains at most 64 KiB of UTF-8 text. `summary_truncated` is true if either the stored result was truncated or the callback summary limit shortened it. The bounded stored answer remains available through the result endpoint.
 
 The callback rules are:
 
@@ -208,7 +210,7 @@ The rendered project contains one container with the following properties:
 - **Hardening:** the root filesystem is read-only, with `cap_drop: [ALL]` and `no-new-privileges`, plus memory and pid limits. It has a tmpfs `/tmp` and no other writable path.
 - **Isolation:** there are no bind mounts, no volumes, no Docker socket and no host namespaces. The only network is the run network.
 - **Inputs:**
-  - The task, the PicoClaw v3 config (including the run's cllama token) and the contract reach the container only through Compose interpolation at `compose up`, so neither the project file nor the ledger holds them.
+  - The task, the PicoClaw v3 config (including the run's cllama token) and the contract reach the container through Compose interpolation at `compose up`. The rendered project file contains placeholders. The private ledger retains the immutable spec, including task text; tokens live in separate `0600` secret files for restart recovery.
   - A pinned shell wrapper writes the config into tmpfs, removes it from the environment, and runs `picoclaw agent -m "$1" -s "$2"`. The task is passed only as a positional argument.
 - **Native tools:** PicoClaw's native tools that act outside the conversation (`exec`, `web_fetch`, file writes, `spawn` and others) are disabled even if an image `CONFIGURE` enables them.
 - **The answer:**
