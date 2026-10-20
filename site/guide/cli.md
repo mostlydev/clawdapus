@@ -433,6 +433,21 @@ Any `docker compose` subcommand works. The full list is available via `docker co
 
 ---
 
+## claw runs
+
+Serve and control [per-run workers](/guide/per-run-workers) (`x-claw.lifecycle: per-run`).
+
+```bash
+claw runs serve [--socket-dir DIR] [--allow-uid UID] [--callback-origin URL --callback-path '/api/runs/{run_id}'] [--heartbeat 1m]
+claw runs launch <installation> <run-id> --spec spec.json [--generation N] [--authority-ttl 30m] [--credential-env VAR]
+claw runs status <installation> <run-id> [--wait running|revoked|stopped|failed]
+claw runs cancel <installation> <run-id> --generation N [--wait stopped]
+claw runs result <installation> <run-id>
+claw runs doctor [--remove-orphans]
+```
+
+`serve` holds the pod's run lock for its whole lifetime, so `claw up` and `claw down` refuse to run until it stops. Before accepting connections it runs a revocation self-test against cllama and reconciles every unfinished run. Client commands verify the socket directory's owner and the server's peer UID (`--server-uid`, which defaults to your own).
+
 ## claw audit
 
 Summarize normalized cllama telemetry for the current pod.
@@ -670,6 +685,8 @@ Error: claw-pod.yml is newer than compose.generated.yml — run 'claw up' to reg
 | `claw audit` | Yes | Yes | Reads pod manifest from `.claw-runtime/` |
 | `claw compose` | Yes¹ | Yes | Passthrough to `docker compose` (¹ `claw compose build` warns instead of erroring; see [Staleness Guard](#staleness-guard)) |
 | `claw api schedule` | Yes | Yes | Tunnels schedule list/get/pause/resume/skip/fire through `claw-api` |
+| `claw runs serve` / `doctor` | Yes | Yes | Per-run worker supervisor; holds the pod run lock |
+| `claw runs launch/status/cancel/result` | -- | No | Unix-socket clients of a running `claw runs serve` |
 | `claw inspect` | -- | No | Reads image labels directly |
 | `claw doctor` | -- | No | System prerequisite check |
 | `claw init` | -- | No | Project scaffolding |

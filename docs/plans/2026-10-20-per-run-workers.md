@@ -2,6 +2,29 @@
 
 **Status:** Agreed in review (2026-10-20), issue #372. Companion: cllama#54 (revocation fence).
 
+## As built (supersedes the draft where they differ)
+
+The user-facing contract is [site/guide/per-run-workers.md](../../site/guide/per-run-workers.md). Review changed the draft below in these ways:
+
+- **Spec:** the spec has no `model` field in v1. Model policy is compiled per template.
+- **Worker inputs:**
+  - There are no volumes and no `docker cp`. Compose refuses env-sourced secrets on `read_only` services, and file secrets are bind mounts.
+  - Inputs (the task, the v3 config with the cllama token, and the contract) reach the worker only through Compose interpolation of `${CLAW_RUN_*:-}`. A pinned shell wrapper writes them into tmpfs.
+- **Result:** the result comes from bounded stdout after PicoClaw's marker. A missing marker is `result_missing`, and there is no result file.
+- **Locking:**
+  - Cancel writes a durable tombstone file under a short per-key admit lock that is shared with launch's final check and accepted write.
+  - Advancement uses a separate step lock, and orchestrator-owned fields are merged on every persist.
+- **Teardown:** the worker is removed even when cllama's ACK is unavailable, but `revoked` and terminal states still wait for the ACK.
+  - `claw down` is the escape hatch. After removing the whole pod it finishes runs with `revocation_proof: proxy_stopped`.
+- **Revocation:**
+  - cllama exposes revoke on the published UI listener. A 409 is not an ACK.
+  - A revocation self-test with the reserved agent `_claw-runs-probe-<ns>` gates serving and every spawn.
+- **Isolation:**
+  - Projects, labels and networks are namespaced by a hash of the pod directory, so two pods with the same run key never collide.
+  - An image `VOLUME` is rejected.
+- **Spec digest:** the digest uses the RFC 8785 (JCS) subset.
+- **Callbacks:** `start` is always resolved before `end`.
+
 ## Goal
 
 An external orchestrator launches one isolated, ephemeral worker per unit of

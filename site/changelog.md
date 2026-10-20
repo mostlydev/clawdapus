@@ -29,7 +29,20 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Per-run workers** ([#372](https://github.com/mostlydev/clawdapus/issues/372)): one isolated, one-shot worker per unit of work for an external orchestrator. The orchestrator never touches Docker.
+  - A pod service with `x-claw.lifecycle: per-run` compiles at `claw up` into a run template: a pinned image, a tool grant and limits.
+  - `claw runs serve` launches, monitors and cancels workers over a Unix socket that authenticates the peer UID in both directions.
+  - Every run is its own Compose project, so Compose stays the only lifecycle writer.
+  - Every run gets its own cllama identity.
+  - Workers run as uid 65534 with a read-only root filesystem, a tmpfs `/tmp` and no mounts, on an `internal` network shared only with cllama.
+  - Launches are idempotent per installation and run ID, with a spec digest (RFC 8785) and a generation fence. A cancel always beats a delayed launch, and a cancelled run never comes back.
+  - A run reports `revoked` only after cllama's durable revocation fence acknowledges it, and `stopped` only once no labelled container remains.
+  - Runs are bounded by `authority_expires_at` and `max-runtime`.
+  - Optional credential custody drives a start/heartbeat/end callback contract against a configured origin.
+  - `claw up` and `claw down` share the supervisor's pod lock. `claw down` always completes, even when cllama cannot acknowledge.
+  - PicoClaw only in v1, with the one-shot contract pinned on v0.2.7. See the [per-run workers guide](/guide/per-run-workers).
+  - **Requires** the cllama revocation fence ([cllama#54](https://github.com/mostlydev/cllama/issues/54)). It ships in the next cllama release and must be pinned before this feature is usable from a release build.
+- **`claw audit` keeps cllama revocation evidence**: `tool_dispatch` and `revocation` events retain `dispatch_id`, `dispatch_status`, `revocation_generation`, `admitted_before_revoke` and `refused_after_revoke` as exact integers. Dispatch records do not count as tool calls.
 
 ## v0.28.1 <Badge type="tip" text="Latest" /> {#v0-28-1}
 

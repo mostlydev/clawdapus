@@ -108,6 +108,7 @@ Current top-level commands are:
 - `claw api` (`schedule` subcommands)
 - `claw agent add`
 - `claw compose` (use this liberally instead of invoking docker directly)
+- `claw runs` (`serve`, `launch`, `status`, `cancel`, `result`, `doctor`): per-run worker supervisor (#372)
 
 Useful current behavior:
 
@@ -196,6 +197,19 @@ Do not assume older docs mentioning only a subset are current.
 - `claw.describe` is the structured service descriptor label. `claw up` extracts `.claw-describe.json` from images (or falls back to the build context filesystem). Descriptors declare feeds, endpoints, auth, and skill file paths. Feed names from descriptors populate a pod-global feed registry; consumers subscribe by name via short-form `feeds: [name]`.
 - Feed resolution is two-phase: the parser stores short-form feed names as `FeedEntry{Unresolved: true}` (no source/path validation). `claw up` resolves them after image inspection against the feed registry. Unresolved feeds that aren't in the registry are hard errors.
 - Spread expansion (`...`) in pod default lists happens at the raw YAML layer in `expandPodDefaults()`, BEFORE typed parsing (`ParseSurface`, `parseFeeds`). The typed parsers never see the `...` token. This ordering is critical — moving spread expansion after typed parsing will break.
+
+- Per-run workers (#372, `internal/runs/`, `cmd/claw/runs.go`, `cmd/claw/compose_up_runs.go`):
+  - **Compilation:** an `x-claw.lifecycle: per-run` service is compiled by `claw up` into `.claw-runs/templates/` and never emitted into `compose.generated.yml`. PicoClaw only, through the optional `driver.RunWorkerCompiler`; its validation is separate from `Validate`, so a long-lived service's channel requirement is not weakened.
+  - **Lifecycle:** `claw runs serve` (a host process) instantiates each run as its own Compose project, `clawrun-<pod-ns>-<runkey>`, on the internal `claw-runs-<pod-ns>` network that only cllama shares. Compose stays the sole lifecycle writer.
+  - **Locking:**
+    - The pod lock (`.claw-runs/lock`) is shared by serve, `claw up` and `claw down`.
+    - `claw up` fails while serve runs or any run is unfinished.
+    - `claw down` cancels runs first. Without a cllama ACK it finishes them after removing the whole pod (`revocation_proof: proxy_stopped`).
+    - Lifecycle subprocesses inherit the lock file descriptor.
+  - **Revocation:** cancel and teardown require cllama's revoke endpoint on the UI port (cllama#54) and `CLAW_REVOCATION_DIR` (the `.claw-revocations/` mount, 0700, never rotated). Serve and each spawn run a revocation self-test with the reserved agent ID `_claw-runs-probe-<ns>`; an older proxy refuses to start workers. A 409 from revoke is not an ACK.
+  - **Private state:** `.claw-runs/` and `.claw-revocations/` are 0700 private dirs (`runs.EnsurePrivateDir`). Do not route them through `ensurePersistentCllamaDir` (0777). For per-run pods `compose.generated.yml` is 0600, because it carries `CLLAMA_UI_TOKEN`.
+  - **Worker inputs:** task text, the worker's cllama token and the config reach the worker only through Compose interpolation (`${CLAW_RUN_*:-}`). Static `$` in rendered projects is escaped as `$$`. Never write them into the project file.
+  - **Live proof:** the spike is `go test -tags spike -run TestSpikePerRun ./cmd/claw/`. It builds cllama from the submodule at a unique local tag via `infraCllamaTag`, never under a released tag.
 
 ## Current Behavior Worth Knowing
 
