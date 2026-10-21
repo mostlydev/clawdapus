@@ -155,7 +155,7 @@ Service skills: `claw.skill.emit` label > operator override > fallback stub.
 
 ## Per-Run Workers
 
-A service with `x-claw.lifecycle: per-run` is compiled by `claw up` into a run template under `.claw-runs/templates/` and is never a long-lived compose service. `claw runs serve` (a host process) launches one worker per run as its own Compose project on an `internal` network shared with cllama, with a fresh cllama identity, read-only rootfs, tmpfs `/tmp`, uid 65534 and no host mounts. Cancel tombstones the run, revokes the identity through cllama's durable fence (requires cllama v0.11.0+), then removes the container. `claw up` and `claw down` refuse while the supervisor holds the pod lock; `claw up` also refuses while any run is unfinished. See `site/guide/per-run-workers.md` for the socket API, spec digest (RFC 8785) and callback contract.
+A service with `x-claw.lifecycle: per-run` is compiled by `claw up` into a run template under `.claw-runs/templates/` and is never a long-lived compose service. `claw runs serve` (a host process) launches one worker per run as its own Compose project on an `internal` network shared with cllama, with a fresh cllama identity, read-only rootfs, tmpfs `/tmp`, uid 65534 and no host mounts. Cancel tombstones the run, revokes the identity through cllama's durable fence (requires cllama v0.11.0+), then removes the container. Workers speak OpenAI chat/completions; direct Anthropic keys and current OpenAI GPT-6 models need cllama v0.12.0+. `claw up` and `claw down` refuse while the supervisor holds the pod lock; `claw up` also refuses while any run is unfinished. See `site/guide/per-run-workers.md` for the socket API, spec digest (RFC 8785) and callback contract.
 
 ## claw-pod.yml Reference
 

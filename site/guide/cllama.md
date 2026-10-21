@@ -75,7 +75,9 @@ Requests to `/v1/messages` are handled as Anthropic format. The payload uses a t
 
 ### Format Bridging
 
-When the resolved provider uses Anthropic format but the incoming request is OpenAI format (`/v1/chat/completions`), the proxy routes through OpenRouter instead, which accepts OpenAI format for all models. This transparent bridging means agents do not need to know which provider or format their assigned model requires.
+When an OpenAI-format request (`/v1/chat/completions`) resolves to a registered Anthropic-format provider, cllama (≥ v0.12.0) translates it to Anthropic Messages at the provider boundary and translates the reply back, so runners that only speak chat/completions can use a direct Anthropic key. Every governance surface keeps observing the chat shape, and routed requests emit an `anthropic_messages_adapter` intervention. Semantics Anthropic cannot honour (JSON `response_format`, audio or file parts, `n > 1`, logprobs, penalties, seed, logit bias) are rejected with a 400 rather than silently dropped. `max_tokens` defaults to 8192 when absent (`anthropic_adapter_default_max_tokens`), and sampling fields are forwarded only to Claude 3 and 4.0–4.6 models, because later models reject them (`anthropic_adapter_dropped_sampling`).
+
+A model whose vendor prefix has no registered provider (for example `mistral/<model>` with only an OpenRouter key) is still routed through OpenRouter, which accepts OpenAI format for all models. Before v0.12.0, Anthropic-format providers were also routed through OpenRouter and failed without it.
 
 ::: tip Passthrough, Not Full Policy
 In passthrough mode, the reference proxy still performs infrastructure work: model routing, budget/rate preflight, late runtime-context assembly, memory recall/retain, managed tool mediation, telemetry, and cost accounting. It does **not** run a contract-derived policy engine, redact responses, compute drift scores, or amend final provider text.
@@ -290,7 +292,7 @@ session history, budgets, tool mediation, declared failover — keeps observing
 the unchanged shape. Requests routed this way emit an `intervention` audit
 event with reason `responses_api_adapter`.
 
-The built-in list covers `openai/gpt-5.6*` and `openai/gpt-5-pro*`. When
+The built-in list covers `openai/gpt-5.6*` and `openai/gpt-5-pro*`, and (cllama ≥ v0.12.0) the documented GPT-6 families `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna` plus their dated snapshots. For those GPT-6 families the adapter also drops the `temperature`/`top_p` defaults older runners send, which the models reject, and logs a `responses_adapter_dropped_sampling` intervention. Sampling is kept only for `gpt-6-sol`/`gpt-6-luna` with an explicit `reasoning_effort: none`; an explicit effort a model does not support is rejected with a 400. When
 OpenAI moves a model before the built-in list catches up, cllama detects the
 upstream rejection and retries once through the adapter automatically. Two
 knobs tune the behavior through the proxy environment:
@@ -308,6 +310,11 @@ x-claw:
 
 No runner or Clawfile changes are needed — declare the model in a slot like
 any other, and cllama handles the dialect.
+
+Failed provider calls (cllama ≥ v0.12.0) emit an `upstream_error` audit event
+with allowlisted `upstream_error_code`, `upstream_error_type` and
+`upstream_error_param` fields, so a rejected parameter is diagnosable without
+the provider's message, the raw body or any credential being logged.
 
 Two further adapter knobs (cllama ≥ v0.10.0), both opt-in and audit-observable:
 
