@@ -104,8 +104,9 @@ func TestGenerateConfigSetsModelPrimary(t *testing.T) {
 
 func TestGenerateConfigCllamaRewritesProviderBaseURL(t *testing.T) {
 	rc := &driver.ResolvedClaw{
-		Models: map[string]string{"primary": "anthropic/claude-sonnet-4"},
-		Cllama: []string{"passthrough"},
+		Models:      map[string]string{"primary": "anthropic/claude-sonnet-4"},
+		Cllama:      []string{"passthrough"},
+		CllamaToken: "fixture-proxy-token",
 	}
 	data, err := GenerateConfig(rc)
 	if err != nil {
@@ -199,7 +200,8 @@ func TestGenerateConfigCllamaRejectsSyntheticIngressProviderPrefix(t *testing.T)
 		Models: map[string]string{
 			"primary": "cllama/google/gemini-3-flash-preview",
 		},
-		Cllama: []string{"passthrough"},
+		Cllama:      []string{"passthrough"},
+		CllamaToken: "fixture-proxy-token",
 	}
 
 	_, err := GenerateConfig(rc)
@@ -1188,8 +1190,8 @@ func TestGenerateConfigHandleTelegram(t *testing.T) {
 		t.Error("expected channels.telegram.enabled=true")
 	}
 
-	// channels.telegram.token
-	if v, _ := getPath(config, "channels.telegram.token"); v != "${TELEGRAM_BOT_TOKEN}" {
+	// channels.telegram.botToken
+	if v, _ := getPath(config, "channels.telegram.botToken"); v != "${TELEGRAM_BOT_TOKEN}" {
 		t.Errorf("expected telegram token reference, got %v", v)
 	}
 
@@ -1230,7 +1232,7 @@ func TestGenerateConfigHandleSlack(t *testing.T) {
 	if v, _ := getPath(config, "channels.slack.enabled"); v != true {
 		t.Error("expected channels.slack.enabled=true")
 	}
-	if v, _ := getPath(config, "channels.slack.token"); v != "${SLACK_BOT_TOKEN}" {
+	if v, _ := getPath(config, "channels.slack.botToken"); v != "${SLACK_BOT_TOKEN}" {
 		t.Errorf("expected slack token reference, got %v", v)
 	}
 	if v, _ := getPath(config, "plugins.entries.slack.enabled"); v != true {

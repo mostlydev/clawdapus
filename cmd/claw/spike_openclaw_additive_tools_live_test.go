@@ -142,53 +142,56 @@ func TestSpikeOpenClawAdditiveToolsLive(t *testing.T) {
 	spikeWaitRunning(t, toolContainerID, 30*time.Second)
 
 	auditWindowStart := time.Now()
-	sessionID := fmt.Sprintf("additive-live-%d", time.Now().UnixNano())
+	if discordPhrase == "" {
+		sessionID := fmt.Sprintf("additive-live-%d", time.Now().UnixNano())
 
-	nativeOut := openClawAdditiveRunAgent(
-		t,
-		agentContainerID,
-		sessionID,
-		"Use the native read tool to read /proof/native-proof.txt. Reply with exactly the file contents and nothing else. Do not call the managed tool.",
-	)
-	if !strings.Contains(nativeOut, nativeProof) {
-		t.Fatalf("native tool turn did not surface proof %q\n%s", nativeProof, nativeOut)
-	}
+		nativeOut := openClawAdditiveRunAgent(
+			t,
+			agentContainerID,
+			sessionID,
+			"Use the native read tool to read /proof/native-proof.txt. Reply with exactly the file contents and nothing else. Do not call the managed tool.",
+		)
+		if !strings.Contains(nativeOut, nativeProof) {
+			t.Fatalf("native tool turn did not surface proof %q\n%s", nativeProof, nativeOut)
+		}
 
-	// Exercise durable native conversation state, not just a startup marker.
-	out, err := exec.Command("docker", "compose", "-p", composeProject, "-f", generatedPath, "up", "-d", "--force-recreate", "oc-additive").CombinedOutput()
-	if err != nil {
-		t.Fatalf("recreate real runner: %v\n%s", err, out)
-	}
-	previousContainer := agentContainerID
-	agentContainerID = rollcallResolveContainerID(t, generatedPath, "oc-additive")
-	if agentContainerID == previousContainer {
-		t.Fatal("runner was not recreated")
-	}
-	spikeWaitHealthy(t, agentContainerID, 120*time.Second)
+		// Exercise durable native conversation state, not just a startup marker.
+		out, err := exec.Command("docker", "compose", "-p", composeProject, "-f", generatedPath, "up", "-d", "--force-recreate", "oc-additive").CombinedOutput()
+		if err != nil {
+			t.Fatalf("recreate real runner: %v\n%s", err, out)
+		}
+		previousContainer := agentContainerID
+		agentContainerID = rollcallResolveContainerID(t, generatedPath, "oc-additive")
+		if agentContainerID == previousContainer {
+			t.Fatal("runner was not recreated")
+		}
+		spikeWaitHealthy(t, agentContainerID, 120*time.Second)
 
-	managedPhrase := fmt.Sprintf("managed-additive-%d", time.Now().UnixNano())
-	managedOut := openClawAdditiveRunAgent(
-		t,
-		agentContainerID,
-		sessionID,
-		fmt.Sprintf("Call the managed tool tool-svc.get_runtime_context before replying. Then reply with %s followed by the exact file contents you read in our previous turn. Recall them from this session; do not read the file again.", managedPhrase),
-	)
-	if !strings.Contains(managedOut, managedPhrase) || !strings.Contains(managedOut, nativeProof) {
-		t.Fatalf("managed tool turn did not surface phrase %q\n%s", managedPhrase, managedOut)
-	}
+		managedPhrase := fmt.Sprintf("managed-additive-%d", time.Now().UnixNano())
+		managedOut := openClawAdditiveRunAgent(
+			t,
+			agentContainerID,
+			sessionID,
+			fmt.Sprintf("Call the managed tool tool-svc.get_runtime_context before replying. Then reply with %s followed by the exact file contents you read in our previous turn. Recall them from this session; do not read the file again.", managedPhrase),
+		)
+		if !strings.Contains(managedOut, managedPhrase) || !strings.Contains(managedOut, nativeProof) {
+			t.Fatalf("managed tool turn did not surface phrase %q\n%s", managedPhrase, managedOut)
+		}
 
-	mixedPhrase := fmt.Sprintf("mixed-additive-%d", time.Now().UnixNano())
-	mixedSince := time.Now().Add(-1 * time.Second)
-	mixedOut := openClawAdditiveRunMixedTurnWithRetry(
-		t,
-		agentContainerID,
-		cllamaContainerID,
-		nativeProof,
-		mixedPhrase,
-		mixedSince,
-	)
-	if !strings.Contains(mixedOut, mixedPhrase) || !strings.Contains(mixedOut, nativeProof) {
-		t.Fatalf("mixed tool turn did not surface phrase %q and proof %q\n%s", mixedPhrase, nativeProof, mixedOut)
+		mixedPhrase := fmt.Sprintf("mixed-additive-%d", time.Now().UnixNano())
+		mixedSince := time.Now().Add(-1 * time.Second)
+		mixedOut := openClawAdditiveRunMixedTurnWithRetry(
+			t,
+			agentContainerID,
+			cllamaContainerID,
+			nativeProof,
+			mixedPhrase,
+			mixedSince,
+		)
+		if !strings.Contains(mixedOut, mixedPhrase) || !strings.Contains(mixedOut, nativeProof) {
+			t.Fatalf("mixed tool turn did not surface phrase %q and proof %q\n%s", mixedPhrase, nativeProof, mixedOut)
+		}
+
 	}
 
 	manifestBytes, err := os.ReadFile(filepath.Join(fixtureDir, ".claw-runtime", "schedule.json"))
@@ -208,11 +211,12 @@ func TestSpikeOpenClawAdditiveToolsLive(t *testing.T) {
 	}
 	apiContainer := rollcallResolveContainerID(t, generatedPath, "claw-api")
 	spikeWaitHealthy(t, apiContainer, 60*time.Second)
-	fire, err := callClawAPICompose(generatedPath, "claw-scheduler", "POST", "/schedule/"+manifest.Invocations[0].ID+"/fire", nil)
-	if err != nil || !bytes.Contains(fire, []byte("manual-fire")) || !bytes.Contains(fire, []byte("compiled-scheduled-turn-proved")) {
-		t.Fatalf("compiled native scheduled wake: %v\n%s", err, fire)
-	}
-	if discordPhrase != "" {
+	if discordPhrase == "" {
+		fire, err := callClawAPICompose(generatedPath, "claw-scheduler", "POST", "/schedule/"+manifest.Invocations[0].ID+"/fire", nil)
+		if err != nil || !bytes.Contains(fire, []byte("manual-fire")) || !bytes.Contains(fire, []byte("compiled-scheduled-turn-proved")) {
+			t.Fatalf("compiled native scheduled wake: %v\n%s", err, fire)
+		}
+	} else {
 		openClawAdditiveFireDiscord(t, generatedPath, manifest, discordPhrase, env)
 	}
 	openClawAdditiveAssertDurableSecretsAbsent(t, fixtureDir)
@@ -220,9 +224,11 @@ func TestSpikeOpenClawAdditiveToolsLive(t *testing.T) {
 
 	rollcallAssertAuditTelemetry(t, podPath, "oc-additive", "openclaw", auditWindowStart)
 	rollcallAssertSessionHistory(t, sessionHistoryDir, "oc-additive")
-	rollcallAssertManagedToolTrace(t, sessionHistoryDir, "oc-additive", "tool-svc")
-	openClawAdditiveAssertHistoryMix(t, sessionHistoryDir, "oc-additive")
-	openClawAdditiveAssertMixedHandoffHistory(t, sessionHistoryDir, "oc-additive", proxyRequest.APIFormat)
+	if discordPhrase == "" {
+		rollcallAssertManagedToolTrace(t, sessionHistoryDir, "oc-additive", "tool-svc")
+		openClawAdditiveAssertHistoryMix(t, sessionHistoryDir, "oc-additive")
+		openClawAdditiveAssertMixedHandoffHistory(t, sessionHistoryDir, "oc-additive", proxyRequest.APIFormat)
+	}
 }
 
 func openClawAdditiveWriteFixture(t *testing.T, dir, baseTag, model, nativeProof string) {

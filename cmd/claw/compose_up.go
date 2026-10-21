@@ -457,6 +457,14 @@ func runComposeUp(podFile string) (err error) {
 		if err := ensureResolvedScheduler(p, runtimeDir, governanceDir); err != nil {
 			return err
 		}
+		// Image-only schedules discover the sidecar after initial enrichment.
+		for _, rc := range resolvedClaws {
+			for i := range rc.Surfaces {
+				if rc.Surfaces[i].Scheme == "service" && rc.Surfaces[i].Target == "claw-api" && len(rc.Surfaces[i].Ports) == 0 {
+					rc.Surfaces[i].Ports = []string{clawAPIInternalPort(p.ClawAPI.Addr)}
+				}
+			}
+		}
 	}
 	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
 	perRunNames := sortedPerRunNames(perRun)

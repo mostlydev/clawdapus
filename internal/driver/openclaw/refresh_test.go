@@ -59,6 +59,17 @@ func TestManagedProviderConfigurationCannotReroute(t *testing.T) {
 		`openclaw config set models.providers.openai.models [{"id":"gpt-test","name":"gpt-test","headers":{"Authorization":"route-secret"}}]`,
 		`openclaw config set models.providers.openai.models [{"id":"gpt-test","name":"gpt-test","api":"anthropic-messages"}]`,
 		`openclaw config set models.providers.openai.models {"invalid":"list"}`,
+		`openclaw config set agents.defaults.model.primary anthropic/claude-other`,
+		`openclaw config set agents.entries.main.model anthropic/claude-other`,
+		`openclaw config set agents.defaults.imageModel anthropic/claude-other`,
+		`openclaw config set agents.defaults.subagents.model anthropic/claude-other`,
+		`openclaw config set agents.defaults.heartbeat.model anthropic/claude-other`,
+		`openclaw config set agents.entries.main.heartbeat.model anthropic/claude-other`,
+		`openclaw config set agents.defaults.models {"anthropic/claude-other":{"alias":"escape"}}`,
+		`openclaw config set env.OPENAI_API_KEY route-secret`,
+		`openclaw config set env.vars.ANTHROPIC_API_KEY route-secret`,
+		`openclaw config set env.OPENAI_BASE_URL https://api.openai.com/v1`,
+		`openclaw config set env.OPENCLAW_CONFIG_PATH /other/config.json`,
 	} {
 		t.Run(command, func(t *testing.T) {
 			_, err := GenerateConfig(&driver.ResolvedClaw{Models: map[string]string{"primary": "openai/gpt-test"}, Cllama: []string{"passthrough"}, CllamaToken: "proxy-token", Configures: []string{command}})
@@ -154,6 +165,12 @@ func TestManagedProviderAllowsOrdinaryRequestSettings(t *testing.T) {
 		Cllama: []string{"passthrough"}, CllamaToken: "proxy-token",
 		Configures: []string{
 			`openclaw config set models.providers.openai.auth api-key`,
+			`openclaw config set agents.defaults.models {"openai/gpt-test":{"alias":"quick","params":{"temperature":0.3}}}`,
+			`openclaw config set agents.entries.main.model quick`,
+			`openclaw config set agents.defaults.imageModel openai/gpt-test`,
+			`openclaw config set agents.defaults.subagents.model openai/gpt-test`,
+			`openclaw config set agents.defaults.heartbeat.model openai/gpt-test`,
+			`openclaw config set env.vars.REPORT_LABEL report`,
 			`openclaw config set models.providers.openai.timeoutSeconds 42`,
 			`openclaw config set models.providers.openai.headers {"X-Trace-ID":"diagnostic"}`,
 			`openclaw config set models.providers.openai.request {"auth":{"mode":"provider-default"},"headers":{"X-Request-ID":"diagnostic"},"tls":{"serverName":"cllama-passthrough"}}`,
@@ -161,5 +178,40 @@ func TestManagedProviderAllowsOrdinaryRequestSettings(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("ordinary request settings rejected: %v", err)
+	}
+}
+
+func TestChannelPluginsAreCompiledAndRespectOperatorTrust(t *testing.T) {
+	for _, platform := range []string{"discord", "slack", "telegram"} {
+		rc := &driver.ResolvedClaw{ServiceName: "bot", Handles: map[string]*driver.HandleInfo{platform: {ID: "123"}}}
+		raw, err := GenerateConfig(rc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var config map[string]any
+		if err := json.Unmarshal(raw, &config); err != nil {
+			t.Fatal(err)
+		}
+		plugins := config["plugins"].(map[string]any)
+		entry := plugins["entries"].(map[string]any)[platform].(map[string]any)
+		if entry["enabled"] != true {
+			t.Fatalf("required %s plugin not enabled", platform)
+		}
+		if platform != "telegram" && !strings.Contains(string(raw), "/opt/claw-openclaw-plugins/"+platform) {
+			t.Fatalf("missing baked %s path", platform)
+		}
+	}
+	for _, command := range []string{`openclaw config set plugins.allow ["other"]`, `openclaw config set plugins.deny ["discord"]`, `openclaw config set plugins.enabled false`, `openclaw config set plugins.entries.discord.enabled false`} {
+		_, err := GenerateConfig(&driver.ResolvedClaw{Handles: map[string]*driver.HandleInfo{"discord": {ID: "123"}}, Configures: []string{command}})
+		if err == nil || !strings.Contains(err.Error(), "plugins policy excludes discord") {
+			t.Fatalf("operator plugin policy not respected for %q: %v", command, err)
+		}
+	}
+}
+
+func TestManagedProviderRequiresIdentityToken(t *testing.T) {
+	_, err := GenerateConfig(&driver.ResolvedClaw{Models: map[string]string{"primary": "openai/gpt-test"}, Cllama: []string{"passthrough"}})
+	if err == nil || !strings.Contains(err.Error(), "cllama") {
+		t.Fatalf("missing identity must fail closed: %v", err)
 	}
 }

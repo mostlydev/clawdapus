@@ -33,7 +33,7 @@ func TestSpikeOpenClawPinnedRefresh(t *testing.T) {
 	if err := os.WriteFile(agent, []byte("# Pinned runtime contract\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	rc := &driver.ResolvedClaw{ServiceName: "bot", Count: 2, AgentHostPath: agent, Models: map[string]string{"primary": "openai/gpt-test"}, Cllama: []string{"passthrough"}, CllamaToken: "fixture-proxy-token", Handles: map[string]*driver.HandleInfo{"discord": {ID: "123"}}, Configures: []string{`openclaw config set channels.discord.enabled false`, `openclaw config set tools.deny ["write","exec"]`}}
+	rc := &driver.ResolvedClaw{ServiceName: "bot", Count: 2, AgentHostPath: agent, Models: map[string]string{"primary": "openai/gpt-test"}, Cllama: []string{"passthrough"}, CllamaToken: "fixture-proxy-token", Handles: map[string]*driver.HandleInfo{"discord": {ID: "123"}, "slack": {ID: "456"}, "telegram": {ID: "789"}}, RuntimeEnv: map[string]string{"SLACK_APP_TOKEN": "disabled-fixture-app-token"}, Configures: []string{`openclaw config set channels.discord.enabled false`, `openclaw config set channels.slack.enabled false`, `openclaw config set channels.telegram.enabled false`, `openclaw config set plugins.load.paths ["/opt/claw-openclaw-plugins/discord","/opt/claw-openclaw-plugins/slack"]`, `openclaw config set tools.deny ["write","exec"]`}}
 	result, err := d.Materialize(rc, driver.MaterializeOpts{RuntimeDir: filepath.Join(dir, "runtime"), StateDir: filepath.Join(dir, "durable")})
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +60,9 @@ func TestSpikeOpenClawPinnedRefresh(t *testing.T) {
 			env[k] = v
 		}
 		env["DISCORD_BOT_TOKEN"] = "disabled-fixture-token"
+		env["SLACK_BOT_TOKEN"] = "disabled-fixture-token"
+		env["SLACK_APP_TOKEN"] = "disabled-fixture-app-token"
+		env["TELEGRAM_BOT_TOKEN"] = "disabled-fixture-token"
 		services[name] = map[string]any{"image": tag, "user": "10001:10001", "volumes": volumes, "environment": env, "tmpfs": result.Tmpfs, "read_only": result.ReadOnly, "cap_drop": []string{"ALL"}, "security_opt": []string{"no-new-privileges:true"}, "stop_grace_period": result.StopGracePeriod, "healthcheck": map[string]any{"start_period": result.Healthcheck.StartPeriod, "test": result.Healthcheck.Test, "interval": "2s", "timeout": "10s", "retries": 30}}
 	}
 	raw, _ := json.Marshal(map[string]any{"services": services})
@@ -95,6 +98,12 @@ func TestSpikeOpenClawPinnedRefresh(t *testing.T) {
 		version := run("exec", "-T", name, "node", "-p", `require('/usr/local/lib/node_modules/openclaw/package.json').version`)
 		if strings.TrimSpace(version) != openclawdriver.UpstreamVersion {
 			t.Fatalf("unexpected installed runtime %q", version)
+		}
+		for _, plugin := range []string{"discord", "slack"} {
+			installed := run("exec", "-T", name, "node", "-p", "require('/opt/claw-openclaw-plugins/"+plugin+"/package.json').version")
+			if strings.TrimSpace(installed) != openclawdriver.UpstreamVersion {
+				t.Fatalf("unexpected %s plugin version %q", plugin, installed)
+			}
 		}
 		run("exec", "-T", name, "node", "-e", `require('node:fs').writeFileSync('/root/.openclaw/state/refresh-identity',process.argv[1])`, name)
 	}

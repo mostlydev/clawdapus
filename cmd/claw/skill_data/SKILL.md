@@ -117,7 +117,7 @@ PRIVILEGE runtime claw-user
 | `CLLAMA <type>` | Governance proxy. Currently only `passthrough`. Runtime enforces max 1. | Label -> proxy sidecar wiring |
 | `PERSONA <path>` | Identity materialization. Local refs copied with traversal hardening; non-local pulled as OCI artifacts. Sets `CLAW_PERSONA_DIR` only when present. | Label -> runtime materialization |
 | `HANDLE <platform>` | Platform identity (`discord`, `slack`, `telegram`). Broadcasts agent ID as `CLAW_HANDLE_*` env vars. | Label -> driver config + pod env |
-| `INVOKE <cron> <name>` | System cron in `/etc/cron.d/claw`. Bot cannot modify. | Baked into image |
+| `INVOKE <cron> <name>` | Driver-specific scheduling. OpenClaw compiles into claw-api `schedule.json`; the compiler owns timing. | Baked contract, materialized at `claw up` |
 | `SURFACE <scheme>://<target> [mode]` | Infrastructure boundary. See Surface Taxonomy. | Label -> compose wiring |
 | `SKILL <file>` | Reference markdown mounted read-only into runner skill directory. | Label -> host path validation + mount |
 | `CONFIGURE <cmd>` | Driver-specific config DSL. Use `<driver> config set <path> <value>`, not arbitrary shell. | Parsed by Clawdapus, then projected into generated runtime config/artifacts |
@@ -132,6 +132,9 @@ PRIVILEGE runtime claw-user
 - `CONFIGURE` applies after generated defaults, so it overrides what `HANDLE` and other driver defaults emitted.
 - For `openclaw`, Clawdapus applies `CONFIGURE` while generating `openclaw.json` during materialization. Do not assume downstream `openclaw config set ...` shell behavior is the same contract.
 - Dotted object paths are the supported shape today. OpenClaw uses keyed `agents.entries.main`, not the retired `agents.list` array. Managed provider routing/authentication/runtime keys cannot be changed through CONFIGURE.
+- OpenClaw model selectors, including image, subagent and heartbeat models, must use declared MODEL values or their aliases. Put provider credentials in `x-claw.cllama-env`; provider auth/route variables in CONFIGURE env fail compilation.
+- OpenClaw Discord/Slack plugins are pinned in the stock image and wired for declared channels. Custom bases need `/opt/claw-openclaw-plugins/{discord,slack}`. Conflicting plugin allow/deny settings fail compilation. Telegram/Slack use `botToken`; Discord uses `token`.
+- OpenClaw INVOKE wakes use fresh sessions and require explicit `to` for automatic final delivery. Configured `agents.defaults.timeoutSeconds` must be 1–900. Configure native `session.maintenance` for frequent schedules; live session SQLite stays in the durable sessions mount through explicit `session.store`.
 
 ## Surface Taxonomy
 

@@ -30,7 +30,8 @@ outline: deep
 ## Unreleased
 
 - **Pinned OpenClaw refresh** — pins OpenClaw 2026.10.5 with Node 24.22.0, adopts keyed agent configuration and rejects overrides conflicting with cllama routing. SQLite state and transcripts persist per ordinal while writable plugins and auth profiles remain temporary. Image and pod INVOKE schedules use claw-api, adding that sidecar to image-only scheduled pods. (#373)
-
+  - Official Discord and Slack plugins are pinned in the image; Telegram remains bundled. Telegram and Slack now use the current `botToken` schema.
+  - Scheduled wakes use fresh sessions and require an explicit target for automatic final delivery. Untargeted wakes no longer post to a remembered route. Explicit OpenClaw timeout settings must be 1–900 seconds, including services without schedules.
 
 - **Per-run workers** ([#372](https://github.com/mostlydev/clawdapus/issues/372)): one isolated, one-shot worker per unit of work for an external orchestrator. The orchestrator never touches Docker.
   - A pod service with `x-claw.lifecycle: per-run` compiles at `claw up` into a run template: a pinned image, a tool grant and limits.

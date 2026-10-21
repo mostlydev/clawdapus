@@ -167,7 +167,7 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			if err := setPath(config, "channels.telegram.enabled", true); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
 			}
-			if err := setPath(config, "channels.telegram.token", "${TELEGRAM_BOT_TOKEN}"); err != nil {
+			if err := setPath(config, "channels.telegram.botToken", "${TELEGRAM_BOT_TOKEN}"); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE telegram: %w", err)
 			}
 
@@ -193,8 +193,13 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			if err := setPath(config, "channels.slack.enabled", true); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
 			}
-			if err := setPath(config, "channels.slack.token", "${SLACK_BOT_TOKEN}"); err != nil {
+			if err := setPath(config, "channels.slack.botToken", "${SLACK_BOT_TOKEN}"); err != nil {
 				return nil, fmt.Errorf("config generation: HANDLE slack: %w", err)
+			}
+			if firstRawEnvRef(rc.RuntimeEnv, "SLACK_APP_TOKEN") != "" || firstRawEnvRef(rc.Environment, "SLACK_APP_TOKEN") != "" {
+				if err := setPath(config, "channels.slack.appToken", "${SLACK_APP_TOKEN}"); err != nil {
+					return nil, err
+				}
 			}
 
 			// Collect mention patterns into the shared slice (agents.entries written after loop)
@@ -286,7 +291,71 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			return nil, err
 		}
 	}
+	if err := compileChannelPlugins(config); err != nil {
+		return nil, err
+	}
 	return json.MarshalIndent(config, "", "  ")
+}
+
+// Official channel packages are baked into the image; only declared, enabled
+// channels load them. Operator trust/deny settings remain authoritative.
+func compileChannelPlugins(config map[string]interface{}) error {
+	channels, _ := config["channels"].(map[string]interface{})
+	for _, name := range []string{"discord", "slack", "telegram"} {
+		channel, _ := channels[name].(map[string]interface{})
+		if channel["enabled"] != true {
+			continue
+		}
+		plugins, _ := config["plugins"].(map[string]interface{})
+		fail := func() error {
+			return fmt.Errorf("plugins policy excludes %s required by the enabled channel; enable the official plugin or disable the channel", name)
+		}
+		if plugins["enabled"] == false {
+			return fail()
+		}
+		contains := func(raw interface{}) bool {
+			list, _ := raw.([]interface{})
+			for _, item := range list {
+				if item == name {
+					return true
+				}
+			}
+			return false
+		}
+		if allow, exists := plugins["allow"]; exists && !contains(allow) {
+			return fail()
+		}
+		if contains(plugins["deny"]) {
+			return fail()
+		}
+		entries, _ := plugins["entries"].(map[string]interface{})
+		entry, _ := entries[name].(map[string]interface{})
+		if entry["enabled"] == false {
+			return fail()
+		}
+		if err := setPath(config, "plugins.entries."+name+".enabled", true); err != nil {
+			return err
+		}
+		if name != "telegram" {
+			plugins, _ = config["plugins"].(map[string]interface{})
+			load, _ := plugins["load"].(map[string]interface{})
+			paths, _ := load["paths"].([]interface{})
+			path := "/opt/claw-openclaw-plugins/" + name
+			found := false
+			for _, item := range paths {
+				if item == path {
+					found = true
+				}
+			}
+			if !found {
+				paths = append(paths, path)
+			}
+			if err := setPath(config, "plugins.load.paths", paths); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // parseConfigSetCommand extracts dotted path and value from
@@ -444,6 +513,9 @@ func validateManagedProviderPolicy(config map[string]interface{}, rc *driver.Res
 	fail := func() error {
 		return fmt.Errorf("CONFIGURE conflicts with cllama-managed provider routing, authentication or runtime; remove the conflicting override or disable cllama for direct routing")
 	}
+	if strings.TrimSpace(rc.CllamaToken) == "" {
+		return fmt.Errorf("cllama-managed OpenClaw requires a non-empty identity token")
+	}
 	models, ok := config["models"].(map[string]interface{})
 	if !ok || models["mode"] != "replace" {
 		return fail()
@@ -455,6 +527,9 @@ func validateManagedProviderPolicy(config map[string]interface{}, rc *driver.Res
 	expected, err := cllama.CollectProviderModels(rc.Models)
 	if err != nil {
 		return err
+	}
+	if !managedModelSelectionsAllowed(config, expected) || !managedConfigEnvAllowed(config, expected) {
+		return fail()
 	}
 	if len(providers) != len(expected) {
 		return fail()
@@ -471,7 +546,7 @@ func validateManagedProviderPolicy(config map[string]interface{}, rc *driver.Res
 		if p["baseUrl"] != cllama.ProxyBaseURL(rc.Cllama[0]) || p["api"] != api {
 			return fail()
 		}
-		if rc.CllamaToken != "" && p["apiKey"] != rc.CllamaToken {
+		if p["apiKey"] != rc.CllamaToken {
 			return fail()
 		}
 		rt, ok := p["agentRuntime"].(map[string]interface{})
@@ -485,11 +560,20 @@ func validateManagedProviderPolicy(config map[string]interface{}, rc *driver.Res
 		if !ok {
 			return fail()
 		}
+		if len(modelDefs) != len(expected[name]) {
+			return fail()
+		}
+		seenModels := map[string]bool{}
 		for _, rawModel := range modelDefs {
 			model, ok := rawModel.(map[string]interface{})
 			if !ok || !managedProviderTransportAllowed(model) {
 				return fail()
 			}
+			id, _ := model["id"].(string)
+			if !containsString(expected[name], id) || seenModels[id] {
+				return fail()
+			}
+			seenModels[id] = true
 			if modelAPI, exists := model["api"]; exists && modelAPI != api {
 				return fail()
 			}
@@ -572,6 +656,133 @@ func managedProviderHeadersAllowed(raw interface{}) bool {
 	for name := range headers {
 		switch strings.ToLower(strings.TrimSpace(name)) {
 		case "authorization", "proxy-authorization", "x-api-key", "api-key", "x-goog-api-key", "host":
+			return false
+		}
+	}
+	return true
+}
+
+func managedModelSelectionsAllowed(config map[string]interface{}, providers map[string][]string) bool {
+	allowed := map[string]bool{}
+	for _, models := range providers {
+		for _, model := range models {
+			allowed[model] = true
+		}
+	}
+	canonicalAllowed := func(ref string) bool {
+		_, canonical, ok := cllama.ProviderQualifiedModelRef(ref)
+		return ok && allowed[canonical]
+	}
+	agents, _ := config["agents"].(map[string]interface{})
+	defaults, _ := agents["defaults"].(map[string]interface{})
+	settings := []map[string]interface{}{defaults}
+	entries, _ := agents["entries"].(map[string]interface{})
+	for _, raw := range entries {
+		if entry, ok := raw.(map[string]interface{}); ok {
+			settings = append(settings, entry)
+		}
+	}
+	aliases := map[string]bool{}
+	for _, settings := range settings {
+		if raw, exists := settings["models"]; exists && raw != nil {
+			models, ok := raw.(map[string]interface{})
+			if !ok {
+				return false
+			}
+			for ref, raw := range models {
+				if !canonicalAllowed(ref) {
+					return false
+				}
+				params, _ := raw.(map[string]interface{})
+				if alias, ok := params["alias"].(string); ok && alias != "" && !strings.Contains(alias, "/") {
+					aliases[alias] = true
+				}
+			}
+		}
+	}
+	var valid func(interface{}) bool
+	valid = func(raw interface{}) bool {
+		switch value := raw.(type) {
+		case nil:
+			return true
+		case string:
+			return value == "" || aliases[value] || canonicalAllowed(value)
+		case map[string]interface{}:
+			for _, nested := range value {
+				if !valid(nested) {
+					return false
+				}
+			}
+			return true
+		case []interface{}:
+			for _, nested := range value {
+				if !valid(nested) {
+					return false
+				}
+			}
+			return true
+		case []string:
+			for _, nested := range value {
+				if !valid(nested) {
+					return false
+				}
+			}
+			return true
+		default:
+			return false
+		}
+	}
+	for _, settings := range settings {
+		for _, field := range []string{"model", "imageModel", "imageGenerationModel", "videoModel", "pdfModel"} {
+			if raw, exists := settings[field]; exists && !valid(raw) {
+				return false
+			}
+		}
+		for _, field := range []string{"subagents", "heartbeat"} {
+			nested, _ := settings[field].(map[string]interface{})
+			if raw, exists := nested["model"]; exists && !valid(raw) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func managedConfigEnvAllowed(config map[string]interface{}, providers map[string][]string) bool {
+	prefixes := map[string]bool{}
+	for _, name := range []string{"OPENAI", "ANTHROPIC", "OPENROUTER", "GOOGLE", "GEMINI", "XAI", "DEEPSEEK", "MISTRAL", "GROQ", "TOGETHER", "PERPLEXITY", "COHERE", "MOONSHOT", "MINIMAX", "QWEN", "DASHSCOPE", "CEREBRAS", "ZAI", "NVIDIA", "HUGGINGFACE", "HF", "BEDROCK", "AWS", "AZURE", "OLLAMA", "VLLM", "LITELLM", "CUSTOM"} {
+		prefixes[name] = true
+	}
+	for name := range providers {
+		prefixes[strings.ToUpper(strings.ReplaceAll(name, "-", "_"))] = true
+	}
+	blocked := func(key string) bool {
+		key = strings.ToUpper(key)
+		switch key {
+		case "OPENCLAW_CONFIG_PATH", "OPENCLAW_STATE_DIR", "OPENCLAW_AGENT_DIR", "GOOGLE_APPLICATION_CREDENTIALS", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "HF_TOKEN":
+			return true
+		}
+		for prefix := range prefixes {
+			if !strings.HasPrefix(key, prefix+"_") {
+				continue
+			}
+			for _, suffix := range []string{"_API_KEY", "_API_TOKEN", "_AUTH_TOKEN", "_BASE_URL", "_API_BASE", "_ENDPOINT"} {
+				if strings.HasSuffix(key, suffix) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	env, _ := config["env"].(map[string]interface{})
+	for key := range env {
+		if blocked(key) {
+			return false
+		}
+	}
+	vars, _ := env["vars"].(map[string]interface{})
+	for key := range vars {
+		if blocked(key) {
 			return false
 		}
 	}

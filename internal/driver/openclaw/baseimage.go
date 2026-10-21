@@ -23,6 +23,23 @@ RUN curl -fsS https://registry.npmjs.org/openclaw/-/openclaw-2026.10.5.tgz -o /t
 
 LABEL claw.runner.upstream.version="2026.10.5"
 
+# Channel integrations are separate official packages in this release.
+# Keep their code in the read-only image, outside the ephemeral state home.
+RUN curl -fsS https://registry.npmjs.org/@openclaw/discord/-/discord-2026.10.5.tgz -o /tmp/claw-discord.tgz \
+    && curl -fsS https://registry.npmjs.org/@openclaw/slack/-/slack-2026.10.5.tgz -o /tmp/claw-slack.tgz \
+    && echo '1b2d8598c17b7270b286876f6101d5b4e3e83e6edd699d5d8d24bbca62c7b09e675883bd185b16f18fe696764031219696099679d1119156d50cc9658bdbe03b  /tmp/claw-discord.tgz' | sha512sum --check - \
+    && echo '03359a48b7d441958fc0376b2d7cd7790fc0ada5cf1279134d62932aae0c14edfd7eeb45031cbe16e96c6124ad0d811dd41d188ed586bd7b3006376b9b046507  /tmp/claw-slack.tgz' | sha512sum --check - \
+    && mkdir -p /opt/claw-openclaw-plugins/discord /opt/claw-openclaw-plugins/slack \
+    && tar -xzf /tmp/claw-discord.tgz -C /opt/claw-openclaw-plugins/discord --strip-components=1 \
+    && tar -xzf /tmp/claw-slack.tgz -C /opt/claw-openclaw-plugins/slack --strip-components=1 \
+    && npm install --prefix /opt/claw-openclaw-plugins/discord --omit=dev --omit=peer --ignore-scripts --no-audit --no-fund \
+    && npm install --prefix /opt/claw-openclaw-plugins/slack --omit=dev --omit=peer --ignore-scripts --no-audit --no-fund \
+    && ln -s /usr/local/lib/node_modules/openclaw /opt/claw-openclaw-plugins/discord/node_modules/openclaw \
+    && ln -s /usr/local/lib/node_modules/openclaw /opt/claw-openclaw-plugins/slack/node_modules/openclaw \
+    && test -f /opt/claw-openclaw-plugins/discord/dist/index.js \
+    && test -f /opt/claw-openclaw-plugins/slack/dist/index.js \
+    && rm /tmp/claw-discord.tgz /tmp/claw-slack.tgz
+
 RUN cat > /usr/local/bin/claw-openclaw-wake <<'CLAW_WAKE_EOF'
 #!/bin/bash
 set -euo pipefail
@@ -52,7 +69,7 @@ if [ -n "$channel" ]; then
 fi
 # Keep the task opaque and enforce a process deadline in addition to the
 # native Gateway turn timeout. The scheduler allows a separate drain margin.
-timeout --kill-after=10 "$timeout_seconds" "$@"
+timeout --kill-after=10 "$((timeout_seconds + 5))" "$@"
 CLAW_WAKE_EOF
 RUN chmod +x /usr/local/bin/claw-openclaw-wake
 

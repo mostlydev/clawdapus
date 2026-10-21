@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -812,7 +814,7 @@ func rollcallFetchMessages(t *testing.T, token, channelID string, limit int, aft
 	}
 	req.Header.Set("Authorization", "Bot "+token)
 	req.Header.Set("User-Agent", "DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := rollcallDiscordRequest(req)
 	if err != nil {
 		t.Logf("warning: Discord GET failed: %v", err)
 		return nil
@@ -852,7 +854,7 @@ func rollcallSendWebhookMessage(t *testing.T, webhookURL, content string) string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := rollcallDiscordRequest(req)
 	if err != nil {
 		t.Fatalf("send webhook message: %v", err)
 	}
@@ -870,4 +872,39 @@ func rollcallSendWebhookMessage(t *testing.T, webhookURL, content string) string
 		return msg.ID
 	}
 	return ""
+}
+
+// Use the host curl transport for Discord acceptance. The Go host transport
+// can be blocked independently of curl/container networking. Credentials and
+// webhook URLs stay on stdin, never in process arguments or error messages.
+func rollcallDiscordRequest(req *http.Request) (*http.Response, error) {
+	var config strings.Builder
+	fmt.Fprintf(&config, "url = %q\nrequest = %q\n", req.URL.String(), req.Method)
+	for name, values := range req.Header {
+		for _, value := range values {
+			fmt.Fprintf(&config, "header = %q\n", name+": "+value)
+		}
+	}
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read Discord request body")
+		}
+		fmt.Fprintf(&config, "data-binary = %q\n", string(body))
+	}
+	cmd := exec.Command("curl", "--config", "-", "--silent", "--show-error", "--connect-timeout", "5", "--max-time", "15", "--max-filesize", "8388608", "--write-out", "\n%{http_code}")
+	cmd.Stdin = strings.NewReader(config.String())
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("Discord curl transport failed")
+	}
+	separator := bytes.LastIndexByte(out, '\n')
+	if separator < 0 {
+		return nil, fmt.Errorf("Discord response missing status")
+	}
+	status, err := strconv.Atoi(strings.TrimSpace(string(out[separator+1:])))
+	if err != nil {
+		return nil, fmt.Errorf("Discord response has invalid status")
+	}
+	return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewReader(out[:separator])), Header: make(http.Header)}, nil
 }
