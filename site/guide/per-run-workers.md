@@ -18,7 +18,7 @@ Every run gets a fresh cllama identity. Cancelling a run revokes that identity t
 Per-run workers need a cllama that implements the operator revoke endpoint and `CLAW_REVOCATION_DIR` ([cllama#54](https://github.com/mostlydev/cllama/issues/54)). The supervisor proves this with a revocation self-test before it serves, and again before each worker starts. With an older proxy it refuses to start any worker.
 :::
 
-PicoClaw speaks only OpenAI chat/completions. cllama v0.12.0 or newer serves those requests from a direct Anthropic key and from current OpenAI GPT-6 models; an older proxy needs OpenRouter for Anthropic models and fails on GPT-6. `CLAW_SPIKE_PINNED_CLLAMA=1 go test -tags spike -run '^TestSpikePerRunProviderLive$' ./cmd/claw` proves a real worker against the pinned proxy.
+Clawdapus configures per-run PicoClaw workers to use OpenAI chat/completions. cllama v0.12.0 or newer serves those requests from a direct Anthropic key and from current OpenAI GPT-6 models; an older proxy needs OpenRouter for Anthropic models and fails on GPT-6. `CLAW_SPIKE_PINNED_CLLAMA=1 go test -tags spike -run '^TestSpikePerRunProviderLive$' ./cmd/claw` proves a real worker against the pinned proxy.
 
 v1 supports the **PicoClaw** runner only. Any other `CLAW_TYPE` with `lifecycle: per-run` fails `claw up`.
 

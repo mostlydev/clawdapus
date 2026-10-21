@@ -31,7 +31,7 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.29.1 {#v0-29-1}
+## v0.29.1 <Badge type="tip" text="Latest" /> {#v0-29-1}
 
 *2026-10-21*
 
@@ -42,7 +42,7 @@ outline: deep
 - **Live per-run acceptance**: `TestSpikePerRunProviderLive` runs a real PicoClaw worker against native Anthropic and checks the answer, usage and history, callbacks, revocation and cleanup. `CLAW_SPIKE_PINNED_CLLAMA=1` runs it against the pinned published proxy.
 - **Pins infra images**: `claw-api` / `clawdash` / `claw-wall` / `claw-channel-memory` / `claw-mcp-stdio` move to `v0.29.1` with no code changes. cllama moves to [v0.12.0](https://github.com/mostlydev/cllama/releases/tag/v0.12.0). `hermes-base` stays at `v2026.6.19-claw.3`.
 
-## v0.29.0 <Badge type="tip" text="Latest" /> {#v0-29-0}
+## v0.29.0 {#v0-29-0}
 
 *2026-10-20*
 
