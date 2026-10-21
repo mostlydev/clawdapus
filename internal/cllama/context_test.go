@@ -4,8 +4,58 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestGenerateContextDirWithoutLongLivedAgents(t *testing.T) {
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	for i := 0; i < 2; i++ {
+		if err := GenerateContextDir(runtimeDir, nil); err != nil {
+			t.Fatal(err)
+		}
+		root := filepath.Join(runtimeDir, "context")
+		info, err := os.Stat(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.IsDir() || info.Mode().Perm() != 0o700 {
+			t.Fatalf("context root mode = %v, want directory 0700", info.Mode())
+		}
+		// A later supervisor launch must be able to populate this same bind
+		// source, rather than relying on Docker to create it as root.
+		if err := GenerateContextDir(runtimeDir, []AgentContextInput{{AgentID: "worker-run-test"}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.RemoveAll(runtimeDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestGenerateContextDirRejectsUnsafeRoot(t *testing.T) {
+	t.Run("wrong owner", func(t *testing.T) {
+		root := t.TempDir()
+		info, err := os.Stat(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Check the same ownership error without requiring chown privileges.
+		err = validateContextRoot(root, info, uint32(os.Geteuid())+1)
+		if err == nil || !strings.Contains(err.Error(), "must be owned by uid") {
+			t.Fatalf("wrong-owner error = %v", err)
+		}
+	})
+	t.Run("symlink", func(t *testing.T) {
+		runtimeDir := t.TempDir()
+		if err := os.Symlink(t.TempDir(), filepath.Join(runtimeDir, "context")); err != nil {
+			t.Fatal(err)
+		}
+		if err := GenerateContextDir(runtimeDir, nil); err == nil || !strings.Contains(err.Error(), "not a symlink") {
+			t.Fatalf("symlink error = %v", err)
+		}
+	})
+}
 
 func TestGenerateContextDirWritesFiles(t *testing.T) {
 	dir := t.TempDir()
