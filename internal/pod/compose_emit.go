@@ -22,6 +22,7 @@ type CllamaProxyConfig struct {
 	GovernanceHostDir     string            // host path for governance override dir (optional, read-only in proxy)
 	RevocationHostDir     string            // host path for the proxy-owned durable revocation ledger (rw)
 	DashboardPort         string            // host port published to proxy UI :8081 (default "8181")
+	DashboardBind         string            // host publication IP; empty preserves Docker default
 	Environment           map[string]string // proxy-only env (e.g. CLAW_POD, provider keys)
 	PodName               string
 }
@@ -29,6 +30,7 @@ type CllamaProxyConfig struct {
 type ClawdashConfig struct {
 	Image              string            // e.g. ghcr.io/mostlydev/clawdash:latest
 	Addr               string            // e.g. :8082
+	HostBind           string            // host publication IP, separate from container Addr
 	ManifestHostPath   string            // host path to pod-manifest.json
 	DockerSockHostPath string            // host path to docker socket
 	CllamaCostsURL     string            // external costs URL for operator browser
@@ -360,6 +362,10 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		hasClaw = true
 		serviceName := cllama.ProxyServiceName(proxy.ProxyType)
 		dashboardPort := hostPortOrDefault(proxy.DashboardPort, "8181")
+		publication, err := dashboardPortMapping(proxy.DashboardBind, dashboardPort, "8081")
+		if err != nil {
+			return "", err
+		}
 		env := map[string]string{
 			"CLAW_CONTEXT_ROOT": "/claw/context",
 			"CLAW_AUTH_DIR":     "/claw/auth",
@@ -397,7 +403,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 
 		rootServices[serviceName] = map[string]interface{}{
 			"image":       proxy.Image,
-			"ports":       []string{fmt.Sprintf("%s:8081", dashboardPort)}, // operator dashboard
+			"ports":       []string{publication}, // operator dashboard
 			"volumes":     volumes,
 			"environment": env,
 			"restart":     "on-failure",
@@ -476,7 +482,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		}
 	}
 
-	if hasClaw && p.Clawdash != nil {
+	if hasClaw && p.Clawdash != nil && !p.DisableClawdash {
 		if strings.TrimSpace(p.Clawdash.Image) == "" {
 			return "", fmt.Errorf("clawdash image must not be empty")
 		}
@@ -484,11 +490,15 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 			return "", fmt.Errorf("clawdash manifest host path must not be empty")
 		}
 
-		addr := strings.TrimSpace(p.Clawdash.Addr)
-		if addr == "" {
-			addr = ":8082"
+		addr, err := ClawdashListenAddress(p.Clawdash.Addr)
+		if err != nil {
+			return "", err
 		}
 		port := clawdashPort(addr)
+		publication, err := dashboardPortMapping(p.Clawdash.HostBind, port, port)
+		if err != nil {
+			return "", err
+		}
 		socketPath := strings.TrimSpace(p.Clawdash.DockerSockHostPath)
 		if socketPath == "" {
 			socketPath = "/var/run/docker.sock"
@@ -508,7 +518,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 
 		rootServices["clawdash"] = map[string]interface{}{
 			"image":     p.Clawdash.Image,
-			"ports":     []string{fmt.Sprintf("%s:%s", port, port)},
+			"ports":     []string{publication},
 			"read_only": true,
 			"tmpfs":     []string{"/tmp"},
 			"volumes": []string{

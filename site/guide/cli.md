@@ -13,6 +13,32 @@ The `-f` flag is a persistent flag on the root command, so lifecycle commands in
 
 ---
 
+## Dashboard publication (Unreleased)
+
+Set these environment variables on the host when running `claw up`:
+
+| Setting | Behavior |
+|---------|----------|
+| `CLAW_DASHBOARD_BIND=127.0.0.1` | Publish both cllama's UI/API and clawdash on IPv4 loopback only. Accepts literal IPv4 or IPv6 addresses, including `[::1]`. Unset preserves Docker's existing default publication on all host interfaces. |
+| `CLAWDASH_ENABLED=false` | Omit clawdash, its generated API principal, image requirement and dashboard URL. Also stop and remove a previously generated clawdash container through Compose. Defaults to `true`. |
+| `CLLAMA_UI_PORT=8181` | cllama UI/API host port; container port remains 8081. |
+| `CLAWDASH_ADDR=:8082` | clawdash **container** listen address and port; its host port uses the same number. Must use a wildcard container address. Use `CLAW_DASHBOARD_BIND` for host publication instead of putting loopback in this setting. |
+
+For example:
+
+```bash
+CLAW_DASHBOARD_BIND=127.0.0.1 CLAWDASH_ENABLED=false claw up -d
+```
+
+The bind setting changes Docker's host publication, not the container listener.
+cllama's authenticated UI/API remains enabled when clawdash is disabled: the
+per-run supervisor needs its revocation endpoint. Its host-side URL follows the
+selected binding, including IPv6. clawdash has no inbound authentication; use
+loopback publication or disable it when remote dashboard access is unwanted.
+Invalid bind addresses and boolean values fail before applying Compose.
+
+---
+
 ## claw pull
 
 Fetch pinned infra images, pod registry images, and built-in local runner bases.

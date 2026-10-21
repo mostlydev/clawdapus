@@ -112,7 +112,7 @@ func rejectImageVolumes(name, imageRef string) error {
 
 // writePerRunTemplates compiles and installs every per-run template. It runs
 // only after the pod applied successfully, under the pod run lock.
-func writePerRunTemplates(podDir string, p *pod.Pod, templates map[string]*perRunTemplate, proxyType, dashboardPort string) error {
+func writePerRunTemplates(podDir string, p *pod.Pod, templates map[string]*perRunTemplate, proxyType, dashboardPort, dashboardBind string) error {
 	names := make([]string, 0, len(templates))
 	for name := range templates {
 		names = append(names, name)
@@ -144,7 +144,7 @@ func writePerRunTemplates(podDir string, p *pod.Pod, templates map[string]*perRu
 			ImageID:      imageID,
 			RunNetwork:   p.RunNetwork,
 			CllamaURL:    cllama.ProxyBaseURL(proxyType),
-			CllamaAPIURL: "http://127.0.0.1:" + dashboardPort,
+			CllamaAPIURL: pod.DashboardURL(dashboardBind, dashboardPort),
 			ToolsGrant:   grant,
 			Limits: runs.Limits{
 				MaxRuntimeSeconds:   int64(limits.MaxRuntime / time.Second),
