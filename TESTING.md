@@ -47,6 +47,29 @@ others — see `grep -l 'go:build spike' cmd/claw/*_test.go` for the current set
 
 Run a spike test when implementing or validating driver/runtime behavior end to end.
 
+### Per-run worker provider acceptance
+
+`TestSpikePerRunWorkers` tests the supervisor lifecycle against a deterministic
+fake provider. `TestSpikePerRunProviderLive` additionally runs the pinned
+PicoClaw worker against native Anthropic through a locally built candidate
+cllama image. It verifies the answer, successful proxy usage/history, callback
+ACKs, revocation ACK, rejection of the revoked bearer, and worker cleanup.
+
+```bash
+go test -tags spike -run '^TestSpikePerRunProviderLive$' -v -timeout 8m ./cmd/claw
+```
+
+The live test uses `ANTHROPIC_API_KEY` from the environment or the existing
+`examples/rollcall/.env` fixture and skips when neither is available. It makes a
+paid synthetic request to `anthropic/claude-sonnet-5-5` in a temporary isolated
+pod. Native worker tools remain enabled; an empty managed grant does not mean
+the provider receives no tool schemas. Images use unique local tags, with no
+released tags or downstream pods changed. Record the tested cllama commit with
+the result; passing against an unreleased candidate does not prove the pinned
+released proxy supports that behavior. To prove the published proxy, set
+`CLAW_SPIKE_PINNED_CLLAMA=1`: the test then pulls the cllama image pinned in
+`internal/infraimages/release_manifest.go` instead of building the submodule.
+
 ### Rollcall Driver Parity Spike
 
 The rollcall spike (`TestSpikeRollCall`) is the best single validation path for
