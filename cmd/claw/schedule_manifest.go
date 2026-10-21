@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
@@ -55,10 +56,11 @@ func buildScheduleManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw)
 			serviceTimezone = "UTC"
 		}
 		for _, inv := range rc.Invocations {
-			if inv.Origin != driver.OriginPod {
+			_, direct := directTurnWakerFor(rc)
+			if inv.Origin != driver.OriginPod && !direct {
 				continue
 			}
-			if !supportsExternalScheduler(rc.ClawType) {
+			if !supportsExternalScheduler(rc.ClawType) && !direct {
 				if inv.When != nil {
 					fmt.Printf("[claw] warning: service %q: driver %q does not support external scheduler; ignoring calendar gating for %q\n", name, rc.ClawType, invocationDisplayName(inv))
 				}
@@ -82,21 +84,29 @@ func buildScheduleManifest(p *pod.Pod, resolved map[string]*driver.ResolvedClaw)
 				fmt.Printf("[claw] warning: %s\n", warning)
 			}
 			for _, agentID := range expandedServiceNames(name, count) {
-				wake, err := resolveWakeAdapter(rc.ClawType, agentID, inv)
+				wake, err := resolveWakeAdapter(rc, agentID, inv)
 				if err != nil {
 					return nil, fmt.Errorf("service %q invocation %q: %w", name, invocationDisplayName(inv), err)
 				}
+				timeoutSeconds := 0
+				if waker, direct := directTurnWakerFor(rc); direct {
+					timeoutSeconds, err = waker.InvocationTimeoutSeconds(rc)
+					if err != nil {
+						return nil, err
+					}
+				}
 				manifest.Invocations = append(manifest.Invocations, schedule.ManifestInvocation{
-					ID:       scheduleManifestID(agentID, inv),
-					Service:  name,
-					AgentID:  agentID,
-					Schedule: inv.Schedule,
-					Timezone: timezone,
-					Message:  inv.Message,
-					Name:     inv.Name,
-					To:       inv.To,
-					When:     inv.When.Clone(),
-					Wake:     wake,
+					TimeoutSeconds: timeoutSeconds,
+					ID:             scheduleManifestID(agentID, inv),
+					Service:        name,
+					AgentID:        agentID,
+					Schedule:       inv.Schedule,
+					Timezone:       timezone,
+					Message:        inv.Message,
+					Name:           inv.Name,
+					To:             inv.To,
+					When:           inv.When.Clone(),
+					Wake:           wake,
 				})
 			}
 		}
@@ -114,18 +124,21 @@ func supportsExternalScheduler(clawType string) bool {
 	}
 }
 
-func resolveWakeAdapter(clawType, target string, inv driver.Invocation) (schedule.Wake, error) {
+func resolveWakeAdapter(rc *driver.ResolvedClaw, target string, inv driver.Invocation) (schedule.Wake, error) {
+	if waker, direct := directTurnWakerFor(rc); direct {
+		seconds, err := waker.InvocationTimeoutSeconds(rc)
+		if err != nil {
+			return schedule.Wake{}, err
+		}
+		command, err := directTurnWakeCommand(waker.WakeHelper(), rc, inv, seconds)
+		if err != nil {
+			return schedule.Wake{}, err
+		}
+		return schedule.Wake{Adapter: rc.ClawType + "-exec", Target: target, Command: command}, nil
+	}
+	clawType := rc.ClawType
 	nativeID := strings.TrimSpace(inv.ID)
 	switch strings.TrimSpace(clawType) {
-	case "openclaw":
-		if nativeID == "" {
-			return schedule.Wake{}, fmt.Errorf("missing native invocation id")
-		}
-		return schedule.Wake{
-			Adapter: "openclaw-exec",
-			Target:  target,
-			Command: []string{"openclaw", "cron", "run", nativeID},
-		}, nil
 	case "hermes":
 		if nativeID == "" {
 			return schedule.Wake{}, fmt.Errorf("missing native invocation id")
@@ -182,4 +195,59 @@ func invocationDisplayName(inv driver.Invocation) string {
 		return strings.TrimSpace(inv.Name)
 	}
 	return strings.TrimSpace(inv.Message)
+}
+
+// The baked helper accepts only positional data; task text is never evaluated
+// as shell syntax. Empty target deliberately requests no automatic delivery.
+func directTurnWakeCommand(helper string, rc *driver.ResolvedClaw, inv driver.Invocation, seconds int) ([]string, error) {
+	if seconds < 1 || seconds > schedule.MaxInvocationTimeoutSeconds {
+		return nil, fmt.Errorf("scheduled turn timeout must be between 1 and %d", schedule.MaxInvocationTimeoutSeconds)
+	}
+	channel, target := inv.Channel, strings.TrimSpace(inv.To)
+	if target != "" && channel == "" {
+		platforms := map[string]bool{}
+		for _, m := range findInvokeChannelMatches(rc.Handles, "", target, true) {
+			platforms[m.Platform] = true
+		}
+		unmatched := len(platforms) == 0
+		if unmatched {
+			for platform := range rc.Handles {
+				platforms[platform] = true
+			}
+		}
+		if len(platforms) != 1 {
+			return nil, fmt.Errorf("scheduled delivery target requires an unambiguous platform; use platform:target")
+		}
+		for p := range platforms {
+			channel = p
+		}
+		if unmatched && channel == "discord" {
+			if _, err := strconv.ParseUint(strings.TrimPrefix(target, "channel:"), 10, 64); err != nil {
+				return nil, fmt.Errorf("unknown Discord scheduled delivery target; use a declared channel name or numeric ID")
+			}
+		}
+	}
+	if target != "" {
+		if channel == "discord" && len(findInvokeChannelMatches(rc.Handles, channel, target, true)) == 0 {
+			if _, err := strconv.ParseUint(strings.TrimPrefix(target, "channel:"), 10, 64); err != nil {
+				return nil, fmt.Errorf("unknown Discord scheduled delivery target; use a declared channel name or numeric ID")
+			}
+		}
+		if _, ok := rc.Handles[channel]; !ok {
+			return nil, fmt.Errorf("scheduled delivery platform %q is not declared", channel)
+		}
+	}
+	return []string{helper, inv.ID, inv.Message, strconv.Itoa(seconds), channel, target}, nil
+}
+
+func directTurnWakerFor(rc *driver.ResolvedClaw) (driver.DirectTurnWaker, bool) {
+	if rc == nil {
+		return nil, false
+	}
+	d, err := driver.Lookup(rc.ClawType)
+	if err != nil {
+		return nil, false
+	}
+	w, ok := d.(driver.DirectTurnWaker)
+	return w, ok
 }

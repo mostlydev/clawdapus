@@ -36,11 +36,19 @@ type RunnerVersionProber interface {
 	RunnerVersionProbe() []string
 }
 
+// DirectTurnWaker opts a runner into compiler-owned scheduling and bounded
+// direct turns, independently of the lifecycle Driver interface.
+type DirectTurnWaker interface {
+	WakeHelper() string
+	InvocationTimeoutSeconds(*ResolvedClaw) (int, error)
+}
+
 // Invocation is a scheduled agent task resolved from image labels or pod x-claw.invoke.
 type Invocation struct {
 	ID       string           `json:"id,omitempty"`
 	Schedule string           // 5-field cron expression (e.g., "15 8 * * 1-5")
 	Message  string           // agent task payload (agentTurn message)
+	Channel  string           `json:"channel,omitempty"` // resolved delivery platform
 	To       string           // platform delivery target (channel/chat ID; empty = driver default behavior)
 	Name     string           // human-readable job name (optional, derived from message if empty)
 	Origin   InvocationOrigin `json:"origin,omitempty"`
@@ -198,15 +206,16 @@ type MaterializeOpts struct {
 
 // MaterializeResult describes what the compose generator must add to the service.
 type MaterializeResult struct {
-	Mounts      []Mount
-	Tmpfs       []string          // paths needing tmpfs (for read_only: true)
-	Environment map[string]string // additional env vars
-	User        string            // optional compose user override (lower priority than explicit compose user)
-	Healthcheck *Healthcheck
-	ReadOnly    bool   // default: true
-	Restart     string // default: "on-failure"
-	SkillDir    string // container path for skills (e.g., "/claw/skills")
-	SkillLayout string // "" (flat, default) or "directory" (Claude Code: skills/name/SKILL.md)
+	Mounts          []Mount
+	Tmpfs           []string          // paths needing tmpfs (for read_only: true)
+	Environment     map[string]string // additional env vars
+	User            string            // optional compose user override (lower priority than explicit compose user)
+	Healthcheck     *Healthcheck
+	ReadOnly        bool   // default: true
+	Restart         string // default: "on-failure"
+	StopGracePeriod string // optional driver default; explicit compose value wins
+	SkillDir        string // container path for skills (e.g., "/claw/skills")
+	SkillLayout     string // "" (flat, default) or "directory" (Claude Code: skills/name/SKILL.md)
 }
 
 type Mount struct {
@@ -217,10 +226,11 @@ type Mount struct {
 }
 
 type Healthcheck struct {
-	Test     []string
-	Interval string
-	Timeout  string
-	Retries  int
+	StartPeriod string
+	Test        []string
+	Interval    string
+	Timeout     string
+	Retries     int
 }
 
 type PostApplyOpts struct {

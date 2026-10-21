@@ -142,3 +142,8 @@ In JSON output (`claw audit --json`), `tool_manifest_loaded` events carry `manif
 - `claw doctor` — environment sanity checks
 - `claw inspect <service>` — what was actually compiled for a service
 - [Open an issue](https://github.com/mostlydev/clawdapus/issues/new/choose) with your `claw doctor` output, driver type, and the relevant pod YAML snippet
+
+
+## OpenClaw waits for state ownership after a crash
+
+Pinned OpenClaw keeps a SQLite owner heartbeat. After an OOM, forced kill or unclean shutdown, a replacement container can wait up to about 95 seconds before reclaiming an owner from another PID namespace. Keep this safeguard enabled. The driver provides a 120-second healthcheck start period; normal graceful shutdown forwards TERM to the Gateway and waits for it to release ownership. Its default Compose stop grace is the configured turn timeout plus 35 seconds. With a turn in flight, down or recreate can wait up to that stop grace (335 seconds at the default timeout); an idle Gateway exits quickly. Explicit healthchecks or `stop_grace_period` settings override those defaults and should leave enough room for recovery and draining.

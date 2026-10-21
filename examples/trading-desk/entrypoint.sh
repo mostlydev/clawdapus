@@ -11,6 +11,17 @@ fi
 openclaw gateway --port 18789 --bind loopback &
 GATEWAY_PID=$!
 
+# Forward shutdown to the gateway and wait for it to release SQLite ownership.
+# Without this, container recreation leaves a fresh owner heartbeat behind.
+stop_gateway() {
+    trap - TERM INT
+    kill -TERM "$GATEWAY_PID" 2>/dev/null || true
+    set +e
+    wait "$GATEWAY_PID"
+    exit "$?"
+}
+trap stop_gateway TERM INT
+
 # If a startup greeting is configured, wait for the gateway to be healthy
 # (Discord connected), then send the message.
 if [ -n "${CLAW_GREETING_CHANNEL:-}" ] && [ -n "${CLAW_GREETING_MESSAGE:-}" ]; then

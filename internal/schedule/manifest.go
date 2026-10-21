@@ -7,16 +7,17 @@ type Manifest struct {
 }
 
 type ManifestInvocation struct {
-	ID       string `json:"id"`
-	Service  string `json:"service"`
-	AgentID  string `json:"agent_id"`
-	Schedule string `json:"schedule"`
-	Timezone string `json:"timezone"`
-	Message  string `json:"message"`
-	Name     string `json:"name,omitempty"`
-	To       string `json:"to,omitempty"`
-	When     *When  `json:"when,omitempty"`
-	Wake     Wake   `json:"wake"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+	ID             string `json:"id"`
+	Service        string `json:"service"`
+	AgentID        string `json:"agent_id"`
+	Schedule       string `json:"schedule"`
+	Timezone       string `json:"timezone"`
+	Message        string `json:"message"`
+	Name           string `json:"name,omitempty"`
+	To             string `json:"to,omitempty"`
+	When           *When  `json:"when,omitempty"`
+	Wake           Wake   `json:"wake"`
 }
 
 type Wake struct {

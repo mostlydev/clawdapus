@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -109,9 +111,6 @@ func TestSpikeRollCall(t *testing.T) {
 		{"openclaw:latest", "Dockerfile.openclaw-base", "", true},
 		{"nanobot:latest", "Dockerfile.nanobot-base", "", true},
 		{"picoclaw:latest", "Dockerfile.picoclaw-base", "", true},
-		// Hermes is a real runtime — build from the canonical dockerfiles dir so
-		// patch-hermes-runtime.py and minisweagent_path.py are in the build context.
-		{"hermes:latest", "Dockerfile", filepath.Join(repoRoot, "dockerfiles", "hermes-base"), false},
 		// Memory stub — shared infrastructure service used by capability-wave agents.
 		{"rollcall-memory-stub:latest", "Dockerfile", filepath.Join(repoRoot, "testdata", "memory-stub"), false},
 		// The pod's mem-svc uses the reference memory service.
@@ -126,8 +125,18 @@ func TestSpikeRollCall(t *testing.T) {
 			spikeBuildImage(t, ctxDir, b.tag, b.dockerfile)
 		}
 	}
-	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawdash, infraComponentClawWall)
-	spikeEnsureCllamaPassthroughImage(t, repoRoot)
+	// Exercise published infrastructure; never replace a release tag with a local build.
+	for _, component := range []string{infraComponentClawdash, infraComponentClawWall, infraComponentCllama} {
+		spikeEnsurePulledImage(t, infraImageSpecFor(component).ExpectedRef)
+	}
+
+	// Hermes refresh is deferred: prove this release against the published pin,
+	// rather than an experimental local image or the unfinished source port.
+	hermesRef := infraImageSpecFor(infraComponentHermesBase).ExpectedRef
+	spikeEnsurePulledImage(t, hermesRef)
+	if out, err := exec.Command("docker", "tag", hermesRef, "hermes:latest").CombinedOutput(); err != nil {
+		t.Fatalf("tag pinned Hermes fixture: %v\n%s", err, out)
+	}
 
 	// Build agent images (Clawfile on top of base)
 	agentImages := []struct {
@@ -156,7 +165,7 @@ func TestSpikeRollCall(t *testing.T) {
 			name:            "oc-roll",
 			runtime:         "openclaw",
 			subtestName:     "openclaw_openai_surface",
-			modelOverride:   "openrouter/anthropic/claude-sonnet-4",
+			modelOverride:   "openrouter/anthropic/claude-sonnet-5",
 			expectedSurface: "openai-chat-completions",
 			requireKeys:     []string{"OPENROUTER_API_KEY"},
 		},
@@ -208,7 +217,7 @@ func TestSpikeRollCall(t *testing.T) {
 		{
 			name:            "hm-roll",
 			runtime:         "hermes",
-			modelOverride:   "openrouter/anthropic/claude-sonnet-4",
+			modelOverride:   "openrouter/anthropic/claude-sonnet-5",
 			expectedSurface: "openai-chat-completions",
 			requireKeys:     []string{"OPENROUTER_API_KEY"},
 		},
@@ -805,7 +814,7 @@ func rollcallFetchMessages(t *testing.T, token, channelID string, limit int, aft
 	}
 	req.Header.Set("Authorization", "Bot "+token)
 	req.Header.Set("User-Agent", "DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := rollcallDiscordRequest(req)
 	if err != nil {
 		t.Logf("warning: Discord GET failed: %v", err)
 		return nil
@@ -845,7 +854,7 @@ func rollcallSendWebhookMessage(t *testing.T, webhookURL, content string) string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "DiscordBot (https://github.com/mostlydev/clawdapus, 1.0)")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := rollcallDiscordRequest(req)
 	if err != nil {
 		t.Fatalf("send webhook message: %v", err)
 	}
@@ -863,4 +872,39 @@ func rollcallSendWebhookMessage(t *testing.T, webhookURL, content string) string
 		return msg.ID
 	}
 	return ""
+}
+
+// Use the host curl transport for Discord acceptance. The Go host transport
+// can be blocked independently of curl/container networking. Credentials and
+// webhook URLs stay on stdin, never in process arguments or error messages.
+func rollcallDiscordRequest(req *http.Request) (*http.Response, error) {
+	var config strings.Builder
+	fmt.Fprintf(&config, "url = %q\nrequest = %q\n", req.URL.String(), req.Method)
+	for name, values := range req.Header {
+		for _, value := range values {
+			fmt.Fprintf(&config, "header = %q\n", name+": "+value)
+		}
+	}
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read Discord request body")
+		}
+		fmt.Fprintf(&config, "data-binary = %q\n", string(body))
+	}
+	cmd := exec.Command("curl", "--config", "-", "--silent", "--show-error", "--connect-timeout", "5", "--max-time", "15", "--max-filesize", "8388608", "--write-out", "\n%{http_code}")
+	cmd.Stdin = strings.NewReader(config.String())
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("Discord curl transport failed")
+	}
+	separator := bytes.LastIndexByte(out, '\n')
+	if separator < 0 {
+		return nil, fmt.Errorf("Discord response missing status")
+	}
+	status, err := strconv.Atoi(strings.TrimSpace(string(out[separator+1:])))
+	if err != nil {
+		return nil, fmt.Errorf("Discord response has invalid status")
+	}
+	return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewReader(out[:separator])), Header: make(http.Header)}, nil
 }

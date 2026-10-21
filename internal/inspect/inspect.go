@@ -196,10 +196,17 @@ func ParseLabels(labels map[string]string) *ClawInfo {
 	})
 	for _, e := range invokeEntries {
 		tab := strings.IndexByte(e.Value, '\t')
+		separatorBytes := 1
+		// Docker can retain the emitter's escaped tab as literal backslash+t.
+		// Split only the first separator; never unescape the task itself.
+		if escaped := strings.Index(e.Value, `\t`); escaped > 0 && (tab < 0 || escaped < tab) {
+			tab = escaped
+			separatorBytes = 2
+		}
 		if tab > 0 {
 			info.Invocations = append(info.Invocations, InspectInvocation{
 				Schedule: e.Value[:tab],
-				Command:  e.Value[tab+1:],
+				Command:  e.Value[tab+separatorBytes:],
 			})
 		}
 	}

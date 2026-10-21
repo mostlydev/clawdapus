@@ -1209,3 +1209,42 @@ func containsString(items []string, want string) bool {
 	}
 	return false
 }
+
+func TestEmitComposeDriverStartupAndShutdownBudgetsRespectOverrides(t *testing.T) {
+	const input = `services:
+  defaults:
+    image: example/bot
+    x-claw:
+      agent: ./AGENTS.md
+  explicit:
+    image: example/bot
+    stop_grace_period: 7m
+    healthcheck:
+      test: [CMD, custom-health]
+      start_period: 3m
+    x-claw:
+      agent: ./AGENTS.md
+`
+	p, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := &driver.MaterializeResult{StopGracePeriod: "335s", Healthcheck: &driver.Healthcheck{Test: []string{"CMD", "driver-health"}, StartPeriod: "120s", Interval: "30s", Timeout: "10s", Retries: 3}}
+	out, err := EmitCompose(p, map[string]*driver.MaterializeResult{"defaults": result, "explicit": result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]interface{}
+	if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err)
+	}
+	services := doc["services"].(map[string]interface{})
+	defaults := services["defaults"].(map[string]interface{})
+	explicit := services["explicit"].(map[string]interface{})
+	if defaults["stop_grace_period"] != "335s" || defaults["healthcheck"].(map[string]interface{})["start_period"] != "120s" {
+		t.Fatalf("driver budgets lost: %v", defaults)
+	}
+	if explicit["stop_grace_period"] != "7m" || explicit["healthcheck"].(map[string]interface{})["start_period"] != "3m" {
+		t.Fatalf("operator budgets overwritten: %v", explicit)
+	}
+}
