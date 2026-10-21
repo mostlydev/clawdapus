@@ -89,6 +89,8 @@ func TestSpikePerRunWorkers(t *testing.T) {
 	spikeWriteFile(t, filepath.Join(providerCtx, "Dockerfile"), "FROM "+pythonImage+"\nCOPY fake_provider.py /app/fake_provider.py\nCOPY .claw-describe.json /.claw-describe.json\nLABEL claw.describe=/.claw-describe.json\nCMD [\"python\",\"-u\",\"/app/fake_provider.py\"]\n")
 	spikeBuildImage(t, providerCtx, providerImage, "Dockerfile")
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "-f", providerImage).Run() })
+	const ingressSecret = "spike-proxy-only-ingress"
+	spikeWriteFile(t, filepath.Join(workDir, ".env"), "TOOL_INGRESS_TOKEN="+ingressSecret+"\n")
 	spikeWriteFile(t, podFile, fmt.Sprintf(`name: %s
 
 x-claw:
@@ -98,6 +100,7 @@ x-claw:
     env:
       OPENAI_API_KEY: sk-local-fake
       OPENAI_BASE_URL: http://fake-provider:8080/v1
+      TOOL_INGRESS_TOKEN: ${TOOL_INGRESS_TOKEN}
   models-defaults:
     primary: openai/gpt-4o
 
@@ -114,6 +117,8 @@ services:
 
   fake-provider:
     image: %s
+    environment:
+      TOOL_INGRESS_TOKEN: ${TOOL_INGRESS_TOKEN}
     expose:
       - "8080"
     networks:
@@ -165,6 +170,13 @@ services:
 	tpl, _, err := runs.LoadTemplate(workDir, "worker")
 	if err != nil {
 		t.Fatalf("template: %v", err)
+	}
+	publicTemplate := spikeReadFile(t, filepath.Join(runs.TemplateDir(workDir), "worker.json"))
+	if strings.Contains(publicTemplate, ingressSecret) {
+		t.Fatal("proxy-only ingress secret reached the public worker template")
+	}
+	if status := runsSpikeUnauthenticatedToolStatus(t, "runs-spike-"+unique+"_claw-internal", pythonImage); status != 401 {
+		t.Fatalf("tool service must refuse requests without proxy bearer: %d", status)
 	}
 	netInspect, err := exec.Command("docker", "network", "inspect", tpl.RunNetwork, "--format", "{{.Internal}}").Output()
 	if err != nil || strings.TrimSpace(string(netInspect)) != "true" {
@@ -228,14 +240,27 @@ services:
 	if !strings.Contains(events, "TOOL "+allowed.RunAgentID) || !strings.Contains(events, "MODEL EMPTY tools=[]") || strings.Contains(events, "TOOL "+empty.RunAgentID) {
 		t.Fatalf("allowlist dispatch evidence: %s", events)
 	}
+	if !strings.Contains(events, "TOOL-AUTH-OK") || !strings.Contains(events, "TOOL-AUTH-DENIED") || strings.Contains(events, "MODEL-SECRET-LEAK") || strings.Contains(events, ingressSecret) {
+		t.Fatal("managed-tool bearer or secret isolation evidence failed")
+	}
 	proxyAudit, err := exec.Command("docker", "compose", "-f", generatedPath, "logs", "--no-log-prefix", "cllama").Output()
 	if err != nil || !runsSpikeHasDispatch(proxyAudit, allowed.RunAgentID) || runsSpikeHasDispatch(proxyAudit, empty.RunAgentID) {
 		t.Fatalf("per-run dispatch audit did not preserve allowlists: %v", err)
+	}
+	if strings.Contains(string(proxyAudit), ingressSecret) {
+		t.Fatal("proxy-only ingress secret reached proxy logs")
 	}
 
 	// 2. Cancel mid-run reaches revoked then stopped; the token is dead.
 	runsSpikeLaunch(t, client, "b", 1, "SLOW task", 20*time.Minute, "")
 	view = runsSpikeWait(t, client, "b", "running")
+	if strings.Contains(runsSpikeInspectEnv(t, view), ingressSecret) {
+		t.Fatal("proxy-only ingress secret reached worker env, argv or mounts")
+	}
+	project := spikeReadFile(t, filepath.Join(workDir, runs.StateDirName, "projects", runs.Key{Installation: "inst", RunID: "b"}.Hash(), "compose.yml"))
+	if strings.Contains(project, ingressSecret) {
+		t.Fatal("proxy-only ingress secret reached rendered run project")
+	}
 	token := runsSpikeRunToken(t, workDir, runs.Key{Installation: "inst", RunID: "b"})
 	runsSpikeWaitProviderHit(t, cb, generatedPath, "SLOW")
 	var cancelled runs.StatusView
@@ -349,7 +374,7 @@ services:
 	}
 }
 
-const runsSpikeFakeProvider = `import json, time
+const runsSpikeFakeProvider = `import json, os, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class Handler(BaseHTTPRequestHandler):
@@ -362,9 +387,17 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode("utf-8", "replace")
         payload = json.loads(body)
         if self.path.startswith("/tool/"):
+            token = os.environ["TOOL_INGRESS_TOKEN"]
+            if self.headers.get("Authorization") != "Bearer " + token:
+                print("TOOL-AUTH-DENIED", flush=True)
+                self.reply({"error": "unauthorized"}, 401)
+                return
+            print("TOOL-AUTH-OK", flush=True)
             print("TOOL " + self.path[len("/tool/"):], flush=True)
             self.reply({"value": "TOOL-ANSWER"})
             return
+        if os.environ["TOOL_INGRESS_TOKEN"] in body:
+            print("MODEL-SECRET-LEAK", flush=True)
         managed = [t["function"]["name"] for t in payload.get("tools", [])
                    if "echo" in t.get("function", {}).get("name", "")]
         if "EMPTY-PER-RUN-PROBE" in body:
@@ -387,9 +420,9 @@ class Handler(BaseHTTPRequestHandler):
         self.reply({"id": "chatcmpl-runs-spike", "object": "chat.completion", "created": 1, "model": "gpt-4o",
                     "choices": [{"index": 0, "message": message, "finish_reason": finish}],
                     "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}})
-    def reply(self, out):
+    def reply(self, out, status=200):
         data = json.dumps(out).encode()
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -596,12 +629,16 @@ except urllib.error.HTTPError as e:
 
 func runsSpikeProxyStatus(t *testing.T, network, image, token string) int {
 	t.Helper()
-	out, err := exec.Command("docker", "run", "--rm", "--network", network, image, "python", "-c", runsSpikeProbe, token).CombinedOutput()
+	// Docker may print a platform warning to stderr; only stdout is the
+	// probe's status protocol.
+	out, err := exec.Command("docker", "run", "--rm", "--network", network, image, "python", "-c", runsSpikeProbe, token).Output()
 	if err != nil {
 		t.Fatalf("probe: %v\n%s", err, out)
 	}
 	var status int
-	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &status)
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &status); err != nil {
+		t.Fatalf("invalid proxy status probe output: %v", err)
+	}
 	return status
 }
 

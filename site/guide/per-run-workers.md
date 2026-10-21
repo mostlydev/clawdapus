@@ -58,6 +58,59 @@ A per-run service may declare only `image` or `build` as Compose keys; the worke
 
 Workers have no channel identity, schedule, host mounts or persistent memory. Every business capability reaches them as a cllama-managed tool.
 
+### Managed-service bearer authentication (Unreleased)
+
+For a per-run consumer, a descriptor's `auth.env` resolves from that consumer's
+`x-claw.cllama-env`, including inherited `cllama-defaults.env`. It does **not**
+resolve from worker Compose `environment` (which remains forbidden), or look up
+an undeclared host variable by name. Missing, blank or unresolved values stop
+compilation. Long-lived consumers retain their existing environment-based auth.
+
+Use one host `.env` reference for the proxy's bearer and the service's expected
+ingress bearer. For example, with `READER_INGRESS_TOKEN` in the host `.env`:
+
+```yaml
+services:
+  worker:
+    image: my-worker:latest
+    x-claw:
+      agent: ./AGENTS.md
+      lifecycle: per-run
+      cllama: passthrough
+      models:
+        primary: openai/gpt-4o
+      tools: [reader]
+      cllama-env:
+        READER_INGRESS_TOKEN: ${READER_INGRESS_TOKEN}
+  reader:
+    image: my-reader:latest
+    expose: ["8080"]
+    environment:
+      READER_INGRESS_TOKEN: ${READER_INGRESS_TOKEN}
+```
+
+The reader's v2 descriptor declares:
+
+```json
+{"version":2,"auth":{"type":"bearer","env":"READER_INGRESS_TOKEN"}}
+```
+
+Add the reader's normal `tools` entries to that descriptor. The reader must
+validate the incoming bearer itself; the descriptor instructs cllama to send
+it, and does not add authentication to the reader implementation.
+
+The resolved credential stays in trusted proxy/service configuration and private
+template/proxy context artifacts. It never enters worker inputs, environment,
+contract, runner config, rendered run project or public template JSON. Protect
+the host `.env`; per-run generated Compose is `0600`, as is the template context
+file. Proxy manifests are inside private `0700` context directories. Gateway
+credentials for upstream services are separate from this ingress bearer.
+
+Credential-only rotation does not change the template identity; endpoint, tool
+and policy changes do. Recompile through the normal drain/stop-supervisor,
+`claw up`, start-supervisor sequence when changing credentials. Do not edit
+generated manifests or mutate live run contexts as a rotation mechanism.
+
 ## What `claw up` produces
 
 - **`compose.generated.yml`** does not contain the per-run service. It adds a `claw-runs-<pod-ns>` network with `internal: true` and attaches cllama to it. Workers join only that network, keeping them off the tool-service and outbound pod networks. Managed business tool calls go through cllama.
