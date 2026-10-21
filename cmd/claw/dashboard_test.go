@@ -66,7 +66,7 @@ func TestRemoveDisabledClawdashUsesPriorComposeOnly(t *testing.T) {
 	calls := 0
 	runComposeDockerCommand = func(args ...string) error {
 		calls++
-		if len(args) != 7 || !reflect.DeepEqual(args[3:], []string{"rm", "--stop", "--force", "clawdash"}) {
+		if len(args) != 7 || args[0] != "compose" || args[1] != "-f" || !reflect.DeepEqual(args[3:], []string{"rm", "--stop", "--force", "clawdash"}) {
 			t.Fatalf("unexpected removal arguments: %v", args)
 		}
 		snapshot = args[2]
@@ -100,10 +100,77 @@ func TestRemoveDisabledClawdashUsesPriorComposeOnly(t *testing.T) {
 		snapshot = args[2]
 		return errors.New("compose failed")
 	}
-	if err := removeDisabledClawdash(generated, previous); err == nil {
-		t.Fatal("Compose removal failure was ignored")
+	if err := removeDisabledClawdash(generated, previous); err == nil || !strings.Contains(err.Error(), "claw compose rm --stop --force clawdash") {
+		t.Fatalf("missing actionable Compose removal failure: %v", err)
 	}
 	if _, err := os.Stat(snapshot); !os.IsNotExist(err) {
 		t.Fatalf("private snapshot remains after failed removal: %v", err)
+	}
+}
+
+func TestFailedDashboardRemovalPreservesComposeAndRestoresRuntime(t *testing.T) {
+	dir := t.TempDir()
+	runtimeDir := filepath.Join(dir, ".claw-runtime")
+	if err := os.Mkdir(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	contract := filepath.Join(runtimeDir, "contract")
+	if err := os.WriteFile(contract, []byte("old context"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stage, err := prepareRuntimeDir(runtimeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(contract, []byte("new context"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous := []byte("services:\n  clawdash:\n    labels: {claw.role: dashboard, claw.service: clawdash}\n")
+	generated := filepath.Join(dir, "compose.generated.yml")
+	if err := os.WriteFile(generated, previous, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldCommand := runComposeDockerCommand
+	t.Cleanup(func() { runComposeDockerCommand = oldCommand })
+	runComposeDockerCommand = func(args ...string) error {
+		if len(args) != 7 || args[3] != "rm" {
+			t.Fatalf("unexpected apply after failed removal: %v", args)
+		}
+		return errors.New("old compose cannot load")
+	}
+	applied, err := applyComposeDefinition(generated, []byte("new compose"), 0o600, previous, true, true)
+	if err == nil || applied {
+		t.Fatalf("failed removal must permit runtime rollback: applied=%v err=%v", applied, err)
+	}
+	// This is the rollback decision consumed by runComposeUp's deferred handler.
+	if err := stage.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(contract); err != nil || string(raw) != "old context" {
+		t.Fatalf("old runtime not restored: %q %v", raw, err)
+	}
+	if raw, err := os.ReadFile(generated); err != nil || string(raw) != string(previous) {
+		t.Fatalf("old Compose not preserved: %q %v", raw, err)
+	}
+}
+
+func TestCleanupInterruptedDashboardSnapshots(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, ".claw-previous-interrupted.yml")
+	if err := os.WriteFile(stale, []byte("private old config"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, ".claw-previous-unrelated.yml")
+	if err := os.Symlink(stale, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupDashboardSnapshots(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("interrupted snapshot remains: %v", err)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("cleanup removed a symlink: %v", err)
 	}
 }

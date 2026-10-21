@@ -133,6 +133,9 @@ func runComposeUp(podFile string) (err error) {
 		return err
 	}
 	defer runGuard.Release()
+	if err := cleanupDashboardSnapshots(podDir); err != nil {
+		return err
+	}
 
 	servicePlans, err := planPodServiceImages(p)
 	if err != nil {
@@ -953,28 +956,9 @@ func runComposeUp(podFile string) (err error) {
 		return fmt.Errorf("claw-managed services require detached mode for fail-closed post-apply verification; rerun with 'claw up -d %s'", podFile)
 	}
 
-	composeArgs := []string{"compose", "-f", generatedPath, "up"}
-	if composeUpDetach {
-		composeArgs = append(composeArgs, "-d")
-	}
-
-	composeApplied = true
-	if !dashboards.Enabled {
-		if err := removeDisabledClawdash(generatedPath, previousGenerated); err != nil {
-			return err
-		}
-	}
-	// Keep the previous definition available if dashboard removal fails, so
-	// the next up can retry targeting the same existing dashboard project.
-	if err := os.WriteFile(generatedPath, []byte(output), generatedMode); err != nil {
-		return fmt.Errorf("write compose.generated.yml: %w", err)
-	}
-	if err := os.Chmod(generatedPath, generatedMode); err != nil {
-		return fmt.Errorf("chmod compose.generated.yml: %w", err)
-	}
-	fmt.Printf("[claw] wrote %s\n", generatedPath)
-	if err := runComposeDockerCommand(composeArgs...); err != nil {
-		return fmt.Errorf("docker compose up failed: %w", err)
+	composeApplied, err = applyComposeDefinition(generatedPath, []byte(output), generatedMode, previousGenerated, !dashboards.Enabled, composeUpDetach)
+	if err != nil {
+		return err
 	}
 
 	runtimeConsumers := runtimeConsumerServices(resolvedClaws, proxies, p.ClawAPI, p.Clawdash)

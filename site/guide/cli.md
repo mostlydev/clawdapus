@@ -36,6 +36,9 @@ per-run supervisor needs its revocation endpoint. Its host-side URL follows the
 selected binding, including IPv6. clawdash has no inbound authentication; use
 loopback publication or disable it when remote dashboard access is unwanted.
 Invalid bind addresses and boolean values fail before applying Compose.
+When disabling an existing dashboard, Compose must still be able to load its
+previous generated definition. If referenced files have been removed, restore
+them, run `claw compose rm --stop --force clawdash`, and retry `claw up`.
 
 ---
 
