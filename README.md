@@ -254,6 +254,7 @@ Clawdapus extends two formats you already know:
 | `claw build` | `docker build` | Transpile + build OCI image, or build every `build:` service in the pod |
 | `claw discover` | MCP `tools/list` | Snapshot stdio MCP sidecar tool schemas into `.claw-discovered/` |
 | `claw up` | `docker compose up` | Enforce + deploy; authoritative on what is stale |
+| `claw runs serve` | _(none)_ | Supervise one-shot per-run workers for an external orchestrator over a Unix socket |
 
 Any valid Dockerfile is a valid Clawfile. Any valid `docker-compose.yml` is a valid `claw-pod.yml`. Extended directives live in namespaces Docker already ignores. Eject from Clawdapus anytime — you still have a working OCI image and a working compose file.
 
