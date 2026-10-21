@@ -31,7 +31,7 @@ outline: deep
 
 <!-- Nothing yet -->
 
-## v0.29.0 {#v0-29-0}
+## v0.29.0 <Badge type="tip" text="Latest" /> {#v0-29-0}
 
 *2026-10-20*
 
@@ -53,11 +53,11 @@ outline: deep
   - PicoClaw only in v1, with the one-shot contract pinned on v0.2.7. See the [per-run workers guide](/guide/per-run-workers).
   - **cllama moves to [v0.11.0](https://github.com/mostlydev/cllama/releases/tag/v0.11.0)**: the durable revocation fence ([cllama#54](https://github.com/mostlydev/cllama/issues/54)) on both listeners, content-free dispatch audit, and the managed duplicate-failure retry fix.
 - **`claw audit` keeps cllama revocation evidence**: `tool_dispatch` and `revocation` events retain `dispatch_id`, `dispatch_status`, `revocation_generation`, `admitted_before_revoke` and `refused_after_revoke` as exact integers. Dispatch records do not count as tool calls.
-- **Pins infra images**: `claw-api` / `clawdash` / `claw-wall` / `claw-mcp-stdio` move to `v0.29.0`. `claw-api` carries the per-invocation scheduled-turn timeouts and must match this release. cllama moves to [v0.11.0](https://github.com/mostlydev/cllama/releases/tag/v0.11.0). `hermes-base` stays at `v2026.6.19-claw.3`; the Hermes upstream refresh is tracked separately in [#375](https://github.com/mostlydev/clawdapus/issues/375).
+- **Pins infra images**: `claw-api` / `clawdash` / `claw-wall` / `claw-channel-memory` / `claw-mcp-stdio` move to `v0.29.0`. `claw-api` carries the per-invocation scheduled-turn timeouts and must match this release. cllama moves to [v0.11.0](https://github.com/mostlydev/cllama/releases/tag/v0.11.0). `hermes-base` stays at `v2026.6.19-claw.3`; the Hermes upstream refresh is tracked separately in [#375](https://github.com/mostlydev/clawdapus/issues/375).
 - Known limitation: the OpenClaw runner image pins the top-level OpenClaw, Discord and Slack packages by SHA-512, but npm resolves their transitive dependencies at build time.
 
 
-## v0.28.1 <Badge type="tip" text="Latest" /> {#v0-28-1}
+## v0.28.1 {#v0-28-1}
 
 *2026-08-03*
 
