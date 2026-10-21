@@ -29,6 +29,13 @@ func GenerateConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 	if err := setPath(config, "agents.defaults.workspace", "/claw"); err != nil {
 		return nil, fmt.Errorf("config generation: %w", err)
 	}
+	// Current upstream keeps live transcripts in the agent directory, next
+	// to generated model/auth catalogs. Select a database in the durable
+	// sessions mount instead, so preserving conversations does not preserve
+	// credentials or installed runtime extensions.
+	if err := setPath(config, "session.store", openclawHomeDir+"/agents/main/sessions/openclaw-agent.sqlite"); err != nil {
+		return nil, fmt.Errorf("config generation: %w", err)
+	}
 
 	// Apply MODEL directives. openclaw uses "fallbacks" ([]string), not
 	// "fallback" (string); the whole fallback family (fallback, fallback-2,
@@ -471,6 +478,22 @@ func validateManagedProviderPolicy(config map[string]interface{}, rc *driver.Res
 		if !ok || rt["id"] != "openclaw" {
 			return fail()
 		}
+		if !managedProviderTransportAllowed(p) {
+			return fail()
+		}
+		modelDefs, ok := p["models"].([]interface{})
+		if !ok {
+			return fail()
+		}
+		for _, rawModel := range modelDefs {
+			model, ok := rawModel.(map[string]interface{})
+			if !ok || !managedProviderTransportAllowed(model) {
+				return fail()
+			}
+			if modelAPI, exists := model["api"]; exists && modelAPI != api {
+				return fail()
+			}
+		}
 	}
 	var check func(interface{}) bool
 	check = func(v interface{}) bool {
@@ -505,4 +528,52 @@ func validateManagedProviderPolicy(config map[string]interface{}, rc *driver.Res
 		return fail()
 	}
 	return nil
+}
+
+// Request transport settings can override otherwise-correct baseUrl/apiKey
+// fields. Keep authentication and proxy selection compiler-owned, while
+// retaining ordinary timeouts, TLS configuration and diagnostic headers.
+func managedProviderTransportAllowed(provider map[string]interface{}) bool {
+	if auth, exists := provider["auth"]; exists && auth != "api-key" {
+		return false
+	}
+	if _, exists := provider["authHeader"]; exists {
+		return false
+	}
+	if !managedProviderHeadersAllowed(provider["headers"]) {
+		return false
+	}
+	if raw, exists := provider["request"]; exists {
+		request, ok := raw.(map[string]interface{})
+		if !ok || !managedProviderHeadersAllowed(request["headers"]) {
+			return false
+		}
+		if proxy := request["proxy"]; proxy != nil {
+			return false
+		}
+		if rawAuth := request["auth"]; rawAuth != nil {
+			auth, ok := rawAuth.(map[string]interface{})
+			if !ok || auth["mode"] != "provider-default" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func managedProviderHeadersAllowed(raw interface{}) bool {
+	if raw == nil {
+		return true
+	}
+	headers, ok := raw.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	for name := range headers {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "authorization", "proxy-authorization", "x-api-key", "api-key", "x-goog-api-key", "host":
+			return false
+		}
+	}
+	return true
 }

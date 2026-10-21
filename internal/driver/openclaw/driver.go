@@ -2,6 +2,7 @@ package openclaw
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,6 +60,15 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 	configData, err := GenerateConfig(rc)
 	if err != nil {
 		return nil, fmt.Errorf("openclaw driver: config generation failed: %w", err)
+	}
+	var stateConfig struct {
+		Session struct{ Store string } `json:"session"`
+	}
+	if err := json.Unmarshal(configData, &stateConfig); err != nil {
+		return nil, err
+	}
+	if !sessionStoreUsesDefaultMount(stateConfig.Session.Store) {
+		fmt.Fprintf(os.Stderr, "[claw] warning: OpenClaw service %q overrides session.store outside the default persistent mounts; provide a persistent mount for the database and its sidecars\n", rc.ServiceName)
 	}
 	memoryDir, err := shared.PreparePortableMemory(shared.ResolveStateDir(opts.RuntimeDir, opts.StateDir), opts.RuntimeDir)
 	if err != nil {
@@ -204,6 +214,19 @@ func (d *Driver) Materialize(rc *driver.ResolvedClaw, opts driver.MaterializeOpt
 		},
 		Environment: env,
 	}, nil
+}
+
+func sessionStoreUsesDefaultMount(store string) bool {
+	if strings.HasPrefix(store, "~/") {
+		store = "/root/" + strings.TrimPrefix(store, "~/")
+	}
+	store = filepath.Clean(store)
+	for _, root := range []string{openclawHomeDir + "/state", openclawHomeDir + "/agents/main/sessions"} {
+		if strings.HasPrefix(store, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func materializeEffectiveAgentContract(runtimeDir, agentHostPath, clawdapusMd string) (string, error) {

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	schedulepkg "github.com/mostlydev/clawdapus/internal/schedule"
 	"gopkg.in/yaml.v3"
 )
 
@@ -77,12 +79,31 @@ func TestSpikeOpenClawAdditiveToolsLive(t *testing.T) {
 	spikeBuildImage(t, tradingDeskDir, baseTag, "Dockerfile.openclaw-base")
 	spikeBuildImage(t, fixtureDir, agentTag, "Clawfile")
 	spikeBuildImage(t, filepath.Join(repoRoot, "testdata", "tool-stub"), toolTag, "Dockerfile")
-	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawdash, infraComponentClawWall)
-	spikeEnsureCllamaPassthroughImage(t, repoRoot)
+	// Release proof must use the published proxy, never the legacy local-build
+	// helper that can fall back to a stub or replace a released image tag.
+	for _, component := range []string{infraComponentClawdash, infraComponentClawWall, infraComponentCllama} {
+		spikeEnsurePulledImage(t, infraImageSpecFor(component).ExpectedRef)
+	}
+	previousAPITag := infraClawAPITag
+	infraClawAPITag = fmt.Sprintf("spike-openclaw-wake-%d", time.Now().UnixNano())
+	apiSpec := infraImageSpecFor(infraComponentClawAPI)
+	t.Cleanup(func() {
+		infraClawAPITag = previousAPITag
+		for _, image := range []string{baseTag, agentTag, toolTag, apiSpec.ExpectedRef} {
+			_ = exec.Command("docker", "image", "rm", image).Run()
+		}
+	})
+	spikeBuildImage(t, repoRoot, apiSpec.ExpectedRef, apiSpec.DockerfilePath)
 
-	podYAML := openClawAdditiveLivePod(t, agentTag, toolTag, proxyRequest)
+	composeProject := fmt.Sprintf("openclaw-additive-%d", time.Now().UnixNano())
+	t.Setenv("COMPOSE_PROJECT_NAME", composeProject)
+	podYAML := strings.Replace(openClawAdditiveLivePod(t, agentTag, toolTag, proxyRequest), "openclaw-additive-live", composeProject, 1)
+	discordPhrase := ""
+	if os.Getenv("CLAW_SPIKE_NATIVE_DISCORD") == "1" {
+		podYAML, discordPhrase = openClawAdditiveDiscordSchedule(t, podYAML, env)
+	}
 	podPath := filepath.Join(fixtureDir, "claw-pod.yml")
-	if err := os.WriteFile(podPath, []byte(podYAML), 0o644); err != nil {
+	if err := os.WriteFile(podPath, []byte(podYAML), 0o600); err != nil {
 		t.Fatalf("write claw-pod.yml: %v", err)
 	}
 
@@ -93,8 +114,6 @@ func TestSpikeOpenClawAdditiveToolsLive(t *testing.T) {
 	composeUpDetach = true
 	defer func() { composeUpDetach = prevDetach }()
 
-	const composeProject = "openclaw-additive-live"
-	spikeCleanupProject(composeProject, generatedPath)
 	t.Cleanup(func() {
 		spikeCleanupProject(composeProject, generatedPath)
 	})
@@ -135,14 +154,26 @@ func TestSpikeOpenClawAdditiveToolsLive(t *testing.T) {
 		t.Fatalf("native tool turn did not surface proof %q\n%s", nativeProof, nativeOut)
 	}
 
+	// Exercise durable native conversation state, not just a startup marker.
+	out, err := exec.Command("docker", "compose", "-p", composeProject, "-f", generatedPath, "up", "-d", "--force-recreate", "oc-additive").CombinedOutput()
+	if err != nil {
+		t.Fatalf("recreate real runner: %v\n%s", err, out)
+	}
+	previousContainer := agentContainerID
+	agentContainerID = rollcallResolveContainerID(t, generatedPath, "oc-additive")
+	if agentContainerID == previousContainer {
+		t.Fatal("runner was not recreated")
+	}
+	spikeWaitHealthy(t, agentContainerID, 120*time.Second)
+
 	managedPhrase := fmt.Sprintf("managed-additive-%d", time.Now().UnixNano())
 	managedOut := openClawAdditiveRunAgent(
 		t,
 		agentContainerID,
 		sessionID,
-		fmt.Sprintf("Call the managed tool tool-svc.get_runtime_context before replying. Then reply with exactly %s and nothing else.", managedPhrase),
+		fmt.Sprintf("Call the managed tool tool-svc.get_runtime_context before replying. Then reply with %s followed by the exact file contents you read in our previous turn. Recall them from this session; do not read the file again.", managedPhrase),
 	)
-	if !strings.Contains(managedOut, managedPhrase) {
+	if !strings.Contains(managedOut, managedPhrase) || !strings.Contains(managedOut, nativeProof) {
 		t.Fatalf("managed tool turn did not surface phrase %q\n%s", managedPhrase, managedOut)
 	}
 
@@ -160,6 +191,33 @@ func TestSpikeOpenClawAdditiveToolsLive(t *testing.T) {
 		t.Fatalf("mixed tool turn did not surface phrase %q and proof %q\n%s", mixedPhrase, nativeProof, mixedOut)
 	}
 
+	manifestBytes, err := os.ReadFile(filepath.Join(fixtureDir, ".claw-runtime", "schedule.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest schedulepkg.Manifest
+	wantInvocations := 1
+	if discordPhrase != "" {
+		wantInvocations++
+	}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil || len(manifest.Invocations) != wantInvocations {
+		t.Fatalf("compiled image INVOKE: %v (%d invocations)", err, len(manifest.Invocations))
+	}
+	if manifest.Invocations[0].TimeoutSeconds != 300 {
+		t.Fatalf("compiled wake budget: %d", manifest.Invocations[0].TimeoutSeconds)
+	}
+	apiContainer := rollcallResolveContainerID(t, generatedPath, "claw-api")
+	spikeWaitHealthy(t, apiContainer, 60*time.Second)
+	fire, err := callClawAPICompose(generatedPath, "claw-scheduler", "POST", "/schedule/"+manifest.Invocations[0].ID+"/fire", nil)
+	if err != nil || !bytes.Contains(fire, []byte("manual-fire")) || !bytes.Contains(fire, []byte("compiled-scheduled-turn-proved")) {
+		t.Fatalf("compiled native scheduled wake: %v\n%s", err, fire)
+	}
+	if discordPhrase != "" {
+		openClawAdditiveFireDiscord(t, generatedPath, manifest, discordPhrase, env)
+	}
+	openClawAdditiveAssertDurableSecretsAbsent(t, fixtureDir)
+	openClawAdditiveAssertNoDeniedNativeSchemas(t, sessionHistoryDir)
+
 	rollcallAssertAuditTelemetry(t, podPath, "oc-additive", "openclaw", auditWindowStart)
 	rollcallAssertSessionHistory(t, sessionHistoryDir, "oc-additive")
 	rollcallAssertManagedToolTrace(t, sessionHistoryDir, "oc-additive", "tool-svc")
@@ -175,7 +233,9 @@ func openClawAdditiveWriteFixture(t *testing.T, dir, baseTag, model, nativeProof
 CLAW_TYPE openclaw
 AGENT AGENTS.md
 MODEL primary %s
-CONFIGURE openclaw config set agents.entries.main {"name":"oc-additive"}
+CONFIGURE openclaw config set agents.entries.main.name oc-additive
+CONFIGURE openclaw config set tools.deny ["write","edit","apply_patch","exec","process"]
+INVOKE 0 0 1 1 * Call the managed tool tool-svc.get_runtime_context, then reply with exactly compiled-scheduled-turn-proved and nothing else.
 `, baseTag, model)
 
 	agents := `# oc-additive
@@ -226,7 +286,7 @@ func openClawAdditiveProxyRequest(t *testing.T, env map[string]string) rollcallP
 	switch {
 	case openrouterKey != "":
 		cfg.APIFormat = "openai"
-		cfg.Model = "openrouter/anthropic/claude-sonnet-4"
+		cfg.Model = "openrouter/anthropic/claude-sonnet-5"
 		cfg.CllamaEnv["OPENROUTER_API_KEY"] = openrouterKey
 	case xaiKey != "":
 		cfg.APIFormat = "openai"
@@ -488,4 +548,147 @@ func openClawAdditiveAssertMixedHandoffHistory(t *testing.T, sessionHistoryDir, 
 	if !sawMixedHandoff {
 		t.Fatalf("expected a mediated %s handoff entry for %s with tool-svc.get_runtime_context trace and native handoff marker in %s", apiFormat, agentName, histFile)
 	}
+}
+
+// Inference creates additional runtime artifacts. Check them after live turns,
+// rather than relying only on the credential-free startup smoke.
+func openClawAdditiveAssertDurableSecretsAbsent(t *testing.T, fixtureDir string) {
+	t.Helper()
+	token := spikeReadAgentToken(t, filepath.Join(fixtureDir, ".claw-runtime", "context", "oc-additive", "metadata.json"))
+	root := filepath.Join(fixtureDir, ".claw-memory", "oc-additive", "openclaw-state")
+	database := filepath.Join(root, "oc-additive", "sessions", "openclaw-agent.sqlite")
+	if info, err := os.Stat(database); err != nil || info.Size() == 0 {
+		t.Fatalf("live conversation database missing from durable mount: %v", err)
+	}
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(b, []byte(token)) {
+			t.Errorf("compiled bearer persisted in %s", filepath.Base(path))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func openClawAdditiveAssertNoDeniedNativeSchemas(t *testing.T, historyDir string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(historyDir, "oc-additive", "history.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
+		var entry struct {
+			Original json.RawMessage `json:"request_original"`
+		}
+		if err := json.Unmarshal(line, &entry); err != nil {
+			t.Fatal(err)
+		}
+		var request struct {
+			Tools []struct {
+				Name     string `json:"name"`
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		if err := json.Unmarshal(entry.Original, &request); err != nil {
+			t.Fatal(err)
+		}
+		for _, tool := range request.Tools {
+			name := strings.ToLower(tool.Name)
+			if tool.Function.Name != "" {
+				name = strings.ToLower(tool.Function.Name)
+			}
+			switch name {
+			case "write", "edit", "apply_patch", "exec", "process":
+				t.Fatalf("native deny policy leaked tool %q into a live model request", name)
+			}
+		}
+	}
+}
+
+// Opt-in real native Discord delivery, without the RollCall responder wrapper.
+func openClawAdditiveDiscordSchedule(t *testing.T, podYAML string, env map[string]string) (string, string) {
+	t.Helper()
+	channel := env["ROLLCALL_CHANNEL_ID"]
+	if channel == "" {
+		channel = env["DISCORD_TRADING_FLOOR_CHANNEL"]
+	}
+	for _, key := range []string{"DISCORD_BOT_TOKEN", "DISCORD_BOT_ID", "DISCORD_GUILD_ID"} {
+		if env[key] == "" {
+			t.Fatalf("native Discord proof requires %s", key)
+		}
+	}
+	if channel == "" {
+		t.Fatal("native Discord proof requires its test channel")
+	}
+	env["ROLLCALL_CHANNEL_ID"] = channel
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(podYAML), &doc); err != nil {
+		t.Fatal(err)
+	}
+	agent := doc["services"].(map[string]any)["oc-additive"].(map[string]any)
+	agent["environment"] = map[string]any{"DISCORD_BOT_TOKEN": env["DISCORD_BOT_TOKEN"], "DISCORD_BOT_ID": env["DISCORD_BOT_ID"]}
+	claw := agent["x-claw"].(map[string]any)
+	claw["handles"] = map[string]any{"discord": map[string]any{
+		"id": env["DISCORD_BOT_ID"], "username": "native-schedule-proof",
+		"guilds": []any{map[string]any{"id": env["DISCORD_GUILD_ID"], "name": "Runtime proof", "channels": []any{map[string]any{"id": channel, "name": "runtime-proof"}}}},
+	}}
+	phrase := fmt.Sprintf("native-scheduled-discord-%d", time.Now().UnixNano())
+	claw["invoke"] = []any{map[string]any{"schedule": "0 0 1 1 *", "message": "Reply with exactly " + phrase + " and nothing else. Do not call a messaging tool; the scheduler will deliver the final reply.", "to": "discord:" + channel}}
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw), phrase
+}
+
+func openClawAdditiveFireDiscord(t *testing.T, compose string, manifest schedulepkg.Manifest, phrase string, env map[string]string) {
+	t.Helper()
+	id := ""
+	for _, inv := range manifest.Invocations {
+		if strings.Contains(inv.Message, phrase) {
+			id = inv.ID
+		}
+	}
+	if id == "" {
+		t.Fatal("native Discord invocation missing")
+	}
+	channel := env["ROLLCALL_CHANNEL_ID"]
+	baseline := rollcallFetchMessages(t, env["DISCORD_BOT_TOKEN"], channel, 1, "")
+	after := ""
+	if len(baseline) > 0 {
+		after = baseline[0].ID
+	}
+	out, err := callClawAPICompose(compose, "claw-scheduler", "POST", "/schedule/"+id+"/fire", nil)
+	if err != nil || !bytes.Contains(out, []byte("manual-fire")) {
+		t.Fatalf("native Discord scheduled fire: %v\n%s", err, out)
+	}
+	count := 0
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
+		count = 0
+		for _, m := range rollcallFetchMessages(t, env["DISCORD_BOT_TOKEN"], channel, 100, after) {
+			if m.Author.ID == env["DISCORD_BOT_ID"] && strings.Contains(m.Content, phrase) {
+				count++
+			}
+		}
+		if count > 0 {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if count != 1 {
+		t.Fatalf("native scheduled Discord deliveries: got %d, want 1", count)
+	}
+	t.Log("native scheduled final reply delivered to Discord exactly once")
 }

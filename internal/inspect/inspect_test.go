@@ -246,6 +246,16 @@ func TestParseLabelsInvocations(t *testing.T) {
 	}
 }
 
+func TestParseDockerInvocationDelimiterPreservesTaskEscapes(t *testing.T) {
+	// Docker preserves the emitted label separator as literal backslash+t.
+	// Decode only that separator: task escapes must remain opaque data.
+	command := `Read C:\tmp\task and print "literal\ttext"`
+	info := ParseLabels(map[string]string{"claw.invoke.0": `0 * * * *\t` + command})
+	if len(info.Invocations) != 1 || info.Invocations[0].Schedule != "0 * * * *" || info.Invocations[0].Command != command {
+		t.Fatalf("Docker invocation label lost or task changed: %#v", info.Invocations)
+	}
+}
+
 func TestParseLabelsCllamaIndexedOrdering(t *testing.T) {
 	raw := map[string]string{
 		"claw.cllama.1": "policy",

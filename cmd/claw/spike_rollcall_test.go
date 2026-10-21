@@ -109,9 +109,6 @@ func TestSpikeRollCall(t *testing.T) {
 		{"openclaw:latest", "Dockerfile.openclaw-base", "", true},
 		{"nanobot:latest", "Dockerfile.nanobot-base", "", true},
 		{"picoclaw:latest", "Dockerfile.picoclaw-base", "", true},
-		// Hermes is a real runtime — build from the canonical dockerfiles dir so
-		// patch-hermes-runtime.py and minisweagent_path.py are in the build context.
-		{"hermes:latest", "Dockerfile", filepath.Join(repoRoot, "dockerfiles", "hermes-base"), false},
 		// Memory stub — shared infrastructure service used by capability-wave agents.
 		{"rollcall-memory-stub:latest", "Dockerfile", filepath.Join(repoRoot, "testdata", "memory-stub"), false},
 		// The pod's mem-svc uses the reference memory service.
@@ -126,8 +123,18 @@ func TestSpikeRollCall(t *testing.T) {
 			spikeBuildImage(t, ctxDir, b.tag, b.dockerfile)
 		}
 	}
-	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawdash, infraComponentClawWall)
-	spikeEnsureCllamaPassthroughImage(t, repoRoot)
+	// Exercise published infrastructure; never replace a release tag with a local build.
+	for _, component := range []string{infraComponentClawdash, infraComponentClawWall, infraComponentCllama} {
+		spikeEnsurePulledImage(t, infraImageSpecFor(component).ExpectedRef)
+	}
+
+	// Hermes refresh is deferred: prove this release against the published pin,
+	// rather than an experimental local image or the unfinished source port.
+	hermesRef := infraImageSpecFor(infraComponentHermesBase).ExpectedRef
+	spikeEnsurePulledImage(t, hermesRef)
+	if out, err := exec.Command("docker", "tag", hermesRef, "hermes:latest").CombinedOutput(); err != nil {
+		t.Fatalf("tag pinned Hermes fixture: %v\n%s", err, out)
+	}
 
 	// Build agent images (Clawfile on top of base)
 	agentImages := []struct {
@@ -156,7 +163,7 @@ func TestSpikeRollCall(t *testing.T) {
 			name:            "oc-roll",
 			runtime:         "openclaw",
 			subtestName:     "openclaw_openai_surface",
-			modelOverride:   "openrouter/anthropic/claude-sonnet-4",
+			modelOverride:   "openrouter/anthropic/claude-sonnet-5",
 			expectedSurface: "openai-chat-completions",
 			requireKeys:     []string{"OPENROUTER_API_KEY"},
 		},
@@ -208,7 +215,7 @@ func TestSpikeRollCall(t *testing.T) {
 		{
 			name:            "hm-roll",
 			runtime:         "hermes",
-			modelOverride:   "openrouter/anthropic/claude-sonnet-4",
+			modelOverride:   "openrouter/anthropic/claude-sonnet-5",
 			expectedSurface: "openai-chat-completions",
 			requireKeys:     []string{"OPENROUTER_API_KEY"},
 		},

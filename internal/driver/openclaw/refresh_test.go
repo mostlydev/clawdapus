@@ -34,6 +34,9 @@ func TestCurrentSchemaUsesKeyedAgentEntries(t *testing.T) {
 	if main["groupChat"] == nil {
 		t.Fatal("mention policy lost")
 	}
+	if c["session"].(map[string]any)["store"] != openclawHomeDir+"/agents/main/sessions/openclaw-agent.sqlite" {
+		t.Fatal("live session database must use the durable sessions mount")
+	}
 }
 
 func TestManagedProviderConfigurationCannotReroute(t *testing.T) {
@@ -44,13 +47,25 @@ func TestManagedProviderConfigurationCannotReroute(t *testing.T) {
 		`openclaw config set agents.entries.main.runtime.type acp`,
 		`openclaw config set agents.defaults.models {"openai/gpt-test":{"agentRuntime":{"id":"codex"}}}`,
 		`openclaw config set models.providers.bypass {"baseUrl":"https://api.openai.com/v1","apiKey":"direct"}`,
+		`openclaw config set models.providers.openai.auth oauth`,
+		`openclaw config set models.providers.openai.authHeader false`,
+		`openclaw config set models.providers.openai.headers {"aUtHoRiZaTiOn":"route-secret"}`,
+		`openclaw config set models.providers.openai.headers {"X-Api-Key":"route-secret"}`,
+		`openclaw config set models.providers.openai.request {"auth":{"mode":"authorization-bearer","token":"route-secret"}}`,
+		`openclaw config set models.providers.openai.request {"auth":{"mode":"header","headerName":"X-Key","value":"route-secret"}}`,
+		`openclaw config set models.providers.openai.request {"proxy":{"mode":"explicit-proxy","url":"http://other-proxy:8080"}}`,
+		`openclaw config set models.providers.openai.request {"proxy":{"mode":"env-proxy"}}`,
+		`openclaw config set models.providers.openai.request {"headers":{"Host":"other-provider"}}`,
+		`openclaw config set models.providers.openai.models [{"id":"gpt-test","name":"gpt-test","headers":{"Authorization":"route-secret"}}]`,
+		`openclaw config set models.providers.openai.models [{"id":"gpt-test","name":"gpt-test","api":"anthropic-messages"}]`,
+		`openclaw config set models.providers.openai.models {"invalid":"list"}`,
 	} {
 		t.Run(command, func(t *testing.T) {
 			_, err := GenerateConfig(&driver.ResolvedClaw{Models: map[string]string{"primary": "openai/gpt-test"}, Cllama: []string{"passthrough"}, CllamaToken: "proxy-token", Configures: []string{command}})
 			if err == nil || !strings.Contains(err.Error(), "cllama") {
 				t.Fatalf("expected explicit cllama policy error, got %v", err)
 			}
-			if strings.Contains(err.Error(), "another-secret") {
+			if strings.Contains(err.Error(), "another-secret") || strings.Contains(err.Error(), "route-secret") {
 				t.Fatal("secret echoed in error")
 			}
 		})
@@ -130,5 +145,21 @@ func TestLegacyOperatorCronStateIsPreservedAndRejected(t *testing.T) {
 	b, err := os.ReadFile(path)
 	if err != nil || string(b) != string(original) {
 		t.Fatalf("legacy source altered: %q %v", b, err)
+	}
+}
+
+func TestManagedProviderAllowsOrdinaryRequestSettings(t *testing.T) {
+	_, err := GenerateConfig(&driver.ResolvedClaw{
+		Models: map[string]string{"primary": "openai/gpt-test"},
+		Cllama: []string{"passthrough"}, CllamaToken: "proxy-token",
+		Configures: []string{
+			`openclaw config set models.providers.openai.auth api-key`,
+			`openclaw config set models.providers.openai.timeoutSeconds 42`,
+			`openclaw config set models.providers.openai.headers {"X-Trace-ID":"diagnostic"}`,
+			`openclaw config set models.providers.openai.request {"auth":{"mode":"provider-default"},"headers":{"X-Request-ID":"diagnostic"},"tls":{"serverName":"cllama-passthrough"}}`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ordinary request settings rejected: %v", err)
 	}
 }

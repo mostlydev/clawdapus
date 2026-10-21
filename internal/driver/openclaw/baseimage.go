@@ -24,20 +24,35 @@ RUN curl -fsS https://registry.npmjs.org/openclaw/-/openclaw-2026.10.5.tgz -o /t
 LABEL claw.runner.upstream.version="2026.10.5"
 
 RUN cat > /usr/local/bin/claw-openclaw-wake <<'CLAW_WAKE_EOF'
-#!/bin/sh
-set -eu
+#!/bin/bash
+set -euo pipefail
 [ "$#" -eq 5 ] || exit 64
 invocation_id=$1
 task=$2
 timeout_seconds=$3
 channel=$4
 target=$5
+[ -n "$invocation_id" ] && [ -n "$task" ] || exit 64
+case "$timeout_seconds" in
+    ''|*[!0-9]*|0) exit 64 ;;
+esac
+[ "$timeout_seconds" -le 900 ] || exit 64
+if { [ -n "$channel" ] && [ -z "$target" ]; } ||
+   { [ -z "$channel" ] && [ -n "$target" ]; }; then
+    exit 64
+fi
+umask 077
+task_dir=$(mktemp -d "/tmp/claw-openclaw-wake.XXXXXX")
+trap 'rm -rf "$task_dir"' EXIT
+printf '%s' "$task" >"$task_dir/task.txt"
 session_id=$(node -e 'console.log(require("node:crypto").randomUUID())')
-set -- openclaw agent --agent main --session-id "$session_id" --message "$task" --timeout "$timeout_seconds" --json
-if [ -n "$channel" ] && [ -n "$target" ]; then
+set -- openclaw agent --agent main --session-id "$session_id" --message-file "$task_dir/task.txt" --timeout "$timeout_seconds" --json
+if [ -n "$channel" ]; then
     set -- "$@" --deliver --reply-channel "$channel" --reply-to "$target"
 fi
-exec "$@"
+# Keep the task opaque and enforce a process deadline in addition to the
+# native Gateway turn timeout. The scheduler allows a separate drain margin.
+timeout --kill-after=10 "$timeout_seconds" "$@"
 CLAW_WAKE_EOF
 RUN chmod +x /usr/local/bin/claw-openclaw-wake
 
