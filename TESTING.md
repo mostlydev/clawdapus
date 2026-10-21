@@ -66,7 +66,9 @@ pod. Native worker tools remain enabled; an empty managed grant does not mean
 the provider receives no tool schemas. Images use unique local tags, with no
 released tags or downstream pods changed. Record the tested cllama commit with
 the result; passing against an unreleased candidate does not prove the pinned
-released proxy supports that behavior.
+released proxy supports that behavior. To prove the published proxy, set
+`CLAW_SPIKE_PINNED_CLLAMA=1`: the test then pulls the cllama image pinned in
+`internal/infraimages/release_manifest.go` instead of building the submodule.
 
 ### Rollcall Driver Parity Spike
 

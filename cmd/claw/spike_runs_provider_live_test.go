@@ -54,12 +54,18 @@ func TestSpikePerRunProviderLive(t *testing.T) {
 		spikeRunsCleanup(t, work, generated)
 	})
 	unique := fmt.Sprintf("runs-spike-provider-live-%d", time.Now().UnixNano())
-	previousTag := infraCllamaTag
-	infraCllamaTag = unique
-	t.Cleanup(func() { infraCllamaTag = previousTag })
-	proxyImage := "ghcr.io/mostlydev/cllama:" + unique
-	spikeBuildImage(t, filepath.Join(root, "cllama"), proxyImage, "Dockerfile")
-	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "-f", proxyImage).Run() })
+	// CLAW_SPIKE_PINNED_CLLAMA=1 proves the published, pinned proxy instead of
+	// a candidate built from the submodule.
+	if os.Getenv("CLAW_SPIKE_PINNED_CLLAMA") == "1" {
+		spikeEnsurePulledImage(t, infraImageSpecFor(infraComponentCllama).ExpectedRef)
+	} else {
+		previousTag := infraCllamaTag
+		infraCllamaTag = unique
+		t.Cleanup(func() { infraCllamaTag = previousTag })
+		proxyImage := "ghcr.io/mostlydev/cllama:" + unique
+		spikeBuildImage(t, filepath.Join(root, "cllama"), proxyImage, "Dockerfile")
+		t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "-f", proxyImage).Run() })
+	}
 	for _, image := range []string{infraImageSpecFor(infraComponentClawdash).ExpectedRef, "docker.io/sipeed/picoclaw:v0.2.7", "python:3.12-alpine"} {
 		spikeEnsurePulledImage(t, image)
 	}
