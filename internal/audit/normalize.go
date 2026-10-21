@@ -98,6 +98,20 @@ func NormalizeLine(line []byte) (*Event, error) {
 	event.Action = strings.TrimSpace(stringField(raw, "action"))
 	event.Reason = strings.TrimSpace(stringField(raw, "reason"))
 	event.CooldownUntil = strings.TrimSpace(stringField(raw, "cooldown_until"))
+	event.DispatchID = strings.TrimSpace(stringField(raw, "dispatch_id"))
+	event.DispatchStatus = strings.TrimSpace(stringField(raw, "dispatch_status"))
+	// Fence counters are full uint64 on the wire; decode them exactly rather
+	// than through float64.
+	var fence struct {
+		RevocationGeneration *uint64 `json:"revocation_generation"`
+		AdmittedBeforeRevoke *uint64 `json:"admitted_before_revoke"`
+		RefusedAfterRevoke   *uint64 `json:"refused_after_revoke"`
+	}
+	if err := json.Unmarshal(line, &fence); err == nil {
+		event.RevocationGeneration = fence.RevocationGeneration
+		event.AdmittedBeforeRevoke = fence.AdmittedBeforeRevoke
+		event.RefusedAfterRevoke = fence.RefusedAfterRevoke
+	}
 	// failover event fields
 	event.FromProvider = strings.TrimSpace(stringField(raw, "from_provider"))
 	event.ToProvider = strings.TrimSpace(stringField(raw, "to_provider"))

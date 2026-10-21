@@ -83,6 +83,8 @@ type rawClawBlock struct {
 	ClawAPI      interface{}            `yaml:"claw-api"`
 	MCPStdio     *rawMCPStdioBlock      `yaml:"mcp-stdio"`
 	Hermes       *rawHermesConfig       `yaml:"hermes"`
+	Lifecycle    string                 `yaml:"lifecycle"`
+	Run          *rawRunLimits          `yaml:"run"`
 }
 
 type rawContextConfig struct {
@@ -348,6 +350,10 @@ func Parse(r io.Reader) (*Pod, error) {
 			if err != nil {
 				return nil, fmt.Errorf("service %q: claw-api: %w", name, err)
 			}
+			lifecycle, runLimits, err := parseRunLifecycle(svc.XClaw.Lifecycle, svc.XClaw.Run)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
+			}
 			service.Claw = &ClawBlock{
 				Agent:        svc.XClaw.Agent,
 				Persona:      svc.XClaw.Persona,
@@ -370,6 +376,11 @@ func Parse(r io.Reader) (*Pod, error) {
 				ClawAPIMode:  clawAPIMode,
 				MCPStdio:     mcpStdio,
 				Hermes:       hermesConfig,
+				Lifecycle:    lifecycle,
+				Run:          runLimits,
+			}
+			if err := validatePerRunService(service); err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
 			}
 		}
 		pod.Services[name] = service
@@ -388,6 +399,9 @@ func Parse(r io.Reader) (*Pod, error) {
 		}
 		if svc == nil || svc.Claw == nil {
 			return nil, fmt.Errorf("x-claw.master %q must target a claw-managed service", pod.Master)
+		}
+		if svc.IsPerRun() {
+			return nil, fmt.Errorf("x-claw.master %q cannot target a per-run worker template", pod.Master)
 		}
 	}
 

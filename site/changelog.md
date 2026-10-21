@@ -29,7 +29,20 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Per-run workers** ([#372](https://github.com/mostlydev/clawdapus/issues/372)): one isolated, one-shot worker per unit of work for an external orchestrator. The orchestrator never touches Docker.
+  - A pod service with `x-claw.lifecycle: per-run` compiles at `claw up` into a run template: a pinned image, a tool grant and limits.
+  - `claw runs serve` launches, monitors and cancels workers over a Unix socket that authenticates the peer UID in both directions.
+  - Every run is its own Compose project, so Compose stays the only lifecycle writer.
+  - Every run gets its own cllama identity.
+  - Workers run as uid 65534 with a read-only root filesystem, a tmpfs `/tmp` and no host mounts, on a dedicated `internal` network connecting the workers and cllama.
+  - Launches are idempotent per installation and run ID, with a spec digest (RFC 8785) and a generation fence. A cancel always beats a delayed launch, and a cancelled run never comes back.
+  - A run reports `revoked` after cllama's durable fence acknowledges it or full-pod teardown verifies proxy termination and removes its context; `stopped` also requires no labelled worker container to remain.
+  - Runs are bounded by `authority_expires_at` and `max-runtime`.
+  - Optional credential custody drives a start/heartbeat/end callback contract against a configured origin.
+  - `claw up` and `claw down` share the supervisor's pod lock. `claw down` can recover from an unavailable proxy through verified full-pod termination.
+  - PicoClaw only in v1, with the one-shot contract pinned on v0.2.7. See the [per-run workers guide](/guide/per-run-workers).
+  - **cllama moves to [v0.11.0](https://github.com/mostlydev/cllama/releases/tag/v0.11.0)**: the durable revocation fence ([cllama#54](https://github.com/mostlydev/cllama/issues/54)) on both listeners, content-free dispatch audit, and the managed duplicate-failure retry fix.
+- **`claw audit` keeps cllama revocation evidence**: `tool_dispatch` and `revocation` events retain `dispatch_id`, `dispatch_status`, `revocation_generation`, `admitted_before_revoke` and `refused_after_revoke` as exact integers. Dispatch records do not count as tool calls.
 
 ## v0.28.1 <Badge type="tip" text="Latest" /> {#v0-28-1}
 

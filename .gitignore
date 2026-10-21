@@ -45,6 +45,8 @@ cmd/clawdash/node_modules/
 .claw-memory/
 .claw-session-history/
 .claw-auth/
+.claw-runs/
+.claw-revocations/
 testdata/*
 !testdata/openclaw-stub/
 !testdata/openclaw-stub-nonroot/

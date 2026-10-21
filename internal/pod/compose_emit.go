@@ -20,6 +20,7 @@ type CllamaProxyConfig struct {
 	AuthHostDir           string            // host path for provider auth state
 	SessionHistoryHostDir string            // host path for session history dir (optional)
 	GovernanceHostDir     string            // host path for governance override dir (optional, read-only in proxy)
+	RevocationHostDir     string            // host path for the proxy-owned durable revocation ledger (rw)
 	DashboardPort         string            // host port published to proxy UI :8081 (default "8181")
 	Environment           map[string]string // proxy-only env (e.g. CLAW_POD, provider keys)
 	PodName               string
@@ -82,6 +83,11 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 
 	for _, name := range serviceNames {
 		svc := p.Services[name]
+		if svc.IsPerRun() {
+			// Per-run templates are compiled by claw up and instantiated as
+			// separate Compose projects by the run supervisor.
+			continue
+		}
 		isClaw := svc.Claw != nil
 		result := results[name]
 		explicitResult := result != nil
@@ -359,6 +365,9 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		if proxy.GovernanceHostDir != "" {
 			env["CLAW_GOVERNANCE_DIR"] = "/claw/governance"
 		}
+		if proxy.RevocationHostDir != "" {
+			env["CLAW_REVOCATION_DIR"] = "/claw/revocations"
+		}
 
 		volumes := []string{
 			fmt.Sprintf("%s:/claw/context:ro", proxy.ContextHostDir),
@@ -369,6 +378,13 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		}
 		if proxy.GovernanceHostDir != "" {
 			volumes = append(volumes, fmt.Sprintf("%s:/claw/governance:ro", proxy.GovernanceHostDir))
+		}
+		if proxy.RevocationHostDir != "" {
+			volumes = append(volumes, fmt.Sprintf("%s:/claw/revocations:rw", proxy.RevocationHostDir))
+		}
+		proxyNetworks := []string{"claw-internal"}
+		if p.RunNetwork != "" {
+			proxyNetworks = append(proxyNetworks, RunNetworkKey)
 		}
 
 		rootServices[serviceName] = map[string]interface{}{
@@ -389,7 +405,7 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 				"claw.proxy.type": proxy.ProxyType,
 				"claw.service":    serviceName,
 			},
-			"networks": []string{"claw-internal"},
+			"networks": proxyNetworks,
 		}
 	}
 
@@ -531,6 +547,21 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 		}
 		root["networks"] = networks
 	}
+	if p.RunNetwork != "" {
+		// Internal: per-run workers reach only cllama, never tool services,
+		// other claws, or the internet directly.
+		networks, err := mergedNamedMap(root["networks"], map[string]interface{}{
+			RunNetworkKey: map[string]interface{}{
+				"name":     p.RunNetwork,
+				"internal": true,
+				"labels":   map[string]string{"claw.pod": p.Name, "claw.role": "run-network"},
+			},
+		})
+		if err != nil {
+			return "", fmt.Errorf("emit compose: networks: %w", err)
+		}
+		root["networks"] = networks
+	}
 
 	data, err := yaml.Marshal(root)
 	if err != nil {
@@ -539,6 +570,9 @@ func EmitCompose(p *Pod, results map[string]*driver.MaterializeResult, proxies .
 
 	return string(data), nil
 }
+
+// RunNetworkKey is the compose network key for the per-run worker network.
+const RunNetworkKey = "claw-runs"
 
 func sortedServiceNames(services map[string]*Service) []string {
 	names := make([]string, 0, len(services))

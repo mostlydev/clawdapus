@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
@@ -19,6 +20,11 @@ var composeDownCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		afterDown, release, err := finalizeRunsBeforeDown(filepath.Dir(generatedPath), generatedPath)
+		if err != nil {
+			return err
+		}
+		defer release()
 
 		dockerCmd := exec.Command("docker", "compose", "-f", generatedPath, "down")
 		dockerCmd.Stdout = os.Stdout
@@ -26,7 +32,7 @@ var composeDownCmd = &cobra.Command{
 		if err := dockerCmd.Run(); err != nil {
 			return fmt.Errorf("docker compose down failed: %w", err)
 		}
-		return nil
+		return afterDown()
 	},
 }
 

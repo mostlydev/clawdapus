@@ -3,6 +3,7 @@ package pod
 import (
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/schedule"
+	"time"
 )
 
 // Pod represents a parsed claw-pod.yml.
@@ -14,11 +15,14 @@ type Pod struct {
 	Compose               map[string]interface{} // preserved top-level compose keys except x-claw and services
 	ClawAPI               *ClawAPIConfig
 	Clawdash              *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
-	Context               *ContextConfig
-	ChannelMemory         *ChannelMemoryConfig
-	Principals            []PodPrincipal
-	AlertWebhooks         []string // pod-scoped Discord webhook URLs for pool-transition alerts
-	AlertMentions         []string // pod-scoped @-mention targets for alerts (e.g. "@wojtek", "@infra")
+	// RunNetwork is the runtime-only Docker network name shared by cllama and
+	// per-run workers. Set by claw up only when per-run templates exist.
+	RunNetwork    string
+	Context       *ContextConfig
+	ChannelMemory *ChannelMemoryConfig
+	Principals    []PodPrincipal
+	AlertWebhooks []string // pod-scoped Discord webhook URLs for pool-transition alerts
+	AlertMentions []string // pod-scoped @-mention targets for alerts (e.g. "@wojtek", "@infra")
 }
 
 // Service represents a service in a claw-pod.yml.
@@ -33,6 +37,10 @@ type Service struct {
 
 func (s *Service) IsMCPStdioSidecar() bool {
 	return s != nil && s.Claw != nil && s.Claw.MCPStdio != nil
+}
+
+func (s *Service) IsPerRun() bool {
+	return s != nil && s.Claw != nil && s.Claw.Lifecycle == LifecyclePerRun
 }
 
 func (s *Service) IsAgentManaged() bool {
@@ -72,6 +80,22 @@ type ClawBlock struct {
 	ClawAPIMode  string // "self" when claw-api: self is declared; empty otherwise
 	MCPStdio     *MCPStdioBlock
 	Hermes       *driver.HermesConfig
+	Lifecycle    string // "" (long-lived service) or LifecyclePerRun
+	Run          *RunLimits
+}
+
+// LifecyclePerRun marks a claw service as a per-run worker template: claw up
+// compiles it but never starts it; `claw runs serve` instantiates it per run.
+const LifecyclePerRun = "per-run"
+
+// RunLimits bounds every run instantiated from a per-run template.
+type RunLimits struct {
+	MaxRuntime     time.Duration
+	MaxAuthority   time.Duration
+	MaxTaskBytes   int
+	MaxResultBytes int
+	Memory         string
+	Pids           int
 }
 
 type MCPStdioBlock struct {

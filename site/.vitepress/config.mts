@@ -70,6 +70,7 @@ export default defineConfig({
           { text: 'cllama Governance Proxy', link: '/guide/cllama' },
           { text: 'Fleet Governance', link: '/guide/fleet-governance' },
           { text: 'Managed Tools', link: '/guide/tools' },
+          { text: 'Per-Run Workers', link: '/guide/per-run-workers' },
           { text: 'Memory Plane', link: '/guide/memory' },
           { text: 'Surfaces & Skills', link: '/guide/surfaces-and-skills' },
           { text: 'Compilation Principles', link: '/guide/compilation-principles' },
