@@ -49,6 +49,22 @@ assert importlib.util.find_spec("minisweagent_path") is not None
 import tools.terminal_tool
 
 from cron import scheduler as cron_scheduler
+from model_tools import get_tool_definitions
+cron_disabled = cron_scheduler._resolve_cron_disabled_toolsets({})
+assert "memory" in cron_disabled
+cron_tools = {
+    tool["function"]["name"]
+    for tool in get_tool_definitions(disabled_toolsets=cron_disabled, quiet_mode=True)
+}
+assert "memory" not in cron_tools
+interactive_tools = {
+    tool["function"]["name"]
+    for tool in get_tool_definitions(
+        disabled_toolsets=["cronjob", "messaging", "clarify"],
+        quiet_mode=True,
+    )
+}
+assert "memory" in interactive_tools
 assert not cron_scheduler._claw_should_deliver_cron_failure("upstream request failed")
 assert not cron_scheduler._claw_should_deliver_cron_failure("Internal Server Error")
 assert cron_scheduler._claw_should_deliver_cron_failure("prompt injection scanner blocked the job")
@@ -61,6 +77,7 @@ assert str(_get_lock_dir()) == "/tmp/hermes-gateway-locks"
 
 from toolsets import _HERMES_CORE_TOOLS, TOOLSETS
 assert "text_to_speech" not in _HERMES_CORE_TOOLS
+assert "memory" in _HERMES_CORE_TOOLS
 for _name, _toolset in TOOLSETS.items():
     if isinstance(_toolset, dict) and isinstance(_toolset.get("tools"), list):
         assert "text_to_speech" not in _toolset["tools"], _name
