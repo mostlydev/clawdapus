@@ -20,6 +20,8 @@ Per-run workers need a cllama that implements the operator revoke endpoint and `
 
 Clawdapus configures per-run PicoClaw workers to use OpenAI chat/completions. cllama v0.12.0 or newer serves those requests from a direct Anthropic key and from current OpenAI GPT-6 models; an older proxy needs OpenRouter for Anthropic models and fails on GPT-6. `CLAW_SPIKE_PINNED_CLLAMA=1 go test -tags spike -run '^TestSpikePerRunProviderLive$' ./cmd/claw` proves a real worker against the pinned proxy.
 
+To keep a verifiable trace of every run, enable the cllama [trace journal](/guide/cllama#trace-journal) (cllama v0.13.0 or newer). Revoking a run identity then writes a coverage seal that accounts for every request the run made.
+
 v1 supports the **PicoClaw** runner only. Any other `CLAW_TYPE` with `lifecycle: per-run` fails `claw up`.
 
 ## Declaring a template

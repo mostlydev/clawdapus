@@ -29,11 +29,19 @@ outline: deep
 
 ## Unreleased
 
-- Resolve per-run descriptor bearer credentials from explicit proxy-only `cllama-env`, keeping service authentication out of worker artifacts while preserving credential-rotation identity.
-- Create private proxy context directories before starting per-run-only pods, preventing rootful Docker from taking ownership of the bind source.
-- Add `CLAW_DASHBOARD_BIND` for explicit dashboard host IP publication and `CLAWDASH_ENABLED=false` to omit clawdash. Host binding remains separate from the container listener and preserves the per-run revocation endpoint.
+<!-- Nothing yet -->
 
-## v0.29.1 <Badge type="tip" text="Latest" /> {#v0-29-1}
+## v0.30.0 <Badge type="tip" text="Latest" /> {#v0-30-0}
+
+*2026-10-23*
+
+- **Run trace journal** through **cllama [v0.13.0](https://github.com/mostlydev/cllama/releases/tag/v0.13.0)** ([cllama#60](https://github.com/mostlydev/cllama/issues/60)). Set `CLLAMA_TRACE_JOURNAL=on` in `cllama-defaults.env` to record every admitted request as a durable segment sealed with a SHA-256 digest, with hidden reasoning dropped and credentials redacted. For per-run workers, a capture epoch, per-request admission sequence and a revocation seal let an orchestrator prove every request of a run was captured. Off by default. See [cllama · Trace Journal](/guide/cllama#trace-journal).
+- **Per-run service bearers** ([#382](https://github.com/mostlydev/clawdapus/issues/382)). Per-run descriptor bearer credentials resolve from explicit proxy-only `cllama-env`, keeping service authentication out of worker artifacts while preserving credential-rotation identity.
+- **Per-run context ownership** ([#379](https://github.com/mostlydev/clawdapus/issues/379)). Private proxy context directories are created before per-run-only pods start, so rootful Docker no longer takes ownership of the bind source.
+- **Dashboard publication controls** ([#380](https://github.com/mostlydev/clawdapus/issues/380)). `CLAW_DASHBOARD_BIND` sets an explicit dashboard host IP and `CLAWDASH_ENABLED=false` omits clawdash. Host binding stays separate from the container listener and preserves the per-run revocation endpoint.
+- **Pins infra images**: `claw-api` / `clawdash` / `claw-wall` / `claw-channel-memory` / `claw-mcp-stdio` move to `v0.30.0` with no code changes. cllama moves to [v0.13.0](https://github.com/mostlydev/cllama/releases/tag/v0.13.0). `hermes-base` stays at `v2026.6.19-claw.3`.
+
+## v0.29.1 {#v0-29-1}
 
 *2026-10-21*
 

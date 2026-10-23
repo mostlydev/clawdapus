@@ -229,6 +229,8 @@ The cllama container receives its configuration through environment variables in
 | `CLLAMA_FEED_FETCH_TIMEOUT_MS` | Per-fetch HTTP timeout for feed providers. Default `3000`, sanity range 100–120000; out-of-range values fall back to the default. Raise it when a feed provider computes synchronously under load. |
 | `CLLAMA_DISPATCH_CANDIDATE_TIMEOUT_MS` | Per-candidate timeout for non-streaming upstream model dispatch before trying the next declared fallback. Default `60000`. Streaming responses are exempt so long-running streams are not cut off. |
 | `CLLAMA_TOOL_SCHEMA_VALIDATION` | Set to `off` to disable pre-dispatch validation of managed tool arguments against the manifest `inputSchema`. On by default; validation fails open on schema constructs it does not understand. |
+| `CLLAMA_TRACE_JOURNAL` | Set to `on` (cllama ≥ v0.13.0) to write the [trace journal](#trace-journal): one durable, verifiable segment per admitted request under `$CLAW_SESSION_HISTORY_DIR/<agent-id>/journal/`. Off by default. |
+| `CLLAMA_TRACE_OWNER` | `<uid>:<gid>` that owns journal files, so a host collector can read and remove them. cllama refuses to start if it cannot apply it. |
 | `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `AI_GATEWAY_API_KEY`, etc. |
 
 ### Where Provider Keys Go
@@ -430,6 +432,21 @@ This produces `analyst-0`, `analyst-1`, and `analyst-2`, each with:
 - A unique bearer token in format `analyst-N:<secret>`
 - A context directory at `/claw/context/analyst-N/`
 - Independent telemetry tagged with `claw_id: analyst-N`
+
+## Trace Journal
+
+cllama v0.13.0 adds an opt-in trace journal for operators who must later prove what a model saw and did. Enable it on the proxy through `cllama-defaults.env` or `x-claw.cllama-env`:
+
+```yaml
+x-claw:
+  cllama-defaults:
+    env:
+      CLLAMA_TRACE_JOURNAL: "on"
+```
+
+Each admitted request gets its own segment under `.claw-session-history/<agent-id>/journal/`, recording the upstream requests and responses, managed tool calls and results, and the response written to the runner. Hidden reasoning is dropped and known credentials are redacted. A closed segment carries its record count and a SHA-256 over its earlier bytes; segments left open by a crash become `incomplete` on restart. The journal fails closed: a request whose segment cannot be opened is refused with 503 before anything is dispatched.
+
+For per-run workers, the journal also proves whole-run coverage. Every proxy start writes a fresh `capture_epoch`, every request gets an `agent_seq` at admission, and revoking a run identity writes `seal-<generation>.json` after in-flight requests drain and before the revoke is acknowledged. Read the epoch before launching a run; after cancellation, the seal plus the segments must account for every `agent_seq` exactly once. cllama's `tracejournal.VerifyCoverage` is the reference verifier. See the cllama README for the record format and the full rule.
 
 ## Cost Accounting
 
