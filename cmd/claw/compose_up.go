@@ -1713,7 +1713,7 @@ func buildFeedManifestEntries(p *pod.Pod, descriptors map[string]*describe.Servi
 		if token, ok := authByService[feed.Source]; ok {
 			entry.Auth = token
 		} else if descriptor := descriptors[feed.Source]; descriptor != nil {
-			token, err := resolveFeedAuthFromServiceEnv(svc.Environment, descriptor, runtimeEnv)
+			token, err := resolveDescriptorAuth(svc, descriptor, runtimeEnv)
 			if err != nil {
 				return nil, fmt.Errorf("feed %q: %w", feedName, err)
 			}
@@ -1828,7 +1828,7 @@ func buildToolManifestEntries(p *pod.Pod, descriptors map[string]*describe.Servi
 		if err != nil {
 			return nil, fmt.Errorf("tool %q: %w", tool.Name, err)
 		}
-		auth, err := resolveManifestAuth(svc.Environment, descriptors[tool.Service], runtimeEnv, serviceAuth, tool.Service)
+		auth, err := resolveManifestAuth(svc, descriptors[tool.Service], runtimeEnv, serviceAuth, tool.Service)
 		if err != nil {
 			return nil, fmt.Errorf("tool %q: %w", tool.Name, err)
 		}
@@ -1882,7 +1882,7 @@ func buildMemoryManifestEntry(p *pod.Pod, descriptors map[string]*describe.Servi
 	if err != nil {
 		return nil, err
 	}
-	auth, err := resolveManifestAuth(svc.Environment, descriptor, runtimeEnv, serviceAuth, memory.Service)
+	auth, err := resolveManifestAuth(svc, descriptor, runtimeEnv, serviceAuth, memory.Service)
 	if err != nil {
 		return nil, err
 	}
@@ -1971,7 +1971,28 @@ func resolveFeedAuthFromServiceEnv(env map[string]string, descriptor *describe.S
 	return expanded, nil
 }
 
-func resolveManifestAuth(env map[string]string, descriptor *describe.ServiceDescriptor, runtimeEnv map[string]string, projected []cllama.ServiceAuthEntry, targetService string) (*cllama.AuthEntry, error) {
+// Per-run workers forbid Compose environment entirely. Their service credentials
+// must come from the explicitly configured proxy-only channel, never host env
+// by descriptor key name or worker inputs. Long-lived consumers keep legacy auth.
+func resolveDescriptorAuth(svc *pod.Service, descriptor *describe.ServiceDescriptor, runtimeEnv map[string]string) (string, error) {
+	env := svc.Environment
+	if svc.IsPerRun() {
+		env = svc.Claw.CllamaEnv
+	}
+	token, err := resolveFeedAuthFromServiceEnv(env, descriptor, runtimeEnv)
+	if svc.IsPerRun() && descriptor != nil && descriptor.Auth != nil && descriptor.Auth.Type == "bearer" && descriptor.Auth.Env != "" {
+		if err != nil {
+			return "", fmt.Errorf("proxy-only descriptor auth %q must have a fully resolved value in x-claw.cllama-env", descriptor.Auth.Env)
+		}
+		token = strings.TrimSpace(token)
+		if token == "" {
+			return "", fmt.Errorf("proxy-only descriptor auth %q in x-claw.cllama-env must not be blank", descriptor.Auth.Env)
+		}
+	}
+	return token, err
+}
+
+func resolveManifestAuth(svc *pod.Service, descriptor *describe.ServiceDescriptor, runtimeEnv map[string]string, projected []cllama.ServiceAuthEntry, targetService string) (*cllama.AuthEntry, error) {
 	for _, entry := range projected {
 		if entry.Service == targetService && entry.AuthType == "bearer" && entry.Token != "" {
 			return &cllama.AuthEntry{
@@ -1981,7 +2002,7 @@ func resolveManifestAuth(env map[string]string, descriptor *describe.ServiceDesc
 		}
 	}
 
-	token, err := resolveFeedAuthFromServiceEnv(env, descriptor, runtimeEnv)
+	token, err := resolveDescriptorAuth(svc, descriptor, runtimeEnv)
 	if err != nil {
 		return nil, err
 	}
