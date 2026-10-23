@@ -29,7 +29,8 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- Create private proxy context directories before starting per-run-only pods, preventing rootful Docker from taking ownership of the bind source.
+- Add `CLAW_DASHBOARD_BIND` for explicit dashboard host IP publication and `CLAWDASH_ENABLED=false` to omit clawdash. Host binding remains separate from the container listener and preserves the per-run revocation endpoint.
 
 ## v0.29.1 <Badge type="tip" text="Latest" /> {#v0-29-1}
 

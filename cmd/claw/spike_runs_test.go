@@ -122,6 +122,8 @@ services:
 
 	t.Setenv("CLLAMA_UI_PORT", spikeFreePort(t))
 	t.Setenv("CLAWDASH_ADDR", ":"+spikeFreePort(t))
+	t.Setenv("CLAW_DASHBOARD_BIND", "127.0.0.1")
+	t.Setenv("CLAWDASH_ENABLED", "true")
 	prevDetach := composeUpDetach
 	composeUpDetach = true
 	defer func() { composeUpDetach = prevDetach }()
@@ -130,9 +132,26 @@ services:
 		t.Fatalf("runComposeUp: %v", err)
 	}
 	spikeWaitHealthy(t, spikeComposeContainerID(t, generatedPath, "cllama"), 60*time.Second)
+	dashboardID := spikeComposeContainerID(t, generatedPath, "clawdash")
+	// Exercise disabling a previously running dashboard, not just omitting it
+	// on a fresh pod. Keep cllama's local revoke/self-test endpoint working.
+	t.Setenv("CLAWDASH_ENABLED", "false")
+	if err := runComposeUp(podFile); err != nil {
+		t.Fatalf("disable dashboard on existing pod: %v", err)
+	}
+	if err := exec.Command("docker", "inspect", dashboardID).Run(); err == nil {
+		t.Fatal("disabled dashboard container remains")
+	}
+	spikeWaitHealthy(t, spikeComposeContainerID(t, generatedPath, "cllama"), 60*time.Second)
+	if info, err := os.Stat(filepath.Join(workDir, ".claw-runtime", "context")); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("per-run-only context root must be 0700: %v", err)
+	}
 
 	// Compile-side checks: the per-run service is a template, not a service.
 	generated := spikeReadFile(t, generatedPath)
+	if strings.Contains(generated, "\n  clawdash:\n") || !strings.Contains(generated, "127.0.0.1:") {
+		t.Fatalf("dashboard disable/host binding missing:\n%s", generated)
+	}
 	if strings.Contains(generated, "\n  worker:\n") {
 		t.Fatalf("per-run template must not be a compose service:\n%s", generated)
 	}

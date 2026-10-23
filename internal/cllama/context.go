@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 type AgentContextInput struct {
@@ -156,6 +157,25 @@ func EffectiveToolPolicy(maxRounds, timeoutPerToolMS, totalTimeoutMS *int) ToolP
 //
 //	<runtimeDir>/context/<agent-id>/{AGENTS.md,AGENTS.effective.md,CLAWDAPUS.md,metadata.json,feeds.json,tools.json,memory.json,rules.json,context-blocks.json,service-auth/...}
 func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
+	// Per-run-only pods have no long-lived agent inputs. Create the bind
+	// source before Compose so Docker cannot create it as root and prevent
+	// the host supervisor from adding a run's context later.
+	if err := os.MkdirAll(filepath.Join(runtimeDir, "context"), 0o700); err != nil {
+		return fmt.Errorf("create context root: %w", err)
+	}
+	root := filepath.Join(runtimeDir, "context")
+	info, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("inspect context root: %w", err)
+	}
+	if err := validateContextRoot(root, info, uint32(os.Geteuid())); err != nil {
+		return err
+	}
+	if info.Mode().Perm() != 0o700 {
+		if err := os.Chmod(root, 0o700); err != nil {
+			return fmt.Errorf("secure context root: %w", err)
+		}
+	}
 	for _, agent := range agents {
 		if agent.AgentID == "" {
 			return fmt.Errorf("agent id must not be empty")
@@ -286,5 +306,16 @@ func GenerateContextDir(runtimeDir string, agents []AgentContextInput) error {
 		}
 	}
 
+	return nil
+}
+
+func validateContextRoot(path string, info os.FileInfo, uid uint32) error {
+	if !info.IsDir() {
+		return fmt.Errorf("context root %s must be a directory, not a symlink or file", path)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || st.Uid != uid {
+		return fmt.Errorf("context root %s must be owned by uid %d; recreate the runtime with claw up as that user", path, uid)
+	}
 	return nil
 }

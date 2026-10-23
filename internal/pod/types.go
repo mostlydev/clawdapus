@@ -15,6 +15,7 @@ type Pod struct {
 	Compose               map[string]interface{} // preserved top-level compose keys except x-claw and services
 	ClawAPI               *ClawAPIConfig
 	Clawdash              *ClawdashConfig // runtime-only dashboard sidecar config, injected by claw up
+	DisableClawdash       bool            // runtime-only operator opt-out, before principal generation
 	// RunNetwork is the runtime-only Docker network name shared by cllama and
 	// per-run workers. Set by claw up only when per-run templates exist.
 	RunNetwork    string

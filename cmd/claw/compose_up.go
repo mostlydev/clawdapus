@@ -123,11 +123,19 @@ func runComposeUp(podFile string) (err error) {
 	if err != nil {
 		return err
 	}
+	dashboards, err := loadDashboardSettings()
+	if err != nil {
+		return err
+	}
+	p.DisableClawdash = !dashboards.Enabled
 	runGuard, err := acquirePodRunGuard(podDir, p, true)
 	if err != nil {
 		return err
 	}
 	defer runGuard.Release()
+	if err := cleanupDashboardSnapshots(podDir); err != nil {
+		return err
+	}
 
 	servicePlans, err := planPodServiceImages(p)
 	if err != nil {
@@ -810,6 +818,7 @@ func runComposeUp(podFile string) (err error) {
 				GovernanceHostDir:     governanceDir,
 				RevocationHostDir:     revocationDir,
 				DashboardPort:         cllamaDashboardPort,
+				DashboardBind:         dashboards.Bind,
 				Environment:           finalProxyEnv,
 				PodName:               p.Name,
 			})
@@ -839,22 +848,25 @@ func runComposeUp(podFile string) (err error) {
 	}
 	fmt.Printf("[claw] wrote %s\n", manifestPath)
 
-	p.Clawdash = &pod.ClawdashConfig{
-		Image:              preferredInfraImageRef(infraComponentClawdash),
-		Addr:               envOrDefault("CLAWDASH_ADDR", ":8082"),
-		ManifestHostPath:   manifestPath,
-		DockerSockHostPath: "/var/run/docker.sock",
-		CllamaCostsURL:     firstIf(cllamaEnabled, fmt.Sprintf("http://localhost:%s", cllamaDashboardPort)),
-		PodName:            p.Name,
-	}
-	if p.ClawAPI != nil {
-		dashboardToken, err := lookupClawAPIPrincipalToken(p.ClawAPI.PrincipalsHostPath, "claw-dashboard")
-		if err != nil {
-			return err
+	if dashboards.Enabled {
+		p.Clawdash = &pod.ClawdashConfig{
+			Image:              preferredInfraImageRef(infraComponentClawdash),
+			Addr:               dashboards.Addr,
+			HostBind:           dashboards.Bind,
+			ManifestHostPath:   manifestPath,
+			DockerSockHostPath: "/var/run/docker.sock",
+			CllamaCostsURL:     firstIf(cllamaEnabled, pod.DashboardURL(dashboards.Bind, cllamaDashboardPort)),
+			PodName:            p.Name,
 		}
-		p.Clawdash.Environment = map[string]string{
-			"CLAW_API_URL":   fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr)),
-			"CLAW_API_TOKEN": dashboardToken,
+		if p.ClawAPI != nil {
+			dashboardToken, err := lookupClawAPIPrincipalToken(p.ClawAPI.PrincipalsHostPath, "claw-dashboard")
+			if err != nil {
+				return err
+			}
+			p.Clawdash.Environment = map[string]string{
+				"CLAW_API_URL":   fmt.Sprintf("http://claw-api:%s", clawAPIInternalPort(p.ClawAPI.Addr)),
+				"CLAW_API_TOKEN": dashboardToken,
+			}
 		}
 	}
 
@@ -912,20 +924,19 @@ func runComposeUp(podFile string) (err error) {
 	}
 
 	generatedPath := filepath.Join(podDir, "compose.generated.yml")
+	var previousGenerated []byte
+	if !dashboards.Enabled {
+		previousGenerated, err = os.ReadFile(generatedPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read previous compose for dashboard removal: %w", err)
+		}
+	}
 	generatedMode := os.FileMode(0644)
 	if p.RunNetwork != "" {
 		// The generated file carries CLLAMA_UI_TOKEN, which can revoke run
 		// identities; per-run pods keep it private to this user.
 		generatedMode = 0600
 	}
-	if err := os.WriteFile(generatedPath, []byte(output), generatedMode); err != nil {
-		return fmt.Errorf("write compose.generated.yml: %w", err)
-	}
-	if err := os.Chmod(generatedPath, generatedMode); err != nil {
-		return fmt.Errorf("chmod compose.generated.yml: %w", err)
-	}
-	fmt.Printf("[claw] wrote %s\n", generatedPath)
-
 	requiredInfra := requiredInfraImageSpecs(p, cllamaEnabled, proxies, p.ClawAPI, p.Clawdash)
 	if !composeUpFix {
 		if err := ensureRequiredInfraImagesAvailable(requiredInfra); err != nil {
@@ -945,14 +956,9 @@ func runComposeUp(podFile string) (err error) {
 		return fmt.Errorf("claw-managed services require detached mode for fail-closed post-apply verification; rerun with 'claw up -d %s'", podFile)
 	}
 
-	composeArgs := []string{"compose", "-f", generatedPath, "up"}
-	if composeUpDetach {
-		composeArgs = append(composeArgs, "-d")
-	}
-
-	composeApplied = true
-	if err := runComposeDockerCommand(composeArgs...); err != nil {
-		return fmt.Errorf("docker compose up failed: %w", err)
+	composeApplied, err = applyComposeDefinition(generatedPath, []byte(output), generatedMode, previousGenerated, !dashboards.Enabled, composeUpDetach)
+	if err != nil {
+		return err
 	}
 
 	runtimeConsumers := runtimeConsumerServices(resolvedClaws, proxies, p.ClawAPI, p.Clawdash)
@@ -981,7 +987,7 @@ func runComposeUp(podFile string) (err error) {
 	}
 
 	if runGuard != nil {
-		if err := writePerRunTemplates(podDir, p, perRun, activeProxyType, cllamaDashboardPort); err != nil {
+		if err := writePerRunTemplates(podDir, p, perRun, activeProxyType, cllamaDashboardPort, dashboards.Bind); err != nil {
 			return fmt.Errorf("compile per-run templates: %w", err)
 		}
 	}
@@ -992,7 +998,7 @@ func runComposeUp(podFile string) (err error) {
 
 	fmt.Println("[claw] pod is up")
 	if p.Clawdash != nil {
-		fmt.Printf("[claw] dashboard:  http://localhost:%s\n", pod.ClawdashHostPort(p.Clawdash.Addr))
+		fmt.Printf("[claw] dashboard:  %s\n", pod.DashboardURL(p.Clawdash.HostBind, pod.ClawdashHostPort(p.Clawdash.Addr)))
 	}
 	return nil
 }
@@ -2513,11 +2519,13 @@ func prepareClawAPIRuntime(runtimeDir string, p *pod.Pod, resolvedClaws map[stri
 		auto = append(auto, schedulerPrincipal)
 	}
 
-	dashboardPrincipal, err := clawapi.BuildDashboardPrincipal(p.Name)
-	if err != nil {
-		return nil, err
+	if !p.DisableClawdash {
+		dashboardPrincipal, err := clawapi.BuildDashboardPrincipal(p.Name)
+		if err != nil {
+			return nil, err
+		}
+		auto = append(auto, dashboardPrincipal)
 	}
-	auto = append(auto, dashboardPrincipal)
 
 	// 2. Build self principals for services declaring claw-api: self.
 	for name, svc := range p.Services {
