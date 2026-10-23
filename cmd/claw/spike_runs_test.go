@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,6 +93,11 @@ func TestSpikePerRunWorkers(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "-f", providerImage).Run() })
 	const ingressSecret = "spike-proxy-only-ingress"
 	spikeWriteFile(t, filepath.Join(workDir, ".env"), "TOOL_INGRESS_TOKEN="+ingressSecret+"\n")
+	journalEnv := "\n      CLLAMA_TRACE_JOURNAL: \"on\""
+	if runtime.GOOS == "linux" {
+		// Docker Desktop bind mounts already map ownership to the host user.
+		journalEnv += fmt.Sprintf("\n      CLLAMA_TRACE_OWNER: \"%d:%d\"", os.Getuid(), os.Getgid())
+	}
 	spikeWriteFile(t, podFile, fmt.Sprintf(`name: %s
 
 x-claw:
@@ -100,7 +107,7 @@ x-claw:
     env:
       OPENAI_API_KEY: sk-local-fake
       OPENAI_BASE_URL: http://fake-provider:8080/v1
-      TOOL_INGRESS_TOKEN: ${TOOL_INGRESS_TOKEN}
+      TOOL_INGRESS_TOKEN: ${TOOL_INGRESS_TOKEN}%s
   models-defaults:
     primary: openai/gpt-4o
 
@@ -123,7 +130,7 @@ services:
       - "8080"
     networks:
       - claw-internal
-`, "runs-spike-"+unique, "runs-spike-"+unique, workerImage, providerImage))
+`, "runs-spike-"+unique, "runs-spike-"+unique, journalEnv, workerImage, providerImage))
 
 	t.Setenv("CLLAMA_UI_PORT", spikeFreePort(t))
 	t.Setenv("CLAWDASH_ADDR", ":"+spikeFreePort(t))
@@ -195,6 +202,16 @@ services:
 	defer os.RemoveAll(sockDir)
 	_ = os.Chmod(sockDir, 0o700)
 
+	// Pin the capture epoch before any run identity can exist.
+	launchEpoch := ""
+	var epoch map[string]any
+	if err := json.Unmarshal([]byte(spikeReadFile(t, filepath.Join(workDir, ".claw-session-history", ".trace-journal-epoch.json"))), &epoch); err != nil {
+		t.Fatalf("capture epoch: %v", err)
+	}
+	launchEpoch, _ = epoch["capture_epoch"].(string)
+	if launchEpoch == "" {
+		t.Fatalf("capture epoch file: %v", epoch)
+	}
 	sup = startRunsSpikeSupervisor(t, workDir, sockDir, cbServer.URL)
 	client, err := runs.Dial(sockDir, uint32(os.Geteuid()))
 	if err != nil {
@@ -213,6 +230,7 @@ services:
 		t.Fatalf("case 1 result: %q %v", result, err)
 	}
 	runsSpikeAssertNoWorker(t, view)
+	caseOneAgent, caseOneGen := view.RunAgentID, view.Generation
 
 	// A nonempty compiled grant must support real managed dispatch, while an
 	// empty per-run subscription to that same template exposes no such tool.
@@ -246,6 +264,16 @@ services:
 	proxyAudit, err := exec.Command("docker", "compose", "-f", generatedPath, "logs", "--no-log-prefix", "cllama").Output()
 	if err != nil || !runsSpikeHasDispatch(proxyAudit, allowed.RunAgentID) || runsSpikeHasDispatch(proxyAudit, empty.RunAgentID) {
 		t.Fatalf("per-run dispatch audit did not preserve allowlists: %v", err)
+	}
+	// The ACKed runs left only closed, verifiable segments whose content
+	// is the run's real exchange, with proxy-only secrets redacted.
+	plain := runsSpikeJournal(t, workDir, caseOneAgent, caseOneGen, ingressSecret, launchEpoch)
+	if !strings.Contains(plain, "SPIKE-ANSWER") || !strings.Contains(plain, `"type":"upstream_request"`) {
+		t.Fatal("trace journal lacks the run's provider exchange")
+	}
+	managed := runsSpikeJournal(t, workDir, allowed.RunAgentID, allowed.Generation, ingressSecret, launchEpoch)
+	if !strings.Contains(managed, `"type":"tool_call"`) || !strings.Contains(managed, `"type":"tool_result"`) || !strings.Contains(managed, "SPIKE-ANSWER-TOOL") {
+		t.Fatal("trace journal lacks the managed tool exchange")
 	}
 	if strings.Contains(string(proxyAudit), ingressSecret) {
 		t.Fatal("proxy-only ingress secret reached proxy logs")
@@ -495,6 +523,100 @@ func startRunsSpikeSupervisor(t *testing.T, podDir, sockDir, callbackOrigin stri
 		time.Sleep(20 * time.Millisecond)
 	}
 	return &runsSpikeSupervisor{cancel: cancel, done: done}
+}
+
+// runsSpikeJournal applies the collector's acceptance rule to every segment
+// of one run's agent: no open or incomplete segment, contiguous seq, and a
+// record count and SHA-256 digest that verify. It returns the joined records.
+func runsSpikeJournal(t *testing.T, podDir, agentID string, generation uint64, secret, launchEpoch string) string {
+	t.Helper()
+	dir := filepath.Join(podDir, ".claw-session-history", agentID, "journal")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("trace journal for %s: %v", agentID, err)
+	}
+	var all strings.Builder
+	closed := 0
+	var seal map[string]any
+	// Exactly-once accounting: each admitted request by one closed segment
+	// or one unopened entry, never both, never twice.
+	seqs := map[int]int{}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, "seal-") && strings.HasSuffix(name, ".json") {
+			if name != fmt.Sprintf("seal-%d.json", generation) || seal != nil {
+				t.Fatalf("unexpected seal %s for %s generation %d", name, agentID, generation)
+			}
+			if err := json.Unmarshal([]byte(spikeReadFile(t, filepath.Join(dir, name))), &seal); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if !strings.HasSuffix(name, ".closed.jsonl") {
+			t.Fatalf("segment %s is not closed after the acknowledged run", name)
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("segment %s recorded a proxy-only secret", name)
+		}
+		lines := strings.SplitAfter(strings.TrimSuffix(string(raw), "\n"), "\n")
+		digest := sha256.New()
+		var last map[string]any
+		for i, line := range lines {
+			var rec map[string]any
+			if err := json.Unmarshal([]byte(line), &rec); err != nil {
+				t.Fatalf("segment %s line %d: %v", name, i+1, err)
+			}
+			if int(rec["seq"].(float64)) != i+1 {
+				t.Fatalf("segment %s seq gap at line %d", name, i+1)
+			}
+			if i == 0 && (rec["type"] != "segment_open" || rec["agent_id"] != agentID || rec["schema"] != "cllama.trace/v1" || rec["capture_epoch"] != launchEpoch) {
+				t.Fatalf("segment %s open record: %v", name, rec)
+			}
+			if i == 0 {
+				seqs[int(rec["agent_seq"].(float64))]++
+			}
+			if i < len(lines)-1 {
+				digest.Write([]byte(line))
+			}
+			last = rec
+		}
+		if last["type"] != "segment_close" || int(last["record_count"].(float64)) != len(lines)-1 || last["sha256"] != hex.EncodeToString(digest.Sum(nil)) || last["complete"] != true {
+			t.Fatalf("segment %s does not verify: %v", name, last)
+		}
+		closed++
+		all.Write(raw)
+	}
+	if closed == 0 {
+		t.Fatalf("no trace segments for %s", agentID)
+	}
+	// Whole-run coverage: the seal names this agent, the pinned epoch and
+	// exactly the admitted requests the closed segments account for.
+	if seal == nil || seal["agent_id"] != agentID || seal["capture_epoch"] != launchEpoch || seal["schema"] != "cllama.trace.seal/v1" || uint64(seal["generation"].(float64)) != generation {
+		t.Fatalf("seal for %s generation %d: %v", agentID, generation, seal)
+	}
+	for _, u := range seal["unopened"].([]any) {
+		entry := u.(map[string]any)
+		switch entry["reason"] {
+		case "cancelled_before_open", "body_read_failed", "journal_open_failed":
+		default:
+			t.Fatalf("%s: unknown unopened reason %v", agentID, entry["reason"])
+		}
+		seqs[int(entry["agent_seq"].(float64))]++
+	}
+	n := int(seal["requests"].(float64))
+	for k, count := range seqs {
+		if k < 1 || k > n || count != 1 {
+			t.Fatalf("%s: agent_seq %d accounted %d times, seal requests %d", agentID, k, count, n)
+		}
+	}
+	if len(seqs) != n {
+		t.Fatalf("%s: %d accounted requests, seal says %d", agentID, len(seqs), n)
+	}
+	return all.String()
 }
 
 func runsSpikeLaunchErr(client *runs.Client, runID string, gen uint64, task string) error {
