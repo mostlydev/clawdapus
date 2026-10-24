@@ -82,6 +82,7 @@ type ResolvedClaw struct {
 	Persona         string                            // runtime persona ref from x-claw or image metadata
 	PersonaHostPath string                            // resolved host path for persona workspace mount
 	Models          map[string]string                 // slot -> provider/model
+	ReasoningEffort map[string]string                 // slot -> per-run reasoning effort (x-claw.reasoning-effort)
 	Handles         map[string]*HandleInfo            // platform -> contact card (from x-claw handles block)
 	PeerHandles     map[string]map[string]*HandleInfo // service name -> platform -> HandleInfo for sibling services
 	Includes        []ResolvedInclude                 // composed contract fragments from x-claw.include

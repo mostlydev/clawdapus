@@ -3,6 +3,7 @@ package pod
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -153,4 +154,34 @@ func validatePerRunService(svc *Service) error {
 		}
 	}
 	return nil
+}
+
+// ReasoningEfforts are the values x-claw.reasoning-effort accepts: the
+// Responses effort set cllama forwards. cllama still rejects a value the
+// selected model does not support.
+var ReasoningEfforts = []string{"none", "minimal", "low", "medium", "high"}
+
+// parseReasoningEffort validates x-claw.reasoning-effort. Only per-run
+// workers compile it; on any other service it would be silently ignored, so
+// it is refused. Slots are checked against the merged models at compile time.
+func parseReasoningEffort(raw map[string]string, lifecycle string) (map[string]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	if lifecycle != LifecyclePerRun {
+		return nil, fmt.Errorf("x-claw.reasoning-effort requires x-claw.lifecycle: %s", LifecyclePerRun)
+	}
+	out := make(map[string]string, len(raw))
+	for slot, value := range raw {
+		slot = strings.TrimSpace(slot)
+		effort := strings.TrimSpace(value)
+		if slot == "" {
+			return nil, fmt.Errorf("x-claw.reasoning-effort: empty model slot")
+		}
+		if !slices.Contains(ReasoningEfforts, effort) {
+			return nil, fmt.Errorf("x-claw.reasoning-effort.%s: unknown value %q (expected one of %s)", slot, value, strings.Join(ReasoningEfforts, ", "))
+		}
+		out[slot] = effort
+	}
+	return out, nil
 }

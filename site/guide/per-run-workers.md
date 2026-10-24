@@ -60,7 +60,22 @@ A per-run service may declare only `image` or `build` as Compose keys; the worke
 
 Workers have no channel identity, schedule, host mounts or persistent memory. Every business capability reaches them as a cllama-managed tool.
 
-### Managed-service bearer authentication (Unreleased)
+### Reasoning effort (Unreleased)
+
+A template can ask for a reasoning effort per model slot:
+
+```yaml
+    x-claw:
+      lifecycle: per-run
+      models:
+        primary: openai/gpt-6-luna
+      reasoning-effort:
+        primary: high             # none | minimal | low | medium | high
+```
+
+The worker then sends `reasoning_effort` on every request for that slot, and cllama forwards it (as `reasoning.effort` for models served through the Responses API). Slots without an entry send no effort, so the model's default applies. `claw up` fails if the service is not `lifecycle: per-run`, if the slot has no model, or if the value is not one of the five above. cllama still rejects a value that the selected model does not support, such as `minimal` on GPT-6 models. To offer the same model at several efforts, declare one template per effort.
+
+### Managed-service bearer authentication
 
 For a per-run consumer, a descriptor's `auth.env` resolves from that consumer's
 `x-claw.cllama-env`, including inherited `cllama-defaults.env`. It does **not**

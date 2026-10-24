@@ -83,6 +83,9 @@ type ClawBlock struct {
 	Hermes       *driver.HermesConfig
 	Lifecycle    string // "" (long-lived service) or LifecyclePerRun
 	Run          *RunLimits
+	// ReasoningEffort maps a model slot to the reasoning effort a per-run
+	// worker requests for it.
+	ReasoningEffort map[string]string
 }
 
 // LifecyclePerRun marks a claw service as a per-run worker template: claw up

@@ -118,6 +118,8 @@ services:
       agent: ./AGENTS.md
       lifecycle: per-run
       tools: [fake-provider]
+      reasoning-effort:
+        primary: high
       run:
         max-runtime: 5m
         max-authority: 30m
@@ -260,6 +262,11 @@ services:
 	}
 	if !strings.Contains(events, "TOOL-AUTH-OK") || !strings.Contains(events, "TOOL-AUTH-DENIED") || strings.Contains(events, "MODEL-SECRET-LEAK") || strings.Contains(events, ingressSecret) {
 		t.Fatal("managed-tool bearer or secret isolation evidence failed")
+	}
+	// x-claw.reasoning-effort reaches the provider on every worker request.
+	providerLog, _ := exec.Command("docker", "compose", "-f", generatedPath, "logs", "--no-log-prefix", "fake-provider").CombinedOutput()
+	if !strings.Contains(string(providerLog), "EFFORT high") || strings.Contains(string(providerLog), "EFFORT None") {
+		t.Fatalf("worker requests did not all carry reasoning_effort high:\n%s", providerLog)
 	}
 	proxyAudit, err := exec.Command("docker", "compose", "-f", generatedPath, "logs", "--no-log-prefix", "cllama").Output()
 	if err != nil || !runsSpikeHasDispatch(proxyAudit, allowed.RunAgentID) || runsSpikeHasDispatch(proxyAudit, empty.RunAgentID) {
@@ -431,6 +438,7 @@ class Handler(BaseHTTPRequestHandler):
         if "EMPTY-PER-RUN-PROBE" in body:
             print("MODEL EMPTY tools=" + json.dumps(managed), flush=True)
         print("REQUEST", "SLOW" if "SLOW" in body else "FAST", flush=True)
+        print("EFFORT", payload.get("reasoning_effort"), flush=True)
         if "SLOW" in body:
             time.sleep(600)
         message = {"role": "assistant", "content": "SPIKE-ANSWER"}

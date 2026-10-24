@@ -65,6 +65,11 @@ func (d *Driver) ValidateRunWorker(rc *driver.ResolvedClaw) error {
 			return fmt.Errorf("picoclaw driver: unsupported CONFIGURE command %q: %w", cmd, err)
 		}
 	}
+	for slot := range rc.ReasoningEffort {
+		if _, ok := rc.Models[slot]; !ok {
+			return fmt.Errorf("picoclaw driver: x-claw.reasoning-effort names model slot %q, which has no MODEL", slot)
+		}
+	}
 	return nil
 }
 
@@ -146,12 +151,18 @@ func generateRunConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 		if _, _, ok := shared.SplitModelRef(ref); !ok {
 			return nil, fmt.Errorf("picoclaw driver: invalid MODEL %s %q (expected provider/model)", slot, ref)
 		}
-		models = append(models, map[string]interface{}{
+		entry := map[string]interface{}{
 			"model_name": slot,
 			"model":      "openai/" + ref,
 			"api_base":   proxy,
 			"api_keys":   []string{driver.RunPlaceholderCllamaToken},
-		})
+		}
+		// PicoClaw copies extra_body over the whole request body, so it
+		// carries only the validated effort and never comes from CONFIGURE.
+		if effort := rc.ReasoningEffort[slot]; effort != "" {
+			entry["extra_body"] = map[string]interface{}{"reasoning_effort": effort}
+		}
+		models = append(models, entry)
 	}
 	config["model_list"] = models
 	tools, _ := config["tools"].(map[string]interface{})
