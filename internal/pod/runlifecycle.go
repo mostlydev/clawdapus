@@ -178,6 +178,11 @@ func parseReasoningEffort(raw map[string]string, lifecycle string) (map[string]s
 		if slot == "" {
 			return nil, fmt.Errorf("x-claw.reasoning-effort: empty model slot")
 		}
+		if _, dup := out[slot]; dup {
+			// Map order is random, so letting one entry win would make the
+			// effort nondeterministic.
+			return nil, fmt.Errorf("x-claw.reasoning-effort: model slot %q is declared more than once", slot)
+		}
 		if !slices.Contains(ReasoningEfforts, effort) {
 			return nil, fmt.Errorf("x-claw.reasoning-effort.%s: unknown value %q (expected one of %s)", slot, value, strings.Join(ReasoningEfforts, ", "))
 		}

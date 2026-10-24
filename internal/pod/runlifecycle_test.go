@@ -111,6 +111,7 @@ func TestParsePerRunRejections(t *testing.T) {
 		{"memory syntax", "      lifecycle: per-run\n      run:\n        memory: lots\n", "", "Docker memory size"},
 		{"effort without per-run", "      reasoning-effort:\n        primary: high\n", "", "requires x-claw.lifecycle"},
 		{"unknown effort", "      lifecycle: per-run\n      reasoning-effort:\n        primary: xhigh\n", "", "unknown value"},
+		{"duplicate slot", "      lifecycle: per-run\n      reasoning-effort:\n        primary: high\n        \" primary \": none\n", "", "more than once"},
 		{"empty effort", "      lifecycle: per-run\n      reasoning-effort:\n        primary: \"\"\n", "", "unknown value"},
 	}
 	for _, tc := range cases {
