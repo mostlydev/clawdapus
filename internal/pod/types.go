@@ -86,6 +86,9 @@ type ClawBlock struct {
 	// ReasoningEffort maps a model slot to the reasoning effort a per-run
 	// worker requests for it.
 	ReasoningEffort map[string]string
+	// ProviderPreferences maps a per-run openrouter/* model slot to the
+	// OpenRouter routing preferences its worker sends.
+	ProviderPreferences map[string]*driver.OpenRouterPreferences
 	// DataPolicy is the region, training and retention policy cllama
 	// enforces for this service. Nil means the conservative default.
 	DataPolicy *DataPolicyConfig

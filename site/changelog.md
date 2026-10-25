@@ -36,6 +36,7 @@ outline: deep
 - **Per-run reasoning effort** ([#384](https://github.com/mostlydev/clawdapus/issues/384)). `x-claw.reasoning-effort` maps a per-run template's model slot to `none`, `minimal`, `low`, `medium` or `high`, which the PicoClaw worker sends on every request for that slot. Templates without it are unchanged.
 - **Meta provider keys** ([#386](https://github.com/mostlydev/clawdapus/issues/386)). `META_API_KEY` (and `META_API_KEY_1`, `META_BASE_URL`) under `x-claw.cllama-env` seed cllama's `meta` provider for `meta/<model>` refs. Requires the cllama release that adds the provider.
 - **Observed trace capture epoch** ([#388](https://github.com/mostlydev/clawdapus/issues/388)). `claw runs` health reports the trace capture epoch cllama last wrote, and each run's status records the epoch observed just before its worker started (`capture_epoch`, `capture_epoch_observed_at`). The values are file-observed, not proof of the live proxy process.
+- **Per-run OpenRouter provider preferences** ([#391](https://github.com/mostlydev/clawdapus/issues/391)). `x-claw.provider-preferences` pins an `openrouter/*` slot's upstream endpoints (`only`) and can require zero retention, no data collection, no fallbacks and full parameter support. Every value can only narrow routing.
 
 ## v0.30.0 <Badge type="tip" text="Latest" /> {#v0-30-0}
 
