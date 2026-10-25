@@ -393,6 +393,7 @@ func runComposeUp(podFile string) (err error) {
 		if resolvedPersona != nil {
 			rc.PersonaHostPath = resolvedPersona.HostPath
 		}
+		rc.ReasoningEffort = svc.Claw.ReasoningEffort
 
 		// Merge image-level invocations (from Clawfile INVOKE labels via inspect)
 		for _, imgInv := range info.Invocations {

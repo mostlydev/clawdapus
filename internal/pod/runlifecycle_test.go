@@ -60,6 +60,23 @@ func TestParsePerRunLimits(t *testing.T) {
 	}
 }
 
+func TestParsePerRunReasoningEffort(t *testing.T) {
+	p, err := parsePerRunPod(t, "      lifecycle: per-run\n      reasoning-effort:\n        primary: \" high \"\n", "")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := p.Services["worker"].Claw.ReasoningEffort; len(got) != 1 || got["primary"] != "high" {
+		t.Fatalf("reasoning effort = %v", got)
+	}
+	p, err = parsePerRunPod(t, "      lifecycle: per-run\n", "")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := p.Services["worker"].Claw.ReasoningEffort; got != nil {
+		t.Fatalf("unset reasoning effort must stay nil, got %v", got)
+	}
+}
+
 func TestParseServiceLifecycleIsDefault(t *testing.T) {
 	p, err := parsePerRunPod(t, "      lifecycle: service\n", "")
 	if err != nil {
@@ -92,6 +109,10 @@ func TestParsePerRunRejections(t *testing.T) {
 		{"sub-second runtime", "      lifecycle: per-run\n      run:\n        max-runtime: 1ns\n", "", "whole number of seconds"},
 		{"fractional authority", "      lifecycle: per-run\n      run:\n        max-authority: 1500ms\n", "", "whole number of seconds"},
 		{"memory syntax", "      lifecycle: per-run\n      run:\n        memory: lots\n", "", "Docker memory size"},
+		{"effort without per-run", "      reasoning-effort:\n        primary: high\n", "", "requires x-claw.lifecycle"},
+		{"unknown effort", "      lifecycle: per-run\n      reasoning-effort:\n        primary: xhigh\n", "", "unknown value"},
+		{"duplicate slot", "      lifecycle: per-run\n      reasoning-effort:\n        primary: high\n        \" primary \": none\n", "", "more than once"},
+		{"empty effort", "      lifecycle: per-run\n      reasoning-effort:\n        primary: \"\"\n", "", "unknown value"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

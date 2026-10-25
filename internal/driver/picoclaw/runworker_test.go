@@ -121,3 +121,62 @@ func TestCompileRunWorkerPinsOneShotContract(t *testing.T) {
 		t.Fatalf("non-security CONFIGURE settings must survive, got %v", defaults["max_tokens"])
 	}
 }
+
+func runWorkerModels(t *testing.T, rc *driver.ResolvedClaw) map[string]map[string]interface{} {
+	t.Helper()
+	spec, err := (&Driver{}).CompileRunWorker(rc, driver.RunWorkerOpts{PodName: "pod"})
+	if err != nil {
+		t.Fatalf("CompileRunWorker: %v", err)
+	}
+	var cfg struct {
+		ModelList []map[string]interface{} `json:"model_list"`
+	}
+	if err := json.Unmarshal([]byte(spec.Inputs["CLAW_RUN_CONFIG"]), &cfg); err != nil {
+		t.Fatalf("config input is not JSON: %v", err)
+	}
+	out := make(map[string]map[string]interface{}, len(cfg.ModelList))
+	for _, m := range cfg.ModelList {
+		out[m["model_name"].(string)] = m
+	}
+	return out
+}
+
+func TestCompileRunWorkerReasoningEffortPerSlot(t *testing.T) {
+	rc := newRunWorkerRC(t)
+	rc.Models["primary"] = "openai/gpt-6-luna"
+	rc.ReasoningEffort = map[string]string{"primary": "high"}
+	// CONFIGURE cannot add request fields: model_list is rebuilt after it.
+	rc.Configures = []string{`picoclaw config set model_list [{"model_name":"primary","extra_body":{"model":"x"}}]`}
+	models := runWorkerModels(t, rc)
+	extra, ok := models["primary"]["extra_body"].(map[string]interface{})
+	if !ok || len(extra) != 1 || extra["reasoning_effort"] != "high" {
+		t.Fatalf("primary extra_body = %v, want only reasoning_effort high", models["primary"]["extra_body"])
+	}
+	if _, ok := models["fallback"]["extra_body"]; ok {
+		t.Fatalf("a slot without an effort must not carry extra_body: %v", models["fallback"])
+	}
+}
+
+func TestCompileRunWorkerWithoutReasoningEffortIsUnchanged(t *testing.T) {
+	rc := newRunWorkerRC(t)
+	before, err := generateRunConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc.ReasoningEffort = map[string]string{}
+	after, err := generateRunConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) || strings.Contains(string(after), "extra_body") {
+		t.Fatalf("an unset or empty effort must leave the config unchanged:\n%s\n%s", before, after)
+	}
+}
+
+func TestValidateRunWorkerRejectsEffortForUnknownSlot(t *testing.T) {
+	rc := newRunWorkerRC(t)
+	rc.ReasoningEffort = map[string]string{"reasoning": "high"}
+	if err := (&Driver{}).ValidateRunWorker(rc); err == nil || !strings.Contains(err.Error(), `model slot "reasoning"`) {
+		t.Fatalf("expected unknown-slot rejection, got %v", err)
+	}
+}

@@ -118,6 +118,8 @@ services:
       agent: ./AGENTS.md
       lifecycle: per-run
       tools: [fake-provider]
+      reasoning-effort:
+        primary: high
       run:
         max-runtime: 5m
         max-authority: 30m
@@ -260,6 +262,14 @@ services:
 	}
 	if !strings.Contains(events, "TOOL-AUTH-OK") || !strings.Contains(events, "TOOL-AUTH-DENIED") || strings.Contains(events, "MODEL-SECRET-LEAK") || strings.Contains(events, ingressSecret) {
 		t.Fatal("managed-tool bearer or secret isolation evidence failed")
+	}
+	// x-claw.reasoning-effort reaches the provider on every worker request.
+	providerLog, err := exec.Command("docker", "compose", "-f", generatedPath, "logs", "--no-log-prefix", "fake-provider").Output()
+	if err != nil {
+		t.Fatalf("provider logs: %v", err)
+	}
+	if efforts := runsSpikeEfforts(string(providerLog)); !runsSpikeAllEqual(efforts, "high") {
+		t.Fatalf("worker requests did not all carry reasoning_effort high: %q", efforts)
 	}
 	proxyAudit, err := exec.Command("docker", "compose", "-f", generatedPath, "logs", "--no-log-prefix", "cllama").Output()
 	if err != nil || !runsSpikeHasDispatch(proxyAudit, allowed.RunAgentID) || runsSpikeHasDispatch(proxyAudit, empty.RunAgentID) {
@@ -431,6 +441,7 @@ class Handler(BaseHTTPRequestHandler):
         if "EMPTY-PER-RUN-PROBE" in body:
             print("MODEL EMPTY tools=" + json.dumps(managed), flush=True)
         print("REQUEST", "SLOW" if "SLOW" in body else "FAST", flush=True)
+        print("EFFORT", payload.get("reasoning_effort"), flush=True)
         if "SLOW" in body:
             time.sleep(600)
         message = {"role": "assistant", "content": "SPIKE-ANSWER"}
@@ -976,5 +987,43 @@ services:
 	err := runComposeUp(filepath.Join(workDir, "claw-pod.yml"))
 	if err == nil || !strings.Contains(err.Error(), "declares VOLUME") {
 		t.Fatalf("expected VOLUME rejection, got %v", err)
+	}
+}
+
+// runsSpikeEfforts returns the reasoning_effort the fake provider logged for
+// each model request, in order.
+func runsSpikeEfforts(log string) []string {
+	var out []string
+	for _, line := range strings.Split(log, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "EFFORT "); ok {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func runsSpikeAllEqual(values []string, want string) bool {
+	for _, v := range values {
+		if v != want {
+			return false
+		}
+	}
+	return len(values) > 0
+}
+
+func TestRunsSpikeEffortCheck(t *testing.T) {
+	for _, tc := range []struct {
+		log  string
+		want bool
+	}{
+		{"REQUEST FAST\nEFFORT high\nREQUEST FAST\nEFFORT high\n", true},
+		{"REQUEST FAST\nEFFORT high\nEFFORT medium\n", false},
+		{"EFFORT None\n", false},
+		{"REQUEST FAST\n", false},
+		{"", false},
+	} {
+		if got := runsSpikeAllEqual(runsSpikeEfforts(tc.log), "high"); got != tc.want {
+			t.Fatalf("%q: got %v, want %v", tc.log, got, tc.want)
+		}
 	}
 }

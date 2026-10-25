@@ -85,6 +85,8 @@ type rawClawBlock struct {
 	Hermes       *rawHermesConfig       `yaml:"hermes"`
 	Lifecycle    string                 `yaml:"lifecycle"`
 	Run          *rawRunLimits          `yaml:"run"`
+
+	ReasoningEffort map[string]string `yaml:"reasoning-effort"`
 }
 
 type rawContextConfig struct {
@@ -378,6 +380,9 @@ func Parse(r io.Reader) (*Pod, error) {
 				Hermes:       hermesConfig,
 				Lifecycle:    lifecycle,
 				Run:          runLimits,
+			}
+			if service.Claw.ReasoningEffort, err = parseReasoningEffort(svc.XClaw.ReasoningEffort, lifecycle); err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
 			}
 			if err := validatePerRunService(service); err != nil {
 				return nil, fmt.Errorf("service %q: %w", name, err)

@@ -29,7 +29,7 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Per-run reasoning effort** ([#384](https://github.com/mostlydev/clawdapus/issues/384)). `x-claw.reasoning-effort` maps a per-run template's model slot to `none`, `minimal`, `low`, `medium` or `high`, which the PicoClaw worker sends on every request for that slot. Templates without it are unchanged.
 
 ## v0.30.0 <Badge type="tip" text="Latest" /> {#v0-30-0}
 
