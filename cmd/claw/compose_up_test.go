@@ -5395,3 +5395,52 @@ func TestAgentBudgetPolicyCopiesServiceBudget(t *testing.T) {
 		t.Fatal("expected nil budget for unknown service")
 	}
 }
+
+func TestMergeProviderSeedsWritesMetaProvider(t *testing.T) {
+	dir := t.TempDir()
+	p := &pod.Pod{
+		Services: map[string]*pod.Service{
+			"worker": {
+				Claw: &pod.ClawBlock{
+					CllamaEnv: map[string]string{
+						"META_API_KEY":  "meta-primary",
+						"META_BASE_URL": "https://meta.example.test/v1",
+					},
+				},
+			},
+		},
+	}
+	if err := mergeProviderSeeds(dir, p, nil); err != nil {
+		t.Fatalf("mergeProviderSeeds: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	if err != nil {
+		t.Fatalf("read providers.json: %v", err)
+	}
+	var probe struct {
+		Providers map[string]struct {
+			BaseURL string `json:"base_url"`
+			Keys    []struct {
+				ID     string `json:"id"`
+				Secret string `json:"secret"`
+			} `json:"keys"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		t.Fatalf("parse providers.json: %v", err)
+	}
+	meta, ok := probe.Providers["meta"]
+	if !ok {
+		t.Fatal("meta missing from output")
+	}
+	if meta.BaseURL != "https://meta.example.test/v1" {
+		t.Fatalf("expected meta base URL override, got %q", meta.BaseURL)
+	}
+	if len(meta.Keys) != 1 || meta.Keys[0].ID != "seed:META_API_KEY" || meta.Keys[0].Secret != "meta-primary" {
+		t.Fatalf("unexpected meta keys: %+v", meta.Keys)
+	}
+	if defaultBaseURLs["meta"] != "https://api.meta.ai/v1" {
+		t.Fatalf("unexpected meta default base URL %q", defaultBaseURLs["meta"])
+	}
+}

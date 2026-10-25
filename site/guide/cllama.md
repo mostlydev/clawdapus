@@ -231,7 +231,7 @@ The cllama container receives its configuration through environment variables in
 | `CLLAMA_TOOL_SCHEMA_VALIDATION` | Set to `off` to disable pre-dispatch validation of managed tool arguments against the manifest `inputSchema`. On by default; validation fails open on schema constructs it does not understand. |
 | `CLLAMA_TRACE_JOURNAL` | Set to `on` (cllama ≥ v0.13.0) to write the [trace journal](#trace-journal): one durable, verifiable segment per admitted request under `$CLAW_SESSION_HISTORY_DIR/<agent-id>/journal/`. Off by default. |
 | `CLLAMA_TRACE_OWNER` | `<uid>:<gid>` that owns journal files, so a host collector can read and remove them. cllama refuses to start if it cannot apply it. |
-| `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `AI_GATEWAY_API_KEY`, etc. |
+| `PROVIDER_API_KEY_*` | Real provider API keys -- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `AI_GATEWAY_API_KEY`, `META_API_KEY`, etc. |
 
 ### Where Provider Keys Go
 
