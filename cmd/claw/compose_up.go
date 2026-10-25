@@ -3732,6 +3732,8 @@ var seedKeyDefs = []seedKeyDef{
 	{"GEMINI_API_KEY", "google", "seed:GEMINI_API_KEY", "primary"},
 	{"GEMINI_API_KEY_1", "google", "seed:GEMINI_API_KEY_1", "backup-1"},
 	{"GOOGLE_API_KEY", "google", "seed:GOOGLE_API_KEY", "backup-2"},
+	{"META_API_KEY", "meta", "seed:META_API_KEY", "primary"},
+	{"META_API_KEY_1", "meta", "seed:META_API_KEY_1", "backup-1"},
 }
 
 // v2ProviderFile is the providers.json v2 on-disk shape (write path only).
@@ -3769,6 +3771,7 @@ var defaultBaseURLs = map[string]string{
 	"openrouter": "https://openrouter.ai/api/v1",
 	"google":     "https://generativelanguage.googleapis.com/v1beta/openai",
 	"ollama":     "http://ollama:11434/v1",
+	"meta":       "https://api.meta.ai/v1",
 }
 
 var defaultAuths = map[string]string{
@@ -3823,6 +3826,7 @@ func mergeProviderSeeds(authDir string, p *pod.Pod, claws map[string]*driver.Res
 		"OPENROUTER_BASE_URL": "openrouter",
 		"GOOGLE_BASE_URL":     "google",
 		"OLLAMA_BASE_URL":     "ollama",
+		"META_BASE_URL":       "meta",
 	}
 	customBaseURLs := make(map[string]string)
 	for envKey, prov := range baseURLEnvMap {
