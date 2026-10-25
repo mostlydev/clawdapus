@@ -268,9 +268,10 @@ func parseDataPolicyEndpoint(raw string) (string, error) {
 }
 
 func localDataPolicyHost(host string) bool {
-	if host == "localhost" || !strings.Contains(host, ".") {
-		return true
+	// An IP literal must itself be loopback or private; only then may a
+	// dotless name count as an in-pod service host.
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate()
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
+	return host == "localhost" || !strings.Contains(host, ".")
 }

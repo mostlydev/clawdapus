@@ -64,6 +64,8 @@ func TestParseDataPolicyEndpoints(t *testing.T) {
 		"HTTPS://API.Example.com/v1/":  "https://api.example.com/v1",
 		"http://ollama:11434/v1":       "http://ollama:11434/v1",
 		"http://127.0.0.1:8080":        "http://127.0.0.1:8080",
+		"http://[::1]:8080/v1":         "http://[::1]:8080/v1",
+		"http://[fd00::5]/v1":          "http://[fd00::5]/v1",
 		"https://eu.api.openai.com/v1": "https://eu.api.openai.com/v1",
 	} {
 		got, err := parseDataPolicyEndpoint(raw)
@@ -71,7 +73,7 @@ func TestParseDataPolicyEndpoints(t *testing.T) {
 			t.Errorf("%q: got %q %v, want %q", raw, got, err, want)
 		}
 	}
-	for _, raw := range []string{"http://api.example.com/v1", "ftp://x.example.com", "https://u:p@x.example.com", "https://x.example.com/v1?k=1", "/v1", "https://x.example.com/#f", "https://x.example.com/v1%2Fadmin", "https://x.example.com/%761"} {
+	for _, raw := range []string{"http://[2001:4860:4860::8888]/v1", "http://8.8.8.8/v1", "http://api.example.com/v1", "ftp://x.example.com", "https://u:p@x.example.com", "https://x.example.com/v1?k=1", "/v1", "https://x.example.com/#f", "https://x.example.com/v1%2Fadmin", "https://x.example.com/%761"} {
 		_, err := parseDataPolicyEndpoint(raw)
 		if err == nil {
 			t.Errorf("%q must be rejected", raw)
