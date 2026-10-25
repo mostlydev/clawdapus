@@ -249,8 +249,8 @@ func parseDataPolicyEndpoint(raw string) (string, error) {
 		return "", nil
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return "", fmt.Errorf("endpoint %q must be an absolute URL without credentials, query or fragment", raw)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || strings.Contains(u.Path, "%") || strings.Contains(raw, "%") {
+		return "", fmt.Errorf("endpoint %q must be an absolute URL without credentials, encoding, query or fragment", raw)
 	}
 	scheme := strings.ToLower(u.Scheme)
 	host := strings.ToLower(u.Hostname())

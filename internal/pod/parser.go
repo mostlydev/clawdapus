@@ -1095,6 +1095,11 @@ func expandPodDefaults(root map[string]interface{}) error {
 		return nil
 	}
 
+	if raw, ok := rawXClaw["data-policy-defaults"]; ok && raw != nil {
+		if _, isMap := raw.(map[string]interface{}); !isMap {
+			return fmt.Errorf("x-claw.data-policy-defaults must be a mapping")
+		}
+	}
 	defaults := podDefaults{
 		CllamaDefaults:   deepCopyMapOrNil(rawXClaw["cllama-defaults"]),
 		ModelsDefaults:   deepCopyMapOrNil(rawXClaw["models-defaults"]),

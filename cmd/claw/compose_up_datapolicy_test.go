@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/pod"
 )
 
@@ -33,5 +35,15 @@ func TestAgentDataPolicyIsExplicitAndConservativeByDefault(t *testing.T) {
 	compiled.Regions[0] = "xx"
 	if p.Services["open"].Claw.DataPolicy.Regions[0] != "jp" {
 		t.Fatal("compiled policy aliases the pod declaration")
+	}
+}
+
+func TestDataPolicyCoverageWarnsForClawsOutsideCllama(t *testing.T) {
+	warnings := dataPolicyCoverageWarnings(map[string]*driver.ResolvedClaw{
+		"governed": {Cllama: []string{"passthrough"}},
+		"direct":   {},
+	})
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `"direct"`) {
+		t.Fatalf("warnings = %v", warnings)
 	}
 }

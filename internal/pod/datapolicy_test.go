@@ -71,7 +71,7 @@ func TestParseDataPolicyEndpoints(t *testing.T) {
 			t.Errorf("%q: got %q %v, want %q", raw, got, err, want)
 		}
 	}
-	for _, raw := range []string{"http://api.example.com/v1", "ftp://x.example.com", "https://u:p@x.example.com", "https://x.example.com/v1?k=1", "/v1", "https://x.example.com/#f"} {
+	for _, raw := range []string{"http://api.example.com/v1", "ftp://x.example.com", "https://u:p@x.example.com", "https://x.example.com/v1?k=1", "/v1", "https://x.example.com/#f", "https://x.example.com/v1%2Fadmin", "https://x.example.com/%761"} {
 		if _, err := parseDataPolicyEndpoint(raw); err == nil {
 			t.Errorf("%q must be rejected", raw)
 		}
@@ -101,5 +101,14 @@ func TestParseDataPolicyRejectsInvalid(t *testing.T) {
 				t.Fatalf("expected data-policy error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestParseDataPolicyDefaultsMustBeMapping(t *testing.T) {
+	for _, value := range []string{"none", "[us]", "true"} {
+		yaml := "x-claw:\n  data-policy-defaults: " + value + "\nservices:\n  a:\n    image: a:latest\n    x-claw:\n      agent: ./AGENTS.md\n"
+		if _, err := Parse(strings.NewReader(yaml)); err == nil || !strings.Contains(err.Error(), "data-policy-defaults must be a mapping") {
+			t.Errorf("%s: expected mapping error, got %v", value, err)
+		}
 	}
 }

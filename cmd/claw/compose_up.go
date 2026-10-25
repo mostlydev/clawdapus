@@ -476,6 +476,9 @@ func runComposeUp(podFile string) (err error) {
 		}
 	}
 	cllamaEnabled, cllamaAgents := detectCllama(resolvedClaws)
+	for _, warning := range dataPolicyCoverageWarnings(resolvedClaws) {
+		fmt.Printf("[claw] warning: %s\n", warning)
+	}
 	perRunNames := sortedPerRunNames(perRun)
 	if len(perRun) > 0 {
 		// Per-run workers always route through cllama.
@@ -1808,6 +1811,18 @@ func buildRulesManifestEntries(includes []driver.ResolvedInclude) ([]cllama.Rule
 		})
 	}
 	return out, nil
+}
+
+// dataPolicyCoverageWarnings names claws whose model requests bypass cllama:
+// the data policy is enforced only at the proxy, so it does not cover them.
+func dataPolicyCoverageWarnings(claws map[string]*driver.ResolvedClaw) []string {
+	var warnings []string
+	for _, name := range sortedResolvedClawNames(claws) {
+		if rc := claws[name]; rc != nil && len(rc.Cllama) == 0 {
+			warnings = append(warnings, fmt.Sprintf("service %q does not route model requests through cllama, so the data policy (regions, training, retention) is not enforced for it", name))
+		}
+	}
+	return warnings
 }
 
 // agentDataPolicy resolves a service's data policy, falling back to the
