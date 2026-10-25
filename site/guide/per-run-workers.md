@@ -60,7 +60,7 @@ A per-run service may declare only `image` or `build` as Compose keys; the worke
 
 Workers have no channel identity, schedule, host mounts or persistent memory. Every business capability reaches them as a cllama-managed tool.
 
-### Reasoning effort (Unreleased)
+### Reasoning effort
 
 A template can ask for a reasoning effort per model slot:
 
@@ -75,7 +75,7 @@ A template can ask for a reasoning effort per model slot:
 
 The worker then sends `reasoning_effort` on every request for that slot, and cllama forwards it (as `reasoning.effort` for models served through the Responses API). Slots without an entry send no effort, so the model's default applies. `claw up` fails if the service is not `lifecycle: per-run`, if the slot has no model, or if the value is not one of the five above. cllama still rejects a value that the selected model does not support, such as `minimal` on GPT-6 models. To offer the same model at several efforts, declare one template per effort.
 
-### OpenRouter provider preferences (Unreleased)
+### OpenRouter provider preferences
 
 A template whose slot routes through OpenRouter can pin that slot's upstream endpoints:
 
@@ -281,7 +281,7 @@ Status carries several fields beyond the state:
 - `callbacks.start` and `callbacks.end`: `acked`, `rejected`, `abandoned` or `skipped`;
 - `deadline`, `authority_expires_at` and timestamps;
 - `pending`, which explains a step that is being retried;
-- `capture_epoch` and `capture_epoch_observed_at` (Unreleased), the trace capture epoch observed once at spawn and never rewritten. Omitted when there is no usable epoch file.
+- `capture_epoch` and `capture_epoch_observed_at`, the trace capture epoch observed once at spawn and never rewritten. Omitted when there is no usable epoch file.
 
 ### Authority, credentials and callbacks
 

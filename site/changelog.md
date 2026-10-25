@@ -29,6 +29,14 @@ outline: deep
 
 ## Unreleased
 
+<!-- Nothing yet -->
+
+## v0.31.0 <Badge type="tip" text="Latest" /> {#v0-31-0}
+
+*2026-10-25*
+
+Pins cllama v0.14.0.
+
 - **Breaking: data policy, conservative by default** ([#390](https://github.com/mostlydev/clawdapus/issues/390)). cllama now enforces a [data policy](/guide/data-policy) on every model request, including each fallback. The default allows processing only in the US or EU, no provider training, no provider retention, and no local content retention.
   - A requirement passes only when the provider applies a per-request control cllama sets, or when the pod attests an account-level guarantee for that exact endpoint. Otherwise the request is refused, and an audit intervention names the unmet requirement.
   - **Migration:** most existing pods will see requests refused until they declare `x-claw.data-policy-defaults` with attestations matching their real provider accounts, or explicitly relax the policy. See [Upgrading](/guide/data-policy#upgrading).
@@ -38,7 +46,7 @@ outline: deep
 - **Observed trace capture epoch** ([#388](https://github.com/mostlydev/clawdapus/issues/388)). `claw runs` health reports the trace capture epoch cllama last wrote, and each run's status records the epoch observed just before its worker started (`capture_epoch`, `capture_epoch_observed_at`). The values are file-observed, not proof of the live proxy process.
 - **Per-run OpenRouter provider preferences** ([#391](https://github.com/mostlydev/clawdapus/issues/391)). `x-claw.provider-preferences` pins an `openrouter/*` slot's upstream endpoints (`only`) and can require zero retention, no data collection, no fallbacks and full parameter support. Every value can only narrow routing.
 
-## v0.30.0 <Badge type="tip" text="Latest" /> {#v0-30-0}
+## v0.30.0 {#v0-30-0}
 
 *2026-10-23*
 

@@ -80,7 +80,7 @@ When an OpenAI-format request (`/v1/chat/completions`) resolves to a registered 
 A model whose vendor prefix has no registered provider (for example `mistral/<model>` with only an OpenRouter key) is still routed through OpenRouter, which accepts OpenAI format for all models. Before v0.12.0, Anthropic-format providers were also routed through OpenRouter and failed without it.
 
 ::: tip Passthrough, Not Full Policy
-In passthrough mode, the reference proxy still performs infrastructure work: model routing, budget/rate preflight, late runtime-context assembly, memory recall/retain, managed tool mediation, telemetry, and cost accounting. It does **not** run a contract-derived policy engine, redact responses, compute drift scores, or amend final provider text.
+In passthrough mode, the reference proxy still performs infrastructure work: model routing, budget/rate preflight, late runtime-context assembly, memory recall and (with `local-retention: allowed`) retain, managed tool mediation, telemetry, and cost accounting. It does **not** run a contract-derived policy engine, redact responses, compute drift scores, or amend final provider text.
 :::
 
 ## The Interception Pipeline
@@ -202,7 +202,7 @@ The reference loader reads the compiled contract (`AGENTS.md`), infrastructure m
 
 ### Internal Context Snapshots
 
-For operator visibility, cllama stores the most recent provider-visible context assembled for each agent. The read-only internal endpoints are:
+For operator visibility, cllama stores the most recent provider-visible context assembled for each agent when the agent's [data policy](/guide/data-policy) has `local-retention: allowed`; under the default it keeps none. The read-only internal endpoints are:
 
 - `GET /internal/context`
 - `GET /internal/context/<agent-id>/snapshot`

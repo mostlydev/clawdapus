@@ -63,11 +63,11 @@ Before `claw up`, configure a [verified regional route and account assurances](h
 
 ### Explicit development opt-out
 
-For synthetic development data, you may deliberately [relax specific requirements](https://clawdapus.dev/guide/data-policy#explicit-development-opt-out). This is an operator choice; no example or scaffold enables it automatically. Recompile with `claw up -d` after changing policy.
+For synthetic development data, you may deliberately [relax specific requirements](https://clawdapus.dev/guide/data-policy#explicit-development-opt-out). This is an operator choice; no canonical quickstart or scaffold enables it automatically. Recompile with `claw up -d` after changing policy.
 
 The cllama governance proxy dashboard runs on port **8181** — every LLM call in real time: which agent, which model, token counts, cost.
 
-The Clawdapus Dash fleet dashboard runs on port **8082** — live service health, topology wiring, per-service drill-down, and agent context inspection. The Agents view shows each claw's compiled `AGENTS.md`/`CLAWDAPUS.md`, redacted runtime manifests, and the latest live context snapshot captured by cllama.
+The Clawdapus Dash fleet dashboard runs on port **8082** — live service health, topology wiring, per-service drill-down, and agent context inspection. The Agents view shows each claw's compiled `AGENTS.md`/`CLAWDAPUS.md`, redacted runtime manifests, and, with `local-retention: allowed`, the latest live context snapshot captured by cllama (see [data policy](https://clawdapus.dev/guide/data-policy)).
 
 The operator surface is four verbs:
 - `claw pull` fetches pinned runtime infra, registry-backed pod services, and refreshes built-in local runner bases

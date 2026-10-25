@@ -13,7 +13,7 @@ The `-f` flag is a persistent flag on the root command, so lifecycle commands in
 
 ---
 
-## Dashboard publication (Unreleased)
+## Dashboard publication
 
 Set these environment variables on the host when running `claw up`:
 
