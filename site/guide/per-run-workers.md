@@ -20,7 +20,7 @@ Per-run workers need a cllama that implements the operator revoke endpoint and `
 
 Clawdapus configures per-run PicoClaw workers to use OpenAI chat/completions. cllama v0.12.0 or newer serves those requests from a direct Anthropic key and from current OpenAI GPT-6 models; an older proxy needs OpenRouter for Anthropic models and fails on GPT-6. `CLAW_SPIKE_PINNED_CLLAMA=1 go test -tags spike -run '^TestSpikePerRunProviderLive$' ./cmd/claw` proves a real worker against the pinned proxy.
 
-To keep a verifiable trace of every run, enable the cllama [trace journal](/guide/cllama#trace-journal) (cllama v0.13.0 or newer). Revoking a run identity then writes a coverage seal that accounts for every request the run made. `GET /v1/health` reports the capture epoch cllama last wrote, read fresh on each call (`null` when the journal is off), so an orchestrator can pin it before launching. Each run's status records the epoch observed just before its worker started. Both are read from cllama's epoch file and don't prove which proxy process is live; the seal's epoch remains the check.
+To keep a verifiable trace of every run, enable the cllama [trace journal](/guide/cllama#trace-journal) (cllama v0.13.0 or newer). Revoking a run identity then writes a coverage seal that accounts for every request the run made. `GET /v1/health` reports the capture epoch cllama last wrote, read fresh on each call (`null` when there is no usable epoch file, which does not by itself mean the journal is off), so an orchestrator can pin it before launching. Each run's status records the epoch observed just before its worker started. Both are read from cllama's epoch file and don't prove which proxy process is live: a valid file can outlive a stopped or restarting proxy. The seal's epoch remains the check.
 
 v1 supports the **PicoClaw** runner only. Any other `CLAW_TYPE` with `lifecycle: per-run` fails `claw up`.
 
@@ -252,7 +252,7 @@ Status carries several fields beyond the state:
 - `callbacks.start` and `callbacks.end`: `acked`, `rejected`, `abandoned` or `skipped`;
 - `deadline`, `authority_expires_at` and timestamps;
 - `pending`, which explains a step that is being retried;
-- `capture_epoch` and `capture_epoch_observed_at` (Unreleased), the trace capture epoch observed once at spawn and never rewritten. Omitted when the journal is off or its epoch record is unreadable.
+- `capture_epoch` and `capture_epoch_observed_at` (Unreleased), the trace capture epoch observed once at spawn and never rewritten. Omitted when there is no usable epoch file.
 
 ### Authority, credentials and callbacks
 

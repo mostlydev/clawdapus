@@ -729,7 +729,7 @@ func (s *Supervisor) stepSpawn(ctx context.Context, rec *Record, now time.Time) 
 	if err := writeFileAtomic(file, project, 0o600); err != nil {
 		return false, err
 	}
-	s.observeCaptureEpoch(rec, now)
+	s.observeCaptureEpoch(rec)
 	rec.SpawnAttempted = true
 	s.setDeadline(rec, now)
 	if err := s.persist(rec); err != nil {
@@ -759,7 +759,7 @@ var errCaptureEpochInvalid = errors.New("trace capture epoch record is invalid")
 
 // ReadCaptureEpoch returns the capture epoch cllama last wrote. It reports
 // what the file says, not which proxy process is live. An empty epoch with a
-// nil error means the journal is off; a malformed record yields
+// nil error means there is no epoch file; a malformed record yields
 // errCaptureEpochInvalid. No value is ever guessed.
 func (s *Supervisor) ReadCaptureEpoch() (string, error) {
 	raw, err := readRegularFile(filepath.Join(s.cfg.PodDir, ".claw-session-history", traceEpochFile), 4096)
@@ -786,7 +786,7 @@ func (s *Supervisor) ReadCaptureEpoch() (string, error) {
 // observeCaptureEpoch records the capture epoch once, immediately before the
 // worker starts. It is never rewritten, and neither an absent nor a malformed
 // record fails the launch.
-func (s *Supervisor) observeCaptureEpoch(rec *Record, now time.Time) {
+func (s *Supervisor) observeCaptureEpoch(rec *Record) {
 	if rec.CaptureEpoch != "" {
 		return
 	}
@@ -798,8 +798,11 @@ func (s *Supervisor) observeCaptureEpoch(rec *Record, now time.Time) {
 	if epoch == "" {
 		return
 	}
+	// Stamp the read itself: the step's clock predates the container lookup
+	// and revocation self-test.
+	observed := s.cfg.Now().UTC()
 	rec.CaptureEpoch = epoch
-	rec.CaptureEpochObservedAt = &now
+	rec.CaptureEpochObservedAt = &observed
 }
 
 func validCaptureEpoch(epoch string) bool {

@@ -198,7 +198,8 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		// The capture epoch is read fresh on every request so an orchestrator
 		// can pin it before launching. It is file-observed, not proof of the
-		// live proxy process; null means the journal is off or unreadable.
+		// live proxy process: a valid file can outlive a stopped proxy, and null
+		// means no usable epoch file, not that the journal is off.
 		health := map[string]any{"ok": true, "capture_epoch": nil, "capture_epoch_observed_at": nil}
 		if epoch, err := srv.Sup.ReadCaptureEpoch(); err != nil {
 			health["capture_epoch_warning"] = err.Error()

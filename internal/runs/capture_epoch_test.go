@@ -1,6 +1,7 @@
 package runs
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeEpoch(t *testing.T, podDir, body string) {
@@ -131,5 +133,27 @@ func TestHealthReportsFreshCaptureEpoch(t *testing.T) {
 	writeEpoch(t, h.podDir, "{")
 	if out := health(); out["capture_epoch"] != nil || out["capture_epoch_warning"] != errCaptureEpochInvalid.Error() {
 		t.Fatalf("malformed record must be null with the fixed warning: %v", out)
+	}
+}
+
+type delayingRevoker func()
+
+func (f delayingRevoker) Revoke(context.Context, string, uint64) error { f(); return nil }
+
+// The observation time is the read itself, not the start of a step whose
+// container lookup and revocation self-test can be slow.
+func TestCaptureEpochObservedAtFollowsPreflight(t *testing.T) {
+	h := newHarness(t, false)
+	writeEpoch(t, h.podDir, epochJSON("epochA"))
+	if _, err := h.launch("r1", 1, "do it"); err != nil {
+		t.Fatal(err)
+	}
+	h.sup.cfg.Revoker = delayingRevoker(func() {
+		h.now = h.now.Add(30 * time.Second)
+		writeEpoch(t, h.podDir, epochJSON("epochB"))
+	})
+	rec := h.advance("r1")
+	if rec.CaptureEpoch != "epochB" || rec.CaptureEpochObservedAt == nil || !rec.CaptureEpochObservedAt.Equal(h.now) {
+		t.Fatalf("observation %v of %q must match the read after preflight at %v", rec.CaptureEpochObservedAt, rec.CaptureEpoch, h.now)
 	}
 }
