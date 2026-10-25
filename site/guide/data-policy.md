@@ -1,6 +1,6 @@
 # Data Policy
 
-Every model request a claw makes goes through cllama, so cllama is where Clawdapus enforces where the request is processed and whether the provider may train on it or keep it. The policy is part of the pod, compiled by `claw up` into each agent's cllama context. It is checked on every request, including every fallback candidate.
+For claws configured with cllama, every model request goes through the proxy, so cllama is where Clawdapus enforces where the request is processed and whether the provider may train on it or keep it. The policy is part of the pod, compiled by `claw up` into each agent's cllama context. It is checked on every request, including every fallback candidate.
 
 The default is the most conservative policy:
 
@@ -21,6 +21,8 @@ A policy states what you require. cllama only lets a request through when the re
 - **Attested:** the guarantee exists only at the account level, such as a zero-data-retention agreement or a data-residency project. You attest it for that provider endpoint in the pod.
 - **Unestablished:** the request is refused with a client error. An audit intervention names the requirement that could not be met. Nothing is silently downgraded.
 
+`retention: none` means content is handled under the provider's zero-data-retention arrangement. It is not a promise of zero transient bytes, and it does not override retention that a provider is legally or for safety required to keep. Providers document short-lived caches as compatible with zero retention, so Anthropic's default five-minute prompt cache stays allowed when zero retention is attested; longer cache options are refused.
+
 An attestation cannot override a known contradiction. If a model or feature is documented to retain or train on data, attesting the opposite does not make the request pass.
 
 ## What each provider can establish
@@ -30,7 +32,7 @@ An attestation cannot override a known contradiction. If a model or feature is d
 | OpenAI | Recognized US/EU regional processing endpoints; otherwise a `processing:<region>` attestation. A regional storage endpoint (e.g. Japan's) is storage residency, not in-region inference. | `no-training` attestation for the account. | `store: false` is applied but does not establish zero retention: a `zero-data-retention` attestation is required, and stateful or non-eligible features are refused. |
 | Anthropic | On supported Messages models, cllama sets `inference_geo: us` when the US is allowed. Other regions and older models need a `processing:<region>` attestation. | `no-training` attestation. | `zero-data-retention` attestation, eligible features only. Model families whose standard offering mandates retention are refused under `retention: none`. |
 | Google (Gemini API) | The global Developer API endpoint establishes no region; a regional deployment needs a `processing:<region>` attestation. | `no-training` attestation (an API key does not prove the paid tier). | Paid no-training is not zero retention; an eligible deployment must be attested. |
-| OpenRouter | Its US/EU regional origins constrain shared endpoints, but your bring-your-own-key deployments and observability destinations stay your responsibility. Even on a regional origin, a `processing:<region>` attestation is required, and the global origin is never used as a fallback. | cllama sets `provider.data_collection: "deny"`. | cllama sets `provider.zdr: true`; a `zero-data-retention` attestation must also cover any observability destinations you configured. A request's own `provider` preferences may narrow routing but never weaken these. |
+| OpenRouter | Its US/EU regional origins constrain shared endpoints, but your bring-your-own-key deployments and observability destinations stay your responsibility. Even on a regional origin, a `processing:<region>` attestation is required. A regional failure never bypasses the policy through an unqualified global fallback: every candidate must establish the same requirements. | cllama sets `provider.data_collection: "deny"`. | cllama sets `provider.zdr: true`; a `zero-data-retention` attestation must also cover any observability destinations you configured. A request's own `provider` preferences may narrow routing but never weaken these. |
 | Vercel AI Gateway | No region is inferred from the global URL; `processing:<region>` attestation. | `no-training` attestation. | cllama sets `providerOptions.gateway.zeroDataRetention: true`, and a `zero-data-retention` attestation is also required: bring-your-own-key eligibility and your own destinations cannot be inferred. Other `providerOptions` are refused. |
 | xAI | The documented US endpoint keeps processing in the US; others need an attestation. | `no-training` attestation. | Team-level `zero-data-retention` attestation before any content is sent. |
 | Meta, custom endpoints, Ollama | Nothing is inferred from a provider name or hostname (an Ollama URL may be remote): `processing:<region>` attestation for that endpoint. | `no-training` attestation. | `zero-data-retention` attestation. |
