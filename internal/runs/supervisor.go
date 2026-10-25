@@ -729,6 +729,7 @@ func (s *Supervisor) stepSpawn(ctx context.Context, rec *Record, now time.Time) 
 	if err := writeFileAtomic(file, project, 0o600); err != nil {
 		return false, err
 	}
+	s.observeCaptureEpoch(rec)
 	rec.SpawnAttempted = true
 	s.setDeadline(rec, now)
 	if err := s.persist(rec); err != nil {
@@ -743,6 +744,77 @@ func (s *Supervisor) stepSpawn(ctx context.Context, rec *Record, now time.Time) 
 		return true, fmt.Errorf("compose up failed")
 	}
 	return true, nil
+}
+
+// Trace journal epoch record that cllama writes in the pod's session history
+// directory (tracejournal.EpochFileName and EpochSchema).
+const (
+	traceEpochFile   = ".trace-journal-epoch.json"
+	traceEpochSchema = "cllama.trace.epoch/v1"
+)
+
+// errCaptureEpochInvalid is the fixed warning for an unreadable epoch record;
+// request-supplied content never reaches it.
+var errCaptureEpochInvalid = errors.New("trace capture epoch record is invalid")
+
+// ReadCaptureEpoch returns the capture epoch cllama last wrote. It reports
+// what the file says, not which proxy process is live. An empty epoch with a
+// nil error means there is no epoch file; a malformed record yields
+// errCaptureEpochInvalid. No value is ever guessed.
+func (s *Supervisor) ReadCaptureEpoch() (string, error) {
+	raw, err := readRegularFile(filepath.Join(s.cfg.PodDir, ".claw-session-history", traceEpochFile), 4096)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", errCaptureEpochInvalid
+	}
+	var file struct {
+		Schema       string `json:"schema"`
+		CaptureEpoch string `json:"capture_epoch"`
+		StartedAt    string `json:"started_at"`
+	}
+	if json.Unmarshal(raw, &file) != nil || file.Schema != traceEpochSchema || !validCaptureEpoch(file.CaptureEpoch) {
+		return "", errCaptureEpochInvalid
+	}
+	if _, err := time.Parse(time.RFC3339Nano, file.StartedAt); err != nil {
+		return "", errCaptureEpochInvalid
+	}
+	return file.CaptureEpoch, nil
+}
+
+// observeCaptureEpoch records the capture epoch once, immediately before the
+// worker starts. It is never rewritten, and neither an absent nor a malformed
+// record fails the launch.
+func (s *Supervisor) observeCaptureEpoch(rec *Record) {
+	if rec.CaptureEpoch != "" {
+		return
+	}
+	epoch, err := s.ReadCaptureEpoch()
+	if err != nil {
+		s.cfg.Logf("runs: run %s: %v; capture epoch not recorded", rec.Key.RunID, err)
+		return
+	}
+	if epoch == "" {
+		return
+	}
+	// Stamp the read itself: the step's clock predates the container lookup
+	// and revocation self-test.
+	observed := s.cfg.Now().UTC()
+	rec.CaptureEpoch = epoch
+	rec.CaptureEpochObservedAt = &observed
+}
+
+func validCaptureEpoch(epoch string) bool {
+	if epoch == "" || len(epoch) > 128 {
+		return false
+	}
+	for _, r := range epoch {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Supervisor) markRunning(rec *Record, now time.Time) {

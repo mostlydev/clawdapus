@@ -156,6 +156,11 @@ type Record struct {
 	Result             *ResultInfo `json:"result,omitempty"`
 	Timestamps         Timestamps  `json:"timestamps"`
 	LastError          string      `json:"last_error,omitempty"`
+
+	// The trace capture epoch cllama had last written when the worker was
+	// started. Observed once at spawn; it does not prove the live process.
+	CaptureEpoch           string     `json:"capture_epoch,omitempty"`
+	CaptureEpochObservedAt *time.Time `json:"capture_epoch_observed_at,omitempty"`
 }
 
 // Callback outcomes. Only CallbackAcked means the orchestrator acknowledged.
