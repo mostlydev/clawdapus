@@ -102,7 +102,7 @@ The worker sends these as OpenRouter's `provider` object on every request for th
 - `data_collection`: `deny` only;
 - `only`: a non-empty list of `provider[/variant][/region][/tier]` slugs.
 
-`claw up` fails on any other key or value, on a slot with no model, on a slot whose model is not `openrouter/*`, and on a service that is not `lifecycle: per-run`. cllama's [data policy](/guide/data-policy) also sets OpenRouter's zero-retention and no-data-collection controls itself, and refuses a request whose preferences would weaken them.
+`claw up` fails on any other key or value, on a slot with no model, on a slot whose model is not `openrouter/*`, and on a service that is not `lifecycle: per-run`. cllama's [data policy](/guide/data-policy) also sets OpenRouter's zero-retention and no-data-collection controls itself, and refuses a request whose preferences would weaken them. An `only` pin selects endpoints but is not evidence of where processing happens: under the default US/EU policy the slot still needs a regional route or a matching `processing:<region>` attestation.
 
 ### Managed-service bearer authentication
 
