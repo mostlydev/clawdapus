@@ -196,7 +196,17 @@ func (srv *Server) Listen(ctx context.Context, dir string) error {
 func (srv *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		// The capture epoch is read fresh on every request so an orchestrator
+		// can pin it before launching. It is file-observed, not proof of the
+		// live proxy process; null means the journal is off or unreadable.
+		health := map[string]any{"ok": true, "capture_epoch": nil, "capture_epoch_observed_at": nil}
+		if epoch, err := srv.Sup.ReadCaptureEpoch(); err != nil {
+			health["capture_epoch_warning"] = err.Error()
+		} else if epoch != "" {
+			health["capture_epoch"] = epoch
+			health["capture_epoch_observed_at"] = srv.Sup.cfg.Now().UTC()
+		}
+		writeJSON(w, http.StatusOK, health)
 	})
 	mux.HandleFunc("GET /v1/identity", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"protocol": ProtocolVersion, "pod": srv.Pod, "uid": os.Geteuid()})
@@ -397,6 +407,9 @@ type StatusView struct {
 	Deadline           *time.Time  `json:"deadline,omitempty"`
 	Timestamps         Timestamps  `json:"timestamps"`
 	Pending            string      `json:"pending,omitempty"`
+
+	CaptureEpoch           string     `json:"capture_epoch,omitempty"`
+	CaptureEpochObservedAt *time.Time `json:"capture_epoch_observed_at,omitempty"`
 }
 
 func statusView(rec *Record) *StatusView {
@@ -408,6 +421,7 @@ func statusView(rec *Record) *StatusView {
 		SpecDigest: rec.SpecDigest, RunAgentID: rec.RunAgentID, State: rec.State, Cancelled: rec.Cancelled,
 		Revoked: rec.Revoked, RevocationProof: rec.RevocationProof, Failure: rec.Failure, Result: rec.Result, Credential: rec.Credential,
 		Callbacks: rec.Callbacks, Deadline: rec.Deadline, Timestamps: rec.Timestamps, Pending: rec.LastError,
+		CaptureEpoch: rec.CaptureEpoch, CaptureEpochObservedAt: rec.CaptureEpochObservedAt,
 	}
 	if rec.Spec != nil {
 		v.Template = rec.Spec.Template
