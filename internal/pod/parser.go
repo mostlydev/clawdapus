@@ -88,6 +88,8 @@ type rawClawBlock struct {
 
 	ReasoningEffort map[string]string    `yaml:"reasoning-effort"`
 	DataPolicy      *rawDataPolicyConfig `yaml:"data-policy"`
+
+	ProviderPreferences map[string]*rawProviderPreferences `yaml:"provider-preferences"`
 }
 
 type rawContextConfig struct {
@@ -383,6 +385,9 @@ func Parse(r io.Reader) (*Pod, error) {
 				Run:          runLimits,
 			}
 			if service.Claw.ReasoningEffort, err = parseReasoningEffort(svc.XClaw.ReasoningEffort, lifecycle); err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
+			}
+			if service.Claw.ProviderPreferences, err = parseProviderPreferences(svc.XClaw.ProviderPreferences, lifecycle); err != nil {
 				return nil, fmt.Errorf("service %q: %w", name, err)
 			}
 			if service.Claw.DataPolicy, err = parseDataPolicy(svc.XClaw.DataPolicy); err != nil {

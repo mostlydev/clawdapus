@@ -180,3 +180,61 @@ func TestValidateRunWorkerRejectsEffortForUnknownSlot(t *testing.T) {
 		t.Fatalf("expected unknown-slot rejection, got %v", err)
 	}
 }
+
+func TestCompileRunWorkerProviderPreferencesBesideEffort(t *testing.T) {
+	rc := newRunWorkerRC(t)
+	rc.Models["primary"] = "openrouter/google/gemini-3.8-flash"
+	rc.ReasoningEffort = map[string]string{"primary": "high"}
+	yes, no := true, false
+	rc.ProviderPreferences = map[string]*driver.OpenRouterPreferences{"primary": {
+		Only: []string{"google-vertex/global", "amazon-bedrock"}, ZDR: &yes, AllowFallbacks: &no, RequireParameters: &yes, DataCollection: "deny",
+	}}
+	models := runWorkerModels(t, rc)
+	extra, _ := models["primary"]["extra_body"].(map[string]interface{})
+	provider, _ := extra["provider"].(map[string]interface{})
+	only, _ := provider["only"].([]interface{})
+	if len(extra) != 2 || extra["reasoning_effort"] != "high" || len(provider) != 5 || len(only) != 2 || only[0] != "google-vertex/global" ||
+		provider["zdr"] != true || provider["allow_fallbacks"] != false || provider["require_parameters"] != true || provider["data_collection"] != "deny" {
+		t.Fatalf("primary extra_body = %v", models["primary"]["extra_body"])
+	}
+	if _, ok := models["fallback"]["extra_body"]; ok {
+		t.Fatalf("a slot without preferences must not carry extra_body: %v", models["fallback"])
+	}
+}
+
+func TestCompileRunWorkerWithoutProviderPreferencesIsUnchanged(t *testing.T) {
+	rc := newRunWorkerRC(t)
+	before, err := generateRunConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc.ProviderPreferences = map[string]*driver.OpenRouterPreferences{}
+	after, err := generateRunConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("empty preferences must leave the config unchanged:\n%s\n%s", before, after)
+	}
+}
+
+func TestValidateRunWorkerProviderPreferencesRequireOpenRouterSlot(t *testing.T) {
+	yes := true
+	for name, models := range map[string]map[string]string{
+		"unknown slot":   {"fallback": "openrouter/x/y"},
+		"non-openrouter": {"primary": "openai/gpt-6-luna"},
+	} {
+		rc := newRunWorkerRC(t)
+		for slot, ref := range models {
+			rc.Models[slot] = ref
+		}
+		slot := "primary"
+		if name == "unknown slot" {
+			slot = "reasoning"
+		}
+		rc.ProviderPreferences = map[string]*driver.OpenRouterPreferences{slot: {ZDR: &yes}}
+		if err := (&Driver{}).ValidateRunWorker(rc); err == nil || !strings.Contains(err.Error(), "provider-preferences") {
+			t.Errorf("%s: expected rejection, got %v", name, err)
+		}
+	}
+}

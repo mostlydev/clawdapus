@@ -70,6 +70,15 @@ func (d *Driver) ValidateRunWorker(rc *driver.ResolvedClaw) error {
 			return fmt.Errorf("picoclaw driver: x-claw.reasoning-effort names model slot %q, which has no MODEL", slot)
 		}
 	}
+	for slot := range rc.ProviderPreferences {
+		ref, ok := rc.Models[slot]
+		if !ok {
+			return fmt.Errorf("picoclaw driver: x-claw.provider-preferences names model slot %q, which has no MODEL", slot)
+		}
+		if provider, _, _ := shared.SplitModelRef(strings.TrimSpace(ref)); provider != "openrouter" {
+			return fmt.Errorf("picoclaw driver: x-claw.provider-preferences applies only to openrouter/* models; slot %q is %q", slot, ref)
+		}
+	}
 	return nil
 }
 
@@ -158,9 +167,17 @@ func generateRunConfig(rc *driver.ResolvedClaw) ([]byte, error) {
 			"api_keys":   []string{driver.RunPlaceholderCllamaToken},
 		}
 		// PicoClaw copies extra_body over the whole request body, so it
-		// carries only the validated effort and never comes from CONFIGURE.
+		// carries only the validated effort and OpenRouter preferences, and
+		// never comes from CONFIGURE.
+		extra := map[string]interface{}{}
 		if effort := rc.ReasoningEffort[slot]; effort != "" {
-			entry["extra_body"] = map[string]interface{}{"reasoning_effort": effort}
+			extra["reasoning_effort"] = effort
+		}
+		if prefs := rc.ProviderPreferences[slot]; prefs != nil {
+			extra["provider"] = prefs.Object()
+		}
+		if len(extra) > 0 {
+			entry["extra_body"] = extra
 		}
 		models = append(models, entry)
 	}

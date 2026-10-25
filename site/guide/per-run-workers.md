@@ -75,6 +75,35 @@ A template can ask for a reasoning effort per model slot:
 
 The worker then sends `reasoning_effort` on every request for that slot, and cllama forwards it (as `reasoning.effort` for models served through the Responses API). Slots without an entry send no effort, so the model's default applies. `claw up` fails if the service is not `lifecycle: per-run`, if the slot has no model, or if the value is not one of the five above. cllama still rejects a value that the selected model does not support, such as `minimal` on GPT-6 models. To offer the same model at several efforts, declare one template per effort.
 
+### OpenRouter provider preferences (Unreleased)
+
+A template whose slot routes through OpenRouter can pin that slot's upstream endpoints:
+
+```yaml
+    x-claw:
+      lifecycle: per-run
+      models:
+        primary: openrouter/google/gemini-3.8-flash
+      reasoning-effort:
+        primary: high
+      provider-preferences:
+        primary:
+          only: [google-vertex/global]   # OpenRouter endpoint slugs
+          allow_fallbacks: false
+          require_parameters: true
+          zdr: true
+          data_collection: deny
+```
+
+The worker sends these as OpenRouter's `provider` object on every request for that slot, beside `reasoning_effort`. Only these five keys are accepted, and each can only narrow routing:
+
+- `zdr`, `require_parameters`: `true` only;
+- `allow_fallbacks`: `false` only;
+- `data_collection`: `deny` only;
+- `only`: a non-empty list of `provider[/variant][/region][/tier]` slugs.
+
+`claw up` fails on any other key or value, on a slot with no model, on a slot whose model is not `openrouter/*`, and on a service that is not `lifecycle: per-run`. cllama's [data policy](/guide/data-policy) also sets OpenRouter's zero-retention and no-data-collection controls itself, and refuses a request whose preferences would weaken them. An `only` pin selects endpoints but is not evidence of where processing happens: under the default US/EU policy the slot still needs a regional route or a matching `processing:<region>` attestation.
+
 ### Managed-service bearer authentication
 
 For a per-run consumer, a descriptor's `auth.env` resolves from that consumer's

@@ -99,6 +99,10 @@ type ResolvedClaw struct {
 	Cllama          []string          // ordered cllama proxy types (e.g., ["passthrough"])
 	CllamaToken     string            // per-agent bearer token injected when cllama is active
 	Hermes          *HermesConfig     // Hermes-specific pod config
+
+	// ProviderPreferences maps an openrouter/* model slot to the OpenRouter
+	// routing preferences a per-run worker sends (x-claw.provider-preferences).
+	ProviderPreferences map[string]*OpenRouterPreferences
 }
 
 type HermesConfig struct {
@@ -246,4 +250,40 @@ type ContainerRef struct {
 type Health struct {
 	OK     bool
 	Detail string
+}
+
+// OpenRouterPreferences is the validated subset of OpenRouter's provider
+// routing object. Every field may only narrow routing: the booleans accept a
+// single value and data collection can only be denied.
+type OpenRouterPreferences struct {
+	Only              []string
+	ZDR               *bool  // true only
+	AllowFallbacks    *bool  // false only
+	RequireParameters *bool  // true only
+	DataCollection    string // "deny" only
+}
+
+// Object returns the OpenRouter "provider" request object.
+func (p *OpenRouterPreferences) Object() map[string]interface{} {
+	out := map[string]interface{}{}
+	if len(p.Only) > 0 {
+		only := make([]interface{}, len(p.Only))
+		for i, slug := range p.Only {
+			only[i] = slug
+		}
+		out["only"] = only
+	}
+	if p.ZDR != nil {
+		out["zdr"] = *p.ZDR
+	}
+	if p.AllowFallbacks != nil {
+		out["allow_fallbacks"] = *p.AllowFallbacks
+	}
+	if p.RequireParameters != nil {
+		out["require_parameters"] = *p.RequireParameters
+	}
+	if p.DataCollection != "" {
+		out["data_collection"] = p.DataCollection
+	}
+	return out
 }
