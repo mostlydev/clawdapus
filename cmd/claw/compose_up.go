@@ -668,14 +668,14 @@ func runComposeUp(podFile string) (err error) {
 						ContextBlocks:     agentContextBlocks(p, name),
 						ServiceAuth:       ordinalAuth,
 						ChannelAllowlist:  conversationWallAllowlists[ordinalName],
-						Metadata: injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
+						Metadata: injectAgentDataPolicy(injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
 							"service":  name,
 							"ordinal":  i,
 							"pod":      p.Name,
 							"type":     rc.ClawType,
 							"token":    tokens[ordinalName],
 							"timezone": rc.Timezone,
-						}, rc.Models), agentBudgetPolicy(p, name)),
+						}, rc.Models), agentBudgetPolicy(p, name)), agentDataPolicy(p, name)),
 					})
 				}
 				continue
@@ -717,13 +717,13 @@ func runComposeUp(podFile string) (err error) {
 				ContextBlocks:     agentContextBlocks(p, name),
 				ServiceAuth:       svcAuth,
 				ChannelAllowlist:  conversationWallAllowlists[name],
-				Metadata: injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
+				Metadata: injectAgentDataPolicy(injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
 					"service":  name,
 					"pod":      p.Name,
 					"type":     rc.ClawType,
 					"token":    tokens[name],
 					"timezone": rc.Timezone,
-				}, rc.Models), agentBudgetPolicy(p, name)),
+				}, rc.Models), agentBudgetPolicy(p, name)), agentDataPolicy(p, name)),
 			})
 		}
 		for _, name := range perRunNames {
@@ -756,13 +756,13 @@ func runComposeUp(podFile string) (err error) {
 				ToolPolicy:    agentToolPolicy(p, name),
 				Rules:         rules,
 				ContextBlocks: agentContextBlocks(p, name),
-				Metadata: injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
+				Metadata: injectAgentDataPolicy(injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
 					"service":   name,
 					"pod":       p.Name,
 					"type":      rc.ClawType,
 					"lifecycle": pod.LifecyclePerRun,
 					"timezone":  rc.Timezone,
-				}, rc.Models), agentBudgetPolicy(p, name)),
+				}, rc.Models), agentBudgetPolicy(p, name)), agentDataPolicy(p, name)),
 			}
 		}
 		if err := cllama.GenerateContextDir(runtimeDir, contextInputs); err != nil {
@@ -1808,6 +1808,36 @@ func buildRulesManifestEntries(includes []driver.ResolvedInclude) ([]cllama.Rule
 		})
 	}
 	return out, nil
+}
+
+// agentDataPolicy resolves a service's data policy, falling back to the
+// conservative default, so every agent context states its policy explicitly.
+func agentDataPolicy(p *pod.Pod, serviceName string) *cllama.DataPolicy {
+	policy := pod.DefaultDataPolicy()
+	if svc := p.Services[serviceName]; svc != nil && svc.Claw != nil && svc.Claw.DataPolicy != nil {
+		policy = svc.Claw.DataPolicy
+	}
+	out := &cllama.DataPolicy{
+		Version:        1,
+		Regions:        append([]string{}, policy.Regions...),
+		Training:       policy.Training,
+		Retention:      policy.Retention,
+		LocalRetention: policy.LocalRetention,
+		Attestations:   []cllama.DataPolicyAttestation{},
+	}
+	for _, att := range policy.Attestations {
+		out.Attestations = append(out.Attestations, cllama.DataPolicyAttestation{
+			Provider:   att.Provider,
+			Endpoint:   att.Endpoint,
+			Guarantees: append([]string{}, att.Guarantees...),
+		})
+	}
+	return out
+}
+
+func injectAgentDataPolicy(meta map[string]any, policy *cllama.DataPolicy) map[string]any {
+	meta["data_policy"] = policy
+	return meta
 }
 
 func injectAgentBudget(meta map[string]any, budget *cllama.BudgetPolicy) map[string]any {

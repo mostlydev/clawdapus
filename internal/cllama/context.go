@@ -83,6 +83,26 @@ type BudgetPolicy struct {
 	Behavior    string   `json:"behavior"`
 }
 
+// DataPolicy is the region, training and retention policy cllama enforces for
+// an agent, written into metadata.json as "data_policy". Clawdapus always
+// writes it, defaults included.
+type DataPolicy struct {
+	Version        int                     `json:"version"`
+	Regions        []string                `json:"regions"`
+	Training       string                  `json:"training"`
+	Retention      string                  `json:"retention"`
+	LocalRetention string                  `json:"local_retention"`
+	Attestations   []DataPolicyAttestation `json:"attestations"`
+}
+
+// DataPolicyAttestation binds account-level guarantees to one provider
+// endpoint. An empty Endpoint covers only the provider's official endpoints.
+type DataPolicyAttestation struct {
+	Provider   string   `json:"provider"`
+	Endpoint   string   `json:"endpoint"`
+	Guarantees []string `json:"guarantees"`
+}
+
 type ChannelAllowlistManifest struct {
 	Version  int      `json:"version"`
 	Channels []string `json:"channels"`
