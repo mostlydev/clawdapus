@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -45,5 +48,41 @@ func TestDataPolicyCoverageWarnsForClawsOutsideCllama(t *testing.T) {
 	})
 	if len(warnings) != 1 || !strings.Contains(warnings[0], `"direct"`) {
 		t.Fatalf("warnings = %v", warnings)
+	}
+}
+
+// A copied quickstart is an operator's starting configuration, so it must not
+// silently opt into broader processing or claim unverified account assurances.
+func TestUserExamplesAndScaffoldKeepConservativeDataPolicy(t *testing.T) {
+	for _, name := range []string{"quickstart", "hermes-quickstart", "nanobot", "picoclaw", "master-claw", "trading-desk", "mcp-stdio", "perplexity-stdio", "ollama-quickstart", "rollcall"} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "examples", name, "claw-pod.yml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Run(name, func(t *testing.T) { assertConservativeExamplePolicy(t, string(raw)) })
+	}
+	t.Run("init", func(t *testing.T) {
+		assertConservativeExamplePolicy(t, renderInitPod(&initResolvedConfig{ProjectName: "example", AgentName: "assistant", Cllama: "passthrough", Platform: "none"}))
+	})
+}
+func assertConservativeExamplePolicy(t *testing.T, source string) {
+	t.Helper()
+	p, err := pod.Parse(strings.NewReader(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for name, svc := range p.Services {
+		if svc.Claw == nil {
+			continue
+		}
+		found = true
+		policy := agentDataPolicy(p, name)
+		if !reflect.DeepEqual(policy.Regions, []string{"eu", "us"}) || policy.Training != "none" || policy.Retention != "none" || policy.LocalRetention != "none" || len(policy.Attestations) != 0 {
+			t.Fatalf("%s broadens the default or asserts unverified terms: %+v", name, policy)
+		}
+	}
+	if !found {
+		t.Fatal("example has no governed claw")
 	}
 }

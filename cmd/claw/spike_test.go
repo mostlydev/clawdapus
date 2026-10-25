@@ -105,7 +105,7 @@ func TestSpikeComposeUp(t *testing.T) {
 
 	// Write a pre-expanded spike pod YAML so Go YAML parser sees real IDs.
 	rawPod := spikeReadFile(t, filepath.Join(dir, "claw-pod.yml"))
-	expandedPod := spikeExpandEnvVars(rawPod, env)
+	expandedPod := spikePermissiveExamplePolicy(t, spikeExpandEnvVars(rawPod, env))
 	spikePodPath := filepath.Join(dir, "spike-pod.yml")
 	if err := os.WriteFile(spikePodPath, []byte(expandedPod), 0644); err != nil {
 		t.Fatalf("write spike-pod.yml: %v", err)
@@ -794,80 +794,34 @@ func spikeEnsureRepoInfraImages(t *testing.T, repoRoot string, components ...str
 	}
 }
 
-// spikeEnsureCllamaPassthroughImage guarantees a local image exists for
-// ghcr.io/mostlydev/cllama:latest. For spike coverage we prefer the local
-// submodule under test over any cached image, then fall back to GitHub, then
-// finally to a stub image if no real build is possible.
+// spikeEnsureCllamaPassthroughImage uses only reviewed local source at a unique
+// test tag, or the real published pin when explicitly requested. Never replace
+// release tags or silently substitute unrelated source/a stub for a failed build.
 func spikeEnsureCllamaPassthroughImage(t *testing.T, repoRoot string) {
 	t.Helper()
-	tags := []string{"ghcr.io/mostlydev/cllama:latest"}
-	if preferred := preferredInfraImageRef(infraComponentCllama); preferred != "" && preferred != tags[0] {
-		tags = append(tags, preferred)
-	}
-
-	localContext := filepath.Join(repoRoot, "cllama")
-	localDockerfile := filepath.Join(localContext, "Dockerfile")
-	if repoRoot != "" {
-		if _, err := os.Stat(localDockerfile); err == nil {
-			t.Logf("building local cllama image from %s as %s", localContext, strings.Join(tags, ", "))
-			args := []string{"build"}
-			for _, tag := range tags {
-				args = append(args, "-t", tag)
-			}
-			args = append(args, localContext)
-			cmd := exec.Command("docker", args...)
-			out, err := cmd.CombinedOutput()
-			if err == nil {
-				t.Logf("built local cllama image from working tree")
-				return
-			}
-			t.Logf("local cllama build failed, falling back to GitHub: %v\n%s", err, out)
+	if os.Getenv("CLAW_SPIKE_PINNED_CLLAMA") == "1" {
+		ref := infraImageSpecFor(infraComponentCllama).ExpectedRef
+		out, err := exec.Command("docker", "pull", ref).CombinedOutput()
+		if err != nil {
+			t.Fatalf("pull published cllama %s: %v\n%s", ref, err, out)
 		}
-	}
-
-	// Try building from the GitHub repo.
-	const repo = "https://github.com/mostlydev/cllama.git"
-	t.Logf("building real cllama from %s", repo)
-	args := []string{"build"}
-	for _, tag := range tags {
-		args = append(args, "-t", tag)
-	}
-	args = append(args, repo)
-	cmd := exec.Command("docker", args...)
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Logf("built real cllama image from GitHub")
+		t.Logf("using pulled published cllama %s", ref)
 		return
 	}
-	t.Logf("GitHub build failed, falling back to stub: %v\n%s", err, out)
-
-	// Fallback: minimal stub that passes healthcheck but doesn't proxy.
-	dockerfile := strings.NewReader(`FROM alpine:3.20
-RUN cat >/cllama <<'EOF'
-#!/bin/sh
-if [ "$1" = "-healthcheck" ]; then
-  exit 0
-fi
-while true; do
-  sleep 3600
-done
-EOF
-RUN chmod +x /cllama
-ENTRYPOINT ["/cllama"]
-`)
-
-	stubArgs := []string{"build"}
-	for _, tag := range tags {
-		stubArgs = append(stubArgs, "-t", tag)
+	previous := infraCllamaTag
+	infraCllamaTag = fmt.Sprintf("spike-source-%d", time.Now().UnixNano())
+	ref := preferredInfraImageRef(infraComponentCllama)
+	t.Cleanup(func() { infraCllamaTag = previous; _ = exec.Command("docker", "image", "rm", "-f", ref).Run() })
+	source := filepath.Join(repoRoot, "cllama")
+	if _, err := os.Stat(filepath.Join(source, "Dockerfile")); err != nil {
+		t.Fatalf("cllama source is required: %v", err)
 	}
-	stubArgs = append(stubArgs, "-")
-	stubCmd := exec.Command("docker", stubArgs...)
-	stubCmd.Stdin = dockerfile
-	stubOut, stubErr := stubCmd.CombinedOutput()
-	if stubErr != nil {
-		t.Fatalf("build cllama stub image: %v\n%s", stubErr, stubOut)
+	revision, err := exec.Command("git", "-C", source, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("resolve cllama source revision: %v", err)
 	}
-	t.Logf("built cllama stub image (no real proxy) as %s", strings.Join(tags, ", "))
+	t.Logf("cllama source %s built as %s", strings.TrimSpace(string(revision)), ref)
+	spikeBuildImage(t, source, ref, "Dockerfile")
 }
 
 // spikeWaitHealthy waits until the Docker healthcheck reports "healthy".

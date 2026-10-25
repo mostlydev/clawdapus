@@ -76,6 +76,42 @@ Fields:
 
 Unknown keys are rejected, so a misspelled field fails `claw up` instead of quietly keeping a default.
 
+## OpenRouter US setup
+
+For an eligible OpenRouter Business/Enterprise account, select the US regional origin and verify that BYOK deployments and configured observability destinations also meet US processing and zero-retention requirements. Add these fields to the **existing** pod/service blocks; keep the rest of the pod configuration. Do not attest settings you have not verified:
+
+```yaml
+x-claw:
+  data-policy-defaults:
+    attestations:
+      - provider: openrouter
+        endpoint: https://us.openrouter.ai/api/v1
+        guarantees: [processing:us, zero-data-retention]
+services:
+  assistant:
+    x-claw:
+      cllama-env:
+        OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+        OPENROUTER_BASE_URL: https://us.openrouter.ai/api/v1
+```
+
+cllama enforces OpenRouter's no-data-collection and ZDR request controls in addition to these account assurances. Configure each fallback independently, or remove an unconfigured fallback. An EU route requires an EU-only deployment assurance; the gateway's broader European footprint alone is insufficient.
+
+## Explicit development opt-out
+
+For synthetic development data, an operator may deliberately replace `data-policy-defaults` with this permissive policy. It permits global processing and the provider's ordinary training/retention terms, and enables ordinary proxy content history. Canonical examples and `claw init` never select this automatically:
+
+```yaml
+x-claw:
+  data-policy-defaults:
+    regions: [global]
+    training: allowed
+    retention: provider-default
+    local-retention: allowed
+```
+
+Relax only the requirements you intend to relax; omitted fields stay conservative. Recompile with `claw up -d`. This does not enable the separate trace journal.
+
 ## Expanding to Japan and other regions
 
 Adding a region allows it; it does not route traffic there by itself. cllama then accepts providers that can show processing in any allowed region.

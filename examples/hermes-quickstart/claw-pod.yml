@@ -1,14 +1,7 @@
 x-claw:
   pod: hermes-quickstart
-  # Example policy: relaxes the conservative default (US/EU only, no training,
-  # no retention) so the example runs on an ordinary provider account. For real
-  # workloads keep the defaults and attest your account's guarantees instead.
-  # See https://clawdapus.dev/guide/data-policy
-  data-policy-defaults:
-    regions: [global]
-    training: allowed
-    retention: provider-default
-    local-retention: allowed
+  # Model requests keep the conservative data-policy defaults.
+  # Configure a verified route/account before inference; see https://clawdapus.dev/guide/data-policy.
 
 services:
   assistant:

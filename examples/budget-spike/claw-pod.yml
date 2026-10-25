@@ -15,9 +15,8 @@ x-claw:
       OPENAI_BASE_URL: http://fake-provider:8080/v1
   models-defaults:
     primary: openai/gpt-5.6
-  # Example policy: relaxes the conservative default (US/EU only, no training,
-  # no retention) so the example runs on an ordinary provider account. For real
-  # workloads keep the defaults and attest your account's guarantees instead.
+  # Synthetic budget-test fixture only: explicitly relaxes policy to exercise
+  # accounting on ordinary provider accounts. Do not use as a workload template.
   # See https://clawdapus.dev/guide/data-policy
   data-policy-defaults:
     regions: [global]
