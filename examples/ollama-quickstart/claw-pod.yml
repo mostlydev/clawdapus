@@ -1,5 +1,16 @@
 x-claw:
   pod: ollama-quickstart
+  # Ollama runs in this pod, so attest it instead of relaxing the policy.
+  # The model is routed as openai/<model> through OPENAI_BASE_URL, so the
+  # attestation names provider openai with the in-pod Ollama endpoint.
+  # Replace processing:us/storage:us with where this host actually runs.
+  # See https://clawdapus.dev/guide/data-policy
+  data-policy-defaults:
+    local-retention: allowed
+    attestations:
+      - provider: openai
+        endpoint: http://ollama:11434/v1
+        guarantees: [processing:us, storage:us, zero-data-retention, no-training]
 
 services:
   assistant:

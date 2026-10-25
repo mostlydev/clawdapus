@@ -82,6 +82,12 @@ func TestSpikePerRunProviderLive(t *testing.T) {
 	spikeWriteFile(t, podFile, fmt.Sprintf(`name: %s
 x-claw:
   pod: %s
+  # Test fixture: an ordinary provider account cannot meet the conservative default.
+  data-policy-defaults:
+    regions: [global]
+    training: allowed
+    retention: provider-default
+    local-retention: allowed
   cllama-defaults:
     proxy: [passthrough]
     env:

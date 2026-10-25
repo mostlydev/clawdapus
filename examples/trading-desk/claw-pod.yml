@@ -11,6 +11,15 @@ x-claw:
               name: trading-floor
   feeds-defaults:
     - market-context
+  # Example policy: relaxes the conservative default (US/EU only, no training,
+  # no retention) so the example runs on an ordinary provider account. For real
+  # workloads keep the defaults and attest your account's guarantees instead.
+  # See https://clawdapus.dev/guide/data-policy
+  data-policy-defaults:
+    regions: [global]
+    training: allowed
+    retention: provider-default
+    local-retention: allowed
 
 x-trading-desk:
   cllama-agent: &cllama_agent

@@ -62,6 +62,12 @@ func TestSpikeBudgetEnforcementAndOverride(t *testing.T) {
 
 x-claw:
   pod: budget-spike
+  # Test fixture: fake provider endpoints cannot meet the conservative default.
+  data-policy-defaults:
+    regions: [global]
+    training: allowed
+    retention: provider-default
+    local-retention: allowed
   master: analyst
   budget-defaults:
     limit-usd: 0.00005
@@ -217,6 +223,12 @@ func TestSpikeFleetGovernanceBudgetLoop(t *testing.T) {
 
 x-claw:
   pod: fleet-governance-spike
+  # Test fixture: fake provider endpoints cannot meet the conservative default.
+  data-policy-defaults:
+    regions: [global]
+    training: allowed
+    retention: provider-default
+    local-retention: allowed
   master: governor
   cllama-defaults:
     proxy: [passthrough]

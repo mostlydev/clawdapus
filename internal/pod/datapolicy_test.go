@@ -72,8 +72,11 @@ func TestParseDataPolicyEndpoints(t *testing.T) {
 		}
 	}
 	for _, raw := range []string{"http://api.example.com/v1", "ftp://x.example.com", "https://u:p@x.example.com", "https://x.example.com/v1?k=1", "/v1", "https://x.example.com/#f", "https://x.example.com/v1%2Fadmin", "https://x.example.com/%761"} {
-		if _, err := parseDataPolicyEndpoint(raw); err == nil {
+		_, err := parseDataPolicyEndpoint(raw)
+		if err == nil {
 			t.Errorf("%q must be rejected", raw)
+		} else if strings.Contains(err.Error(), "x.example") || strings.Contains(err.Error(), "u:p") {
+			t.Errorf("rejection must not echo the endpoint: %v", err)
 		}
 	}
 }

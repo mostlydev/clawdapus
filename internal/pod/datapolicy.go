@@ -250,7 +250,8 @@ func parseDataPolicyEndpoint(raw string) (string, error) {
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || strings.Contains(u.Path, "%") || strings.Contains(raw, "%") {
-		return "", fmt.Errorf("endpoint %q must be an absolute URL without credentials, encoding, query or fragment", raw)
+		// Fixed text: a rejected endpoint may carry credentials.
+		return "", fmt.Errorf("endpoint must be an absolute URL without credentials, encoding, query or fragment")
 	}
 	scheme := strings.ToLower(u.Scheme)
 	host := strings.ToLower(u.Hostname())
@@ -258,7 +259,7 @@ func parseDataPolicyEndpoint(raw string) (string, error) {
 	case scheme == "https":
 	case scheme == "http" && localDataPolicyHost(host):
 	default:
-		return "", fmt.Errorf("endpoint %q must use https (http only for a local or in-pod host)", raw)
+		return "", fmt.Errorf("endpoint must use https (http only for a local or in-pod host)")
 	}
 	u.Scheme = scheme
 	u.Host = strings.ToLower(u.Host)

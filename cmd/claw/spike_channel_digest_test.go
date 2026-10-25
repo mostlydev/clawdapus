@@ -88,6 +88,12 @@ HANDLE discord
 
 x-claw:
   pod: channel-digest-spike
+  # Test fixture: fake provider endpoints cannot meet the conservative default.
+  data-policy-defaults:
+    regions: [global]
+    training: allowed
+    retention: provider-default
+    local-retention: allowed
   channel-memory:
     service: channel-memory
 
