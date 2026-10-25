@@ -1,5 +1,7 @@
 x-claw:
   pod: picoclaw-example
+  # Model requests keep the conservative data-policy defaults.
+  # Configure a verified route/account before inference; see https://clawdapus.dev/guide/data-policy.
 
 services:
   gateway:

@@ -125,8 +125,10 @@ func TestSpikeRollCall(t *testing.T) {
 			spikeBuildImage(t, ctxDir, b.tag, b.dockerfile)
 		}
 	}
-	// Exercise published infrastructure; never replace a release tag with a local build.
-	for _, component := range []string{infraComponentClawdash, infraComponentClawWall, infraComponentCllama} {
+	// Use published supporting infrastructure and the proxy under test.
+	// CLAW_SPIKE_PINNED_CLLAMA=1 selects the published proxy for release proof.
+	spikeEnsureCllamaPassthroughImage(t, repoRoot)
+	for _, component := range []string{infraComponentClawdash, infraComponentClawWall} {
 		spikeEnsurePulledImage(t, infraImageSpecFor(component).ExpectedRef)
 	}
 
@@ -241,7 +243,7 @@ func TestSpikeRollCall(t *testing.T) {
 	}
 
 	// ── Expand env vars in pod YAML ─────────────────────────────────────
-	expandedPod := spikeExpandEnvVars(spikeReadFile(t, filepath.Join(dir, "claw-pod.yml")), env)
+	expandedPod := spikePermissiveExamplePolicy(t, spikeExpandEnvVars(spikeReadFile(t, filepath.Join(dir, "claw-pod.yml")), env))
 	generatedPath := filepath.Join(dir, "compose.generated.yml")
 	runtimeDir := filepath.Join(dir, ".claw-runtime")
 	sessionHistoryDir := filepath.Join(dir, ".claw-session-history")

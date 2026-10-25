@@ -1,5 +1,8 @@
 x-claw:
   pod: ollama-quickstart
+  # No region or retention guarantee is inferred from a local endpoint.
+  # Verify this deployment and configure its assurances before inference;
+  # see README.md and https://clawdapus.dev/guide/data-policy.
 
 services:
   assistant:
@@ -27,7 +30,8 @@ services:
   # proxy a network path to it. To use a host-side Ollama install instead,
   # delete this service plus the surfaces block and point the proxy at the
   # host in the assistant's cllama-env:
-  #   OPENAI_BASE_URL: "http://host.docker.internal:11434/v1"
+  #   OPENAI_BASE_URL: "https://your-ollama-gateway.example/v1"
+  # Configure matching verified assurances and any gateway credentials.
   ollama:
     image: ollama/ollama:latest
     entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 3 && ollama pull qwen2.5:0.5b && ollama run qwen2.5:0.5b 'warmup' >/dev/null 2>&1; wait"]

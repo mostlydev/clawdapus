@@ -16,7 +16,7 @@ Clawdapus treats the agent as an untrusted workload. It is the layer below the f
 
 ## Quickstart (5 minutes)
 
-**You need:** Docker Desktop, an [OpenRouter](https://openrouter.ai/) API key, and a Discord bot token + guild ID (see [Discord setup guide](./examples/quickstart/README.md#discord-bot-setup)).
+**You need:** Docker Desktop, an [OpenRouter](https://openrouter.ai/) API key, a provider route/account that meets the [data policy](https://clawdapus.dev/guide/data-policy), and a Discord bot token + guild ID (see [Discord setup guide](./examples/quickstart/README.md#discord-bot-setup)).
 
 ```bash
 # Install
@@ -29,6 +29,8 @@ cd clawdapus/examples/quickstart
 # Configure
 cp .env.example .env
 # Edit .env — add OPENROUTER_API_KEY, DISCORD_BOT_TOKEN, DISCORD_BOT_ID, DISCORD_GUILD_ID
+
+# Before inference: configure verified provider policy (see the setup section below).
 
 # Run the operator loop
 source .env
@@ -54,6 +56,14 @@ claw compose top
 # 4. tear the pod down when you're done
 claw down
 ```
+
+### Provider policy setup
+
+Before `claw up`, configure a [verified regional route and account assurances](https://clawdapus.dev/guide/data-policy#openrouter-us-setup) in `claw-pod.yml`. An API key alone is insufficient: the default permits US/EU processing, no training, no upstream retention, and metadata-only proxy history. The quickstart and `claw init` preserve these defaults; every configured fallback must satisfy them too.
+
+### Explicit development opt-out
+
+For synthetic development data, you may deliberately [relax specific requirements](https://clawdapus.dev/guide/data-policy#explicit-development-opt-out). This is an operator choice; no example or scaffold enables it automatically. Recompile with `claw up -d` after changing policy.
 
 The cllama governance proxy dashboard runs on port **8181** — every LLM call in real time: which agent, which model, token counts, cost.
 
@@ -378,7 +388,7 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Budget and rate enforcement:** Per-agent `x-claw.budget` caps compile into the proxy context. cllama rejects over-budget or over-rate turns with 429 and logs `budget_exceeded` / `rate_limited` interventions.
 - **Audit logging:** Structured JSON on stdout — timestamp, agent, model, latency, tokens, cost, intervention reason.
 - **Managed tool mediation:** Services declare callable tools via `claw.describe` (MCP-shaped schemas). `claw up` compiles per-agent `tools.json`. cllama injects tools into LLM requests, intercepts `tool_call` responses, executes them against the service, and loops until terminal text — transparent to the runner. HTTP services, Streamable HTTP MCP sidecars, and stdio MCP servers wrapped by `claw-mcp-stdio` are supported.
-- **Ambient memory plane:** Services declare `recall`, `retain`, and `forget` endpoints via `claw.describe`. `claw up` compiles per-agent `memory.json`. cllama calls `/recall` before each inference turn and `/retain` after each successful response (async, non-blocking). Memory intelligence stays in swappable external services — the proxy owns orchestration only.
+- **Ambient memory plane:** Services declare `recall`, `retain`, and `forget` endpoints via `claw.describe`. `claw up` compiles per-agent `memory.json`. cllama calls `/recall` before each inference turn and, with `local-retention: allowed`, `/retain` after each successful response (async, non-blocking). Memory intelligence stays in swappable external services — the proxy owns orchestration only.
 - **Context blocks:** Operators can compile short per-agent context snippets into `context-blocks.json`; cllama injects enabled blocks into late runtime context so durable operating focus stays visible without expanding the primary contract.
 - **Operator dashboard:** Real-time web UI at host port 8181 by default (container `:8081`) — agent activity, provider status, cost breakdown.
 

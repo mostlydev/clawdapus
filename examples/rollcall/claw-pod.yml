@@ -3,6 +3,8 @@
 x-claw:
   pod: rollcall
   sequential-conformance: true
+  # Model requests keep the conservative data-policy defaults.
+  # Configure a verified route/account before inference; see https://clawdapus.dev/guide/data-policy.
 
 services:
   mem-svc:

@@ -5,7 +5,7 @@ Get a governed OpenClaw agent running in 5 minutes.
 ## Prerequisites
 
 - Docker Desktop running
-- An [OpenRouter](https://openrouter.ai/) API key (or Anthropic/OpenAI)
+- A provider account and regional route meeting the [data policy](https://clawdapus.dev/guide/data-policy), plus its API key
 - A Discord bot token ([create one here](https://discord.com/developers/applications))
 
 ## Discord bot setup
@@ -35,6 +35,14 @@ cd clawdapus/examples/quickstart
 cp .env.example .env
 # Edit .env — add your OPENROUTER_API_KEY, DISCORD_BOT_TOKEN, DISCORD_BOT_ID, DISCORD_GUILD_ID
 ```
+
+## Provider policy setup
+
+Before `claw up`, configure a [verified regional route and account assurances](https://clawdapus.dev/guide/data-policy#openrouter-us-setup). An API key alone is insufficient. This pod keeps the defaults: US/EU processing, no training, no upstream retention, and metadata-only proxy history. Every configured fallback needs matching assurances too.
+
+### Explicit development opt-out
+
+For synthetic development data, you can deliberately [relax specific requirements](https://clawdapus.dev/guide/data-policy#explicit-development-opt-out). The quickstart never does this automatically. Recompile with `claw up -d` after changing policy.
 
 ## 3. Run the operator loop
 

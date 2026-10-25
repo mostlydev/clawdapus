@@ -1,5 +1,7 @@
 x-claw:
   pod: hermes-quickstart
+  # Model requests keep the conservative data-policy defaults.
+  # Configure a verified route/account before inference; see https://clawdapus.dev/guide/data-policy.
 
 services:
   assistant:

@@ -57,6 +57,14 @@ Edit `.env` and set:
 - `DISCORD_BOT_ID` -- your Discord bot's application ID
 - `DISCORD_GUILD_ID` -- the Discord server (guild) ID
 
+## Configure the provider data policy
+
+Before starting inference, configure a [verified regional route and account assurances](/guide/data-policy#openrouter-us-setup) in the pod. An ordinary API key alone does not establish the default requirements: US/EU processing, no training, no upstream retention, and metadata-only proxy history. Canonical examples and `claw init` preserve these defaults. Each configured fallback must meet the same policy.
+
+### Explicit development opt-out
+
+For synthetic development data, you can deliberately [relax specific requirements](/guide/data-policy#explicit-development-opt-out). This does not happen automatically. Recompile with `claw up -d` after changing policy.
+
 ## Run the Operator Loop
 
 ```bash
@@ -161,7 +169,7 @@ This gives your coding agent full context on Clawfiles, pod configurations, and 
 
 ## No credentials yet?
 
-The [Ollama quickstart](https://github.com/mostlydev/clawdapus/tree/master/examples/ollama-quickstart) runs a governed agent against a local model with **zero secrets** — no provider key, no Discord bot. Docker plus the `claw` CLI is the entire prerequisite list, and `claw audit` shows the governance plane working on the first turn.
+The [Ollama quickstart](https://github.com/mostlydev/clawdapus/tree/master/examples/ollama-quickstart) runs a governed agent against a local model with **zero secrets** — no provider key, no Discord bot. You must also verify and declare the local deployment's processing region and retention/training assurances before inference; a local hostname proves none of those.
 
 ## Next Steps
 

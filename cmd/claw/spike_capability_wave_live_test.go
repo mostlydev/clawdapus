@@ -82,7 +82,7 @@ func TestSpikeCapabilityWaveLive(t *testing.T) {
 	spikeEnsureRepoInfraImages(t, repoRoot, infraComponentClawdash, infraComponentClawWall)
 	spikeEnsureCllamaPassthroughImage(t, repoRoot)
 
-	expandedPod := spikeExpandEnvVars(spikeReadFile(t, filepath.Join(dir, "claw-pod.yml")), env)
+	expandedPod := spikePermissiveExamplePolicy(t, spikeExpandEnvVars(spikeReadFile(t, filepath.Join(dir, "claw-pod.yml")), env))
 	podYAML := capabilityWaveLivePod(t, expandedPod, proxyRequest)
 	podPath := filepath.Join(dir, "spike-capability-wave-live-pod.yml")
 	if err := os.WriteFile(podPath, []byte(podYAML), 0o644); err != nil {
@@ -174,11 +174,11 @@ func capabilityWaveProxyRequest(t *testing.T, env map[string]string) rollcallPro
 		cfg.CllamaEnv["XAI_API_KEY"] = xaiKey
 	case anthropicKey != "":
 		cfg.APIFormat = "anthropic"
-		cfg.Model = "claude-sonnet-4"
+		cfg.Model = "anthropic/claude-sonnet-5"
 		cfg.CllamaEnv["ANTHROPIC_API_KEY"] = anthropicKey
 	case openrouterKey != "":
 		cfg.APIFormat = "openai"
-		cfg.Model = "openrouter/anthropic/claude-sonnet-4"
+		cfg.Model = "openrouter/anthropic/claude-sonnet-5"
 		cfg.CllamaEnv["OPENROUTER_API_KEY"] = openrouterKey
 	default:
 		t.Fatal("capability-wave proxy request requires at least one real provider key")

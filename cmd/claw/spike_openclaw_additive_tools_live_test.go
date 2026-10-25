@@ -314,6 +314,13 @@ func openClawAdditiveLivePod(t *testing.T, agentImage, toolImage string, proxyRe
 	doc := map[string]any{
 		"x-claw": map[string]any{
 			"pod": "openclaw-additive-live",
+			// Test fixture: an ordinary provider account cannot meet the conservative default.
+			"data-policy-defaults": map[string]any{
+				"regions":         []any{"global"},
+				"training":        "allowed",
+				"retention":       "provider-default",
+				"local-retention": "allowed",
+			},
 		},
 		"services": map[string]any{
 			"oc-additive": map[string]any{

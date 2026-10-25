@@ -3,6 +3,8 @@ x-claw:
   models-defaults:
     primary: openrouter/anthropic/claude-sonnet-5
     fallback: anthropic/claude-haiku-4-5
+  # Model requests keep the conservative data-policy defaults.
+  # Configure a verified route/account before inference; see https://clawdapus.dev/guide/data-policy.
 services:
   assistant:
     image: quickstart-assistant:latest

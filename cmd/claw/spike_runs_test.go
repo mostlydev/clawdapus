@@ -102,6 +102,12 @@ func TestSpikePerRunWorkers(t *testing.T) {
 
 x-claw:
   pod: %s
+  # Test fixture: fake provider endpoints cannot meet the conservative default.
+  data-policy-defaults:
+    regions: [global]
+    training: allowed
+    retention: provider-default
+    local-retention: allowed
   cllama-defaults:
     proxy: [passthrough]
     env:

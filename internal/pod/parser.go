@@ -86,7 +86,8 @@ type rawClawBlock struct {
 	Lifecycle    string                 `yaml:"lifecycle"`
 	Run          *rawRunLimits          `yaml:"run"`
 
-	ReasoningEffort map[string]string `yaml:"reasoning-effort"`
+	ReasoningEffort map[string]string    `yaml:"reasoning-effort"`
+	DataPolicy      *rawDataPolicyConfig `yaml:"data-policy"`
 }
 
 type rawContextConfig struct {
@@ -383,6 +384,9 @@ func Parse(r io.Reader) (*Pod, error) {
 			}
 			if service.Claw.ReasoningEffort, err = parseReasoningEffort(svc.XClaw.ReasoningEffort, lifecycle); err != nil {
 				return nil, fmt.Errorf("service %q: %w", name, err)
+			}
+			if service.Claw.DataPolicy, err = parseDataPolicy(svc.XClaw.DataPolicy); err != nil {
+				return nil, fmt.Errorf("service %q: parse data-policy: %w", name, err)
 			}
 			if err := validatePerRunService(service); err != nil {
 				return nil, fmt.Errorf("service %q: %w", name, err)
@@ -1091,6 +1095,11 @@ func expandPodDefaults(root map[string]interface{}) error {
 		return nil
 	}
 
+	if raw, ok := rawXClaw["data-policy-defaults"]; ok && raw != nil {
+		if _, isMap := raw.(map[string]interface{}); !isMap {
+			return fmt.Errorf("x-claw.data-policy-defaults must be a mapping")
+		}
+	}
 	defaults := podDefaults{
 		CllamaDefaults:   deepCopyMapOrNil(rawXClaw["cllama-defaults"]),
 		ModelsDefaults:   deepCopyMapOrNil(rawXClaw["models-defaults"]),
@@ -1101,6 +1110,7 @@ func expandPodDefaults(root map[string]interface{}) error {
 		BudgetDefaults:   deepCopyMapOrNil(rawXClaw["budget-defaults"]),
 		MemoryDefaults:   deepCopyMapOrNil(rawXClaw["memory-defaults"]),
 		SkillsDefaults:   deepCopySliceOrNil(rawXClaw["skills-defaults"]),
+		DataPolicy:       deepCopyMapOrNil(rawXClaw["data-policy-defaults"]),
 	}
 
 	rawServices, err := mapStringAny(root["services"])
@@ -1153,6 +1163,7 @@ type podDefaults struct {
 	BudgetDefaults   map[string]interface{}
 	MemoryDefaults   map[string]interface{}
 	SkillsDefaults   []interface{}
+	DataPolicy       map[string]interface{}
 }
 
 func applyRawPodDefaults(raw map[string]interface{}, defaults podDefaults) error {
@@ -1175,6 +1186,9 @@ func applyRawPodDefaults(raw map[string]interface{}, defaults podDefaults) error
 		return err
 	}
 	if err := applyRawObjectDefault(raw, "budget", defaults.BudgetDefaults); err != nil {
+		return err
+	}
+	if err := applyRawObjectDefault(raw, "data-policy", defaults.DataPolicy); err != nil {
 		return err
 	}
 	if err := applyRawObjectDefault(raw, "memory", defaults.MemoryDefaults); err != nil {

@@ -132,6 +132,8 @@ The cursor ledger lives at `$CLAW_CONTEXT_LEDGER_DIR/<agent-id>/cursor.json`. Th
 
 The proxy strips the dummy token, attaches the real provider API key, and forwards the request upstream. Declared model failover is implemented for key/provider exhaustion, transport failures, and eligible upstream 5xx responses before downstream bytes are committed. Auth, quota, and provider rate-limit responses keep their existing key-state semantics.
 
+Before each upstream call, including every failover candidate, cllama checks the agent's [data policy](/guide/data-policy): the allowed processing regions and whether the provider may train on or retain content. A candidate that cannot be shown to meet the policy is refused rather than sent.
+
 ### Egress
 
 The provider response is returned to the agent. The reference passthrough proxy does not amend final text, redact PII, or compute a drift score. Those behaviors belong in a future/custom policy proxy layered on the same context and telemetry contracts.

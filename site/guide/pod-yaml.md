@@ -55,6 +55,7 @@ The top-level `x-claw` block declares shared configuration that all services inh
 | `tools-defaults` | Managed tool allowlists inherited by all services |
 | `tool-policy-defaults` | Managed-tool mediation policy (`max-rounds`, `timeout-per-tool-ms`, `total-timeout-ms`) inherited by all services |
 | `budget-defaults` | Proxy-enforced spend and request-rate caps inherited by all cllama-managed services |
+| `data-policy-defaults` | Allowed processing regions, provider training and retention, local content retention, and provider attestations, enforced by cllama on every request. Defaults to US/EU, no training, no retention. See [Data Policy](/guide/data-policy) |
 | `memory-defaults` | Memory service subscription inherited by all services |
 | `skills-defaults` | Operator skill files inherited by all services |
 | `handles-defaults` | Shared chat topology (guild IDs, channel IDs) inherited by all services |
@@ -96,7 +97,7 @@ services:
           message: "Run morning market analysis."
 ```
 
-Service-level fields include `agent`, `persona`, `describe-file`, `cllama`, `cllama-env`, `models`, `handles`, `feeds`, `tools`, `tool-policy`, `budget`, `memory`, `include`, `surfaces`, `skills`, `invoke`, `context`, `claw-api`, `mcp-stdio`, `hermes`, and `count`.
+Service-level fields include `agent`, `persona`, `describe-file`, `cllama`, `cllama-env`, `models`, `handles`, `feeds`, `tools`, `tool-policy`, `budget`, `data-policy`, `memory`, `include`, `surfaces`, `skills`, `invoke`, `context`, `claw-api`, `mcp-stdio`, `hermes`, and `count`.
 
 ### Managed-Tool Mediation Policy
 
@@ -144,6 +145,10 @@ services:
 ```
 
 `id` and `text` are required. `kind` defaults to `context_block`, `enabled` defaults to `true`, `cadence` currently supports `every_turn`, `placement` supports `before_feeds` and `after_feeds` (default), and `max-chars` defaults to `800`. `claw up` validates the manifest and writes `context-blocks.json` to each subscribing agent's cllama context directory.
+
+### Data Policy
+
+Every cllama-managed service runs under a data policy that sets allowed processing regions, whether providers may train on or retain content, and whether cllama keeps content locally. The default is the most conservative: US/EU only, no training, no retention, no local content. `data-policy-defaults` sets it for the pod; a service-level `data-policy` replaces it entirely. See [Data Policy](/guide/data-policy) for the fields, what each provider can establish, and how to allow Japan or other regions.
 
 ### Budget And Request-Rate Caps
 

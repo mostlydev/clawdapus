@@ -86,6 +86,9 @@ type ClawBlock struct {
 	// ReasoningEffort maps a model slot to the reasoning effort a per-run
 	// worker requests for it.
 	ReasoningEffort map[string]string
+	// DataPolicy is the region, training and retention policy cllama
+	// enforces for this service. Nil means the conservative default.
+	DataPolicy *DataPolicyConfig
 }
 
 // LifecyclePerRun marks a claw service as a per-run worker template: claw up
