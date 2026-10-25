@@ -31,7 +31,7 @@ An attestation cannot override a known contradiction. If a model or feature is d
 | Anthropic | On supported Messages models, cllama sets `inference_geo: us` when the US is allowed. Other regions and older models need a `processing:<region>` attestation. | `no-training` attestation. | `zero-data-retention` attestation, eligible features only. Model families whose standard offering mandates retention are refused under `retention: none`. |
 | Google (Gemini API) | The global Developer API endpoint establishes no region; a regional deployment needs a `processing:<region>` attestation. | `no-training` attestation (an API key does not prove the paid tier). | Paid no-training is not zero retention; an eligible deployment must be attested. |
 | OpenRouter | Its US/EU regional origins constrain shared endpoints, but your bring-your-own-key deployments and observability destinations stay your responsibility. Even on a regional origin, a `processing:<region>` attestation is required, and the global origin is never used as a fallback. | cllama sets `provider.data_collection: "deny"`. | cllama sets `provider.zdr: true`; a `zero-data-retention` attestation must also cover any observability destinations you configured. A request's own `provider` preferences may narrow routing but never weaken these. |
-| Vercel AI Gateway | No region is inferred from the global URL; `processing:<region>` attestation. | `no-training` attestation. | cllama sets `providerOptions.gateway.zeroDataRetention: true`, within the account's eligibility. |
+| Vercel AI Gateway | No region is inferred from the global URL; `processing:<region>` attestation. | `no-training` attestation. | cllama sets `providerOptions.gateway.zeroDataRetention: true`, and a `zero-data-retention` attestation is also required: bring-your-own-key eligibility and your own destinations cannot be inferred. Other `providerOptions` are refused. |
 | xAI | The documented US endpoint keeps processing in the US; others need an attestation. | `no-training` attestation. | Team-level `zero-data-retention` attestation before any content is sent. |
 | Meta, custom endpoints, Ollama | Nothing is inferred from a provider name or hostname (an Ollama URL may be remote): `processing:<region>` attestation for that endpoint. | `no-training` attestation. | `zero-data-retention` attestation. |
 
@@ -52,10 +52,11 @@ x-claw:
     retention: none
     local-retention: none
     attestations:
+      # Each guarantee must be true of your account; cllama cannot verify it.
       - provider: openai
-        guarantees: [zero-data-retention]
-      - provider: anthropic
-        guarantees: [zero-data-retention]
+        guarantees: [no-training, processing:us, zero-data-retention]
+      - provider: anthropic                # cllama sets inference_geo: us itself
+        guarantees: [no-training, zero-data-retention]
 ```
 
 Fields:
@@ -96,7 +97,7 @@ services:
         attestations:
           - provider: openai
             endpoint: https://<your-jp-endpoint>/v1
-            guarantees: [processing:jp, storage:jp, zero-data-retention]
+            guarantees: [no-training, processing:jp, storage:jp, zero-data-retention]
       cllama-env:
         OPENAI_BASE_URL: https://<your-jp-endpoint>/v1
 ```
@@ -124,11 +125,13 @@ services:
 
 ## Local retention
 
-With `local-retention: none`, cllama still records metadata for every request: ids, model, token usage, cost, status and timestamps. Budgets, cost reporting and `claw audit` keep working. Request, response and tool content, context snapshots, and automatically retained memory are not written. Channel cursor ledgers hold only message IDs and are kept. Existing files are never deleted. `claw history` and memory features that replay past content need `local-retention: allowed`.
+With `local-retention: none`, cllama still records metadata for each finished completion and managed failure: ids, model, token usage, cost, status and timestamps. A refused request is logged as an audit intervention, not a history entry. Budgets, cost reporting and `claw audit` keep working. Request, response and tool content, context snapshots, and automatically retained memory are not written. Channel cursor ledgers hold only message IDs and are kept. Existing files are never deleted. `claw history` and memory features that replay past content need `local-retention: allowed`.
 
 The [trace journal](/guide/cllama#trace-journal) is a separate explicit opt-in (`CLLAMA_TRACE_JOURNAL: "on"`). It keeps journal content for verifiable run traces even when `local-retention` is `none`, independent of the provider's retention. It does not re-enable normal history or snapshots.
 
 This policy covers model-provider data and proxy observability. It does not delete application or business records, or mounted contracts.
+
+An OpenRouter `provider.only` pin such as `google-vertex/global` selects an upstream endpoint; it does not establish where processing happens, and does not satisfy a regional policy on its own.
 
 `eu` always means your EU requirement. OpenRouter's EU origin covers a broader European area (EEA, UK, Switzerland), so on its own it cannot prove EU-only processing. Establish a matching EU deployment, or explicitly allow the additional countries.
 
