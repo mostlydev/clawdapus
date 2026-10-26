@@ -4,10 +4,11 @@ description: >
   Automates cutting a Clawdapus release: runs pre-release checks, coordinates
   with cllama submodule releases if needed, determines the next semver version,
   backfills any missing changelog entries, sweeps docs (CLI reference, README,
-  manifesto) for updates tied to the release, writes the new version entry in
-  the site changelog, updates the nav dropdown and Latest badge, pushes the
-  release-prep commit to master, prepublishes the pinned infra image refs the
-  release workflow verifies, then tags and pushes the release. Use this skill
+  manifesto) for updates tied to the release, prepares release notes in
+  the site changelog, pushes the release-prep commit to master, prepublishes
+  the pinned infra image refs the release workflow verifies, then tags and
+  publishes the release. Only after publication and verification does it
+  promote the site nav dropdown and Latest badge. Use this skill
   whenever the user says "release", "cut a release", "new version", "update
   the changelog and tag", "prepare a release", or anything about shipping a
   new version of the claw CLI.
@@ -186,33 +187,20 @@ Don't just dump commit hashes — synthesize user-facing prose grouped by theme.
 Pull context from referenced PRs/issues (`gh pr view N`, `gh issue view N`)
 when the commit message alone doesn't explain the "why".
 
-## Step 5: Write the new version entry
+## Step 5: Prepare the release notes without promoting the site
 
-Convert the `## Unreleased` section (if present) into the new version heading.
-If there's no Unreleased section, write one from the commits since the last
-tag and from the PRs/issues they reference.
+Prepare the new release notes in `## Unreleased`, using commits and PRs/issues
+since the last tag. Keep that heading until the GitHub release and its required
+assets are published and verified. The release tag may therefore still contain
+an Unreleased section; the post-release site commit records the published version.
 
-The new version gets the `<Badge>` and anchor:
+Keep the Latest badge on the previous published release. Do not move it or the
+nav version during release preparation. `AGENTS.md` is canonical: master/site
+pushes deploy immediately, and pushing master and a tag back to back does not
+prevent the site from becoming available before the GitHub release.
 
-```markdown
-## v0.X.Y <Badge type="tip" text="Latest" /> {#v0-X-Y}
-
-*YYYY-MM-DD*
-
-- **Feature** — description.
-```
-
-Remove the `<Badge type="tip" text="Latest" />` from whichever older version
-currently has it. Only one version should have the Latest badge.
-
-Add a fresh empty `## Unreleased` section at the top (above the new version)
-so there's always a place for future notes:
-
-```markdown
-## Unreleased
-
-<!-- Nothing yet -->
-```
+The version heading, date, anchor and badge are added in the post-release site
+promotion in Step 12, not in this preparation step.
 
 ### Keep entries deployment-agnostic
 
@@ -380,24 +368,19 @@ prepublish happens in Step 10. The point of Step 7 is to make the released
 name, so the test doesn't need updating. Running `go test ./internal/infraimages/...`
 after the edit still catches typos.
 
-## Step 8: Update the nav dropdown version
+## Step 8: Keep the nav version on the published release
 
-In `site/.vitepress/config.mts`, find the version string in the nav array:
-
-```ts
-{
-  text: 'v0.X.Y',  // ← update this
-  items: [
-```
-
-Replace it with the new version.
+Leave the version string in `site/.vitepress/config.mts` unchanged during
+preparation. Other docs/sidebar updates may ship, but the version dropdown moves
+only in the post-release site promotion in Step 12.
 
 ## Step 9: Commit and push master first
 
 Stage the changed files explicitly — don't use `git add -A`:
 
 ```bash
-git add site/changelog.md site/.vitepress/config.mts
+git add site/changelog.md
+# Stage config.mts only for docs/sidebar changes; keep its version unchanged.
 # Add runtime infra pin bumps if any were changed in Step 7
 git add internal/infraimages/release_manifest.go  # only if modified
 # Add any docs sweep changes
@@ -411,10 +394,10 @@ git add cllama  # only if modified
 Commit:
 
 ```bash
-git commit -m "site: release v0.X.Y
+git commit -m "release: prepare v0.X.Y
 
-Backfill v0.A.B–v0.C.D changelog entries. Add v0.X.Y with [brief summary].
-Update nav dropdown and CLI reference."
+Prepare release notes and CLI documentation. Keep site promotion on the
+previous published release until the new release and assets are available."
 ```
 
 Push `master` before creating the release tag. The tag workflow's release job
@@ -616,6 +599,30 @@ Also make sure the tag-triggered `claw-api Image`, `clawdash Image`,
 `claw-wall Image`, and `claw-mcp-stdio Image` workflows finished green. They are confirmation that the CI
 publishing path still works, but they are not the thing the release job
 depended on.
+
+### Promote the published release on the site
+
+Only after the GitHub release exists with its required assets published and
+verified, and the tag image workflows are green:
+
+1. Convert the prepared `## Unreleased` notes to the version heading and date:
+
+   ```markdown
+   ## v0.X.Y <Badge type="tip" text="Latest" /> {#v0-X-Y}
+
+   *YYYY-MM-DD*
+   ```
+
+2. Remove the Latest badge from the previous release. Leave exactly one badge,
+   and add a fresh empty `## Unreleased` section above the new entry.
+3. Update the nav dropdown in `site/.vitepress/config.mts` to the published version.
+4. Commit and push these site-only promotion changes to master, then verify the
+   deployed changelog, nav and release links. Do not move or rebuild release tags
+   for this documentation commit.
+
+If publication or required artifact verification fails, leave the previous
+release promoted. A running tag workflow or an unpublished/draft release does
+not satisfy the publication gate.
 
 Report the status to the user with links:
 
