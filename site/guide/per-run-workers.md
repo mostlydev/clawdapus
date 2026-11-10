@@ -202,6 +202,26 @@ services:
 - **Session proof.** The wrapper reads the turn's session from the home's store, not from Hermes's output: on a resume it is the saved session or its compression continuation, on a first run the one new session without a parent. Missing session records or incompatible ancestry metadata fail with `worker_session_unproven`; the wrapper does not guess from the newest message. Hermes's own `session_id:` line is only a cross-check. That line can be lost when Hermes's background review thread has redirected the process's stderr at the moment it is printed; in releases up to v0.32.1 a lost line ended a stored, successful turn with exit 70.
 - **Authority.** The run's cllama token is new for every run and is never written into the home.
 
+### Deliverables
+
+A worker hands files to the person who gave it the task by putting them in `deliverables/` at the top of its home. The worker's contract tells it so. The supervisor serves that one directory, flat, and nothing else in the home.
+
+```
+GET /v1/homes/{installation}/{home}/deliverables
+->  {"deliverables":[{"name":"report.md","bytes":1820,"sha256":"3f1a…","modified_at":"2026-11-10T21:30:00Z"}],
+     "truncated":false}
+
+GET /v1/homes/{installation}/{home}/deliverables/report.md?sha256=3f1a…
+->  {"name":"report.md","bytes":1820,"sha256":"3f1a…","content_base64":"IyBSZXBvcnQK…"}
+```
+
+- A deliverable is a regular file directly in `deliverables/`, with a name of letters, digits, `.`, `_`, `-` and spaces that starts with a letter or digit (at most 128 characters), and at most 524288 bytes (512 KiB). Subdirectories, links, FIFOs, hidden files and larger files are not served.
+- The list holds at most 200 files, sorted by name. `truncated` is true when there were more, or when the directory holds more than 4096 entries of any kind.
+- A fetch returns the bytes as base64 in JSON, at most about 700 KiB in all. Its `sha256` is the digest of exactly the bytes returned. Pass the digest from the list as `?sha256=`; if the file has changed since, the fetch is refused with `deliverable_changed` (409) and no content.
+- Other refusals: `deliverable_unknown` (404), `deliverable_too_large` (413), `home_unknown` (404).
+- The worker is untrusted and can change the directory at any time. The supervisor opens each path component relative to its own homes directory without following links, never blocks on a FIFO, and takes a file's size, digest and bytes from one open descriptor. No host path is accepted or returned.
+- It works whether or not a run currently holds the home.
+
 Inspect and delete homes through the supervisor:
 
 ```bash
@@ -445,6 +465,8 @@ A run is identified by `installation` (`[a-z0-9][a-z0-9-]{0,63}`) and `run_id` (
 | `POST /v1/runs/{installation}/{run_id}/credential` | `{generation, credential, authority_expires_at?}` | Replaces the held credential and optionally extends authority. Persisted before the ACK. |
 | `GET /v1/runs/{installation}/{run_id}/result` | — | The bounded answer (`X-Claw-Result-Truncated` header) |
 | `GET /v1/subscriptions` | — | State of the pod's [plan sign-ins](#sign-in-state-without-a-run). Never a token. |
+| `GET /v1/homes/{installation}/{home}/deliverables` | — | Files the home's worker left for its requester. See [deliverables](#deliverables) |
+| `GET /v1/homes/{installation}/{home}/deliverables/{name}` | `?sha256=` | One deliverable, base64 in JSON |
 | `GET /v1/templates` | — | The compiled templates: `name`, `id`, `context_digest` and `models`, the concrete chain in routing order. See [pinning a queued spec](#pinning-a-queued-spec) |
 | `GET /v1/identity`, `GET /v1/health` | — | Protocol version, pod and supervisor UID |
 

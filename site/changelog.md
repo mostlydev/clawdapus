@@ -29,6 +29,8 @@ outline: deep
 
 ## Unreleased
 
+- Deliverables: a task-home worker puts files for its requester in `deliverables/` at the top of its home, and the supervisor serves them through `GET /v1/homes/{installation}/{home}/deliverables` (list with size, digest and time) and `…/deliverables/{name}` (base64 in JSON, optional `?sha256=` to refuse a file that changed). Regular files up to 512 KiB, flat, at most 200 listed; links, FIFOs and subdirectories are never followed or served. The worker contract tells the worker about the directory, so Hermes task-home templates get a new ID on the next `claw up`.
+
 - Model families now resolve on the ChatGPT plan route: `chatgpt/@<family>` with a pattern and no price ceilings. The pinned cllama (v0.18.0 or later) reads the signed-in account's own model list; `claw` never reads the sign-in and the API-key model list is not used in its place.
 
 - Fix: each task-home run's private network now takes a /29 from one range set aside for runs (`10.213.0.0/16` by default, `CLAW_RUN_SUBNET_BASE` on `claw runs serve` to change it) instead of a whole block from Docker's default address pools. Concurrent runs no longer consume the daemon’s default subnet allocations. A foreign network that overlaps the configured range can still cause a spawn failure; choose a different range in that case. A run that cannot get a block is refused with `network_unavailable`.

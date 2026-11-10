@@ -221,6 +221,8 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/templates", srv.handleTemplates)
 	mux.HandleFunc("GET /v1/homes/{installation}/{home}", srv.handleHomeStatus)
 	mux.HandleFunc("DELETE /v1/homes/{installation}/{home}", srv.handleHomeDelete)
+	mux.HandleFunc("GET /v1/homes/{installation}/{home}/deliverables", srv.handleDeliverables)
+	mux.HandleFunc("GET /v1/homes/{installation}/{home}/deliverables/{name}", srv.handleDeliverable)
 	return mux
 }
 
@@ -258,6 +260,24 @@ func (srv *Server) handleTemplates(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"templates": valid, "invalid": invalid})
+}
+
+func (srv *Server) handleDeliverables(w http.ResponseWriter, r *http.Request) {
+	list, truncated, err := srv.Sup.Deliverables(r.PathValue("installation"), r.PathValue("home"))
+	if err != nil {
+		writeHomeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deliverables": list, "truncated": truncated})
+}
+
+func (srv *Server) handleDeliverable(w http.ResponseWriter, r *http.Request) {
+	content, err := srv.Sup.Deliverable(r.PathValue("installation"), r.PathValue("home"), r.PathValue("name"), r.URL.Query().Get("sha256"))
+	if err != nil {
+		writeHomeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, content)
 }
 
 func (srv *Server) handleHomeDelete(w http.ResponseWriter, r *http.Request) {
