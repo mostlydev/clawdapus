@@ -29,6 +29,8 @@ outline: deep
 
 ## Unreleased
 
+- Model families now resolve on the Vercel AI Gateway: `vercel/@<family>` with a pattern over the gateway ID. Members are the language models the gateway reports as eligible for the team, and the price ceiling is checked against the gateway's own listed prices, tiers and the highest price among the providers serving the model.
+
 - Model families: `GET /v1/templates` and a run's status now show `requested` beside the concrete `ref` for a chain entry resolved from a family (`openai/@terra`). The value is part of the compiled template and its ID, so a template that uses a family gets a new ID on the next `claw up`; exact-model templates are unchanged. `claw runs doctor` reports family drift read-only: up to date, a newer candidate within the family and price ceilings, a newer member that is not eligible and why, a locked model absent from the current listing, or an unavailable listing. Service data policy is explicitly not assessed by this report; `claw up` rechecks it.
 
 ## v0.34.0 <Badge type="tip" text="Latest" /> {#v0-34-0}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -32,8 +33,36 @@ type LockEntry struct {
 	// CatalogAt is when the provider's complete listing was read.
 	CatalogAt time.Time `json:"catalog_at"`
 	// CllamaTag and CllamaImageID name the image whose price table was used.
-	CllamaTag     string `json:"cllama_tag"`
-	CllamaImageID string `json:"cllama_image_id"`
+	CllamaTag     string `json:"cllama_tag,omitempty"`
+	CllamaImageID string `json:"cllama_image_id,omitempty"`
+	// PriceSource is "catalog" when the rates came from the provider's own
+	// listing and not from cllama's table.
+	PriceSource string `json:"price_source,omitempty"`
+}
+
+// ReuseRecorded is Reuse for a provider whose prices come from its own
+// catalog. With the catalog unavailable there is no price to read, so the
+// rates recorded when the model was chosen are held to the current ceilings.
+func (f Family) ReuseRecorded(entry LockEntry) string {
+	if entry.ID == "" {
+		return ReasonNoMember
+	}
+	if entry.Provider != f.Provider || entry.Pattern != f.Pattern {
+		return "family_changed"
+	}
+	if _, ok := f.Member(entry.ID); !ok {
+		return ReasonNoMember
+	}
+	if entry.PriceSource != "catalog" || entry.MaxInput < 0 || entry.MaxOutput < 0 || math.IsNaN(entry.MaxInput) || math.IsNaN(entry.MaxOutput) || math.IsInf(entry.MaxInput, 0) || math.IsInf(entry.MaxOutput, 0) {
+		return ReasonUnpriced
+	}
+	if entry.MaxInput > f.MaxInput {
+		return ReasonOverInput
+	}
+	if entry.MaxOutput > f.MaxOutput {
+		return ReasonOverOutput
+	}
+	return ""
 }
 
 // LockKey is the key of a family in the lock: its provider and name.

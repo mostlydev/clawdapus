@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -226,7 +227,7 @@ func TestFamilyRefusals(t *testing.T) {
 	}{
 		"undeclared family":          {terraFamily, key, "openai/@luna", &full, false, "is not declared", false},
 		"family of another provider": {terraFamily, key, "xai/@terra", &full, false, `belongs to provider "openai"`, false},
-		"provider not supported":     {modelfamily.Family{Name: "terra", Provider: "vercel", Pattern: "openai/gpt-*-terra", MaxInput: 4, MaxOutput: 18}, key, "vercel/@terra", &full, false, "not supported for provider", false},
+		"provider not supported":     {modelfamily.Family{Name: "terra", Provider: "openrouter", Pattern: "openai/gpt-*-terra", MaxInput: 4, MaxOutput: 18}, key, "openrouter/@terra", &full, false, "not supported for provider", false},
 		"plan route":                 {modelfamily.Family{Name: "terra", Provider: "chatgpt", Pattern: "gpt-*-terra", MaxInput: 4, MaxOutput: 18}, key, "chatgpt/@terra", &full, false, "not supported for provider", false},
 		"no key":                     {terraFamily, map[string]string{}, "openai/@terra", &full, false, "no key for provider", false},
 		"custom endpoint":            {terraFamily, map[string]string{"OPENAI_API_KEY": "sk-key", "OPENAI_BASE_URL": "https://eu.api.openai.com/v1"}, "openai/@terra", &full, false, "custom endpoint", false},
@@ -534,5 +535,147 @@ func TestFamilyDriftDoesNotClaimPolicyAdmission(t *testing.T) {
 				t.Fatal("doctor changed the lock")
 			}
 		})
+	}
+}
+
+func vercelPrices(t *testing.T, entries map[string][2]float64) *modelfamily.Prices {
+	t.Helper()
+	var rows []string
+	for id, p := range entries {
+		rows = append(rows, fmt.Sprintf(`{"provider":"vercel","model":%q,"input":%v,"output":%v,"max_input":%v,"max_output":%v,"context_tiers":"all"}`, id, p[0], p[1], p[0], p[1]))
+	}
+	prices, err := modelfamily.ParsePrices([]byte(`{"schema":1,"cllama":{},"currency":"USD","unit":"per_million_tokens","scope":{"service_tier":"standard","tokens":"uncached_text"},"entries":[` + strings.Join(rows, ",") + `]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prices
+}
+
+// A gateway family is bounded by the gateway's own prices, including the
+// highest price among the providers that serve the model.
+func TestVercelFamily(t *testing.T) {
+	fam := modelfamily.Family{Name: "terra", Provider: "vercel", Pattern: "openai/gpt-*-terra", MaxInput: 4, MaxOutput: 18}
+	policy := func(rig *familyRig) {
+		rig.policy.Attestations = []pod.DataPolicyAttestation{{Provider: "vercel", Guarantees: []string{"no-training", "zero-data-retention", "processing:us"}}}
+	}
+	type endpoint struct {
+		in, out float64
+		err     error
+	}
+	setup := func(t *testing.T, endpoints map[string]endpoint) *familyRig {
+		rig := newFamilyRig(t, fam, map[string]string{"AI_GATEWAY_API_KEY": "gw-key"})
+		policy(rig)
+		rig.r.fetchVercel = func(_ context.Context, baseURL, key string) (modelfamily.Catalog, *modelfamily.Prices, error) {
+			rig.fetches = append(rig.fetches, baseURL+" "+key)
+			if !rig.catalogOK {
+				return modelfamily.Catalog{}, nil, errors.New("gateway listing could not be read")
+			}
+			return rig.catalog, vercelPrices(t, map[string][2]float64{"openai/gpt-5.6-terra": {2, 12}, "openai/gpt-6.1-terra": {2, 7.5}}), nil
+		}
+		rig.r.fetchVercelEndpointMax = func(_ context.Context, _, _, id string) (float64, float64, error) {
+			e := endpoints[id]
+			return e.in, e.out, e.err
+		}
+		rig.catalog = modelfamily.Catalog{Complete: true, IDs: []string{"openai/gpt-5.6-terra", "openai/gpt-6.1-terra", "openai/gpt-7-terra"}}
+		return rig
+	}
+
+	rig := setup(t, map[string]endpoint{"openai/gpt-6.1-terra": {3, 9, nil}})
+	models, err := rig.up(map[string]string{"primary": "vercel/@terra"})
+	if err != nil || models["primary"] != "vercel/openai/gpt-6.1-terra" {
+		t.Fatalf("models = %v, %v", models, err)
+	}
+	// The gateway's standard endpoint and key, and no cllama price read.
+	if rig.priceRuns != 0 || len(rig.fetches) != 1 || rig.fetches[0] != "https://ai-gateway.vercel.sh/v1 gw-key" {
+		t.Fatalf("prices=%d fetches=%v", rig.priceRuns, rig.fetches)
+	}
+	// The lock records the higher endpoint price and where it came from.
+	entry := rig.lockEntry("vercel/@terra")
+	if entry.ID != "openai/gpt-6.1-terra" || entry.MaxInput != 3 || entry.MaxOutput != 9 || entry.PriceSource != "catalog" || entry.CllamaTag != "" {
+		t.Fatalf("lock = %+v", entry)
+	}
+	if !strings.Contains(rig.out.String(), "not using openai/gpt-7-terra (unpriced)") {
+		t.Fatalf("output = %q", rig.out.String())
+	}
+
+	// An endpoint dearer than the ceiling rules the newer model out.
+	rig = setup(t, map[string]endpoint{"openai/gpt-6.1-terra": {5, 9, nil}, "openai/gpt-5.6-terra": {2, 12, nil}})
+	models, err = rig.up(map[string]string{"primary": "vercel/@terra"})
+	if err != nil || models["primary"] != "vercel/openai/gpt-5.6-terra" || !strings.Contains(rig.out.String(), "not using openai/gpt-6.1-terra (input_price_over_ceiling)") {
+		t.Fatalf("models = %v, %v, out=%q", models, err, rig.out.String())
+	}
+
+	// Endpoint prices that cannot be read whole rule a model out too.
+	rig = setup(t, map[string]endpoint{"openai/gpt-6.1-terra": {0, 0, errors.New("gateway endpoint listing has an endpoint with no price")}, "openai/gpt-5.6-terra": {2, 12, nil}})
+	models, err = rig.up(map[string]string{"primary": "vercel/@terra"})
+	if err != nil || models["primary"] != "vercel/openai/gpt-5.6-terra" || !strings.Contains(rig.out.String(), "not using openai/gpt-6.1-terra (endpoint prices unavailable or over ceiling)") {
+		t.Fatalf("models = %v, %v, out=%q", models, err, rig.out.String())
+	}
+	rig = setup(t, map[string]endpoint{"openai/gpt-6.1-terra": {0, 0, errors.New("x")}, "openai/gpt-5.6-terra": {0, 0, errors.New("x")}})
+	if _, err := rig.up(map[string]string{"primary": "vercel/@terra"}); err == nil || !strings.Contains(err.Error(), "no model can be chosen") {
+		t.Fatalf("no readable endpoint prices: %v", err)
+	}
+
+	// A fresh failed endpoint check cannot be replaced with an old lock price.
+	rig = setup(t, map[string]endpoint{"openai/gpt-6.1-terra": {0, 0, errors.New("unavailable")}, "openai/gpt-5.6-terra": {2, 12, nil}})
+	rig.r.lock = &modelfamily.Lock{Version: 1, Families: map[string]modelfamily.LockEntry{"vercel/@terra": {Provider: "vercel", Pattern: fam.Pattern, ID: "openai/gpt-6.1-terra", MaxInput: 2, MaxOutput: 7.5, PriceSource: "catalog"}}}
+	models, err = rig.up(map[string]string{"primary": "vercel/@terra"})
+	if err != nil || models["primary"] != "vercel/openai/gpt-5.6-terra" {
+		t.Fatalf("stale endpoint price reused: %v %v", models, err)
+	}
+
+	// The bounded lookup loop must not admit the next unchecked candidate.
+	rig = setup(t, nil)
+	rates := map[string][2]float64{}
+	var ids []string
+	for i := 1; i <= 17; i++ {
+		id := fmt.Sprintf("openai/gpt-%d-terra", i)
+		ids = append(ids, id)
+		rates[id] = [2]float64{1, 1}
+	}
+	rig.r.fetchVercel = func(context.Context, string, string) (modelfamily.Catalog, *modelfamily.Prices, error) {
+		return modelfamily.Catalog{Complete: true, IDs: ids}, vercelPrices(t, rates), nil
+	}
+	calls := 0
+	rig.r.fetchVercelEndpointMax = func(context.Context, string, string, string) (float64, float64, error) {
+		calls++
+		return 0, 0, errors.New("unavailable")
+	}
+	if _, err := rig.up(map[string]string{"primary": "vercel/@terra"}); err == nil || calls != 16 {
+		t.Fatalf("unchecked candidate admitted: calls=%d err=%v", calls, err)
+	}
+
+	// Listing unavailable: the locked model stands on its recorded price,
+	// unless the ceiling has since been lowered below it.
+	rig = setup(t, map[string]endpoint{"openai/gpt-6.1-terra": {3, 9, nil}})
+	if _, err := rig.up(map[string]string{"primary": "vercel/@terra"}); err != nil {
+		t.Fatal(err)
+	}
+	rig.again(fam)
+	policy(rig)
+	rig.catalogOK = false
+	rig.r.fetchVercel = func(context.Context, string, string) (modelfamily.Catalog, *modelfamily.Prices, error) {
+		return modelfamily.Catalog{}, nil, errors.New("gateway listing could not be read")
+	}
+	models, err = rig.up(map[string]string{"primary": "vercel/@terra"})
+	if err != nil || models["primary"] != "vercel/openai/gpt-6.1-terra" || !strings.Contains(rig.out.String(), "keeping locked openai/gpt-6.1-terra") {
+		t.Fatalf("offline: %v %v %q", models, err, rig.out.String())
+	}
+	lower := fam
+	lower.MaxInput = 2.5
+	rig.again(lower)
+	policy(rig)
+	rig.r.fetchVercel = func(context.Context, string, string) (modelfamily.Catalog, *modelfamily.Prices, error) {
+		return modelfamily.Catalog{}, nil, errors.New("gateway listing could not be read")
+	}
+	if _, err := rig.up(map[string]string{"primary": "vercel/@terra"}); err == nil || !strings.Contains(err.Error(), "input_price_over_ceiling") {
+		t.Fatalf("offline with a lowered ceiling: %v", err)
+	}
+
+	// A gateway reached at another address is refused.
+	rig = newFamilyRig(t, fam, map[string]string{"AI_GATEWAY_API_KEY": "gw-key", "AI_GATEWAY_BASE_URL": "https://gateway.internal/v1"})
+	policy(rig)
+	if _, err := rig.up(map[string]string{"primary": "vercel/@terra"}); err == nil || !strings.Contains(err.Error(), "custom endpoint") {
+		t.Fatalf("custom gateway: %v", err)
 	}
 }
