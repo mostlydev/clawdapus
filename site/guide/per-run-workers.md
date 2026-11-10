@@ -161,6 +161,8 @@ generated manifests or mutate live run contexts as a rotation mechanism.
 
 A stateless worker answers from what it is handed. A **task-home** worker carries one unit of work across several runs: it has a shell and files, and each later run resumes its own conversation. The rule is: *a task has a home; a run is a clean container visiting it.* The design and its reasons are in [ADR-027](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/027-task-home-per-run-profile.md).
 
+The Hermes task-home profile rejects `reasoning-effort` and `provider-preferences` until request-option projection is supported; it never silently drops those settings.
+
 A service opts in with `x-claw.run.home`. Everything above still applies unless this section says otherwise, and a service that does not opt in is unchanged.
 
 ```yaml
@@ -197,7 +199,15 @@ claw runs home rm <installation> <home>      # refused while a run reserves it
 The same verbs are `GET` and `DELETE /v1/homes/{installation}/{home}` on the socket. Deleting a home is how to reset a task: the next run for that ID starts with an empty home and a new session. `claw up` and `claw down` leave homes in place.
 
 ::: warning Storage is not capped
-A home has no enforced size limit. A worker's shell can fill the host disk during a run. Use this profile only for workloads where you accept that.
+`run.home.max-bytes` sets a logical-byte watchdog threshold (default 1073741824, or 1 GiB).
+A separate meter mounts the home read-only with no network or credentials. Crossing the threshold,
+exceeding the scan budget, or making the home unreadable ends the run as `home_full` through normal
+revocation and teardown. A missing or failed meter ends it as `home_meter_unavailable`.
+
+This is a watchdog, not a hard quota: a fast writer can fill the host disk before detection or
+teardown. Use the profile where you accept that limitation; it was accepted for the internal trial.
+After a killed turn, inspect durable effects before repeating them. Resume preserves history,
+but does not provide exactly-once shell execution.
 :::
 
 `go test -tags spike -run '^TestSpikeTaskHomeWorkers$' ./cmd/claw` proves this profile end to end with a local fake provider.

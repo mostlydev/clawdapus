@@ -17,6 +17,7 @@ func TestParseRunHome(t *testing.T) {
 		t.Fatalf("stateless run gained a home: %+v %v", limits, err)
 	}
 	bad := map[string]*rawRunLimits{
+		"max-bytes":        {Home: &rawRunHome{MaxBytes: -1}},
 		"content requires": {Content: []rawRunContent{{Source: "a", Target: "/a"}}},
 		"home.mount":       {Home: &rawRunHome{Mount: "relative"}},
 		"outside /tmp":     {Home: &rawRunHome{Mount: "/tmp/home"}},
@@ -30,5 +31,24 @@ func TestParseRunHome(t *testing.T) {
 		if _, _, err := parseRunLifecycle("per-run", raw); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: got %v", want, err)
 		}
+	}
+}
+
+func TestParseRunHomeWatchdogThreshold(t *testing.T) {
+	for _, n := range []int64{0, 1, 4096, 1 << 40} {
+		_, limits, err := parseRunLifecycle("per-run", &rawRunLimits{Home: &rawRunHome{MaxBytes: n}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := n
+		if want == 0 {
+			want = DefaultRunHomeMaxBytes
+		}
+		if limits.Home.MaxBytes != want {
+			t.Fatalf("max bytes=%d want%d", limits.Home.MaxBytes, want)
+		}
+	}
+	if _, _, err := parseRunLifecycle("per-run", &rawRunLimits{Home: &rawRunHome{MaxBytes: 1<<40 + 1}}); err == nil {
+		t.Fatal("excessive threshold accepted")
 	}
 }

@@ -24,7 +24,8 @@ type rawRunLimits struct {
 }
 
 type rawRunHome struct {
-	Mount string `yaml:"mount"`
+	Mount    string `yaml:"mount"`
+	MaxBytes int64  `yaml:"max-bytes"`
 }
 
 type rawRunContent struct {
@@ -132,7 +133,14 @@ func parseRunHome(raw *rawRunLimits, limits *RunLimits) error {
 	if !cleanAbsContainerPath(mount) || mount == "/tmp" || strings.HasPrefix(mount, "/tmp/") {
 		return fmt.Errorf("x-claw.run.home.mount must be a clean absolute container path outside /tmp, got %q", raw.Home.Mount)
 	}
-	limits.Home = &RunHome{Mount: mount}
+	maxBytes := raw.Home.MaxBytes
+	if maxBytes == 0 {
+		maxBytes = DefaultRunHomeMaxBytes
+	}
+	if maxBytes < 1 || maxBytes > 1<<40 {
+		return fmt.Errorf("x-claw.run.home.max-bytes must be between 1 and 1099511627776")
+	}
+	limits.Home = &RunHome{Mount: mount, MaxBytes: maxBytes}
 	seen := map[string]struct{}{}
 	for i, c := range raw.Content {
 		source, target := strings.TrimSpace(c.Source), strings.TrimSpace(c.Target)

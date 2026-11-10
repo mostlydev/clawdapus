@@ -906,6 +906,14 @@ func verifyContainers(rec *Record, containers []Container) string {
 }
 
 func (s *Supervisor) stepMonitor(ctx context.Context, rec *Record, now time.Time) (bool, error) {
+	if rec.HomeHash != "" {
+		if reason, err := s.checkHomeMeter(ctx, rec); err != nil {
+			return false, err
+		} else if reason != "" {
+			rec.Failure = reason
+			return true, nil
+		}
+	}
 	containers, err := s.cfg.Executor.Containers(ctx, rec.RunKey)
 	if err != nil {
 		return false, fmt.Errorf("list containers: %w", err)
@@ -934,6 +942,40 @@ func (s *Supervisor) stepMonitor(ctx context.Context, rec *Record, now time.Time
 		return true, nil
 	}
 	return s.deliverProgress(ctx, rec, now)
+}
+
+type auxContainerLister interface {
+	AuxContainers(context.Context, string) ([]Container, error)
+}
+
+func (s *Supervisor) checkHomeMeter(ctx context.Context, rec *Record) (string, error) {
+	lister, ok := s.cfg.Executor.(auxContainerLister)
+	if !ok {
+		return ReasonHomeMeterUnavailable, nil
+	}
+	cs, err := lister.AuxContainers(ctx, rec.RunKey)
+	if err != nil {
+		return ReasonHomeMeterUnavailable, nil
+	}
+	var meter *Container
+	for i := range cs {
+		if cs[i].Labels[LabelRole] == RoleRunMeter {
+			if meter != nil {
+				return ReasonHomeMeterUnavailable, nil
+			}
+			meter = &cs[i]
+		}
+	}
+	if meter == nil {
+		return ReasonHomeMeterUnavailable, nil
+	}
+	if meter.Exited && meter.ExitCode == 75 {
+		return ReasonHomeFull, nil
+	}
+	if !meter.Running {
+		return ReasonHomeMeterUnavailable, nil
+	}
+	return "", nil
 }
 
 // deliverProgress sends start and heartbeat callbacks while running.
@@ -1128,7 +1170,17 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 	if err != nil {
 		return false, fmt.Errorf("list containers: %w", err)
 	}
-	if len(containers) > 0 {
+	needsDown := len(containers) > 0
+	if rec.HomeHash != "" {
+		if lister, ok := s.cfg.Executor.(auxContainerLister); ok {
+			aux, err := lister.AuxContainers(ctx, rec.RunKey)
+			if err != nil {
+				return false, fmt.Errorf("list auxiliary containers: %w", err)
+			}
+			needsDown = needsDown || len(aux) > 0
+		}
+	}
+	if needsDown {
 		if !rec.Cancelled && rec.Result == nil && len(containers) == 1 && containers[0].Exited {
 			if err := s.captureResult(ctx, rec, containers[0]); err != nil {
 				return false, err
@@ -1143,6 +1195,14 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 		}
 		if len(remaining) > 0 {
 			return false, fmt.Errorf("%d labelled containers remain after compose down", len(remaining))
+		}
+		if rec.HomeHash != "" {
+			if lister, ok := s.cfg.Executor.(auxContainerLister); ok {
+				aux, err := lister.AuxContainers(ctx, rec.RunKey)
+				if err != nil || len(aux) > 0 {
+					return false, fmt.Errorf("auxiliary container removal not verified")
+				}
+			}
 		}
 		if revokeErr != nil {
 			return true, fmt.Errorf("worker removed; cllama revoke not acknowledged: %w", revokeErr)
@@ -1393,6 +1453,14 @@ func (s *Supervisor) FinalizeWithoutProxy(ctx context.Context, k Key, proxyGone 
 	}
 	if len(containers) > 0 {
 		return fmt.Errorf("run %s/%s still has %d worker container(s)", k.Installation, k.RunID, len(containers))
+	}
+	if rec.HomeHash != "" {
+		if lister, ok := s.cfg.Executor.(auxContainerLister); ok {
+			aux, err := lister.AuxContainers(ctx, rec.RunKey)
+			if err != nil || len(aux) > 0 {
+				return fmt.Errorf("run auxiliary container removal not verified")
+			}
+		}
 	}
 	gone, err := proxyGone(ctx)
 	if err != nil {

@@ -2,12 +2,24 @@ package hermes
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mostlydev/clawdapus/internal/driver"
 )
+
+func TestRunWrapperAdversarialPython(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	cmd := exec.Command(python, "-B", "-m", "unittest", "discover", "-s", "runwrap", "-p", "*_test.py")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("wrapper/meter adversarial checks: %v\n%s", err, out)
+	}
+}
 
 func runWorkerClaw(t *testing.T) *driver.ResolvedClaw {
 	t.Helper()
@@ -28,12 +40,15 @@ func runWorkerClaw(t *testing.T) *driver.ResolvedClaw {
 func TestCompileRunWorkerTaskHome(t *testing.T) {
 	d := &Driver{}
 	rc := runWorkerClaw(t)
-	spec, err := d.CompileRunWorker(rc, driver.RunWorkerOpts{Home: &driver.RunHomeSpec{Mount: "/home/task"}, MaxResultBytes: 4096})
+	spec, err := d.CompileRunWorker(rc, driver.RunWorkerOpts{Home: &driver.RunHomeSpec{Mount: "/home/task", MaxBytes: 1 << 30}, MaxResultBytes: 4096})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if spec.Home == nil || spec.Gate == nil || spec.Result.Header != driver.RunResultHeaderJSONLine || spec.Result.Marker != RunResultMarker {
 		t.Fatalf("spec lacks the task-home contract: %+v", spec)
+	}
+	if spec.Meter == nil || len(spec.Meter.Entrypoint) < 4 || spec.Meter.Entrypoint[1] != "-I" || spec.Meter.Entrypoint[2] != "-S" {
+		t.Fatal("meter can import worker-controlled Python startup code")
 	}
 	if spec.Inputs["CLAW_RUN_TOKEN"] != driver.RunPlaceholderCllamaToken || spec.Inputs["CLAW_RUN_TASK"] != driver.RunPlaceholderTask {
 		t.Fatalf("inputs: %v", spec.Inputs)
@@ -70,5 +85,21 @@ func TestCompileRunWorkerRequiresHome(t *testing.T) {
 	rc.Handles = map[string]*driver.HandleInfo{"discord": {}}
 	if err := d.ValidateRunWorker(rc); err == nil || !strings.Contains(err.Error(), "HANDLE") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRunWorkerRefusesUnprojectedRequestPolicy(t *testing.T) {
+	for _, kind := range []string{"reasoning-effort", "provider-preferences"} {
+		t.Run(kind, func(t *testing.T) {
+			rc := runWorkerClaw(t)
+			if kind == "reasoning-effort" {
+				rc.ReasoningEffort = map[string]string{"primary": "high"}
+			} else {
+				rc.ProviderPreferences = map[string]*driver.OpenRouterPreferences{"primary": {}}
+			}
+			if err := (&Driver{}).ValidateRunWorker(rc); err == nil || !strings.Contains(err.Error(), kind) {
+				t.Fatalf("unprojected %s accepted: %v", kind, err)
+			}
+		})
 	}
 }

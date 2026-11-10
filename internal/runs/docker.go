@@ -119,11 +119,21 @@ func (d *DockerExecutor) Down(ctx context.Context, project, file string) error {
 
 // Containers lists every container, running or not, labelled with the key.
 func (d *DockerExecutor) Containers(ctx context.Context, keyHash string) ([]Container, error) {
+	return d.containersByLabel(ctx, LabelRunKey, keyHash)
+}
+
+// AuxContainers returns the gate and meter without confusing them with the
+// one worker whose exit supplies the run's result.
+func (d *DockerExecutor) AuxContainers(ctx context.Context, keyHash string) ([]Container, error) {
+	return d.containersByLabel(ctx, LabelGateFor, keyHash)
+}
+
+func (d *DockerExecutor) containersByLabel(ctx context.Context, label, keyHash string) ([]Container, error) {
 	ctx, cancel := context.WithTimeout(ctx, dockerReadTimeout)
 	defer cancel()
 	list, err := d.cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.Arg("label", LabelRunKey+"="+keyHash)),
+		Filters: filters.NewArgs(filters.Arg("label", label+"="+keyHash)),
 	})
 	if err != nil {
 		return nil, err
@@ -279,7 +289,7 @@ func (d *DockerExecutor) RunWorkers(ctx context.Context, podNS string) ([]Contai
 	defer cancel()
 	var out []Container
 	// Gates are listed with workers so a leftover forwarder is an orphan too.
-	for _, role := range []string{RoleRunWorker, RoleRunGate} {
+	for _, role := range []string{RoleRunWorker, RoleRunGate, RoleRunMeter} {
 		list, err := d.cli.ContainerList(ctx, container.ListOptions{
 			All:     true,
 			Filters: filters.NewArgs(filters.Arg("label", LabelRole+"="+role), filters.Arg("label", LabelPodNS+"="+podNS)),

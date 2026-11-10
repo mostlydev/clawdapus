@@ -25,6 +25,9 @@ var runWrapper string
 //go:embed runwrap/gate.py
 var runGate string
 
+//go:embed runwrap/meter.py
+var runMeter string
+
 const (
 	// RunResultMarker starts the wrapper's result frame on stdout.
 	RunResultMarker = "\x1eclaw-run-result\n"
@@ -47,6 +50,12 @@ func (d *Driver) SupportsRunProfile(taskHome bool) bool { return taskHome }
 // ValidateRunWorker is separate from Validate, which requires a channel
 // handle that a per-run worker never has.
 func (d *Driver) ValidateRunWorker(rc *driver.ResolvedClaw) error {
+	if len(rc.ProviderPreferences) > 0 {
+		return fmt.Errorf("hermes driver: task-home profile does not project x-claw.provider-preferences yet")
+	}
+	if len(rc.ReasoningEffort) > 0 {
+		return fmt.Errorf("hermes driver: task-home profile does not project x-claw.reasoning-effort yet")
+	}
 	if rc.AgentHostPath == "" {
 		return fmt.Errorf("hermes driver: no agent host path specified (no contract, no start)")
 	}
@@ -85,6 +94,10 @@ func (d *Driver) CompileRunWorker(rc *driver.ResolvedClaw, opts driver.RunWorker
 		return nil, fmt.Errorf("hermes driver: per-run worker needs a result limit")
 	}
 	home := opts.Home.Mount
+	maxBytes := opts.Home.MaxBytes
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("hermes driver: task-home worker requires a positive storage watchdog threshold")
+	}
 	workspace := home + "/workspace"
 
 	// The worker reaches cllama only through its run's gate, so the model
@@ -123,7 +136,7 @@ func (d *Driver) CompileRunWorker(rc *driver.ResolvedClaw, opts driver.RunWorker
 		}
 	}
 	return &driver.RunWorkerSpec{
-		Entrypoint: []string{"python3", "-c", runWrapper},
+		Entrypoint: []string{"python3", "-I", "-S", "-c", runWrapper},
 		Command:    []string{"${CLAW_RUN_TASK}"},
 		Environment: map[string]string{
 			"CLAW_MANAGED":                "true",
@@ -145,7 +158,12 @@ func (d *Driver) CompileRunWorker(rc *driver.ResolvedClaw, opts driver.RunWorker
 		Inputs: inputs,
 		Tmpfs:  []string{runTmpfs},
 		Result: driver.RunResultContract{Source: "stdout", Marker: RunResultMarker, Header: driver.RunResultHeaderJSONLine},
-		Home:   &driver.RunHomeSpec{Mount: home},
+		Home:   &driver.RunHomeSpec{Mount: home, MaxBytes: maxBytes},
+		Meter: &driver.RunGateSpec{
+			Entrypoint:  []string{"python3", "-I", "-S", "-c", runMeter},
+			Command:     []string{home, strconv.FormatInt(maxBytes, 10)},
+			Environment: map[string]string{"PYTHONDONTWRITEBYTECODE": "1"},
+		},
 		Gate: &driver.RunGateSpec{
 			Entrypoint: []string{"python3", "-c", runGate},
 			Command:    []string{proxy.Hostname(), proxy.Port(), runGatePort},

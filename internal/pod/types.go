@@ -114,7 +114,8 @@ type RunLimits struct {
 
 // RunHome is the task-home declaration of a per-run service.
 type RunHome struct {
-	Mount string
+	Mount    string
+	MaxBytes int64
 	// Content lists read-only reference mounts.
 	Content []RunContent
 }
@@ -129,6 +130,8 @@ type RunContent struct {
 // DefaultRunHomeMount is where a task home is mounted unless the pod says
 // otherwise.
 const DefaultRunHomeMount = "/home/task"
+
+const DefaultRunHomeMaxBytes int64 = 1 << 30
 
 type MCPStdioBlock struct {
 	Command string

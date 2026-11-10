@@ -4,6 +4,13 @@ Reviewed design commit `1ad3888`, ADR-027 and its linked plan, for issue #394.
 This review covers the opt-in API-backed Hermes profile. It does not approve
 subscription authentication, publication, or a release.
 
+Implementation update: the credential, log and result concerns below are resolved
+in source and live acceptance. The operator accepted in-run disk-exhaustion risk
+for the internal trial, with a separate watchdog and the limitation documented.
+That scoped risk is no longer a veto. Final agreement is recorded against the
+exact reviewed PR head after independent review and CI, rather than inferred
+from this earlier design review.
+
 ## Verdict on the proposed design
 
 The capability is acceptable: writable task homes, native terminal/file tools,
@@ -49,9 +56,9 @@ No host content parser is needed for the result/session protocol.
   permits unrelated homes, and releases the reservation only after ACK.
 
 Command: `go test ./internal/runs -run '^TestTaskHomeSecurity' -count=1`.
-All four currently fail at the admission prerequisite: `spec_invalid`, unknown
-`home` field. The later assertions have **not** executed. They must run after
-the schema/profile is implemented; a compilation failure is not the red signal.
+Initially all four failed at the admission prerequisite: `spec_invalid`, unknown
+`home` field. After implementation, all four execute their later assertions and
+pass. The first red signal was a runtime admission failure, not compilation.
 JSON fixtures must be aligned with the final compiler-owned schema during
 implementation. Render assertions do not replace live isolation tests.
 
@@ -133,6 +140,9 @@ credential supplied only through the process environment. It does not prove
 compression, supervisor integration, gate streaming, Linux-host bind behavior,
 or adversarial cross-task isolation.
 
+Later implementation acceptance adds the actual supervisor/gate/Hermes path;
+the initial standalone probe's limitations above do not describe those later checks.
+
 Observed on macOS/OrbStack Docker 29.8.2 with local image
 `ghcr.io/mostlydev/hermes-base:v2026.6.19-claw.3`:
 
@@ -151,3 +161,29 @@ Observed on macOS/OrbStack Docker 29.8.2 with local image
 - Existing Hermes unit tests and existing runs unit tests passed, with the four
   deliberate new red cases excluded from the latter command.
 - Probe containers and networks were removed after the checks.
+
+## Implementation verification
+
+- The task-home spike passed independently in 141.19s, including a networkless
+  read-only meter and real `home_full` revocation/removal. A sparse logical file
+  crosses the threshold without consuming a GiB of host disk.
+- Hostile A/B probes test parent, symlink and process-root access, mounts, socket
+  absence and reference write denial. A control container deliberately placed on
+  B's network reaches its listener; A cannot, while A still completes inference.
+- Kill recovery records one durable effect, kills before completion, then has
+  the new turn inspect that effect without repeating it. Hermes merges adjacent
+  unanswered and new user text. The fixture selects the latest command; Hermes
+  does not automatically replay a native tool. No exactly-once guarantee exists.
+- A pinned-image probe seeded an oversized history through SessionDB, observed
+  a real compression summary call and a new session with its parent recorded,
+  then resumed the descendant in another container with the summary in inference.
+- Stateless `TestSpikePerRunWorkers` passed independently in 168.54s.
+- Meter tests cover outside symlinks, concurrent directory/symlink swaps and
+  scan budgets. Python isolation prevents worker-authored startup code from
+  falsifying sizes; removing isolation is an executable regression control.
+- Wrapper tests cover FIFO/symlink traps, stale questions, prior assistant rows,
+  failed/user-only turns and UTF-8 truncation. They run in the Go unit suite.
+- The pinned image used was `sha256:e6f2d271983ad96e991f5a62425fa9c68eaa5e86e0d945a4eebd4f4a8810f67e`.
+- Full unit suite, vet and site build passed before final review refinements;
+  final-head results are attached to the PR. A native Linux-host Docker spike
+  remains unverified; macOS with a Linux Docker engine was exercised.

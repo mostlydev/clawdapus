@@ -30,14 +30,16 @@ func (s State) Terminal() bool { return s == StateStopped || s == StateFailed }
 
 // Failure reasons.
 const (
-	ReasonExitNonZero      = "exit_nonzero"
-	ReasonTimeout          = "timeout"
-	ReasonAuthorityExpired = "authority_expired"
-	ReasonSpawnError       = "spawn_error"
-	ReasonContainerMissing = "container_missing"
-	ReasonDuplicate        = "duplicate"
-	ReasonMismatch         = "mismatch"
-	ReasonResultMissing    = "result_missing"
+	ReasonExitNonZero          = "exit_nonzero"
+	ReasonTimeout              = "timeout"
+	ReasonAuthorityExpired     = "authority_expired"
+	ReasonSpawnError           = "spawn_error"
+	ReasonContainerMissing     = "container_missing"
+	ReasonDuplicate            = "duplicate"
+	ReasonMismatch             = "mismatch"
+	ReasonResultMissing        = "result_missing"
+	ReasonHomeFull             = "home_full"
+	ReasonHomeMeterUnavailable = "home_meter_unavailable"
 )
 
 var (

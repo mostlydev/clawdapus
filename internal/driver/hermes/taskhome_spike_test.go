@@ -65,7 +65,7 @@ func TestSpikeTaskHomeHermesContract(t *testing.T) {
 			t.Errorf("probe cleanup: %v %s", err, out)
 		}
 	})
-	for _, phase := range []string{"first", "resume"} {
+	for _, phase := range []string{"first", "resume", "compression", "compressed-resume"} {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		started := time.Now()
 		name := project + "-" + phase

@@ -326,14 +326,23 @@ services:
 		t.Fatalf("case 5 (answer): %q %+v", body, a5.Result)
 	}
 
-	// 6. Kill mid-turn: the next run resumes the same session. Hermes stored
-	// the killed turn's request but no reply, so it presents that request
-	// again with the new text appended, and the pending work is retried.
-	if err := launch("a6", "task-a", "RUN: sleep 25"); err != nil {
+	// 6. Kill after a durable effect but before its result. The follow-up
+	// inspects that effect rather than blindly repeating it. Hermes may merge
+	// the unanswered request and new brief into one user message.
+	if err := launch("a6", "task-a", "RUN: printf EFFECT-ONCE >> /home/task/workspace/effects; sleep 300"); err != nil {
 		t.Fatal(err)
 	}
 	a6 := runsSpikeWait(t, client, "a6", "running")
-	time.Sleep(8 * time.Second)
+	deadline = time.Now().Add(40 * time.Second)
+	for time.Now().Before(deadline) {
+		if raw, err := os.ReadFile(filepath.Join(homeDir("task-a"), "workspace", "effects")); err == nil && string(raw) == "EFFECT-ONCE" {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if raw, err := os.ReadFile(filepath.Join(homeDir("task-a"), "workspace", "effects")); err != nil || string(raw) != "EFFECT-ONCE" {
+		t.Fatalf("case6 effect not observed before kill: %q %v", raw, err)
+	}
 	out, _ := exec.Command("docker", "ps", "-q", "--filter", "label="+runs.LabelRunKey+"="+runsSpikeRunKey(t, a6)).Output()
 	if err := exec.Command("docker", "kill", strings.TrimSpace(string(out))).Run(); err != nil {
 		t.Fatalf("case 6: kill: %v", err)
@@ -341,11 +350,12 @@ services:
 	if view := runsSpikeWait(t, client, "a6", "failed"); view.State != runs.StateFailed || view.Result != nil {
 		t.Fatalf("case 6: killed run: %+v", view)
 	}
-	a7, body := run("a7", "task-a", "after the kill")
-	logs, _ := exec.Command("docker", "compose", "-f", generatedPath, "logs", "--no-log-prefix", "--tail", "3", "fake-provider").CombinedOutput()
-	if a7.Result.Session != a1.Result.Session || a7.Result.Outcome != runs.OutcomeAnswer || !strings.Contains(body, `"exit_code": 0`) ||
-		!strings.Contains(string(logs), `RUN: sleep 25\n\nafter the kill`) {
-		t.Fatalf("case 6 (resume after kill): %q %+v\n%s", body, a7.Result, logs)
+	a7, body := run("a7", "task-a", "RUN: cat /home/task/workspace/effects")
+	if a7.Result.Session != a1.Result.Session || a7.Result.Outcome != runs.OutcomeAnswer || strings.Count(body, "EFFECT-ONCE") != 1 {
+		t.Fatalf("case 6 (resume inspects prior effect): %q %+v", body, a7.Result)
+	}
+	if raw, err := os.ReadFile(filepath.Join(homeDir("task-a"), "workspace", "effects")); err != nil || string(raw) != "EFFECT-ONCE" {
+		t.Fatalf("case6 effect repeated: %q %v", raw, err)
 	}
 
 	// 7. Reset: deleting the home removes workspace and history; B is intact.
@@ -365,6 +375,16 @@ services:
 	}
 	if raw, err := os.ReadFile(filepath.Join(homeDir("task-b"), "workspace", "secret")); err != nil || !strings.Contains(string(raw), "B-SECRET") {
 		t.Fatalf("case 7: reset of A disturbed B: %q %v", raw, err)
+	}
+
+	// 8. A sparse file crosses the logical-byte watchdog threshold without
+	// consuming a GiB of host storage. The independent meter must fence it.
+	if err := launch("full", "task-full", `RUN: python3 -c "f=open('/home/task/workspace/big','wb');f.truncate(1073741825)"; sleep 300`); err != nil {
+		t.Fatal(err)
+	}
+	full := runsSpikeWait(t, client, "full", "failed")
+	if full.Failure != runs.ReasonHomeFull || !full.Revoked || full.Result != nil {
+		t.Fatalf("case8 watchdog: %+v", full)
 	}
 
 	// No gate or worker is left behind.
@@ -392,6 +412,10 @@ class Handler(BaseHTTPRequestHandler):
         last = messages[-1] if messages else {}
         users = [m for m in messages if m.get("role") == "user"]
         task = str(users[-1].get("content", "")) if users else ""
+        # Adjacent unanswered and new user inputs may be merged by Hermes.
+        # This deterministic fixture obeys the latest explicit control command.
+        if "RUN: " in task:
+            task = task[task.rfind("RUN: "):]
         seen = any("MARK-ONE" in str(m.get("content", "")) for m in messages if m.get("role") == "assistant")
         msg, finish = {"role": "assistant", "content": "HISTORY-SEEN" if seen else "MARK-ONE"}, "stop"
         if "RUN: " in task:

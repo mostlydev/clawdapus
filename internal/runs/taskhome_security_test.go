@@ -11,9 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// These are deliberately red acceptance cases for #394. JSON fixtures keep
-// them compilable before the opt-in schema exists. Admission failures are
-// prerequisites, not evidence that the later isolation assertions ran.
 func taskHomeHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t, false)
@@ -26,9 +23,10 @@ func taskHomeHarness(t *testing.T) *harness {
 	if err := json.Unmarshal(raw, &worker); err != nil {
 		t.Fatal(err)
 	}
-	worker["home"] = map[string]any{"mount": "/home/task"}
+	worker["home"] = map[string]any{"mount": "/home/task", "max_bytes": 1 << 30}
 	worker["result"] = map[string]any{"source": "stdout", "marker": taskHomeMarker, "header": "json-line"}
 	worker["gate"] = map[string]any{"entrypoint": []string{"/bin/gate"}, "command": []string{"cllama:8080"}}
+	worker["meter"] = map[string]any{"entrypoint": []string{"/bin/meter"}}
 	raw, _ = json.Marshal(worker)
 	if err := json.Unmarshal(raw, &tpl.Worker); err != nil {
 		t.Fatal(err)

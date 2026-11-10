@@ -29,6 +29,8 @@ type RunWorkerOpts struct {
 type RunHomeSpec struct {
 	// Mount is the absolute container path of the home.
 	Mount string `json:"mount"`
+	// MaxBytes is a watchdog threshold, not a filesystem quota.
+	MaxBytes int64 `json:"max_bytes"`
 }
 
 // RunGateSpec is a forwarder service rendered beside a task-home worker. It
@@ -43,6 +45,8 @@ type RunGateSpec struct {
 // GateServiceName is the Compose service name, and so the DNS name, of the
 // forwarder inside a task-home run project.
 const GateServiceName = "gate"
+
+const MeterServiceName = "meter"
 
 // Run placeholders are substituted by the run supervisor at launch. They only
 // ever appear as complete values inside RunWorkerSpec.Inputs.
@@ -75,6 +79,8 @@ type RunWorkerSpec struct {
 	// when empty, so a stateless template's identity does not change.
 	Home *RunHomeSpec `json:"home,omitempty"`
 	Gate *RunGateSpec `json:"gate,omitempty"`
+	// Meter is a networkless, read-only home-size watchdog.
+	Meter *RunGateSpec `json:"meter,omitempty"`
 }
 
 // RunResultContract describes how the supervisor extracts a worker's answer.

@@ -85,6 +85,9 @@ func (s *Supervisor) homeHolder(hash string, except Key) (*Record, error) {
 		if r.State.Terminal() {
 			continue
 		}
+		if r.Spec == nil {
+			return nil, fmt.Errorf("run %s: unfinished record has no spec", r.Key.RunID)
+		}
 		// An unfinished record whose reservation does not match its own spec
 		// is ambiguous: it may hold any home. Fail closed for every home.
 		want := ""

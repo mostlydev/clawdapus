@@ -28,6 +28,7 @@ const (
 	// RoleRunGate marks a task-home run's forwarder. It deliberately carries
 	// no run-key label, so the supervisor's view of a run stays one container.
 	RoleRunGate  = "run-gate"
+	RoleRunMeter = "run-meter"
 	LabelGateFor = "claw.run.gate-for"
 
 	workerService = "worker"
@@ -66,7 +67,10 @@ func renderProject(tpl *Template, rec *Record, homeSource string) ([]byte, error
 	if tpl.Worker.Home != nil && tpl.Worker.Gate == nil {
 		return nil, fmt.Errorf("template %q: a task-home worker needs a gate", tpl.Name)
 	}
-	if tpl.Worker.Home == nil && (tpl.Worker.Gate != nil || len(tpl.Content) > 0) {
+	if tpl.Worker.Home != nil && (tpl.Worker.Meter == nil || tpl.Worker.Home.MaxBytes <= 0) {
+		return nil, fmt.Errorf("template %q: a task-home worker needs a storage meter and positive threshold", tpl.Name)
+	}
+	if tpl.Worker.Home == nil && (tpl.Worker.Gate != nil || tpl.Worker.Meter != nil || len(tpl.Content) > 0) {
 		return nil, fmt.Errorf("template %q: gate and content require a task home", tpl.Name)
 	}
 	w := tpl.Worker
@@ -162,6 +166,8 @@ func renderProject(tpl *Template, rec *Record, homeSource string) ([]byte, error
 		svc["depends_on"] = []string{driver.GateServiceName}
 		svc["logging"] = runLogging(tpl)
 		services[driver.GateServiceName] = renderGate(tpl, rec)
+		services[driver.MeterServiceName] = renderMeter(tpl, rec, homeSource)
+		svc["depends_on"] = []string{driver.GateServiceName, driver.MeterServiceName}
 		networks[privateNetworkRef] = map[string]any{"internal": true}
 	}
 	doc := map[string]any{
@@ -227,6 +233,19 @@ func renderGate(tpl *Template, rec *Record) map[string]any {
 			LabelGateFor: rec.RunKey,
 		},
 	}
+}
+
+// The meter sees only its own home read-only, with the worker's UID so Linux
+// private directories remain readable. It has no network, token or task input.
+func renderMeter(tpl *Template, rec *Record, source string) map[string]any {
+	copy := *tpl
+	copy.Worker.Gate = tpl.Worker.Meter
+	svc := renderGate(&copy, rec)
+	delete(svc, "networks")
+	svc["network_mode"] = "none"
+	svc["volumes"] = []any{map[string]any{"type": "bind", "source": composeLiteral(source), "target": composeLiteral(tpl.Worker.Home.Mount), "read_only": true, "bind": map[string]any{"create_host_path": false}}}
+	svc["labels"].(map[string]string)[LabelRole] = RoleRunMeter
+	return svc
 }
 
 // inputEnv substitutes run placeholders into the template's inputs. The

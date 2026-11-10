@@ -1,7 +1,7 @@
 # Task-home run wrapper for Hermes (ADR-027). Pinned against hermes-base
 # v2026.6.19. It runs one turn, resuming the session recorded in the home when
 # there is one, and is the only writer of the result frame on stdout.
-import json, os, re, sqlite3, stat, subprocess, sys
+import json, os, re, sqlite3, stat, subprocess, sys, tempfile
 
 MARK = "\x1eclaw-run-result\n"
 SID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -120,14 +120,13 @@ if prior:
     cmd += ["--resume", prior]
 
 before = last_message_id()
-os.makedirs("/tmp/claw-run", exist_ok=True)
-with open("/tmp/claw-run/out", "wb") as out, open("/tmp/claw-run/err", "wb") as err:
-    code = subprocess.run(cmd, cwd=ws, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err).returncode
-
-with open("/tmp/claw-run/err", "rb") as f:
-    f.seek(0, 2)
-    f.seek(max(0, f.tell() - 65536))
-    tail = f.read().decode("utf-8", "replace")
+with tempfile.TemporaryDirectory(prefix="claw-run-", dir="/tmp") as capture:
+    with open(capture + "/out", "wb") as out, open(capture + "/err", "wb") as err:
+        code = subprocess.run(cmd, cwd=ws, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err).returncode
+    with open(capture + "/err", "rb") as f:
+        f.seek(0, 2)
+        f.seek(max(0, f.tell() - 65536))
+        tail = f.read().decode("utf-8", "replace")
 ids = re.findall(r"^session_id:\s*(\S+)\s*$", tail, re.M)
 if code != 0:
     sys.stderr.write(tail[-4000:])

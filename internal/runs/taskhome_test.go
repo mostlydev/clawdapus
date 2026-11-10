@@ -92,8 +92,8 @@ func TestTaskHomeLifecycleAndVerbs(t *testing.T) {
 	h.exec.mu.Lock()
 	rendered := string(h.exec.lastFile)
 	h.exec.mu.Unlock()
-	if !strings.Contains(rendered, "source: "+src+"\n") || strings.Count(rendered, "type: bind") != 1 {
-		t.Fatalf("worker must mount exactly its own home %s:\n%s", src, rendered)
+	if strings.Count(rendered, "source: "+src+"\n") != 2 || strings.Count(rendered, "type: bind") != 2 {
+		t.Fatalf("worker and read-only meter must mount only this home %s:\n%s", src, rendered)
 	}
 	if strings.Contains(rendered, "source: "+filepath.Dir(src)+"\n") || strings.Contains(rendered, "source: "+h.sup.homesDir()+"\n") {
 		t.Fatalf("a parent of the home is mounted:\n%s", rendered)
@@ -190,9 +190,10 @@ func TestTaskHomeResultHeader(t *testing.T) {
 
 func TestTaskHomeAmbiguousReservationFailsClosed(t *testing.T) {
 	for name, corrupt := range map[string]func(*Record){
-		"missing hash":    func(r *Record) { r.HomeHash = "" },
-		"mismatched hash": func(r *Record) { r.HomeHash = HomeHash("inst", "other") },
-		"hash, no home":   func(r *Record) { r.Spec.Home = "" },
+		"missing hash":          func(r *Record) { r.HomeHash = "" },
+		"mismatched hash":       func(r *Record) { r.HomeHash = HomeHash("inst", "other") },
+		"hash, no home":         func(r *Record) { r.Spec.Home = "" },
+		"missing spec and hash": func(r *Record) { r.Spec = nil; r.HomeHash = "" },
 	} {
 		h := taskHomeHarness(t)
 		if _, err := launchTaskHome(h, "a", "task-a"); err != nil {

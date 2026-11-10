@@ -55,6 +55,9 @@ stays as built for every service that does not opt in.
 9. **Authority stays ephemeral.** The run's cllama token reaches the harness only through its
    process environment. Nothing the infrastructure writes into the home is a credential, and
    nothing in the home grants authority to a later run.
+10. **A separate meter watches home size.** It mounts only that home read-only, runs as the
+    worker UID with no network or credentials, and exits when the logical-byte threshold or scan
+    budget is exceeded. The supervisor then revokes and removes the run as `home_full`.
 
 ## What this amends
 
@@ -104,14 +107,13 @@ stays as built for every service that does not opt in.
 
 ## Consequences
 
-- **A home has no enforced size limit in this version.** A worker's shell can fill the host disk
-  during a run. Until a kernel-enforced quota exists, this profile is for workloads whose operator
-  accepts that, and the guide says so. Whether a trial may proceed on that basis is the operator's
-  decision, recorded on #394.
+- **The meter is a watchdog, not a hard quota.** Concurrent writes can exhaust the host disk
+  before detection or teardown. The operator accepted this limitation for the internal trial,
+  with the watchdog and written limitation; kernel-enforced storage quotas remain later work.
 - Clawdapus now holds data that outlives a run. Homes are not rotated by `claw up` and not removed
   by `claw down`. Retention is the orchestrator's decision, made through the delete verb.
 - A run that cannot get its revocation acknowledged keeps its home reserved. Other homes continue.
-- The supervisor gains a second container per run in this profile (the forwarder).
+- Each run has three containers: worker, forwarder, and networkless storage meter.
 - The Hermes per-run contract is pinned to a Hermes version, as the PicoClaw contract is. A Hermes
   upgrade re-proves it.
 - The security review of this profile, and its acceptance cases, are recorded with the design.

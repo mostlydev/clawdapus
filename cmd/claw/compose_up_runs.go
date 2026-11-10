@@ -176,7 +176,7 @@ func writePerRunTemplates(podDir string, p *pod.Pod, templates map[string]*perRu
 		svc := p.Services[name]
 		opts := driver.RunWorkerOpts{PodName: p.Name, MaxResultBytes: svc.Claw.Run.MaxResultBytes}
 		if home := svc.Claw.Run.Home; home != nil {
-			opts.Home = &driver.RunHomeSpec{Mount: home.Mount}
+			opts.Home = &driver.RunHomeSpec{Mount: home.Mount, MaxBytes: home.MaxBytes}
 		}
 		spec, err := t.compiler.CompileRunWorker(t.rc, opts)
 		if err != nil {

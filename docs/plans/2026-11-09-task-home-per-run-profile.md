@@ -11,8 +11,9 @@ only the differences are described here.
 A pod service with `x-claw.lifecycle: per-run` may declare `x-claw.run.home`. `claw up` then
 compiles a task-home template. A launch for that template names a home by an opaque ID. The
 supervisor resolves the ID to a private host directory, reserves it, and renders a run project with
-two services: the worker, with the home mounted read-write and compiled content read-only, and a
-forwarder that is the worker's only route to cllama. The worker runs one turn of its harness,
+three services: the worker, with the home mounted read-write and compiled content read-only; a
+forwarder that is the worker's only route to cllama; and a networkless, read-only storage meter.
+The worker runs one turn of its harness,
 resuming the session stored in the home when there is one, and reports a bounded result frame on
 stdout. On teardown the container is removed, the run's authority is revoked, and the home is
 released for the next run.
@@ -35,8 +36,9 @@ services:
             target: /reference/handbook
 ```
 
-- `run.home` opts the service into the task-home profile. Its one field, `mount`, defaults to
-  `/home/task`.
+- `run.home` opts the service into the task-home profile. `mount` defaults to `/home/task`.
+  `max-bytes` defaults to 1073741824 (1 GiB), accepts 1 through 1099511627776, and is the
+  logical-byte watchdog threshold, not a filesystem quota.
 - `run.content` lists read-only mounts. `source` is a path relative to the pod file, resolved and
   checked at `claw up`: it must exist, stay inside the pod directory after symlink resolution, and
   be a directory or a regular file. `target` is an absolute container path outside the home mount.
@@ -145,11 +147,19 @@ services:
         target: /reference/handbook
         read_only: true
     networks: [run]
-    depends_on: [gate]
+    depends_on: [gate, meter]
   gate:
     # same pinned image, read_only, cap_drop ALL, user 65534:65534, no mounts,
     # no inputs, no token
     networks: [run, claw-runs]
+  meter:
+    # same image and worker UID, read_only, cap_drop ALL, no inputs or token
+    network_mode: none
+    volumes:
+      - type: bind
+        source: <pod>/.claw-homes/<home-hash>/home
+        target: /home/task
+        read_only: true
 networks:
   run:       { internal: true }          # created and removed with this project
   claw-runs: { external: true, name: claw-runs-<ns> }
@@ -160,7 +170,7 @@ networks:
 - The gate forwards TCP from `gate:<port>` to one fixed destination, cllama's API port. It is not
   an HTTP proxy and accepts no destination from the worker. The worker's model base URL is the
   gate.
-- Both services carry a Docker log budget (`json-file`, one file, sized from the result limit). A
+- All three services carry a Docker log budget (`json-file`, one file, sized from the result limit). A
   worker with a shell can write to the container's stdout directly, so the wrapper's own bound is
   not enough. A flood that rotates the result frame away ends as `result_missing`.
 - The driver supplies the gate's entrypoint, run from the worker's own image, so no new image is
@@ -170,6 +180,13 @@ networks:
 - The gate carries the pod labels and a `claw.run.gate-for` label, but not the run-key label, so
   the supervisor's view of a run stays one container. A gate with no ledger record is an orphan,
   like a worker, and blocks `claw runs serve` until removed.
+- The meter carries the same run association, with role `run-meter`. It checks logical regular-file
+  sizes every second using descriptor-relative, no-follow traversal. A scan exceeding 100000
+  entries, 128 directory levels, two seconds of checked work, or the byte threshold exits 75.
+  Unreadable directories also exit 75. Meter loss or unexpected exit fails closed as `home_meter_unavailable`.
+  The monitor revokes and tears down an over-budget run as `home_full`. This does not bound
+  write-rate overshoot or prevent host exhaustion. The operator accepted that risk for the internal
+  trial with this watchdog. No host process needs to traverse Linux worker-owned `0700` directories.
 
 ## Driver contract changes
 
@@ -181,6 +198,7 @@ type RunWorkerSpec struct {
     // existing fields unchanged
     Home   *RunHomeSpec `json:"home,omitempty"`   // container mount path for the home
     Gate   *RunGateSpec `json:"gate,omitempty"`   // forwarder entrypoint, command and listen port
+    Meter  *RunGateSpec `json:"meter,omitempty"`  // networkless read-only home watchdog
 }
 
 type RunResultContract struct {
@@ -240,7 +258,9 @@ A second `RunWorkerCompiler`, in `internal/driver/hermes/runworker.go`.
 `HANDLE`. It does not call the long-lived `Validate`, which requires a channel.
 
 **Commands.** The wrapper is a pinned Python program passed as the entrypoint
-(`python3 -c <program>`), with the task as its one positional argument:
+(`python3 -I -S -c <program>`), with the task as its one positional argument.
+The wrapper and meter use isolated Python startup so files in a custom home
+cannot become infrastructure startup hooks:
 
 - First turn (no `.claw-run/session` in the home):
   `hermes chat -Q -q <task> --toolsets <compiled list>`
@@ -321,6 +341,15 @@ The facts:
 8. The gate forwarder carries a streamed completion.
 9. Cold start: container create to first model request, measured.
 
+The pinned-image probe now demonstrates a real compression summary request, a new session with
+`parent_session_id` pointing to the seeded oversized conversation, and a further container resuming
+that descendant with the summary present in inference. The oversized history is seeded through
+Hermes's SessionDB API; the CLI, compressor, summary request and session split are real.
+
+After an interrupted turn, prior native effects are uncertain. The next brief must ask the worker
+to inspect durable state before repeating an effect. Adjacent unanswered and new user input may
+be merged by Hermes; this is not automatic tool replay or an exactly-once effect guarantee.
+
 ## Acceptance
 
 Security acceptance cases are written by the security reviewer and recorded on #394. The functional
@@ -337,8 +366,8 @@ cases:
 
 One line each; the controls are the reviewer's call.
 
-- The home has no size quota. Reviewed: this is a host-availability risk that a polling check
-  cannot bound. It is recorded as a limitation in ADR-027 and awaits the operator's decision.
+- The home has no hard size quota. Reviewed: this is a host-availability risk the meter cannot
+  bound. The operator accepted it for the internal trial with the watchdog and written limitation.
 - A worker can leave files in its home that change its own next run (config, hooks, skills).
 - Host tooling that reads a home could follow a symlink the worker planted.
 - The gate shares the pod's run network with other runs' gates.
