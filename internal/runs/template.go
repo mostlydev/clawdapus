@@ -244,6 +244,118 @@ func LoadTemplate(podDir, name string) (*Template, *ContextTemplate, error) {
 	return &tpl, &ctx, nil
 }
 
+// templateModels returns the concrete model chain compiled into a template's
+// context, in routing order. It is empty when the template declares none.
+func templateModels(ctx *ContextTemplate) []ModelRef {
+	if ctx == nil {
+		return nil
+	}
+	raw, err := json.Marshal(ctx.Input.Metadata["model_policy"])
+	if err != nil {
+		return nil
+	}
+	var policy struct {
+		Allowed []ModelRef `json:"allowed"`
+	}
+	if json.Unmarshal(raw, &policy) != nil {
+		return nil
+	}
+	return policy.Allowed
+}
+
+// TemplateInfo is what an orchestrator may know about a compiled template:
+// its identity and the concrete models it routes to. It carries no
+// credential, no context body and no task content.
+type TemplateInfo struct {
+	Name          string     `json:"name"`
+	ID            string     `json:"id"`
+	ContextDigest string     `json:"context_digest"`
+	Models        []ModelRef `json:"models"`
+	// Profile is "task_home" for a template whose runs resume a home and
+	// "stateless" otherwise.
+	Profile string `json:"profile"`
+	// ContentTargets are the in-worker paths of a task-home template's
+	// read-only reference mounts. Host paths are not listed.
+	ContentTargets []string `json:"content_targets,omitempty"`
+	// DataPolicy summarizes what cllama enforces for the template's model
+	// calls. It is absent when the template compiled none.
+	DataPolicy *DataPolicySummary `json:"data_policy,omitempty"`
+}
+
+// DataPolicySummary is the data-handling policy compiled for a template.
+// Attestations are named by provider only; their endpoints are not listed.
+type DataPolicySummary struct {
+	Regions           []string `json:"regions"`
+	Training          string   `json:"training"`
+	Retention         string   `json:"retention"`
+	LocalRetention    string   `json:"local_retention"`
+	AttestedProviders []string `json:"attested_providers"`
+}
+
+const (
+	ProfileStateless = "stateless"
+	ProfileTaskHome  = "task_home"
+)
+
+func templateDataPolicy(ctx *ContextTemplate) *DataPolicySummary {
+	if ctx == nil || ctx.Input.Metadata["data_policy"] == nil {
+		return nil
+	}
+	raw, err := json.Marshal(ctx.Input.Metadata["data_policy"])
+	if err != nil {
+		return nil
+	}
+	var policy cllama.DataPolicy
+	if json.Unmarshal(raw, &policy) != nil {
+		return nil
+	}
+	out := &DataPolicySummary{
+		Regions: append([]string{}, policy.Regions...), Training: policy.Training,
+		Retention: policy.Retention, LocalRetention: policy.LocalRetention, AttestedProviders: []string{},
+	}
+	seen := map[string]bool{}
+	for _, a := range policy.Attestations {
+		if a.Provider != "" && !seen[a.Provider] {
+			seen[a.Provider] = true
+			out.AttestedProviders = append(out.AttestedProviders, a.Provider)
+		}
+	}
+	sort.Strings(out.AttestedProviders)
+	return out
+}
+
+// DescribeTemplates lists the compiled templates that pass their digest
+// checks, and names those that do not. A template is described only from
+// files that verify against its own ID and context digest.
+func DescribeTemplates(podDir string) (valid []TemplateInfo, invalid []string, err error) {
+	names, err := ListTemplates(podDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	valid, invalid = []TemplateInfo{}, []string{}
+	for _, name := range names {
+		tpl, ctx, err := LoadTemplate(podDir, name)
+		if err != nil {
+			invalid = append(invalid, name)
+			continue
+		}
+		models := templateModels(ctx)
+		if models == nil {
+			models = []ModelRef{}
+		}
+		info := TemplateInfo{Name: tpl.Name, ID: tpl.ID, ContextDigest: tpl.ContextDigest, Models: models,
+			Profile: ProfileStateless, DataPolicy: templateDataPolicy(ctx)}
+		if tpl.Worker.Home != nil {
+			info.Profile = ProfileTaskHome
+		}
+		for _, mount := range tpl.Content {
+			info.ContentTargets = append(info.ContentTargets, mount.Target)
+		}
+		valid = append(valid, info)
+	}
+	return valid, invalid, nil
+}
+
 // ListTemplates returns the names of compiled templates.
 func ListTemplates(podDir string) ([]string, error) {
 	entries, err := os.ReadDir(TemplateDir(podDir))

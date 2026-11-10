@@ -218,6 +218,7 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/runs/{installation}/{run}/credential", srv.handleCredential)
 	mux.HandleFunc("GET /v1/runs/{installation}/{run}/result", srv.handleResult)
 	mux.HandleFunc("GET /v1/subscriptions", srv.handleSubscriptions)
+	mux.HandleFunc("GET /v1/templates", srv.handleTemplates)
 	mux.HandleFunc("GET /v1/homes/{installation}/{home}", srv.handleHomeStatus)
 	mux.HandleFunc("DELETE /v1/homes/{installation}/{home}", srv.handleHomeDelete)
 	return mux
@@ -248,6 +249,15 @@ func (srv *Server) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"subscriptions": statuses})
+}
+
+func (srv *Server) handleTemplates(w http.ResponseWriter, _ *http.Request) {
+	valid, invalid, err := DescribeTemplates(srv.Sup.cfg.PodDir)
+	if err != nil {
+		writeHomeError(w, apiErr(http.StatusServiceUnavailable, "templates_unavailable", "compiled templates are unreadable"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"templates": valid, "invalid": invalid})
 }
 
 func (srv *Server) handleHomeDelete(w http.ResponseWriter, r *http.Request) {
@@ -442,6 +452,8 @@ type StatusView struct {
 	Generation         uint64      `json:"generation"`
 	SpecDigest         string      `json:"spec_digest,omitempty"`
 	Template           string      `json:"template,omitempty"`
+	TemplateID         string      `json:"template_id,omitempty"`
+	Models             []ModelRef  `json:"models,omitempty"`
 	RunAgentID         string      `json:"run_agent_id,omitempty"`
 	State              State       `json:"state"`
 	Cancelled          bool        `json:"cancelled"`
@@ -469,7 +481,7 @@ func statusView(rec *Record) *StatusView {
 	}
 	v := &StatusView{
 		Installation: rec.Key.Installation, RunID: rec.Key.RunID, Generation: rec.Generation,
-		SpecDigest: rec.SpecDigest, RunAgentID: rec.RunAgentID, State: rec.State, Cancelled: rec.Cancelled,
+		SpecDigest: rec.SpecDigest, TemplateID: rec.TemplateID, Models: rec.Models, RunAgentID: rec.RunAgentID, State: rec.State, Cancelled: rec.Cancelled,
 		Revoked: rec.Revoked, RevocationProof: rec.RevocationProof, Failure: rec.Failure, Result: rec.Result, Credential: rec.Credential,
 		Callbacks: rec.Callbacks, Deadline: rec.Deadline, Timestamps: rec.Timestamps, Pending: rec.LastError,
 		CaptureEpoch: rec.CaptureEpoch, CaptureEpochObservedAt: rec.CaptureEpochObservedAt,

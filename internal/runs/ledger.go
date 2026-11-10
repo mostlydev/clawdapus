@@ -97,6 +97,17 @@ type Spec struct {
 	// Home is the opaque task-home ID. It is required by a task-home template
 	// and refused by a stateless one.
 	Home string `json:"home,omitempty"`
+	// TemplateID, when set, pins the launch to the compiled template the
+	// caller built this spec against. A launch is refused if the template
+	// named by Template has another ID by the time it is admitted.
+	TemplateID string `json:"template_id,omitempty"`
+}
+
+// ModelRef is one entry of a template's compiled model chain: the slot and
+// the concrete provider/model reference.
+type ModelRef struct {
+	Slot string `json:"slot"`
+	Ref  string `json:"ref"`
 }
 
 // ExitInfo records an observed worker exit. Observing an exit is not terminal.
@@ -167,10 +178,13 @@ type Record struct {
 	SpecDigest string `json:"spec_digest,omitempty"`
 	Spec       *Spec  `json:"spec,omitempty"`
 	TemplateID string `json:"template_id,omitempty"`
-	ImageID    string `json:"image_id,omitempty"`
-	RunAgentID string `json:"run_agent_id,omitempty"`
-	RunKey     string `json:"run_key,omitempty"` // pod-scoped container label value
-	Project    string `json:"project,omitempty"`
+	// Models is the concrete model chain of the template the run was
+	// admitted with, in routing order.
+	Models     []ModelRef `json:"models,omitempty"`
+	ImageID    string     `json:"image_id,omitempty"`
+	RunAgentID string     `json:"run_agent_id,omitempty"`
+	RunKey     string     `json:"run_key,omitempty"` // pod-scoped container label value
+	Project    string     `json:"project,omitempty"`
 	// HomeHash names the task home this run reserves, from accept until the
 	// run is terminal. Empty for a stateless run.
 	HomeHash           string      `json:"home_hash,omitempty"`

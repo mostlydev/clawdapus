@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,9 @@ type APIError struct {
 	Status  int    `json:"-"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// CurrentTemplateID accompanies template_changed: the ID the named
+	// template has now, which the templates listing shows to the same peer.
+	CurrentTemplateID string `json:"current_template_id,omitempty"`
 }
 
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }
@@ -35,7 +39,11 @@ var specFields = map[string]string{
 	"tools":               "strings",
 	"max_runtime_seconds": "integer",
 	"home":                "string",
+	"template_id":         "string",
 }
+
+// templateIDRe is the form of a compiled template ID.
+var templateIDRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // CanonicalSpec validates a raw launch spec and returns its canonical JSON
 // form (sorted keys, no insignificant whitespace, no HTML escaping), the
@@ -104,6 +112,9 @@ func CanonicalSpec(raw json.RawMessage) ([]byte, *Spec, string, error) {
 	}
 	if spec.Tools == nil {
 		spec.Tools = []string{}
+	}
+	if _, present := generic["template_id"]; present && !templateIDRe.MatchString(spec.TemplateID) {
+		return nil, nil, "", apiErr(http.StatusBadRequest, "spec_invalid", "spec.template_id must be a compiled template ID")
 	}
 	sum := sha256.Sum256(canonical)
 	return canonical, &spec, "sha256:" + hex.EncodeToString(sum[:]), nil

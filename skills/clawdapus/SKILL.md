@@ -155,6 +155,15 @@ Service skills: `claw.skill.emit` label > operator override > fallback stub.
 
 ## Per-Run Workers
 
+An orchestrator can read `GET /v1/templates` on the supervisor socket and put the
+compiled template's `id` in the launch spec as `template_id`, before computing
+its digest and queueing it. A stale ID fails admission with `409 template_changed`
+and `current_template_id`; it does not reserve a home or create a run. A retry of
+an already-admitted identical spec returns the original run. Status exposes the
+admitted `template_id` and concrete `models` chain. The listing contains only
+verified template metadata, model refs, profile, reference mount targets and a
+data-policy summary; it contains no credentials or context body.
+
 The default profile remains stateless PicoClaw. Hermes can opt into a persistent
 task home with `x-claw.run.home: {}`. Launch specs then require an opaque `home`
 ID, scoped by installation; the supervisor admits one live run per home. Only
