@@ -631,3 +631,5 @@ All views are read-only and scoped through `claw-api` principals. Use this befor
 - `claw-internal` Docker network is NOT `internal: true` — agents need egress for APIs
 
 Task-home run networks use individual /29 blocks from `10.213.0.0/16` instead of consuming Docker default address pools. Set `CLAW_RUN_SUBNET_BASE` on `claw runs serve` to choose a different private IPv4 range (/8 through /24) if another host network overlaps. Runs remain on separate internal bridges; no existing host networks are pruned.
+
+Task-home workers can return files in `<home>/deliverables/`. The supervisor socket serves `GET /v1/homes/{installation}/{home}/deliverables` (up to 200 files, 4096 scanned entries, `truncated` when bounded) and `GET .../deliverables/{name}?sha256=<optional expected digest>`. Only flat regular files up to 524288 bytes are served. Fetch returns `{name,bytes,sha256,content_base64}` under 700 KiB total JSON; a digest mismatch returns `409 deliverable_changed`. Symlinks, directories and harness/session files are not served. The digest describes the returned bytes.
