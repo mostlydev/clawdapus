@@ -243,9 +243,14 @@ var runsDoctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check the run ledger and list run workers it does not know",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		podDir, _, err := loadRunsPod()
+		podDir, p, err := loadRunsPod()
 		if err != nil {
 			return err
+		}
+		// Model family drift needs no run lock and changes nothing, so it
+		// is reported even while the supervisor is serving.
+		for _, line := range newFamilyResolver(podDir, p).familyDrift(cmd.Context()) {
+			fmt.Fprintln(cmd.OutOrStdout(), line)
 		}
 		lock, err := runs.AcquirePodLock(podDir)
 		if errors.Is(err, runs.ErrPodLocked) {

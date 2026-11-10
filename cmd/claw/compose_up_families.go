@@ -130,6 +130,10 @@ func (r *familyResolver) apply(ctx context.Context, rc *driver.ResolvedClaw) err
 		if err != nil {
 			return fmt.Errorf("service %q: model slot %q: %w", rc.ServiceName, slot, err)
 		}
+		if rc.RequestedModels == nil {
+			rc.RequestedModels = map[string]string{}
+		}
+		rc.RequestedModels[slot] = ref
 		rc.Models[slot] = m[1] + "/" + id
 	}
 	return nil
@@ -440,4 +444,116 @@ func sameEndpoint(a, b string) bool {
 	na, okA := norm(a)
 	nb, okB := norm(b)
 	return okA && okB && na == nb
+}
+
+// familyDrift reports, for every declared family and every lock entry, how
+// the locked model compares with what the provider lists now. It only
+// reads: it has no way to write the lock or a template. An absent model is
+// reported as absent from this listing, never as retired.
+func (r *familyResolver) familyDrift(ctx context.Context) []string {
+	lock, err := modelfamily.LoadLock(filepath.Join(r.podDir, modelfamily.LockFileName))
+	if err != nil {
+		return []string{"model families: " + modelfamily.LockFileName + " is unreadable"}
+	}
+	keys := map[string]bool{}
+	for name, fam := range r.families {
+		keys[modelfamily.LockKey(fam.Provider, name)] = true
+	}
+	for key := range lock.Families {
+		keys[key] = true
+	}
+	ordered := make([]string, 0, len(keys))
+	for key := range keys {
+		ordered = append(ordered, key)
+	}
+	sort.Strings(ordered)
+
+	var lines []string
+	var policyNotes []string
+	say := func(key, format string, args ...any) {
+		line := "model family " + key + ": " + fmt.Sprintf(format, args...)
+		if len(policyNotes) > 0 {
+			line += "; " + strings.Join(policyNotes, "; ")
+		}
+		lines = append(lines, line)
+	}
+	for _, key := range ordered {
+		policyNotes = nil
+		provider, name, _ := strings.Cut(key, "/@")
+		locked, hadLock := lock.Families[key]
+		fam, declared := r.families[name]
+		if !declared || fam.Provider != provider {
+			say(key, "locked %s, but the pod declares no such family", locked.ID)
+			continue
+		}
+		if !hadLock {
+			say(key, "declared, not resolved yet; run claw up")
+			continue
+		}
+		if _, err := r.lookup(provider, name); err != nil {
+			say(key, "locked %s; cannot be checked (%v)", locked.ID, err)
+			continue
+		}
+		policyNotes = []string{"service data policy not assessed; claw up rechecks it"}
+		if r.prices == nil {
+			prices, source, err := r.loadPrices(ctx)
+			if err != nil {
+				say(key, "locked %s; price table unavailable", locked.ID)
+				continue
+			}
+			r.prices, r.source = prices, source
+		}
+		// The lock is judged against the family as the pod writes it now.
+		lockedReason := fam.Reuse(locked, r.prices, nil)
+		qualifies := "still meets family/pricing constraints"
+		if lockedReason != "" {
+			qualifies = "no longer meets family/pricing constraints (" + lockedReason + ")"
+		}
+		baseURL, apiKey, err := r.providerEndpoint(provider)
+		if err != nil {
+			say(key, "locked %s, %s; listing not read (%v)", locked.ID, qualifies, err)
+			continue
+		}
+		catalog, catalogErr := r.fetchCatalog(ctx, baseURL, apiKey)
+		if catalogErr != nil || !catalog.Complete {
+			why := "incomplete"
+			if catalogErr != nil {
+				why = catalogErr.Error()
+			}
+			say(key, "locked %s, %s; listing unavailable (%s)", locked.ID, qualifies, why)
+			continue
+		}
+		present := false
+		for _, id := range catalog.IDs {
+			present = present || id == locked.ID
+		}
+		lockedVersion, _ := fam.Member(locked.ID)
+		decision := fam.Choose(catalog, r.prices, nil)
+		var notes []string
+		if !present {
+			notes = append(notes, "absent from this listing")
+		}
+		if lockedReason != "" {
+			notes = append(notes, qualifies)
+		}
+		if decision.Reason == modelfamily.ReasonVersionTie {
+			notes = append(notes, "the listing has two members with one version; nothing would move")
+		}
+		for _, skipped := range decision.Skipped {
+			if v, ok := fam.Member(skipped.ID); ok && v.Compare(lockedVersion) > 0 && skipped.Reason != modelfamily.ReasonVersionTie {
+				notes = append(notes, fmt.Sprintf("newer member %s is not eligible (%s)", skipped.ID, skipped.Reason))
+			}
+		}
+		if decision.ID != "" && decision.ID != locked.ID {
+			if v, _ := fam.Member(decision.ID); v.Compare(lockedVersion) > 0 || lockedReason != "" {
+				notes = append(notes, fmt.Sprintf("family/pricing candidate %s", decision.ID))
+			}
+		}
+		if len(notes) == 0 {
+			say(key, "locked %s; up to date", locked.ID)
+			continue
+		}
+		say(key, "locked %s; %s", locked.ID, strings.Join(notes, "; "))
+	}
+	return lines
 }

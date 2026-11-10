@@ -8,6 +8,7 @@ import (
 	"errors"
 	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/infraimages"
 	"github.com/mostlydev/clawdapus/internal/modelfamily"
 	"github.com/mostlydev/clawdapus/internal/runs"
 	"os"
@@ -69,7 +70,7 @@ func TestSpikeFamilyPriceExport(t *testing.T) {
 // worker or granting any provider access.
 func TestSpikeFamilyCompiledQueueIdentity(t *testing.T) {
 	prev := infraCllamaTag
-	infraCllamaTag = "v0.16.0"
+	infraCllamaTag = infraimages.DefaultCllamaTag
 	defer func() { infraCllamaTag = prev }()
 	prices, source, err := loadPinnedCllamaPrices(context.Background())
 	if err != nil {
@@ -89,17 +90,20 @@ func TestSpikeFamilyCompiledQueueIdentity(t *testing.T) {
 	compile := func(ids []string) *runs.Template {
 		t.Helper()
 		rig.catalog = modelfamily.Catalog{Complete: true, IDs: ids}
-		models, err := rig.up(map[string]string{"primary": "openai/@terra"})
-		if err != nil {
+		rc := &driver.ResolvedClaw{ServiceName: "worker", ClawType: "hermes", AgentHostPath: contract, Cllama: []string{"passthrough"}, Models: map[string]string{"primary": "openai/@terra"}}
+		if err := rig.r.apply(context.Background(), rc); err != nil {
 			t.Fatal(err)
 		}
-		rc := &driver.ResolvedClaw{ServiceName: "worker", ClawType: "hermes", AgentHostPath: contract, Cllama: []string{"passthrough"}, Models: models}
+		if err := rig.r.save(); err != nil {
+			t.Fatal(err)
+		}
 		worker, err := compiler.CompileRunWorker(rc, driver.RunWorkerOpts{PodName: "family-test", MaxResultBytes: 4096, Home: &driver.RunHomeSpec{Mount: "/task", MaxBytes: 1 << 20}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		tpl := &runs.Template{Name: "worker", Pod: "family-test", ClawType: "hermes", ImageID: "sha256:" + strings.Repeat("a", 64), Worker: *worker, Limits: runs.Limits{MaxTaskBytes: 4096, MaxResultBytes: 4096, MaxRuntimeSeconds: 60, MaxAuthoritySeconds: 3600}}
-		ctx := &runs.ContextTemplate{Input: cllama.AgentContextInput{Metadata: cllama.InjectCompiledModelPolicy(map[string]any{}, models)}}
+		tpl.RequestedModels = requestedModelChain(rc)
+		ctx := &runs.ContextTemplate{Input: cllama.AgentContextInput{Metadata: cllama.InjectCompiledModelPolicy(map[string]any{}, rc.Models)}}
 		if err := runs.WriteTemplates(rig.dir, []*runs.Template{tpl}, map[string]*runs.ContextTemplate{"worker": ctx}); err != nil {
 			t.Fatal(err)
 		}
@@ -121,7 +125,7 @@ func TestSpikeFamilyCompiledQueueIdentity(t *testing.T) {
 		t.Fatal("successor did not change template identity")
 	}
 	infos, invalid, err := runs.DescribeTemplates(rig.dir)
-	if err != nil || len(invalid) != 0 || len(infos) != 1 || infos[0].Profile != "task_home" || infos[0].Models[0].Ref != "openai/gpt-6.1-terra" {
+	if err != nil || len(invalid) != 0 || len(infos) != 1 || infos[0].Profile != "task_home" || infos[0].Models[0].Ref != "openai/gpt-6.1-terra" || infos[0].Models[0].Requested != "openai/@terra" {
 		t.Fatalf("listing: %+v %v %v", infos, invalid, err)
 	}
 	// Nil embedded methods deliberately panic if admission starts any external
@@ -143,7 +147,7 @@ func TestSpikeFamilyCompiledQueueIdentity(t *testing.T) {
 	fresh, _ := json.Marshal(map[string]any{"template": "worker", "template_id": second.ID, "task": "current", "home": "task-a", "tools": []string{}})
 	_, _, freshDigest, _ := runs.CanonicalSpec(fresh)
 	rec, _, err := sup.Launch(context.Background(), runs.LaunchRequest{Key: key, Generation: 1, Spec: fresh, SpecDigest: freshDigest, AuthorityExpiresAt: time.Now().Add(time.Minute)})
-	if err != nil || rec.TemplateID != second.ID || len(rec.Models) != 1 || rec.Models[0].Ref != "openai/gpt-6.1-terra" {
+	if err != nil || rec.TemplateID != second.ID || len(rec.Models) != 1 || rec.Models[0].Ref != "openai/gpt-6.1-terra" || rec.Models[0].Requested != "openai/@terra" {
 		t.Fatalf("current spec: %+v %v", rec, err)
 	}
 }

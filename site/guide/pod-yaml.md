@@ -323,6 +323,24 @@ A model the pinned cllama does not price is passed over, so a brand-new model be
 - Supported providers are `openai`, `xai`, `google` and `meta`, on their standard endpoints. A provider endpoint overridden in `x-claw.cllama-env` or in the pod's provider store is refused, because the price table does not cover it. Plan routes (`chatgpt/…`), Vercel, OpenRouter and Anthropic need an exact ID for now.
 - The ceilings bound the vendor's listed standard rates for uncached text tokens. They are not a billing cap: regional uplifts, faster service tiers and cache writes are outside the price table.
 
+### Checking for drift
+
+`claw runs doctor` reports each family before its other checks. It reads the pod file, `models.lock`, the pinned price table and the provider's model list, and changes nothing: no lock, no template. It needs no run lock, so it reports even while `claw runs serve` is running (the rest of `doctor` still refuses then).
+
+```
+model family openai/@terra: locked gpt-6.1-terra; up to date
+model family openai/@terra: locked gpt-5.6-terra; family/pricing candidate gpt-6.1-terra
+model family openai/@terra: locked gpt-6.1-terra; newer member gpt-7-terra is not eligible (unpriced)
+model family openai/@terra: locked gpt-6.1-terra; absent from this listing
+model family openai/@terra: locked gpt-6.1-terra, still meets family/pricing constraints; listing unavailable (model listing could not be read)
+```
+
+Eligibility lines also state `service data policy not assessed; claw up rechecks it`. Doctor does not inspect image `MODEL` labels and cannot establish all consuming services. A family/pricing candidate is not a promise that recompilation will succeed: `claw up` checks every resolved service and cllama enforces policy on every request.
+
+- `absent from this listing` means one complete read of the provider's list did not include the locked model. It is an observation, not a statement that the model was retired, and `claw up` will not move down because of it.
+- `no longer meets family/pricing constraints (<reason>)` means the locked model does not fit the family as the pod writes it now, for example after a ceiling was lowered.
+- A family that is declared but has no lock entry, and a lock entry whose family the pod no longer declares, are each reported.
+
 `models.lock` records, per family, the chosen model, the previous one, the rates it was bounded with, when the model list was read and the cllama image the prices came from. It holds no credential. Commit it with the pod if you want the choice reviewed.
 
 A catalog that omits the locked model does not authorize a downgrade. If the lock still satisfies the current constraints and no newer eligible model is listed, `claw up` keeps it and explains why. Changing the family or ceilings can invalidate the lock; in that case the highest eligible member under the new constraints is selected.

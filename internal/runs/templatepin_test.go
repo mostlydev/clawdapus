@@ -82,7 +82,7 @@ func TestLaunchPinnedToATemplateID(t *testing.T) {
 	if err != nil || rec == nil || rec.TemplateID != first {
 		t.Fatalf("launch: %v %+v", err, rec)
 	}
-	wantChain := []ModelRef{{"primary", "openai/gpt-5.6-terra"}, {"fallback", "chatgpt/gpt-5.6-terra"}}
+	wantChain := []ModelRef{{Slot: "primary", Ref: "openai/gpt-5.6-terra"}, {Slot: "fallback", Ref: "chatgpt/gpt-5.6-terra"}}
 	if len(rec.Models) != 2 || rec.Models[0] != wantChain[0] || rec.Models[1] != wantChain[1] {
 		t.Fatalf("admitted chain = %+v", rec.Models)
 	}
@@ -184,7 +184,7 @@ func TestTemplatesListing(t *testing.T) {
 	if tpl.Name != "worker" || tpl.ID != id || !strings.HasPrefix(tpl.ContextDigest, "sha256:") {
 		t.Fatalf("template = %+v", tpl)
 	}
-	if len(tpl.Models) != 2 || tpl.Models[0] != (ModelRef{"primary", "openai/gpt-6.1-terra"}) || tpl.Models[1] != (ModelRef{"fallback", "chatgpt/gpt-6.1-terra"}) {
+	if len(tpl.Models) != 2 || tpl.Models[0] != (ModelRef{Slot: "primary", Ref: "openai/gpt-6.1-terra"}) || tpl.Models[1] != (ModelRef{Slot: "fallback", Ref: "chatgpt/gpt-6.1-terra"}) {
 		t.Fatalf("models = %+v", tpl.Models)
 	}
 	if tpl.Profile != ProfileStateless || len(tpl.ContentTargets) != 0 {
@@ -275,5 +275,150 @@ func TestTemplatesListingNamesTaskHomeProfile(t *testing.T) {
 		if mount.Source != "" && strings.Contains(string(raw), mount.Source) {
 			t.Fatalf("listing leaks a host path: %s", raw)
 		}
+	}
+}
+
+// requestedTemplate rewrites the harness template with a chain and the
+// family references it was resolved from, as claw up would.
+func (h *harness) requestedTemplate(models map[string]string, requested []string) (string, error) {
+	h.t.Helper()
+	tpl, ctx, err := LoadTemplate(h.podDir, "worker")
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	ctx.Input.Metadata = cllama.InjectCompiledModelPolicy(ctx.Input.Metadata, models)
+	tpl.RequestedModels = requested
+	if err := WriteTemplates(h.podDir, []*Template{tpl}, map[string]*ContextTemplate{"worker": ctx}); err != nil {
+		h.t.Fatal(err)
+	}
+	next, _, err := LoadTemplate(h.podDir, "worker")
+	if err != nil {
+		return "", err
+	}
+	return next.ID, nil
+}
+
+// A template says which model family each chain entry was resolved from. An
+// exact model has no requested name, and a template of exact models is the
+// same template it always was.
+func TestRequestedModelsInTemplatesAndRuns(t *testing.T) {
+	h := newHarness(t, false)
+	chain := map[string]string{"primary": "openai/gpt-6.1-terra", "fallback": "chatgpt/gpt-6.1-terra", "fallback-2": "openai/gpt-5.6-terra"}
+
+	exactID, err := h.requestedTemplate(chain, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(TemplateDir(h.podDir) + "/worker.json")
+	if strings.Contains(string(raw), "requested_models") {
+		t.Fatalf("a template of exact models carries the field: %s", raw)
+	}
+	listing, _, _ := DescribeTemplates(h.podDir)
+	for _, m := range listing[0].Models {
+		if m.Requested != "" {
+			t.Fatalf("exact model has a requested name: %+v", m)
+		}
+	}
+	plain, _ := json.Marshal(listing[0].Models)
+	if strings.Contains(string(plain), "requested") {
+		t.Fatalf("listing of exact models mentions requested: %s", plain)
+	}
+
+	// A mixed chain: the first and third entries came from a family.
+	mixedID, err := h.requestedTemplate(chain, []string{"openai/@terra", "", "openai/@terra"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mixedID == exactID {
+		t.Fatal("the requested names are not part of the template ID")
+	}
+	listing, invalid, err := DescribeTemplates(h.podDir)
+	if err != nil || len(invalid) != 0 || len(listing) != 1 {
+		t.Fatalf("listing: %v %v %v", listing, invalid, err)
+	}
+	want := []ModelRef{
+		{Slot: "primary", Ref: "openai/gpt-6.1-terra", Requested: "openai/@terra"},
+		{Slot: "fallback", Ref: "chatgpt/gpt-6.1-terra"},
+		{Slot: "fallback", Ref: "openai/gpt-5.6-terra", Requested: "openai/@terra"},
+	}
+	for i, m := range listing[0].Models {
+		if m != want[i] {
+			t.Fatalf("models[%d] = %+v, want %+v", i, m, want[i])
+		}
+	}
+
+	// A run admitted against it records the same, and keeps it.
+	specRaw, digest := pinnedSpec(t, "task", mixedID)
+	rec, err := h.launchSpec("a", specRaw, digest)
+	if err != nil || len(rec.Models) != 3 || rec.Models[0] != want[0] || rec.Models[1] != want[1] {
+		t.Fatalf("admitted run: %v %+v", err, rec)
+	}
+	if _, err := h.requestedTemplate(chain, nil); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := h.sup.Get(Key{"inst", "a"}); again.TemplateID != mixedID || again.Models[0].Requested != "openai/@terra" {
+		t.Fatalf("an admitted run changed after a recompile: %+v", again)
+	}
+	// A spec queued against the family template is refused once it changed.
+	if _, err := h.launchSpec("b", specRaw, digest); err == nil {
+		t.Fatal("a stale template ID was admitted")
+	}
+}
+
+// A requested-model list that does not line up with the chain is a broken
+// template. It is never used to label another model.
+func TestMalformedRequestedModelsInvalidateTheTemplate(t *testing.T) {
+	chain := map[string]string{"primary": "openai/gpt-6.1-terra", "fallback": "chatgpt/gpt-6.1-terra"}
+	for name, requested := range map[string][]string{
+		"too short":            {"openai/@terra"},
+		"too long":             {"openai/@terra", "", ""},
+		"another provider":     {"xai/@terra", ""},
+		"plan slot mislabeled": {"", "openai/@terra"},
+		"not a family ref":     {"openai/gpt-6.1-terra", ""},
+		"a path":               {"openai/@../x", ""},
+		"upper case":           {"openai/@Terra", ""},
+		"names nothing":        {"", ""},
+	} {
+		h := newHarness(t, false)
+		if _, err := h.requestedTemplate(chain, requested); err == nil {
+			t.Errorf("%s: template loaded", name)
+			continue
+		}
+		valid, invalid, err := DescribeTemplates(h.podDir)
+		if err != nil || len(valid) != 0 || len(invalid) != 1 {
+			t.Errorf("%s: listing = %v %v %v", name, valid, invalid, err)
+		}
+		raw, digest := pinnedSpec(t, "task", "")
+		if _, err := h.launchSpec("a", raw, digest); err == nil {
+			t.Errorf("%s: a run was admitted against a broken template", name)
+		}
+	}
+}
+
+// A requested name written into the context cannot label a model: only the
+// template's own list does.
+func TestRequestedNameInTheContextIsIgnored(t *testing.T) {
+	h := newHarness(t, false)
+	tpl, ctx, err := LoadTemplate(h.podDir, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx.Input.Metadata["model_policy"] = map[string]any{"mode": "clamp", "allowed": []any{
+		map[string]any{"slot": "primary", "ref": "openai/gpt-6.1-terra", "requested": "openai/@terra"},
+	}}
+	if err := WriteTemplates(h.podDir, []*Template{tpl}, map[string]*ContextTemplate{"worker": ctx}); err != nil {
+		t.Fatal(err)
+	}
+	listing, invalid, err := DescribeTemplates(h.podDir)
+	if err != nil || len(invalid) != 0 || len(listing) != 1 || len(listing[0].Models) != 1 {
+		t.Fatalf("listing: %v %v %v", listing, invalid, err)
+	}
+	if m := listing[0].Models[0]; m.Ref != "openai/gpt-6.1-terra" || m.Requested != "" {
+		t.Fatalf("a context-side requested name surfaced: %+v", m)
+	}
+	raw, digest := pinnedSpec(t, "task", listing[0].ID)
+	rec, err := h.launchSpec("a", raw, digest)
+	if err != nil || len(rec.Models) != 1 || rec.Models[0].Requested != "" {
+		t.Fatalf("run record: %v %+v", err, rec)
 	}
 }

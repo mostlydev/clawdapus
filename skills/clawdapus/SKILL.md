@@ -162,7 +162,9 @@ and `current_template_id`; it does not reserve a home or create a run. A retry o
 an already-admitted identical spec returns the original run. Status exposes the
 admitted `template_id` and concrete `models` chain. The listing contains only
 verified template metadata, model refs, profile, reference mount targets and a
-data-policy summary; it contains no credentials or context body.
+data-policy summary; it contains no credentials or context body. Each model entry has `slot`, concrete `ref`, and optional `requested` (for example `openai/@terra`) when a family was resolved. Requested names come only from the verified template and are copied into the run at admission. Exact pins omit the field. The first recompilation with this feature changes family-template IDs; queued old IDs keep the normal `template_changed` refusal, never an automatic rebind.
+
+`claw runs doctor` reports model-family drift before taking the run lock, so this report is available while serve runs (later ledger checks still refuse). It never changes model locks or templates. It compares the current family/pricing constraints and catalog, reports newer candidates/ineligible members/listing absence or unavailability, and states that service data policy was not assessed. Image-only consumers are not inspected; candidates are not compile approval and listing absence is not retirement.
 
 The default profile remains stateless PicoClaw. Hermes can opt into a persistent
 task home with `x-claw.run.home: {}`. Launch specs then require an opaque `home`
