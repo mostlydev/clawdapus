@@ -165,9 +165,41 @@ services:
 	}
 	ctx := context.Background()
 
+	// Pin every launch to the metadata returned by the live supervisor.
+	var listing struct {
+		Templates []runs.TemplateInfo `json:"templates"`
+		Invalid   []string            `json:"invalid"`
+	}
+	if err := client.Do(ctx, "GET", "/v1/templates", nil, &listing); err != nil {
+		t.Fatal(err)
+	}
+	var templateID string
+	for _, info := range listing.Templates {
+		if info.Name == "worker" {
+			templateID = info.ID
+			if info.Profile != runs.ProfileTaskHome || len(info.Models) == 0 {
+				t.Fatalf("incomplete worker template: %+v", info)
+			}
+		}
+	}
+	if templateID == "" || len(listing.Invalid) > 0 {
+		t.Fatalf("template listing: %+v", listing)
+	}
+	// Negative control: stale identity cannot create a run or reserve task-a.
+	stale, _ := json.Marshal(map[string]any{"template": "worker", "template_id": "sha256:" + strings.Repeat("0", 64), "task": "never run", "tools": []string{}, "home": "task-a"})
+	_, _, staleDigest, _ := runs.CanonicalSpec(stale)
+	err = client.Do(ctx, "POST", "/v1/runs", map[string]any{"installation": "inst", "run_id": "stale-template", "generation": 1, "spec_digest": staleDigest, "spec": json.RawMessage(stale), "authority_expires_at": time.Now().Add(20 * time.Minute)}, nil)
+	var refused *runs.APIError
+	if !errors.As(err, &refused) || refused.Status != 409 || refused.Code != "template_changed" || refused.CurrentTemplateID != templateID {
+		t.Fatalf("stale template admitted or wrong refusal: %v", err)
+	}
+	if err := client.Do(ctx, "GET", runs.RunPath(runs.Key{Installation: "inst", RunID: "stale-template"}, ""), nil, nil); !errors.As(err, &refused) || refused.Status != 404 {
+		t.Fatalf("refused launch left a run: %v", err)
+	}
+
 	// Every run hands over a credential, so its end callback is delivered.
 	launch := func(runID, home, task string) error {
-		raw, _ := json.Marshal(map[string]any{"template": "worker", "task": task, "tools": []string{}, "home": home})
+		raw, _ := json.Marshal(map[string]any{"template": "worker", "template_id": templateID, "task": task, "tools": []string{}, "home": home})
 		_, _, digest, _ := runs.CanonicalSpec(raw)
 		return client.Do(ctx, "POST", "/v1/runs", map[string]any{
 			"installation": "inst", "run_id": runID, "generation": 1, "spec_digest": digest,
@@ -207,6 +239,9 @@ services:
 	finish := func(runID string) (runs.StatusView, string) {
 		t.Helper()
 		view := runsSpikeWait(t, client, runID, "stopped")
+		if view.TemplateID != templateID || len(view.Models) == 0 {
+			t.Fatalf("run %s lost admitted identity: %+v", runID, view)
+		}
 		if view.State != runs.StateStopped || view.Failure != "" || !view.Revoked || view.Result == nil {
 			t.Fatalf("run %s: %+v", runID, view)
 		}

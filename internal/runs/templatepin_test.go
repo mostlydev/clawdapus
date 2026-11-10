@@ -215,6 +215,14 @@ func TestTemplatesListing(t *testing.T) {
 		t.Fatalf("status = %+v", view)
 	}
 
+	// The stale-pin refusal survives the HTTP boundary with the current ID.
+	current := h.recompile(map[string]string{"primary": "openai/gpt-6.1-sol"})
+	body["run_id"] = "stale-http"
+	var refusal *APIError
+	if err := c.Do(context.Background(), "POST", "/v1/runs", body, nil); !errors.As(err, &refusal) || refusal.Status != http.StatusConflict || refusal.Code != "template_changed" || refusal.CurrentTemplateID != current {
+		t.Fatalf("HTTP stale-pin refusal = %+v (%v)", refusal, err)
+	}
+
 	// A template whose files no longer verify is named as invalid and never
 	// described from its stale parts.
 	ctxPath := TemplateDir(h.podDir) + "/worker.context.json"
@@ -222,7 +230,7 @@ func TestTemplatesListing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(ctxPath, []byte(strings.Replace(string(data), "gpt-6.1-terra", "gpt-9.9-other", 1)), 0o600); err != nil {
+	if err := os.WriteFile(ctxPath, []byte(strings.Replace(string(data), "gpt-6.1-sol", "gpt-9.9-other", 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Do(context.Background(), "GET", "/v1/templates", nil, &raw); err != nil {
@@ -235,9 +243,20 @@ func TestTemplatesListing(t *testing.T) {
 
 func TestTemplatesListingNamesTaskHomeProfile(t *testing.T) {
 	h := taskHomeHarness(t)
+	compiled, ctx, err := LoadTemplate(h.podDir, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled.Content = []ContentMount{{Source: "/private/reference-host-canary", Target: "/reference/handbook"}}
+	if err := WriteTemplates(h.podDir, []*Template{compiled}, map[string]*ContextTemplate{"worker": ctx}); err != nil {
+		t.Fatal(err)
+	}
 	valid, invalid, err := DescribeTemplates(h.podDir)
 	if err != nil || len(invalid) != 0 || len(valid) != 1 {
 		t.Fatalf("listing: %v %v %v", valid, invalid, err)
+	}
+	if len(valid[0].ContentTargets) != 1 || valid[0].ContentTargets[0] != "/reference/handbook" {
+		t.Fatalf("content targets = %v", valid[0].ContentTargets)
 	}
 	if valid[0].Profile != ProfileTaskHome {
 		t.Fatalf("profile = %q", valid[0].Profile)
