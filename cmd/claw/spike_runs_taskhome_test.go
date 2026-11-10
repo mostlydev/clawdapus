@@ -187,6 +187,21 @@ services:
 		if err := json.Unmarshal([]byte(raw), &body); err != nil {
 			t.Fatalf("end callback of %s is not JSON: %q", runID, raw)
 		}
+		// A proxy with plan routes also reports which credential class served
+		// the run (#398). Those fields have their own live test; they are
+		// checked for shape here and set aside, so the field counts below
+		// hold for either proxy.
+		if served, ok := body["served_by"]; ok {
+			counts, _ := served.(map[string]any)
+			if n, _ := counts["api_key"].(float64); n < 1 || len(counts) != 1 || body["served_by_complete"] != true {
+				t.Fatalf("end callback of %s: served_by: %v complete=%v", runID, served, body["served_by_complete"])
+			}
+			delete(body, "served_by")
+			delete(body, "served_by_complete")
+		}
+		if _, ok := body["last_plan_failure"]; ok {
+			t.Fatalf("end callback of %s names a plan failure though no plan route is declared: %v", runID, body)
+		}
 		return body
 	}
 	finish := func(runID string) (runs.StatusView, string) {

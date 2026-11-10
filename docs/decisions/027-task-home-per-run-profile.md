@@ -1,7 +1,7 @@
 # ADR-027: Task-Home Profile for Per-Run Workers
 
 **Date:** 2026-11-09
-**Status:** Proposed
+**Status:** Accepted
 **Depends on:** ADR-002 (Runtime Authority), ADR-020 (cllama Compiled Tool Mediation)
 **Amends:** the per-run worker design agreed for #372 (`docs/plans/2026-10-20-per-run-workers.md`, "As built")
 **Tracks:** #394
@@ -121,8 +121,7 @@ stays as built for every service that does not opt in.
 
 ## Not decided here
 
-- Model access through a subscription sign-in. The design leaves a placeholder; it gets its own
-  record.
+- Model access through a subscription sign-in. Decided in ADR-028.
 - Warm workers.
 - Network egress beyond cllama.
 - Pod-declared `SKILL` files for per-run workers. Skills the worker writes for itself live in its
