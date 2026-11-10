@@ -103,6 +103,27 @@ type Spec struct {
 type ExitInfo struct {
 	Code int       `json:"code"`
 	At   time.Time `json:"at"`
+	// RunnerCode is the exit code of the runner inside a task-home worker,
+	// when the worker's wrapper reported that the runner itself failed.
+	RunnerCode *int `json:"runner_code,omitempty"`
+}
+
+// Failure reasons a task-home worker's wrapper reports about itself. The
+// worker is untrusted: its report can only choose among these names for its
+// own non-zero exit. It grants nothing and replaces no supervisor finding.
+const (
+	ReasonWorkerUsage           = "worker_usage"
+	ReasonWorkerHomeInvalid     = "worker_home_invalid"
+	ReasonWorkerSessionLocator  = "worker_session_locator_malformed"
+	ReasonWorkerRunnerExit      = "worker_runner_exit"
+	ReasonWorkerTurnNotStored   = "worker_turn_not_stored"
+	ReasonWorkerSessionUnproven = "worker_session_unproven"
+	workerReasonPrefix          = "worker_"
+)
+
+var workerReasons = map[string]bool{
+	ReasonWorkerUsage: true, ReasonWorkerHomeInvalid: true, ReasonWorkerSessionLocator: true,
+	ReasonWorkerRunnerExit: true, ReasonWorkerTurnNotStored: true, ReasonWorkerSessionUnproven: true,
 }
 
 // ResultInfo describes the stored result.

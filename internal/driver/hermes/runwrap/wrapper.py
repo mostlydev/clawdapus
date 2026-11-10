@@ -12,8 +12,16 @@ db_path = hh + "/state.db"
 session_file, question_file = ctl + "/session", ctl + "/question.md"
 
 
-def die(code, msg):
+def die(code, msg, reason, runner_exit=None):
+    # The message is for a person reading the container log. The supervisor
+    # reads only the frame: a fixed reason code and, when the runner itself
+    # failed, its exit code. No output, session id or path goes in the frame.
     sys.stderr.write("claw-run: " + msg + "\n")
+    header = {"outcome": "failed", "reason": reason}
+    if runner_exit is not None:
+        header["runner_exit"] = runner_exit
+    sys.stdout.buffer.write(MARK.encode() + json.dumps(header, separators=(",", ":")).encode() + b"\n")
+    sys.stdout.buffer.flush()
     sys.exit(code)
 
 
@@ -23,7 +31,7 @@ def real_dir(path):
     except FileExistsError:
         pass
     if not stat.S_ISDIR(os.lstat(path).st_mode):
-        die(71, path + " is not a directory")
+        die(71, path + " is not a directory", "home_invalid")
 
 
 def read_small(path, cap):
@@ -61,7 +69,7 @@ def remove(path):
     except FileNotFoundError:
         pass
     except OSError:
-        die(71, path + " cannot be cleared")
+        die(71, path + " cannot be cleared", "home_invalid")
 
 
 def last_message_id():
@@ -92,9 +100,73 @@ def stored_answer(sid, after):
     return row[0] if row else None
 
 
+MAX_HOPS, MAX_CANDIDATES = 32, 64
+
+
+def continuation_tip(db, start):
+    # Follow compression continuations from a session to the live end of its
+    # conversation. The edge is the runner's own definition: the parent ended
+    # with reason "compression" and the child started at or after that. A
+    # delegated or branched child also names a parent, and is not followed.
+    # Two continuations of one session, or a chain past the bound (which is
+    # also how a cycle ends), prove nothing.
+    cur = start
+    for _ in range(MAX_HOPS):
+        try:
+            rows = db.execute(
+                "SELECT c.id FROM sessions c JOIN sessions p ON p.id = c.parent_session_id"
+                " WHERE p.id = ? AND p.end_reason = 'compression' AND c.started_at >= p.ended_at LIMIT 2",
+                (cur,),
+            ).fetchall()
+        except sqlite3.Error:
+            return cur  # a store without session records has no continuations
+        if not rows:
+            return cur
+        if len(rows) > 1 or not isinstance(rows[0][0], str) or not SID.match(rows[0][0]):
+            return None
+        cur = rows[0][0]
+    return None
+
+
+def proven_session(prior, after):
+    # Where this run's turn must be, read from the store and not from the
+    # runner's output. On a resume it is the prior session or its
+    # continuation. On a first run it is the one session this run created
+    # that has no parent, or its continuation. Anything else is unproven:
+    # there is no guessing by newest row.
+    db = sqlite3.connect("file:" + db_path + "?mode=ro", uri=True)
+    try:
+        if prior:
+            return continuation_tip(db, prior)
+        rows = db.execute(
+            "SELECT DISTINCT session_id FROM messages WHERE id > ? LIMIT ?", (after, MAX_CANDIDATES + 1)
+        ).fetchall()
+        if len(rows) > MAX_CANDIDATES:
+            return None
+        roots = []
+        for (sid,) in rows:
+            if not isinstance(sid, str) or not SID.match(sid):
+                return None
+            if db.execute("SELECT 1 FROM messages WHERE session_id = ? AND id <= ? LIMIT 1", (sid, after)).fetchone():
+                continue  # existed before this run
+            try:
+                parent = db.execute("SELECT parent_session_id FROM sessions WHERE id = ?", (sid,)).fetchone()
+            except sqlite3.Error:
+                parent = None
+            if not parent or not parent[0]:
+                roots.append(sid)
+        if len(roots) != 1:
+            return None
+        return continuation_tip(db, roots[0])
+    except sqlite3.Error:
+        return None
+    finally:
+        db.close()
+
+
 os.umask(0o077)
 if len(sys.argv) != 2 or not sys.argv[1].strip():
-    die(64, "expected the task as the only argument")
+    die(64, "expected the task as the only argument", "usage")
 task = sys.argv[1]
 for d in (hh, ws, ctl):
     real_dir(d)
@@ -116,7 +188,7 @@ raw = read_small(session_file, 256)
 prior = raw.decode("ascii", "replace").strip() if raw else ""
 if prior:
     if not SID.match(prior):
-        die(71, "session locator is malformed")
+        die(71, "session locator is malformed", "session_locator_malformed")
     cmd += ["--resume", prior]
 
 before = last_message_id()
@@ -130,13 +202,23 @@ with tempfile.TemporaryDirectory(prefix="claw-run-", dir="/tmp") as capture:
 ids = re.findall(r"^session_id:\s*(\S+)\s*$", tail, re.M)
 if code != 0:
     sys.stderr.write(tail[-4000:])
-    die(code if 0 < code < 64 else 1, "hermes exited %d" % code)
-if not ids or not SID.match(ids[-1]):
-    die(70, "hermes reported no session id")
-sid = ids[-1]
+    die(code if 0 < code < 64 else 1, "hermes exited %d" % code, "runner_exit", code)
+if last_message_id() <= before:
+    die(70, "hermes stored nothing for this turn", "turn_not_stored")
+sid = proven_session(prior, before)
+if sid is None:
+    die(70, "the store does not prove which session this turn belongs to", "session_unproven")
+# The runner's own report is a cross-check. It can be missing: a background
+# thread in the runner may have redirected the process's stderr at the moment
+# the line was printed. When present it must agree with the store.
+if ids and SID.match(ids[-1]):
+    if ids[-1] != sid:
+        die(70, "hermes reported a session the store does not prove", "session_unproven")
+else:
+    sys.stderr.write("claw-run: hermes reported no session id; using the session the store proves\n")
 answer = stored_answer(sid, before)
 if answer is None:
-    die(70, "the turn was not stored under session " + sid)
+    die(70, "the turn was not stored under its session", "turn_not_stored")
 replace_file(session_file, sid.encode())
 
 outcome, body = "answer", answer.encode("utf-8", "replace")

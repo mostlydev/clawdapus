@@ -29,6 +29,9 @@ outline: deep
 
 ## Unreleased
 
+- Fix: a Hermes task-home run no longer fails when Hermes's session line is missing from stderr. The wrapper now proves the turn's session from the home's store (the saved session or its compression continuation; on a first run, the one new session without a parent) and uses Hermes's own report only as a cross-check. The pinned Hermes background review thread redirects the process's stderr, which could drop that line and end a stored, successful turn with exit 70.
+- Task-home failures name their cause: `worker_runner_exit`, `worker_turn_not_stored`, `worker_session_unproven`, `worker_session_locator_malformed`, `worker_home_invalid` or `worker_usage` in the run's failure reason and the `end` callback's `reason`, with `exit.runner_code` for a failed runner. The report is an allowlisted name only; no worker output is kept.
+
 ## v0.32.1 <Badge type="tip" text="Latest" /> {#v0-32-1}
 
 *2026-11-10*

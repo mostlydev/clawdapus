@@ -147,6 +147,7 @@ type fakeNotifier struct {
 	mu                    sync.Mutex
 	started, beats, ended int
 	lastOutcome, lastCred string
+	lastReason            string
 	err                   error
 }
 
@@ -171,7 +172,7 @@ func (n *fakeNotifier) Heartbeat(_ context.Context, _ *Record, cred string) erro
 	n.beats++
 	return nil
 }
-func (n *fakeNotifier) Ended(_ context.Context, _ *Record, cred string, outcome, _ string, _ []byte) error {
+func (n *fakeNotifier) Ended(_ context.Context, _ *Record, cred string, outcome, reason string, _ []byte) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.err != nil {
@@ -180,6 +181,7 @@ func (n *fakeNotifier) Ended(_ context.Context, _ *Record, cred string, outcome,
 	n.order = append(n.order, "end")
 	n.ended++
 	n.lastOutcome = outcome
+	n.lastReason = reason
 	return nil
 }
 
