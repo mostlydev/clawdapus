@@ -1,7 +1,7 @@
 # Task-home run wrapper for Hermes (ADR-027). Pinned against hermes-base
 # v2026.6.19. It runs one turn, resuming the session recorded in the home when
 # there is one, and is the only writer of the result frame on stdout.
-import json, os, re, sqlite3, stat, subprocess, sys, tempfile
+import itertools, json, os, re, sqlite3, stat, subprocess, sys, tempfile
 
 MARK = "\x1eclaw-run-result\n"
 SID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -180,7 +180,9 @@ def publish_deliverables():
             os.fchmod(dfd, 0o755)
         except OSError:
             pass  # not ours to change: the supervisor made it, already open
-        for name in os.listdir(dfd)[:4096]:
+        with os.scandir(dfd) as entries:
+            names = [entry.name for entry in itertools.islice(entries, 4096)]
+        for name in names:
             try:
                 fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
             except OSError:

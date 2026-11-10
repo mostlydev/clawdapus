@@ -316,3 +316,10 @@ func TestDeliverablesCrossUserPrepare(t *testing.T) {
 		fmt.Printf("HOME %s %s\n", home, data)
 	}
 }
+
+func TestDeliverableUnexpectedReadFailureIsNotAbsence(t *testing.T) {
+	_, _, _, ok, unreadable := readDeliverable(-1, "report.md")
+	if ok || !unreadable {
+		t.Fatal("invalid descriptor was reported as absent")
+	}
+}

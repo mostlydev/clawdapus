@@ -64,6 +64,9 @@ func (s *Supervisor) openDeliverablesDir(installation, home string) (int, error)
 	const flags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
 	fd, err := unix.Open(s.homesDir(), flags, 0)
 	if err != nil {
+		if !deliverableAbsent(err) {
+			return -1, errDeliverablesUnreadable
+		}
 		return -1, apiErr(http.StatusNotFound, "home_unknown", "no such home")
 	}
 	for i, component := range []string{HomeHash(installation, home), homeDataDir, DeliverablesDir} {
@@ -72,7 +75,7 @@ func (s *Supervisor) openDeliverablesDir(installation, home string) (int, error)
 		if err != nil {
 			// Being refused is not the same as there being nothing. Only a
 			// missing entry, or one that is not a real directory, is absence.
-			if !errors.Is(err, unix.ENOENT) && !errors.Is(err, unix.ENOTDIR) && !errors.Is(err, unix.ELOOP) {
+			if !deliverableAbsent(err) {
 				return -1, errDeliverablesUnreadable
 			}
 			if i < 2 {
@@ -85,11 +88,15 @@ func (s *Supervisor) openDeliverablesDir(installation, home string) (int, error)
 	return fd, nil
 }
 
+func deliverableAbsent(err error) bool {
+	return errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.ELOOP)
+}
+
 // errDeliverablesUnreadable is returned when the supervisor is refused
 // access to the deliverables directory or a file in it. It is never reported
 // as an empty list or a missing file.
 var errDeliverablesUnreadable = apiErr(http.StatusServiceUnavailable, "deliverables_unreadable",
-	"deliverables exist but the supervisor cannot read them; the worker publishes them at the end of its next turn")
+	"the supervisor cannot read deliverables; a new run publishes worker-owned files, otherwise check storage access")
 
 // readDeliverable reads one file relative to an open deliverables directory.
 // ok is false for anything that is not a regular file of acceptable size.
@@ -100,13 +107,16 @@ func readDeliverable(dirFD int, name string) (data []byte, modified time.Time, t
 	}
 	fd, err := unix.Openat(dirFD, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, time.Time{}, false, false, errors.Is(err, unix.EACCES) || errors.Is(err, unix.EPERM)
+		return nil, time.Time{}, false, false, !deliverableAbsent(err)
 	}
 	f := os.NewFile(uintptr(fd), name)
 	defer f.Close()
 	// Stat the descriptor, not the name: the name may already point elsewhere.
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil {
+		return nil, time.Time{}, false, false, true
+	}
+	if !info.Mode().IsRegular() {
 		return nil, time.Time{}, false, false, false
 	}
 	if info.Size() > MaxDeliverableBytes {
@@ -116,7 +126,7 @@ func readDeliverable(dirFD int, name string) (data []byte, modified time.Time, t
 	// and judge what was actually read.
 	data, err = io.ReadAll(io.LimitReader(f, MaxDeliverableBytes+1))
 	if err != nil {
-		return nil, time.Time{}, false, false, false
+		return nil, time.Time{}, false, false, true
 	}
 	if len(data) > MaxDeliverableBytes {
 		return nil, time.Time{}, true, false, false
