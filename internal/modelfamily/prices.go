@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 )
 
@@ -63,13 +64,23 @@ func ParsePrices(raw []byte) (*Prices, error) {
 			Tokens      string `json:"tokens"`
 		} `json:"scope"`
 		Entries []struct {
-			Price
-			LongContextThresholdTokens int `json:"long_context_threshold_tokens"`
+			Provider                   string   `json:"provider"`
+			Model                      string   `json:"model"`
+			Input                      *float64 `json:"input"`
+			Output                     *float64 `json:"output"`
+			MaxInput                   *float64 `json:"max_input"`
+			MaxOutput                  *float64 `json:"max_output"`
+			ContextTiers               string   `json:"context_tiers"`
+			LongContextThresholdTokens int      `json:"long_context_threshold_tokens"`
 		} `json:"entries"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	if err := dec.Decode(&export); err != nil {
 		return nil, errors.New("price export is not valid JSON")
+	}
+	// Exactly one JSON value: a second one is not a price table we read.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return nil, errors.New("price export has trailing content")
 	}
 	if export.Schema != 1 || export.Currency != "USD" || export.Unit != "per_million_tokens" {
 		return nil, errors.New("price export has an unsupported schema, currency or unit")
@@ -82,19 +93,25 @@ func ParsePrices(raw []byte) (*Prices, error) {
 		if e.Provider == "" || e.Model == "" {
 			return nil, errors.New("price export has an entry without a provider or model")
 		}
-		for _, v := range []float64{e.Input, e.Output, e.MaxInput, e.MaxOutput} {
-			if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
-				return nil, fmt.Errorf("price export entry %s/%s has an invalid rate", e.Provider, e.Model)
+		// A rate that is absent is not zero.
+		rates := []*float64{e.Input, e.Output, e.MaxInput, e.MaxOutput}
+		for _, v := range rates {
+			if v == nil || math.IsNaN(*v) || math.IsInf(*v, 0) || *v < 0 {
+				return nil, fmt.Errorf("price export entry %s/%s has a missing or invalid rate", e.Provider, e.Model)
 			}
 		}
-		if e.MaxInput < e.Input || e.MaxOutput < e.Output {
+		if *e.MaxInput < *e.Input || *e.MaxOutput < *e.Output {
 			return nil, fmt.Errorf("price export entry %s/%s has a maximum below its base rate", e.Provider, e.Model)
+		}
+		if e.LongContextThresholdTokens < 0 {
+			return nil, fmt.Errorf("price export entry %s/%s has an invalid threshold", e.Provider, e.Model)
 		}
 		key := e.Provider + "\x00" + e.Model
 		if _, dup := out.entries[key]; dup {
 			return nil, fmt.Errorf("price export lists %s/%s twice", e.Provider, e.Model)
 		}
-		out.entries[key] = e.Price
+		out.entries[key] = Price{Provider: e.Provider, Model: e.Model, Input: *e.Input, Output: *e.Output,
+			MaxInput: *e.MaxInput, MaxOutput: *e.MaxOutput, ContextTiers: e.ContextTiers}
 	}
 	return out, nil
 }

@@ -188,6 +188,11 @@ func TestParsePricesRefusesWhatItCannotBound(t *testing.T) {
 		"duplicate model":  exportHead + good + "," + entry("openai", "gpt-6.1-terra", 9, 9, 9, 9, "all") + "]}",
 		"no model":         exportHead + entry("openai", "", 1, 5, 2, 7.5, "all") + "]}",
 		"too large":        exportHead + good + "]}" + strings.Repeat(" ", MaxPriceExportBytes),
+		"trailing value":   exportHead + good + "]}" + exportHead + good + "]}",
+		"trailing text":    exportHead + good + "]} x",
+		"missing rate":     exportHead + `{"provider":"openai","model":"m","input":1,"output":5,"max_input":2,"context_tiers":"all"}` + "]}",
+		"null rate":        exportHead + `{"provider":"openai","model":"m","input":null,"output":5,"max_input":2,"max_output":7,"context_tiers":"all"}` + "]}",
+		"bad threshold":    exportHead + `{"provider":"openai","model":"m","input":1,"output":5,"max_input":2,"max_output":7,"context_tiers":"all","long_context_threshold_tokens":-1}` + "]}",
 	} {
 		if p, err := ParsePrices([]byte(raw)); err == nil {
 			t.Errorf("%s: accepted %+v", name, p)

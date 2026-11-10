@@ -63,6 +63,10 @@ func FetchCatalog(ctx context.Context, client *http.Client, baseURL, apiKey stri
 	var listing struct {
 		Data []struct {
 			ID any `json:"id"`
+			// A listing that states prices is one this reader does not
+			// bound against. It is refused, never read as if it had none.
+			Pricing json.RawMessage `json:"pricing"`
+			Price   json.RawMessage `json:"price"`
 		} `json:"data"`
 		HasMore any `json:"has_more"`
 	}
@@ -85,6 +89,9 @@ func FetchCatalog(ctx context.Context, client *http.Client, baseURL, apiKey stri
 		}
 		if seen[id] {
 			return incomplete("model listing repeats an entry")
+		}
+		if item.Pricing != nil || item.Price != nil {
+			return incomplete("model listing states prices, which this version does not bound against")
 		}
 		seen[id] = true
 		ids = append(ids, id)

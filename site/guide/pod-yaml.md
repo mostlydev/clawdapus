@@ -50,6 +50,7 @@ The top-level `x-claw` block declares shared configuration that all services inh
 | `master` | Designates the Master Claw governor for fleet oversight |
 | `cllama-defaults` | Shared governance proxy configuration -- proxy types and provider API keys |
 | `models-defaults` | Shared compile-time model slots inherited by all claw-managed services |
+| `model-families` | Version-free model names that `claw up` resolves to a concrete model. See [Model Families](#model-families) |
 | `surfaces-defaults` | Surfaces available to all services (volumes, services, channels) |
 | `feeds-defaults` | Context feeds subscribed by all services |
 | `tools-defaults` | Managed tool allowlists inherited by all services |
@@ -254,6 +255,55 @@ Chain rules:
   every provider key in `x-claw.cllama-env`.
 
 See ADR-019 for the full failover contract.
+
+## Model Families
+
+A model slot normally names an exact vendor ID, so a new model version means editing the pod. A model family lets a slot say which line of models it wants and what they may cost, and `claw up` picks the current member.
+
+```yaml
+x-claw:
+  model-families:
+    terra:
+      provider: openai
+      pattern: gpt-*-terra     # one * stands for the version
+      max-input: 4             # USD per million tokens
+      max-output: 18
+services:
+  worker:
+    x-claw:
+      models:
+        primary: openai/@terra         # resolved by claw up
+        fallback: chatgpt/gpt-6.1-terra  # an exact ID is still an exact pin
+```
+
+`claw up` prints what each family resolved to and writes it to `models.lock` beside the pod file:
+
+```
+[claw] model family openai/@terra: gpt-5.6-terra -> gpt-6.1-terra
+[claw] model family openai/@terra: not using gpt-7-terra (unpriced)
+```
+
+**How a member is chosen.** `claw up` reads the provider's model list with the provider key from `x-claw.cllama-env`, and the price table from the pinned cllama image (`cllama prices --json`, cllama v0.16.0 or later). It takes the highest version that:
+
+- matches the pattern in full. The `*` is a dotted version of one to three numbers (`6`, `6.1`, `6.10.2`), compared numerically, so `6.10` is newer than `6.9`. A dated snapshot such as `gpt-6.1-terra-2026-10-01`, or any other variant, is not a member;
+- has an exact entry in cllama's price table whose highest listed rates, long-context tier included, are within `max-input` and `max-output`.
+
+A model the pinned cllama does not price is passed over, so a brand-new model becomes eligible when a cllama release prices it and Clawdapus pins that release. If two members have the same version (`6` and `6.0`), nothing is chosen.
+
+**What it will not do.**
+
+- Nothing moves at launch or during a run. A family is resolved only by `claw up`, which refuses while runs are unfinished, and a changed model changes the template ID. An orchestrator that queues specs should [pin them to a template ID](/guide/per-run-workers#pinning-a-queued-spec).
+- The provider and the credential class never change. `openai/@terra` resolves only among OpenAI API-key models.
+- A model is not chosen from a model list that could not be read whole. If the list is unavailable, the model in `models.lock` is kept, provided it still fits the family as written now: same provider and pattern, still priced, still within the ceilings. With no usable lock entry, `claw up` fails and asks for an exact ID.
+- The provider key is sent only to the provider's own endpoint. Redirects are not followed.
+
+**Requirements and limits.**
+
+- The service must be cllama-managed, and its [data policy](/guide/data-policy) must already allow the provider: under a policy that constrains training, retention or region, the provider's attestations for its official endpoint are checked for every service that uses the family.
+- Supported providers are `openai`, `xai`, `google` and `meta`, on their standard endpoints. A provider endpoint overridden in `x-claw.cllama-env` or in the pod's provider store is refused, because the price table does not cover it. Plan routes (`chatgpt/…`), Vercel, OpenRouter and Anthropic need an exact ID for now.
+- The ceilings bound the vendor's listed standard rates for uncached text tokens. They are not a billing cap: regional uplifts, faster service tiers and cache writes are outside the price table.
+
+`models.lock` records, per family, the chosen model, the previous one, the rates it was bounded with, when the model list was read and the cllama image the prices came from. It holds no credential. Commit it with the pod if you want the choice reviewed.
 
 ## Mixed Cognitive and Non-Cognitive Services
 

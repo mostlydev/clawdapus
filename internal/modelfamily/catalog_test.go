@@ -62,6 +62,8 @@ func TestFetchCatalog(t *testing.T) {
 		"empty id":          {200, `{"data":[{"id":""}]}`},
 		"id too long":       {200, `{"data":[{"id":"` + strings.Repeat("m", maxCatalogIDBytes+1) + `"}]}`},
 		"not a list":        {200, `{"models":[]}`},
+		"states prices":     {200, `{"data":[{"id":"gpt-6.1-terra","pricing":{"input":"0.000009"}}]}`},
+		"states a price":    {200, `{"data":[{"id":"gpt-6.1-terra","price":null},{"id":"x","price":3}]}`},
 		"not json":          {200, `<html>`},
 		"cut short":         {200, `{"data":[{"id":"gpt-6.1-terra"}`},
 		"too large":         {200, big},
