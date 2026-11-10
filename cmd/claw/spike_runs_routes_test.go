@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -503,6 +504,34 @@ services:
 		}
 	}
 	servedOnlyByKey("pf4", endBody("pf4"))
+
+	// 10. Deliverables. A real worker writes a file into its home's
+	// deliverables directory with its own tools; the supervisor lists it and
+	// returns its bytes, and serves nothing else from the home.
+	launch("dl1", "gateway", "RUN: echo DELIVERED-BY-WORKER > /home/task/deliverables/note.txt; echo private > /home/task/workspace/private.txt; ls -ld /home/task/deliverables; echo DELIVERABLE-WRITTEN")
+	if _, out := answer("dl1"); !strings.Contains(out, "DELIVERABLE-WRITTEN") {
+		t.Fatalf("case 10: the worker did not write its deliverable:\n%s", out)
+	}
+	var listing struct {
+		Deliverables []runs.Deliverable `json:"deliverables"`
+		Truncated    bool               `json:"truncated"`
+	}
+	if err := client.Do(ctx, "GET", "/v1/homes/inst/home-dl1/deliverables", nil, &listing); err != nil {
+		t.Fatalf("case 10: list: %v", err)
+	}
+	if len(listing.Deliverables) != 1 || listing.Deliverables[0].Name != "note.txt" || listing.Truncated {
+		t.Fatalf("case 10: listing = %+v", listing)
+	}
+	var fetched runs.DeliverableContent
+	if err := client.Do(ctx, "GET", "/v1/homes/inst/home-dl1/deliverables/note.txt?sha256="+listing.Deliverables[0].SHA256, nil, &fetched); err != nil {
+		t.Fatalf("case 10: fetch: %v", err)
+	}
+	if raw, _ := base64.StdEncoding.DecodeString(fetched.ContentBase64); strings.TrimSpace(string(raw)) != "DELIVERED-BY-WORKER" {
+		t.Fatalf("case 10: content = %q", raw)
+	}
+	if err := client.Do(ctx, "GET", "/v1/homes/inst/home-dl1/deliverables/private.txt", nil, &fetched); err == nil {
+		t.Fatal("case 10: a workspace file was served as a deliverable")
+	}
 
 	// The synthetic tokens appear nowhere but the sign-in record: not in the
 	// proxy's log, the callbacks, or anything the pod wrote outside the

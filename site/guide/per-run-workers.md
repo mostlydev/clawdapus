@@ -219,6 +219,7 @@ GET /v1/homes/{installation}/{home}/deliverables/report.md?sha256=3f1a…
 - The list holds at most 200 files, sorted by name. `truncated` is true when there were more, or when the directory holds more than 4096 entries of any kind.
 - A fetch returns the bytes as base64 in JSON, at most about 700 KiB in all. Its `sha256` is the digest of exactly the bytes returned. Pass the digest from the list as `?sha256=`; if the file has changed since, the fetch is refused with `deliverable_changed` (409) and no content.
 - Other refusals: `deliverable_unknown` (404), `deliverable_too_large` (413), `home_unknown` (404).
+- `deliverables_unreadable` (503) means the supervisor could not read the directory or a file (including permission, storage, or file-descriptor errors). It is never reported as an empty list or a missing file. The worker runs as another user with private file modes; its wrapper makes `deliverables/` and the regular files directly in it readable at the start and at the end of every turn, and leaves the rest of the home private. A turn that was killed before it ended leaves its new files unreadable until the next run for that home starts.
 - The worker is untrusted and can change the directory at any time. The supervisor opens each path component relative to its own homes directory without following links, never blocks on a FIFO, and takes a file's size, digest and bytes from one open descriptor. No host path is accepted or returned.
 - It works whether or not a run currently holds the home.
 

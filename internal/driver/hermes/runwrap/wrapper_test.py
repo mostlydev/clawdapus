@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -62,6 +63,13 @@ if 'missing-table' in task: db.execute('DROP TABLE sessions')
 if 'missing-row' in task: db.execute('DELETE FROM sessions')
 if 'missing-column' in task: db.execute('ALTER TABLE sessions RENAME COLUMN ended_at TO incompatible')
 db.commit(); db.close()
+if 'deliver' in task:
+    d=home/'deliverables'; d.mkdir(exist_ok=True)
+    (d/'report.md').write_text('# Report')
+    (home/'workspace'/'private.txt').write_text('private')
+    if not (d/'link').is_symlink(): (d/'link').symlink_to(os.environ['OUTSIDE'])
+    if not (d/'pipe').exists(): os.mkfifo(d/'pipe')
+    (d/'sub').mkdir(exist_ok=True); (d/'sub'/'inner.txt').write_text('inner')
 question=home/'.claw-run/question.md'
 if task=='question': question.write_text('Which branch?')
 if task=='question-link': question.symlink_to(os.environ['OUTSIDE'])
@@ -73,7 +81,7 @@ elif 'silent' not in task:
     print('session_id: '+sid,file=sys.stderr)
 if 'badhint' in task:
     print('session_id: ../../x',file=sys.stderr)
-sys.exit(2 if task=='failed' else 0)
+sys.exit(2 if (task=='failed' or 'failed-turn' in task) else 0)
 '''
 
 
@@ -87,6 +95,7 @@ class WrapperTests(unittest.TestCase):
         fake.chmod(0o755)
         outside = root / 'outside'
         outside.write_text('PRIVATE-OUTSIDE-MARKER')
+        outside.chmod(0o600)
         env = dict(os.environ, PATH=str(bindir)+os.pathsep+os.environ['PATH'],
                    HOME=home, HERMES_HOME=str(root/'hermes'), OUTSIDE=str(outside),
                    CLAW_RUN_HOME=home, CLAW_RUN_MAX_RESULT_BYTES=str(limit),
@@ -237,6 +246,37 @@ class WrapperTests(unittest.TestCase):
             self.assertNotIn(b'noise', result.stdout)
             self.assertNotIn(b'session-1', result.stdout)
             self.assertNotIn(home.encode(), result.stdout)
+
+    def test_deliverables_are_published_and_nothing_else(self):
+        # The supervisor reads deliverables as another user. Only that
+        # directory and the regular files directly in it are opened up.
+        for task in ('deliver', 'deliver failed-turn'):
+            with self.subTest(task=task), tempfile.TemporaryDirectory() as home:
+                root = Path(home)
+                self.invoke(home, task)
+                d = root / 'deliverables'
+                mode = lambda p: stat.S_IMODE(os.lstat(p).st_mode)
+                self.assertEqual(mode(d), 0o755)
+                self.assertEqual(mode(d / 'report.md'), 0o644)
+                # Private state keeps the wrapper's private modes.
+                self.assertEqual(mode(root / 'workspace' / 'private.txt'), 0o600)
+                self.assertEqual(mode(root / 'workspace'), 0o700)
+                self.assertEqual(mode(root / 'hermes'), 0o700)
+                # Nothing is followed or descended into.
+                self.assertEqual(stat.S_IMODE(os.stat(root / 'outside').st_mode), 0o600)
+                self.assertEqual(mode(d / 'sub' / 'inner.txt'), 0o600)
+                self.assertTrue(stat.S_ISFIFO(os.lstat(d / 'pipe').st_mode))
+
+    def test_files_left_unpublished_are_published_by_the_next_run(self):
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home, 'deliverables')
+            d.mkdir(mode=0o700)
+            old = d / 'old.md'
+            old.write_text('left by a killed turn')
+            old.chmod(0o600)
+            self.framed(self.invoke(home, 'answer'))
+            self.assertEqual(stat.S_IMODE(os.lstat(old).st_mode), 0o644)
+            self.assertEqual(stat.S_IMODE(os.lstat(d).st_mode), 0o755)
 
     def test_usage_failure_is_framed(self):
         with tempfile.TemporaryDirectory() as home:

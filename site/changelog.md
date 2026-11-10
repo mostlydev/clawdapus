@@ -29,6 +29,8 @@ outline: deep
 
 ## Unreleased
 
+- Fix: deliverables written by a worker on a Linux host could not be read by the supervisor, which runs as another user, and were reported as an empty list. The worker's wrapper now makes `deliverables/` and the regular files directly in it readable at the start and end of every turn, leaving the rest of the home private, and the supervisor creates the directory with each home. A directory or file the supervisor is refused is now `deliverables_unreadable` (503), never an empty list or `deliverable_unknown`. Files from a turn killed mid-way are published when the next run for that home starts. Recompile to pick up the wrapper change.
+
 - Deliverables: a task-home worker puts files for its requester in `deliverables/` at the top of its home, and the supervisor serves them through `GET /v1/homes/{installation}/{home}/deliverables` (list with size, digest and time) and `…/deliverables/{name}` (base64 in JSON, optional `?sha256=` to refuse a file that changed). Regular files up to 512 KiB, flat, at most 200 listed; links, FIFOs and subdirectories are never followed or served. The worker contract tells the worker about the directory, so Hermes task-home templates get a new ID on the next `claw up`.
 
 ## v0.35.0 <Badge type="tip" text="Latest" /> {#v0-35-0}

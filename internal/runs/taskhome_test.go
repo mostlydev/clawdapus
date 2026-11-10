@@ -149,8 +149,12 @@ func TestTaskHomeLifecycleAndVerbs(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := h.advance("b")
-	if entries, _ := os.ReadDir(h.sup.homeMountSource(b.HomeHash)); len(entries) != 0 {
+	// A reset home holds only the empty deliverables directory.
+	if entries, _ := os.ReadDir(h.sup.homeMountSource(b.HomeHash)); len(entries) != 1 || entries[0].Name() != DeliverablesDir {
 		t.Fatalf("home not empty after reset: %v", entries)
+	}
+	if left, _ := os.ReadDir(filepath.Join(h.sup.homeMountSource(b.HomeHash), DeliverablesDir)); len(left) != 0 {
+		t.Fatalf("deliverables survived a reset: %v", left)
 	}
 }
 
