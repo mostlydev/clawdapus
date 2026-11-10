@@ -147,6 +147,8 @@ The proxy strips the dummy token, attaches the real provider API key, and forwar
 
 Before each upstream call, including every failover candidate, cllama checks the agent's [data policy](/guide/data-policy): the allowed processing regions and whether the provider may train on or retain content. A candidate that cannot be shown to meet the policy is refused rather than sent.
 
+From cllama v0.17.0, a separate final-request check refuses provider-hosted capabilities unless the compiled agent context explicitly grants them. Relaxing the data policy does not grant web search, code execution, file search or image generation. Declare supported grants with service-level [`x-claw.hosted-capabilities`](/guide/pod-yaml#hosted-capabilities); remote MCP servers and vendor plugins cannot be granted. The check covers API fallback and request-shape retries as well as ordinary dispatch. Native function/custom tools remain available. A refusal returns HTTP 400 and records `hosted_capability_refused:<capability>` without sending that request upstream.
+
 ### Egress
 
 The provider response is returned to the agent. The reference passthrough proxy does not amend final text, redact PII, or compute a drift score. Those behaviors belong in a future/custom policy proxy layered on the same context and telemetry contracts.

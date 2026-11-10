@@ -408,6 +408,10 @@ The policy is tunable from the pod YAML via `x-claw.tool-policy` (service level)
 
 `x-claw.data-policy` (service level, replaces) or `x-claw.data-policy-defaults` (pod level) sets the data policy cllama enforces on every model request and fallback: `regions` (default `[us, eu]`; lowercase codes or `global`), `training` (`none` default | `allowed`), `retention` (provider retention, `none` default | `provider-default`), `local-retention` (cllama content, `none` default | `allowed`), and `attestations` (`- provider:`, optional `endpoint:`, `guarantees: [zero-data-retention, no-training, processing:<cc>, storage:<cc>]`). A requirement passes only by a per-request control cllama applies or an endpoint-bound attestation; otherwise the request is refused with an intervention naming the unmet requirement. Most providers need attestations under the default, so an upgraded pod that suddenly gets refused needs its real account guarantees attested or the policy relaxed. With `local-retention: none` history keeps metadata only. Claws that bypass cllama are not covered (`claw up` warns). See `site/guide/data-policy.md`.
 
+### Hosted capabilities
+
+With cllama v0.17.0 or later, provider-hosted features require an explicit service-level `x-claw.hosted-capabilities` list: `web_search`, `code_interpreter`, `file_search`, or `image_generation`. It requires cllama, has no pod default, and applies only to that service and its ordinals across their already authorized model routes. Remote MCP servers and vendor plugins cannot be granted. A grant never overrides the data policy; relaxing that policy grants nothing. Per-run templates reject grants in this version and remain protected on API fallback. Native function/custom tools and managed tools need no hosted grant. The fixed refusal is HTTP 400 `hosted capability not granted: <capability>` with intervention `hosted_capability_refused:<capability>`. See `site/guide/pod-yaml.md`.
+
 ## Communication Tools Contract
 
 All four drivers compile mention-only channel consumption so an unaddressed bot message does not create a feedback loop.
