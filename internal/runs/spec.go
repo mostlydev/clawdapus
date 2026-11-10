@@ -34,6 +34,7 @@ var specFields = map[string]string{
 	"task":                "string",
 	"tools":               "strings",
 	"max_runtime_seconds": "integer",
+	"home":                "string",
 }
 
 // CanonicalSpec validates a raw launch spec and returns its canonical JSON

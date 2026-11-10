@@ -107,3 +107,8 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 func RunPath(k Key, suffix string) string {
 	return "/v1/runs/" + url.PathEscape(k.Installation) + "/" + url.PathEscape(k.RunID) + suffix
 }
+
+// HomePath returns the API path of a task home.
+func HomePath(installation, home string) string {
+	return "/v1/homes/" + url.PathEscape(installation) + "/" + url.PathEscape(home)
+}

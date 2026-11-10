@@ -435,7 +435,11 @@ func runComposeUp(podFile string) (err error) {
 		}
 
 		if svc.IsPerRun() {
-			compiler, err := validatePerRunResolution(name, rc, d)
+			compiler, err := validatePerRunResolution(name, rc, d, svc.Claw.Run.Home != nil)
+			if err != nil {
+				return err
+			}
+			content, err := resolveRunContent(name, podDir, svc.Claw.Run.Home)
 			if err != nil {
 				return err
 			}
@@ -448,7 +452,7 @@ func runComposeUp(podFile string) (err error) {
 			if imageID == "" {
 				return fmt.Errorf("service %q: cannot resolve image ID for %q", name, imageRef)
 			}
-			perRun[name] = &perRunTemplate{rc: rc, compiler: compiler, imageRef: imageRef, imageID: imageID}
+			perRun[name] = &perRunTemplate{rc: rc, compiler: compiler, imageRef: imageRef, imageID: imageID, content: content}
 			fmt.Printf("[claw] %s: validated per-run template (%s driver)\n", name, rc.ClawType)
 			continue
 		}

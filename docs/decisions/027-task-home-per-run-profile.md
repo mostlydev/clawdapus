@@ -44,12 +44,17 @@ stays as built for every service that does not opt in.
 5. **Hermes is the first driver for this profile.** It runs one turn per run and resumes its own
    session, by exact session ID, on later runs.
 6. **The result is a bounded frame on stdout.** It carries the session ID and whether the worker
-   ended with an answer or with a question for a person. The supervisor never reads anything from
-   the home.
-7. **Each run gets its own network.** The worker reaches a small forwarder in its own run project,
-   and the forwarder reaches cllama's API port. Two workers do not share a network.
+   ended with an answer or with a question for a person. The supervisor never opens a file the
+   worker can write.
+7. **Each run gets its own network.** The worker reaches a small forwarder in its own run project.
+   The forwarder relays TCP to one fixed destination, cllama's API port. It is not a proxy: it
+   parses nothing, has one listener, and has no route to cllama's operator port. Two workers do
+   not share a network.
 8. **Homes have their own verbs.** A home can be inspected and deleted through the supervisor.
    Deleting a home is how an orchestrator resets a task.
+9. **Authority stays ephemeral.** The run's cllama token reaches the harness only through its
+   process environment. Nothing the infrastructure writes into the home is a credential, and
+   nothing in the home grants authority to a later run.
 
 ## What this amends
 
@@ -92,13 +97,17 @@ stays as built for every service that does not opt in.
 - **Reading the session ID or the result from a file in the home.** The home is writable by the
   worker, so the supervisor would be parsing worker-controlled files on the host. Everything the
   supervisor learns arrives on stdout, bounded.
-- **`hermes -z` (one-shot mode).** It cannot resume, reports no session ID, and exits 0 when the
-  provider failed.
+- **`hermes -z` (one-shot mode).** It is dispatched before resume is handled, so it cannot resume
+  a session, and it reports no session ID.
 - **Keeping a stopped container for a later run.** A stopped container keeps the old command,
   environment and token and no process memory. It is not a warm worker. Out of scope.
 
 ## Consequences
 
+- **A home has no enforced size limit in this version.** A worker's shell can fill the host disk
+  during a run. Until a kernel-enforced quota exists, this profile is for workloads whose operator
+  accepts that, and the guide says so. Whether a trial may proceed on that basis is the operator's
+  decision, recorded on #394.
 - Clawdapus now holds data that outlives a run. Homes are not rotated by `claw up` and not removed
   by `claw down`. Retention is the orchestrator's decision, made through the delete verb.
 - A run that cannot get its revocation acknowledged keeps its home reserved. Other homes continue.

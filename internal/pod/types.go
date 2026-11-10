@@ -106,7 +106,29 @@ type RunLimits struct {
 	MaxResultBytes int
 	Memory         string
 	Pids           int
+	// Home opts the template into the task-home profile (ADR-027): one
+	// persistent writable directory per home ID, mounted at Home.Mount.
+	// It is a pointer so RunLimits stays comparable.
+	Home *RunHome
 }
+
+// RunHome is the task-home declaration of a per-run service.
+type RunHome struct {
+	Mount string
+	// Content lists read-only reference mounts.
+	Content []RunContent
+}
+
+// RunContent is one declared read-only mount. Source is relative to the pod
+// file and is resolved and checked by claw up.
+type RunContent struct {
+	Source string
+	Target string
+}
+
+// DefaultRunHomeMount is where a task home is mounted unless the pod says
+// otherwise.
+const DefaultRunHomeMount = "/home/task"
 
 type MCPStdioBlock struct {
 	Command string

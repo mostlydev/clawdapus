@@ -217,7 +217,36 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/runs/{installation}/{run}/cancel", srv.handleCancel)
 	mux.HandleFunc("POST /v1/runs/{installation}/{run}/credential", srv.handleCredential)
 	mux.HandleFunc("GET /v1/runs/{installation}/{run}/result", srv.handleResult)
+	mux.HandleFunc("GET /v1/homes/{installation}/{home}", srv.handleHomeStatus)
+	mux.HandleFunc("DELETE /v1/homes/{installation}/{home}", srv.handleHomeDelete)
 	return mux
+}
+
+func (srv *Server) handleHomeStatus(w http.ResponseWriter, r *http.Request) {
+	st, err := srv.Sup.HomeStatus(r.PathValue("installation"), r.PathValue("home"))
+	if err != nil {
+		writeHomeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (srv *Server) handleHomeDelete(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), requestDeadline)
+	defer cancel()
+	if err := srv.Sup.DeleteHome(ctx, r.PathValue("installation"), r.PathValue("home")); err != nil {
+		writeHomeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func writeHomeError(w http.ResponseWriter, err error) {
+	var apiError *APIError
+	if !errors.As(err, &apiError) {
+		apiError = apiErr(http.StatusInternalServerError, "internal", "internal error")
+	}
+	writeJSON(w, apiError.Status, map[string]any{"error": apiError})
 }
 
 type launchBody struct {

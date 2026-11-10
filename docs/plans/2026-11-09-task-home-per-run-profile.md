@@ -1,7 +1,7 @@
 # Task-home profile for per-run workers (2026-11-09)
 
 **Status:** Proposed, issue #394. Decision record: [ADR-027](../decisions/027-task-home-per-run-profile.md).
-Nothing here is built. Security review and failing acceptance cases come before implementation.
+Security review: [task-home security review](../reviews/2026-11-09-task-home-security.md).
 
 This document extends [the per-run worker design](2026-10-20-per-run-workers.md). Read that first;
 only the differences are described here.
@@ -72,8 +72,8 @@ different homes.
 - `.claw-homes` goes through `runs.EnsurePrivateDir`, like `.claw-runs`.
 - The inner `home/` is world-writable so the fixed unprivileged worker user can write it. The 0700
   parent is what keeps other host users out.
-- The supervisor creates the home at the first accepted launch that names it, and never reads or
-  writes inside `home/` afterwards.
+- The supervisor creates the home when the first run that names it is spawned. It never opens a
+  file inside `home/`: nothing a worker writes there is parsed on the host.
 - `claw down` leaves homes in place. `claw up` leaves them in place.
 
 Inside the home the driver owns the layout. For Hermes:
@@ -100,6 +100,8 @@ home/
 - An idempotent relaunch of the same run key is not a second run and is admitted as today.
 - A launch whose spawn fails closed reaches a terminal state through the normal teardown and
   releases the home.
+- An unfinished record whose reservation does not match its own spec is ambiguous. While one
+  exists, every launch that names a home and every home delete is refused (`ledger_unavailable`).
 
 ## Home verbs
 
@@ -108,7 +110,16 @@ On the supervisor socket, with the same auth as the run API:
 | Verb | Behaviour |
 |---|---|
 | `GET /v1/homes/{installation}/{home}` | `exists`, `created_at`, `last_run_id`, `reserved_by` (a run ID or empty). |
-| `DELETE /v1/homes/{installation}/{home}` | Refused with `409 home_busy` while reserved. Otherwise removes `<home-hash>/` and returns `204`. Deleting an absent home is `204`. Takes the home admission lock, so it cannot interleave with a launch. |
+| `DELETE /v1/homes/{installation}/{home}` | Refused with `409 home_busy` while reserved. Otherwise returns `200`; deleting an absent home is also `200`. |
+
+Delete has two steps. Under the home admission lock, which launch also takes, the home directory is
+renamed out of the way and the rename is made durable; from that moment the ID names a new, empty
+home. The renamed directory is then removed outside that lock, so a large tree cannot delay
+admission for other homes. Removal never follows a symlink. Files the worker user created in its
+own subdirectories may not be removable by the supervisor's user; those are removed as the worker
+user by a short-lived container run through Compose from the worker image, with no network, no
+inputs and only that directory mounted. A removal that fails is reported and retried on the next
+delete; the ID is free either way.
 
 CLI: `claw runs home status <installation> <home>` and `claw runs home rm <installation> <home>`.
 
@@ -146,14 +157,19 @@ networks:
 
 - The worker is on the run's own network only. The gate is on that network and on the pod's shared
   run network, where cllama is.
-- The gate forwards TCP from `gate:<port>` to cllama's API port and nothing else. The worker's
-  model base URL is the gate.
+- The gate forwards TCP from `gate:<port>` to one fixed destination, cllama's API port. It is not
+  an HTTP proxy and accepts no destination from the worker. The worker's model base URL is the
+  gate.
+- Both services carry a Docker log budget (`json-file`, one file, sized from the result limit). A
+  worker with a shell can write to the container's stdout directly, so the wrapper's own bound is
+  not enough. A flood that rotates the result frame away ends as `result_missing`.
 - The driver supplies the gate's entrypoint, run from the worker's own image, so no new image is
   published. For Hermes it is a short Python forwarder passed on the command line.
 - Bind sources are absolute host paths computed by the supervisor and content paths compiled at
   `claw up`. Static `$` is escaped as elsewhere.
-- Both containers carry the run labels, so reconciliation and `compose down` treat them as one run.
-  `verifyContainers` expects exactly the worker and the gate in this profile.
+- The gate carries the pod labels and a `claw.run.gate-for` label, but not the run-key label, so
+  the supervisor's view of a run stays one container. A gate with no ledger record is an orphan,
+  like a worker, and blocks `claw runs serve` until removed.
 
 ## Driver contract changes
 
@@ -193,23 +209,25 @@ files on tmpfs. After the harness exits, the wrapper prints:
 
 - `outcome` is `answer` or `question`.
 - `session` is the exact harness session ID that now holds this turn.
+- The body is the assistant message this turn appended to the session store, not the harness's
+  stdout, which can carry warnings.
 - The wrapper cuts the body at the template's result limit, at a rune boundary, and sets
-  `truncated`. Stdout therefore never exceeds the header plus the limit, which also bounds the
-  container log.
-- The supervisor parses the header strictly: one line, at most 1024 bytes, known keys only, known
-  outcome values, session ID of at most 128 bytes from a fixed alphabet. Anything else is
-  `result_missing`. A stateless template has no header and is parsed as today.
+  `truncated`.
+- The supervisor parses the header strictly: one line, at most 1024 bytes, exactly one JSON object
+  with nothing after it, no duplicate keys, known keys only, known outcome values, session ID of
+  at most 128 bytes from a fixed alphabet. Anything else is `result_missing`. A stateless template has no header and is parsed as today.
 - The run's result view gains `outcome` and `session`. The result body endpoint is unchanged.
 
-The supervisor reads nothing from the home, so no file a worker writes there is ever opened on the
+The supervisor opens no file in the home, so nothing a worker writes there is ever parsed on the
 host by Clawdapus.
 
 ## Questions
 
 A worker that needs a person writes its question to `.claw-run/question.md` in its home and ends its
-turn. The compiled contract tells it so. After the harness exits, the wrapper checks that file: if it
-is a non-empty regular file, the wrapper moves it aside, uses its content as the body and reports
-`outcome: question`. Otherwise the harness's final text is the body and the outcome is `answer`.
+turn. The compiled contract tells it so. The wrapper removes that file before every turn, so a
+question left by a killed run is never reported by its successor. After the harness exits, the
+wrapper checks the file: if it is a non-empty regular file, the wrapper uses its content as the
+body, removes it and reports `outcome: question`. Otherwise the harness's final text is the body and the outcome is `answer`.
 
 The orchestrator parks the task and later launches a new run for the same home whose task text is
 the answer. That text arrives as the next user message in the resumed session.
@@ -222,7 +240,7 @@ A second `RunWorkerCompiler`, in `internal/driver/hermes/runworker.go`.
 `HANDLE`. It does not call the long-lived `Validate`, which requires a channel.
 
 **Commands.** The wrapper is a pinned Python program passed as the entrypoint
-(`python3 -c <program> claw-run`), with the task as a positional argument:
+(`python3 -c <program>`), with the task as its one positional argument:
 
 - First turn (no `.claw-run/session` in the home):
   `hermes chat -Q -q <task> --toolsets <compiled list>`
@@ -233,31 +251,38 @@ In this mode Hermes prints the final response on stdout, `session_id: <id>` on s
 when the run failed. The wrapper:
 
 1. Creates `workspace/`, `hermes/` and `.claw-run/` in the home if absent.
-2. Writes the runner config, the model credentials and the agent contract into `hermes/` from its
-   environment, replacing whatever a previous run left, then removes them from the environment.
-3. Reads `.claw-run/session`. A value that is not a well-formed session ID is treated as absent.
-4. Runs Hermes with stdout and stderr captured to tmpfs.
-5. Takes the session ID from the last `session_id:` line on stderr. This is the ID after any
+2. Writes the non-secret runner config and the agent contract into the home from its environment,
+   replacing whatever a previous run left, and removes any `.env` there. The run token is never
+   written: it is passed to Hermes only in that process's environment.
+3. Removes `.claw-run/question.md`.
+4. Reads `.claw-run/session` without following a link or blocking on a FIFO. A malformed value
+   fails the run; an absent one starts a new session.
+5. Notes the highest message ID in the session store, then runs Hermes with stdout and stderr
+   captured to tmpfs.
+6. Takes the session ID from the last `session_id:` line on stderr. This is the ID after any
    mid-run compression, which Hermes reports as the continuation session.
-6. Proves the turn was stored: opens `hermes/state.db` read-only and requires at least one message
-   row for that session ID. If the proof fails, it does not update `.claw-run/session`, prints no
-   result frame and exits 70.
-7. Writes the session ID to `.claw-run/session` atomically.
-8. Prints the result frame and exits with Hermes's exit code.
+7. Proves the turn was stored: opens `hermes/state.db` read-only and requires an assistant message
+   under that session ID with an ID above the one noted in step 5. If the proof fails, it does not
+   update `.claw-run/session`, prints no result frame and exits 70.
+8. Writes the session ID to `.claw-run/session` atomically and prints the result frame.
 
-A resume that names a session Hermes does not have must fail the run and not start a fresh session
-silently. Whether Hermes does this by itself is one of the facts to prove; if it does not, the
-wrapper checks the session exists before the turn.
+If Hermes exits non-zero, the wrapper prints no frame and exits non-zero, and the locator is left
+as it was. A resume that names a session Hermes does not have exits non-zero without calling the
+model (proven against the pinned image).
 
 **Environment.** `HERMES_HOME=<home>/hermes`, `HOME=<home>`, `TERMINAL_ENV=local`,
 `TERMINAL_CWD=<home>/workspace`, `HERMES_YOLO_MODE=1` and `HERMES_ACCEPT_HOOKS=1` (there is no
 person to approve a command), `CLAW_MANAGED=true`.
 
 **Model access.** The config names a custom OpenAI-compatible provider whose base URL is the gate
-and whose key is the run's cllama token, as the long-lived Hermes driver does with cllama today.
+and whose `key_env` names an environment variable. The wrapper sets that variable to the run's
+cllama token in the Hermes process environment only. (Hermes sends `OPENAI_API_KEY` only to
+`openai.com` hosts, so that variable cannot carry the token.)
+Model, approvals and terminal settings are asserted after `CONFIGURE`, so an image directive
+cannot reroute them.
 
-**Tools.** Terminal and file toolsets on. Messaging, cron, browser and web toolsets off: there is
-no channel, no schedule and no route out.
+**Tools.** The `terminal`, `file`, `memory`, `skills` and `todo` toolsets are on. Messaging, cron,
+browser and web toolsets are off: there is no channel, no schedule and no route out.
 
 **Image.** The pinned `hermes-base`. If the contract needs a Hermes patch, that is a coordinated
 `hermes-base` release, not part of the feature PR.
@@ -268,9 +293,21 @@ Out of scope for this profile's first version, which uses API keys held by cllam
 direction is a cllama provider adapter that holds a provider sign-in and gives the worker only its
 per-run cllama token, so this profile needs no change. It gets its own issue and decision record.
 
-## Facts to prove first
+## Proven and open facts
 
-A spike against the pinned Hermes image, before any driver code is merged:
+Proven against the pinned image by `TestSpikeTaskHomeHermesContract` (CLI contract) and
+`TestSpikeTaskHomeWorkers` (the whole path: `claw up`, supervisor, gate, cllama, fake provider):
+facts 1, 2, 3, 5, 6 and 8 below, and fact 7 on a macOS development host. One measured sample of
+fact 9: 6.4 s from launch to a stopped first run with an instant fake model.
+
+A worker killed in the middle of a turn: Hermes had stored that turn's user message and no reply.
+The next run resumes the same session, and Hermes presents the unanswered message again with the
+new run's text appended to it. So pending work is retried, and the new text does not replace the
+old request. An orchestrator's follow-up brief should be written with that in mind.
+
+Open: fact 4 (compression), and fact 7 on Linux.
+
+The facts:
 
 1. `hermes chat -Q -q` with `--resume <id>` continues the named session, and the second turn can
    quote the first.
@@ -300,7 +337,8 @@ cases:
 
 One line each; the controls are the reviewer's call.
 
-- The home has no size quota.
+- The home has no size quota. Reviewed: this is a host-availability risk that a polling check
+  cannot bound. It is recorded as a limitation in ADR-027 and awaits the operator's decision.
 - A worker can leave files in its home that change its own next run (config, hooks, skills).
 - Host tooling that reads a home could follow a symlink the worker planted.
 - The gate shares the pod's run network with other runs' gates.

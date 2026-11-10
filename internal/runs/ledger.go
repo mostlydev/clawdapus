@@ -92,6 +92,9 @@ type Spec struct {
 	Task              string   `json:"task"`
 	Tools             []string `json:"tools"`
 	MaxRuntimeSeconds int64    `json:"max_runtime_seconds,omitempty"`
+	// Home is the opaque task-home ID. It is required by a task-home template
+	// and refused by a stateless one.
+	Home string `json:"home,omitempty"`
 }
 
 // ExitInfo records an observed worker exit. Observing an exit is not terminal.
@@ -104,6 +107,9 @@ type ExitInfo struct {
 type ResultInfo struct {
 	Bytes     int  `json:"bytes"`
 	Truncated bool `json:"truncated"`
+	// Outcome and Session come from a task-home worker's result header.
+	Outcome string `json:"outcome,omitempty"`
+	Session string `json:"session,omitempty"`
 }
 
 // Timestamps records state transitions.
@@ -132,16 +138,19 @@ const (
 
 // Record is one run's durable ledger entry.
 type Record struct {
-	Version            int         `json:"version"`
-	Key                Key         `json:"key"`
-	Generation         uint64      `json:"generation"`
-	SpecDigest         string      `json:"spec_digest,omitempty"`
-	Spec               *Spec       `json:"spec,omitempty"`
-	TemplateID         string      `json:"template_id,omitempty"`
-	ImageID            string      `json:"image_id,omitempty"`
-	RunAgentID         string      `json:"run_agent_id,omitempty"`
-	RunKey             string      `json:"run_key,omitempty"` // pod-scoped container label value
-	Project            string      `json:"project,omitempty"`
+	Version    int    `json:"version"`
+	Key        Key    `json:"key"`
+	Generation uint64 `json:"generation"`
+	SpecDigest string `json:"spec_digest,omitempty"`
+	Spec       *Spec  `json:"spec,omitempty"`
+	TemplateID string `json:"template_id,omitempty"`
+	ImageID    string `json:"image_id,omitempty"`
+	RunAgentID string `json:"run_agent_id,omitempty"`
+	RunKey     string `json:"run_key,omitempty"` // pod-scoped container label value
+	Project    string `json:"project,omitempty"`
+	// HomeHash names the task home this run reserves, from accept until the
+	// run is terminal. Empty for a stateless run.
+	HomeHash           string      `json:"home_hash,omitempty"`
 	State              State       `json:"state"`
 	Cancelled          bool        `json:"cancelled"`
 	Revoked            bool        `json:"revoked"`

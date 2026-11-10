@@ -25,9 +25,16 @@ const (
 	LabelDigest     = "claw.run.spec-digest"
 	LabelPodNS      = "claw.run.pod-ns"
 	RoleRunWorker   = "run-worker"
+	// RoleRunGate marks a task-home run's forwarder. It deliberately carries
+	// no run-key label, so the supervisor's view of a run stays one container.
+	RoleRunGate  = "run-gate"
+	LabelGateFor = "claw.run.gate-for"
 
 	workerService = "worker"
 	runNetworkRef = "claw-runs"
+	// privateNetworkRef is a task-home run's own network: the worker and its
+	// gate, and nothing else.
+	privateNetworkRef = "run"
 	// workerUser is a fixed unprivileged identity; the worker only writes tmpfs.
 	workerUser = "65534:65534"
 )
@@ -52,7 +59,16 @@ func composeWithInputs(s string, inputs map[string]string) string {
 // renderProject renders a run's Compose project. The file contains no secrets
 // and no task text: those reach the container only through interpolation of
 // the declared inputs at `compose up`.
-func renderProject(tpl *Template, rec *Record) ([]byte, error) {
+func renderProject(tpl *Template, rec *Record, homeSource string) ([]byte, error) {
+	if (tpl.Worker.Home != nil) != (homeSource != "") {
+		return nil, fmt.Errorf("template %q: task home and its mount source must be set together", tpl.Name)
+	}
+	if tpl.Worker.Home != nil && tpl.Worker.Gate == nil {
+		return nil, fmt.Errorf("template %q: a task-home worker needs a gate", tpl.Name)
+	}
+	if tpl.Worker.Home == nil && (tpl.Worker.Gate != nil || len(tpl.Content) > 0) {
+		return nil, fmt.Errorf("template %q: gate and content require a task home", tpl.Name)
+	}
 	w := tpl.Worker
 	for name := range w.Inputs {
 		if !inputNameRe.MatchString(name) {
@@ -119,14 +135,98 @@ func renderProject(tpl *Template, rec *Record) ([]byte, error) {
 	if tpl.Limits.Pids > 0 {
 		svc["pids_limit"] = tpl.Limits.Pids
 	}
+	services := map[string]any{workerService: svc}
+	networks := map[string]any{
+		runNetworkRef: map[string]any{"external": true, "name": tpl.RunNetwork},
+	}
+	if tpl.Worker.Home != nil {
+		volumes := []any{map[string]any{
+			"type":   "bind",
+			"source": composeLiteral(homeSource),
+			"target": composeLiteral(tpl.Worker.Home.Mount),
+			"bind":   map[string]any{"create_host_path": false},
+		}}
+		for _, c := range tpl.Content {
+			volumes = append(volumes, map[string]any{
+				"type":      "bind",
+				"source":    composeLiteral(c.Source),
+				"target":    composeLiteral(c.Target),
+				"read_only": true,
+				"bind":      map[string]any{"create_host_path": false},
+			})
+		}
+		svc["volumes"] = volumes
+		// The worker joins only its own network. Its one route out is the
+		// gate, which forwards to cllama's API port and nothing else.
+		svc["networks"] = []string{privateNetworkRef}
+		svc["depends_on"] = []string{driver.GateServiceName}
+		svc["logging"] = runLogging(tpl)
+		services[driver.GateServiceName] = renderGate(tpl, rec)
+		networks[privateNetworkRef] = map[string]any{"internal": true}
+	}
 	doc := map[string]any{
 		"name":     rec.Project,
-		"services": map[string]any{workerService: svc},
-		"networks": map[string]any{
-			runNetworkRef: map[string]any{"external": true, "name": tpl.RunNetwork},
-		},
+		"services": services,
+		"networks": networks,
 	}
 	return yaml.Marshal(doc)
+}
+
+// runLogging bounds a task-home container's log. A worker with a shell can
+// write to the container's stdout directly, so the wrapper's own bound on its
+// output is not enough. A flood that rotates the result frame away ends as a
+// missing result, never as an inferred answer.
+func runLogging(tpl *Template) map[string]any {
+	size := 4 * (tpl.Limits.MaxResultBytes + resultPreambleBytes)
+	if size < 4<<20 {
+		size = 4 << 20
+	}
+	return map[string]any{
+		"driver":  "json-file",
+		"options": map[string]string{"max-size": strconv.Itoa(size), "max-file": "1"},
+	}
+}
+
+// renderGate renders the forwarder: same pinned image, no mounts, no inputs,
+// no token. It sits on the run's private network and the pod's run network.
+func renderGate(tpl *Template, rec *Record) map[string]any {
+	g := tpl.Worker.Gate
+	entrypoint := make([]string, len(g.Entrypoint))
+	for i, s := range g.Entrypoint {
+		entrypoint[i] = composeLiteral(s)
+	}
+	command := make([]string, len(g.Command))
+	for i, s := range g.Command {
+		command[i] = composeLiteral(s)
+	}
+	env := make(map[string]string, len(g.Environment))
+	for k, v := range g.Environment {
+		env[k] = composeLiteral(v)
+	}
+	return map[string]any{
+		"image":             tpl.ImageID,
+		"pull_policy":       "never",
+		"entrypoint":        entrypoint,
+		"command":           command,
+		"environment":       env,
+		"user":              workerUser,
+		"read_only":         true,
+		"init":              true,
+		"cap_drop":          []string{"ALL"},
+		"security_opt":      []string{"no-new-privileges:true"},
+		"networks":          []string{privateNetworkRef, runNetworkRef},
+		"restart":           "no",
+		"stop_grace_period": "2s",
+		"mem_limit":         "128m",
+		"pids_limit":        64,
+		"logging":           runLogging(tpl),
+		"labels": map[string]string{
+			LabelPod:     composeLiteral(tpl.Pod),
+			LabelRole:    RoleRunGate,
+			LabelPodNS:   podNamespaceOf(rec),
+			LabelGateFor: rec.RunKey,
+		},
+	}
 }
 
 // inputEnv substitutes run placeholders into the template's inputs. The

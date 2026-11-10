@@ -27,6 +27,8 @@ func taskHomeHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	worker["home"] = map[string]any{"mount": "/home/task"}
+	worker["result"] = map[string]any{"source": "stdout", "marker": taskHomeMarker, "header": "json-line"}
+	worker["gate"] = map[string]any{"entrypoint": []string{"/bin/gate"}, "command": []string{"cllama:8080"}}
 	raw, _ = json.Marshal(worker)
 	if err := json.Unmarshal(raw, &tpl.Worker); err != nil {
 		t.Fatal(err)
@@ -37,6 +39,8 @@ func taskHomeHarness(t *testing.T) *harness {
 	}
 	return h
 }
+
+const taskHomeMarker = "\x1eclaw-run-result\n"
 
 func launchTaskHome(h *harness, id, home string) (*Record, error) {
 	raw, _ := json.Marshal(map[string]any{"template": "worker", "task": "task", "tools": []string{}, "home": home})

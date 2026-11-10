@@ -8,9 +8,41 @@ type RunWorkerCompiler interface {
 	CompileRunWorker(rc *ResolvedClaw, opts RunWorkerOpts) (*RunWorkerSpec, error)
 }
 
+// RunProfileSupporter is optionally implemented by a RunWorkerCompiler to say
+// which per-run profiles it compiles. A compiler without it supports only
+// the stateless profile.
+type RunProfileSupporter interface {
+	SupportsRunProfile(taskHome bool) bool
+}
+
 type RunWorkerOpts struct {
 	PodName string
+	// Home, when set, compiles the task-home profile: the worker gets one
+	// persistent writable directory mounted at Home.Mount.
+	Home *RunHomeSpec
+	// MaxResultBytes is the template's answer limit, for drivers whose wrapper
+	// bounds its own output.
+	MaxResultBytes int
 }
+
+// RunHomeSpec describes the persistent task home of a task-home worker.
+type RunHomeSpec struct {
+	// Mount is the absolute container path of the home.
+	Mount string `json:"mount"`
+}
+
+// RunGateSpec is a forwarder service rendered beside a task-home worker. It
+// runs from the worker's own image, joins the run's private network and the
+// pod's run network, and is the worker's only route to cllama.
+type RunGateSpec struct {
+	Entrypoint  []string          `json:"entrypoint"`
+	Command     []string          `json:"command,omitempty"`
+	Environment map[string]string `json:"environment,omitempty"`
+}
+
+// GateServiceName is the Compose service name, and so the DNS name, of the
+// forwarder inside a task-home run project.
+const GateServiceName = "gate"
 
 // Run placeholders are substituted by the run supervisor at launch. They only
 // ever appear as complete values inside RunWorkerSpec.Inputs.
@@ -39,6 +71,10 @@ type RunWorkerSpec struct {
 	Tmpfs []string `json:"tmpfs"`
 	// Result describes where the worker reports its answer.
 	Result RunResultContract `json:"result"`
+	// Home and Gate are set only by the task-home profile. Both are omitted
+	// when empty, so a stateless template's identity does not change.
+	Home *RunHomeSpec `json:"home,omitempty"`
+	Gate *RunGateSpec `json:"gate,omitempty"`
 }
 
 // RunResultContract describes how the supervisor extracts a worker's answer.
@@ -48,4 +84,11 @@ type RunResultContract struct {
 	// Marker, when set, starts the answer: the answer is everything after the
 	// first occurrence of Marker in the stream, minus one trailing newline.
 	Marker string `json:"marker,omitempty"`
+	// Header, when RunResultHeaderJSONLine, means the first line after Marker
+	// is a JSON object of at most 1024 bytes describing the result; the answer
+	// is everything after that line.
+	Header string `json:"header,omitempty"`
 }
+
+// RunResultHeaderJSONLine selects the one-line JSON result header.
+const RunResultHeaderJSONLine = "json-line"

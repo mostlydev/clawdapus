@@ -26,6 +26,7 @@ type perRunTemplate struct {
 	context  *cllama.AgentContextInput
 	imageRef string
 	imageID  string // image validated during this claw up
+	content  []runs.ContentMount
 }
 
 func podHasPerRunServices(p *pod.Pod) bool {
@@ -75,10 +76,20 @@ func runNetworkName(podDir string) string {
 }
 
 // validatePerRunResolution applies checks that need the resolved claw.
-func validatePerRunResolution(name string, rc *driver.ResolvedClaw, d driver.Driver) (driver.RunWorkerCompiler, error) {
+func validatePerRunResolution(name string, rc *driver.ResolvedClaw, d driver.Driver, taskHome bool) (driver.RunWorkerCompiler, error) {
 	compiler, ok := d.(driver.RunWorkerCompiler)
 	if !ok {
-		return nil, fmt.Errorf("service %q: CLAW_TYPE %q does not support x-claw.lifecycle: %s (supported: picoclaw)", name, rc.ClawType, pod.LifecyclePerRun)
+		return nil, fmt.Errorf("service %q: CLAW_TYPE %q does not support x-claw.lifecycle: %s (supported: picoclaw, and hermes with x-claw.run.home)", name, rc.ClawType, pod.LifecyclePerRun)
+	}
+	supported := !taskHome
+	if profiles, ok := d.(driver.RunProfileSupporter); ok {
+		supported = profiles.SupportsRunProfile(taskHome)
+	}
+	if !supported {
+		if taskHome {
+			return nil, fmt.Errorf("service %q: CLAW_TYPE %q does not support x-claw.run.home (supported: hermes)", name, rc.ClawType)
+		}
+		return nil, fmt.Errorf("service %q: CLAW_TYPE %q per-run workers require x-claw.run.home", name, rc.ClawType)
 	}
 	if len(rc.Skills) > 0 {
 		return nil, fmt.Errorf("service %q: per-run workers do not support skills yet (image or include declared %d)", name, len(rc.Skills))
@@ -93,6 +104,46 @@ func validatePerRunResolution(name string, rc *driver.ResolvedClaw, d driver.Dri
 		return nil, fmt.Errorf("service %q: validation failed: %w", name, err)
 	}
 	return compiler, nil
+}
+
+// privateRunStateDirs may never be handed to a worker as reference content.
+var privateRunStateDirs = []string{runs.StateDirName, runs.RevocationDirName, runs.HomesDirName, ".claw-runtime", ".claw-session-history", ".claw-memory", ".claw-skills"}
+
+// resolveRunContent turns declared content sources into absolute host paths.
+// A source must exist, be a directory or regular file, and stay inside the
+// pod directory after symlinks are resolved; pod state directories that hold
+// credentials or other runs' data are refused.
+func resolveRunContent(name, podDir string, home *pod.RunHome) ([]runs.ContentMount, error) {
+	if home == nil || len(home.Content) == 0 {
+		return nil, nil
+	}
+	root, err := filepath.EvalSymlinks(podDir)
+	if err != nil {
+		return nil, fmt.Errorf("service %q: resolve pod directory: %w", name, err)
+	}
+	out := make([]runs.ContentMount, 0, len(home.Content))
+	for _, c := range home.Content {
+		resolved, err := filepath.EvalSymlinks(filepath.Join(root, c.Source))
+		if err != nil {
+			return nil, fmt.Errorf("service %q: x-claw.run.content source %q: %w", name, c.Source, err)
+		}
+		rel, err := filepath.Rel(root, resolved)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("service %q: x-claw.run.content source %q must be a path inside the pod directory", name, c.Source)
+		}
+		first := strings.Split(rel, string(filepath.Separator))[0]
+		for _, private := range privateRunStateDirs {
+			if first == private {
+				return nil, fmt.Errorf("service %q: x-claw.run.content source %q is pod runtime state and cannot be mounted", name, c.Source)
+			}
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || !(info.IsDir() || info.Mode().IsRegular()) {
+			return nil, fmt.Errorf("service %q: x-claw.run.content source %q must be a directory or a regular file", name, c.Source)
+		}
+		out = append(out, runs.ContentMount{Source: resolved, Target: c.Target})
+	}
+	return out, nil
 }
 
 // rejectImageVolumes refuses images that declare VOLUME: Docker would give
@@ -123,7 +174,11 @@ func writePerRunTemplates(podDir string, p *pod.Pod, templates map[string]*perRu
 	for _, name := range names {
 		t := templates[name]
 		svc := p.Services[name]
-		spec, err := t.compiler.CompileRunWorker(t.rc, driver.RunWorkerOpts{PodName: p.Name})
+		opts := driver.RunWorkerOpts{PodName: p.Name, MaxResultBytes: svc.Claw.Run.MaxResultBytes}
+		if home := svc.Claw.Run.Home; home != nil {
+			opts.Home = &driver.RunHomeSpec{Mount: home.Mount}
+		}
+		spec, err := t.compiler.CompileRunWorker(t.rc, opts)
 		if err != nil {
 			return fmt.Errorf("service %q: compile per-run worker: %w", name, err)
 		}
@@ -154,7 +209,8 @@ func writePerRunTemplates(podDir string, p *pod.Pod, templates map[string]*perRu
 				Memory:              limits.Memory,
 				Pids:                limits.Pids,
 			},
-			Worker: *spec,
+			Worker:  *spec,
+			Content: t.content,
 		})
 		contexts[name] = &runs.ContextTemplate{Input: *t.context}
 	}

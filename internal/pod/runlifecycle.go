@@ -2,6 +2,8 @@ package pod
 
 import (
 	"fmt"
+	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -16,6 +18,18 @@ type rawRunLimits struct {
 	MaxResultBytes int    `yaml:"max-result-bytes"`
 	Memory         string `yaml:"memory"`
 	Pids           int    `yaml:"pids"`
+
+	Home    *rawRunHome     `yaml:"home"`
+	Content []rawRunContent `yaml:"content"`
+}
+
+type rawRunHome struct {
+	Mount string `yaml:"mount"`
+}
+
+type rawRunContent struct {
+	Source string `yaml:"source"`
+	Target string `yaml:"target"`
 }
 
 // Defaults for per-run templates. max-authority bounds how far ahead an
@@ -96,7 +110,59 @@ func parseRunLifecycle(rawLifecycle string, raw *rawRunLimits) (string, *RunLimi
 		}
 		limits.Pids = raw.Pids
 	}
+	if err := parseRunHome(raw, limits); err != nil {
+		return "", nil, err
+	}
 	return lifecycle, limits, nil
+}
+
+// parseRunHome validates the task-home declaration. Paths are checked for
+// shape only; claw up resolves content sources against the pod directory.
+func parseRunHome(raw *rawRunLimits, limits *RunLimits) error {
+	if raw.Home == nil {
+		if len(raw.Content) > 0 {
+			return fmt.Errorf("x-claw.run.content requires x-claw.run.home")
+		}
+		return nil
+	}
+	mount := strings.TrimSpace(raw.Home.Mount)
+	if mount == "" {
+		mount = DefaultRunHomeMount
+	}
+	if !cleanAbsContainerPath(mount) || mount == "/tmp" || strings.HasPrefix(mount, "/tmp/") {
+		return fmt.Errorf("x-claw.run.home.mount must be a clean absolute container path outside /tmp, got %q", raw.Home.Mount)
+	}
+	limits.Home = &RunHome{Mount: mount}
+	seen := map[string]struct{}{}
+	for i, c := range raw.Content {
+		source, target := strings.TrimSpace(c.Source), strings.TrimSpace(c.Target)
+		if source == "" || filepath.IsAbs(source) {
+			return fmt.Errorf("x-claw.run.content[%d].source must be a path relative to the pod file", i)
+		}
+		if !cleanAbsContainerPath(target) {
+			return fmt.Errorf("x-claw.run.content[%d].target must be a clean absolute container path, got %q", i, c.Target)
+		}
+		if pathWithin(target, mount) || pathWithin(mount, target) || pathWithin(target, "/tmp") {
+			return fmt.Errorf("x-claw.run.content[%d].target %q must be outside the home mount and /tmp", i, target)
+		}
+		for other := range seen {
+			if pathWithin(target, other) || pathWithin(other, target) {
+				return fmt.Errorf("x-claw.run.content[%d].target %q overlaps %q", i, target, other)
+			}
+		}
+		seen[target] = struct{}{}
+		limits.Home.Content = append(limits.Home.Content, RunContent{Source: source, Target: target})
+	}
+	return nil
+}
+
+func cleanAbsContainerPath(p string) bool {
+	return strings.HasPrefix(p, "/") && p != "/" && path.Clean(p) == p && !strings.ContainsAny(p, ":\x00\n")
+}
+
+// pathWithin reports whether p is base or lies under it.
+func pathWithin(p, base string) bool {
+	return p == base || strings.HasPrefix(p, base+"/")
 }
 
 // parsePositiveDuration accepts whole-second durations of at least 1s, so the

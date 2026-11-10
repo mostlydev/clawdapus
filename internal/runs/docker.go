@@ -17,6 +17,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -172,6 +173,58 @@ func (d *DockerExecutor) Stdout(ctx context.Context, containerID string, limit i
 	return raw, false, nil
 }
 
+// SweepDir empties dir as the worker user, for entries the supervisor's own
+// user cannot remove. It runs one short-lived container from the pinned
+// worker image through Compose, with no network, no inputs and only dir
+// mounted, then removes the project.
+func (d *DockerExecutor) SweepDir(ctx context.Context, project, image, dir string) error {
+	ctx, cancel := context.WithTimeout(ctx, composeUpTimeout)
+	defer cancel()
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() {
+		return errors.New("sweep target is not a directory")
+	}
+	doc := map[string]any{
+		"name": project,
+		"services": map[string]any{"sweep": map[string]any{
+			"image":        image,
+			"pull_policy":  "never",
+			"entrypoint":   []string{"/bin/sh", "-c", `chmod -R u+rwx /sweep 2>/dev/null; find /sweep -mindepth 1 -delete`},
+			"user":         workerUser,
+			"read_only":    true,
+			"network_mode": "none",
+			"cap_drop":     []string{"ALL"},
+			"security_opt": []string{"no-new-privileges:true"},
+			"restart":      "no",
+			"volumes": []any{map[string]any{
+				"type": "bind", "source": composeLiteral(dir), "target": "/sweep",
+				"bind": map[string]any{"create_host_path": false},
+			}},
+		}},
+	}
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	empty, err := os.MkdirTemp("", "clawrun-sweep-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(empty)
+	run := d.lifecycleCommand(ctx, "compose", "-p", project, "--project-directory", empty, "-f", "-", "run", "--rm", "--no-deps", "sweep")
+	run.Env = composeEnv(nil)
+	run.Stdin = bytes.NewReader(raw)
+	run.Stdout = io.Discard
+	run.Stderr = io.Discard
+	runErr := run.Run()
+	_ = d.Down(context.WithoutCancel(ctx), project, "")
+	if runErr != nil {
+		d.Logf("[claw runs] %s: sweep exited: %v", project, exitSummary(runErr))
+		return errors.New("home sweep failed")
+	}
+	return nil
+}
+
 var errLimitReached = errors.New("limit reached")
 
 type limitedBuffer struct {
@@ -224,16 +277,19 @@ func exitSummary(err error) string {
 func (d *DockerExecutor) RunWorkers(ctx context.Context, podNS string) ([]Container, error) {
 	ctx, cancel := context.WithTimeout(ctx, dockerReadTimeout)
 	defer cancel()
-	list, err := d.cli.ContainerList(ctx, container.ListOptions{
-		All:     true,
-		Filters: filters.NewArgs(filters.Arg("label", LabelRole+"="+RoleRunWorker), filters.Arg("label", LabelPodNS+"="+podNS)),
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Container, 0, len(list))
-	for _, c := range list {
-		out = append(out, Container{ID: c.ID, ImageID: c.ImageID, Labels: c.Labels, Running: c.State == "running"})
+	var out []Container
+	// Gates are listed with workers so a leftover forwarder is an orphan too.
+	for _, role := range []string{RoleRunWorker, RoleRunGate} {
+		list, err := d.cli.ContainerList(ctx, container.ListOptions{
+			All:     true,
+			Filters: filters.NewArgs(filters.Arg("label", LabelRole+"="+role), filters.Arg("label", LabelPodNS+"="+podNS)),
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range list {
+			out = append(out, Container{ID: c.ID, ImageID: c.ImageID, Labels: c.Labels, Running: c.State == "running"})
+		}
 	}
 	return out, nil
 }
