@@ -45,7 +45,7 @@ e.g. an org's Master Claw policy).
 | 024 | Runner Base Refresh from Upstream | Shipped | `claw pull` runner refresh; `built-against`/`image-id`/`recipe-sha` labels |
 | 026 | Runner Adoption and Retirement | Shipped | four retained drivers; retired types fail closed with Hermes migration guidance |
 | 027 | Task-Home Profile for Per-Run Workers | On master, unreleased | `x-claw.run.home`; Hermes per-run driver (`internal/driver/hermes/runworker.go`); `internal/runs/home.go`; live proof `TestSpikeTaskHomeWorkers`. Storage is a watchdog, not a quota. Not yet run on a native Linux host. |
-| 028 | Plan Sign-In Model Routes | In review, unreleased | Needs a cllama release with plan routes (mostlydev/cllama#70). `chatgpt/<model>` in a model chain; `served_by` in task-home status and `end` callback; `GET /v1/subscriptions`; live proof `TestSpikeTaskHomeRoutes` against a fixture standing in for the plan endpoint. No request authorized by a real sign-in has been run. |
+| 028 | Plan Sign-In Model Routes | In review, unreleased | Requires published cllama v0.15.0 (mostlydev/cllama#70). `chatgpt/<model>` in a model chain; `served_by` in task-home status and `end` callback; `GET /v1/subscriptions`; live proof `TestSpikeTaskHomeRoutes` against a fixture standing in for the plan endpoint. No request authorized by a real sign-in has been run. |
 
 *(ADR-005 does not exist.)*
 
