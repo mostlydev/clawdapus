@@ -29,9 +29,13 @@ outline: deep
 
 ## Unreleased
 
+## v0.34.0 <Badge type="tip" text="Latest" /> {#v0-34-0}
+
+*2026-11-10*
+
 - Hosted capabilities: a service may declare `x-claw.hosted-capabilities` (`web_search`, `code_interpreter`, `file_search`, `image_generation`), compiled into its cllama context. With cllama v0.17.0, provider-hosted features are refused on the final request unless granted, whatever the data policy; a remote MCP server and vendor plugins cannot be granted. Per-run services cannot declare a grant, so per-run workers run with none. A service under a fully permissive data policy that already uses a hosted feature needs the grant after upgrading.
 
-## v0.33.0 <Badge type="tip" text="Latest" /> {#v0-33-0}
+## v0.33.0 {#v0-33-0}
 
 *2026-11-10*
 
