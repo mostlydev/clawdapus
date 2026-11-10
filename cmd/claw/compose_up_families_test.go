@@ -773,3 +773,10 @@ func TestParsePlanCatalog(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePlanCatalogRejectsOversize(t *testing.T) {
+	raw := []byte(`{"provider":"chatgpt","complete":true,"ids":[]}` + strings.Repeat(" ", 1<<20))
+	if _, err := parsePlanCatalog(raw, "chatgpt"); err == nil {
+		t.Fatal("accepted oversized catalog")
+	}
+}

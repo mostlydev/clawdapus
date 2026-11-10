@@ -804,7 +804,11 @@ func loadPinnedPlanCatalog(ctx context.Context, podDir, provider string) (modelf
 	}
 	project := "claw-plan-catalog-" + hex.EncodeToString(suffix)
 	composeFile := filepath.Join(dir, "compose.yml")
-	volume, _ := json.Marshal(authDir + ":/claw/auth:rw")
+	authDir, err = filepath.Abs(authDir)
+	if err != nil {
+		return modelfamily.Catalog{}, source, err
+	}
+	volume, _ := json.Marshal(map[string]any{"type": "bind", "source": strings.ReplaceAll(authDir, "$", "$$"), "target": "/claw/auth", "read_only": false, "bind": map[string]any{"create_host_path": false}})
 	compose := "services:\n  catalog:\n    image: " + imageID + "\n" +
 		"    entrypoint: [\"/cllama\"]\n    command: [\"auth\", \"catalog\", \"" + provider + "\", \"--json\"]\n" +
 		"    read_only: true\n    cap_drop: [ALL]\n    security_opt: [\"no-new-privileges:true\"]\n    pull_policy: never\n" +
@@ -822,7 +826,7 @@ func loadPinnedPlanCatalog(ctx context.Context, podDir, provider string) (modelf
 	run := exec.CommandContext(ctx, "docker", "compose", "-p", project, "-f", composeFile, "run", "--rm", "--no-deps", "-T", "catalog")
 	run.Env = scrubbedComposeEnv()
 	var stdout bytes.Buffer
-	run.Stdout = &limitedWriter{w: &stdout, n: 1 << 20}
+	run.Stdout = &limitedWriter{w: &stdout, n: (1 << 20) + 1}
 	if err := run.Run(); err != nil {
 		return modelfamily.Catalog{}, source, fmt.Errorf("the plan's model list could not be read; check the sign-in with cllama auth status (needs cllama v0.18.0 or later)")
 	}
@@ -832,6 +836,9 @@ func loadPinnedPlanCatalog(ctx context.Context, podDir, provider string) (modelf
 
 // parsePlanCatalog reads cllama's plan catalog output.
 func parsePlanCatalog(raw []byte, provider string) (modelfamily.Catalog, error) {
+	if len(raw) > 1<<20 {
+		return modelfamily.Catalog{}, fmt.Errorf("the plan model list is too large")
+	}
 	var out struct {
 		Provider string `json:"provider"`
 		Complete bool   `json:"complete"`
