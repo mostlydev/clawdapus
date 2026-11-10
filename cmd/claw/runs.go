@@ -94,6 +94,9 @@ Trust model: the socket authenticates peers by Unix UID. Every allowed UID
 			Revoker:           &runs.CllamaRevoker{PodDir: podDir},
 			HeartbeatInterval: runsHeartbeat,
 			Logf:              logf,
+			// CLAW_RUN_SUBNET_BASE moves task-home run networks to another
+			// private range when the default collides with the host's.
+			PrivateSubnetBase: os.Getenv("CLAW_RUN_SUBNET_BASE"),
 		}
 		if runsCallbackOrigin != "" {
 			notifier, err := runs.NewHTTPNotifier(runsCallbackOrigin, runsCallbackPath)

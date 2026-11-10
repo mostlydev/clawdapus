@@ -168,7 +168,13 @@ func renderProject(tpl *Template, rec *Record, homeSource string) ([]byte, error
 		services[driver.GateServiceName] = renderGate(tpl, rec)
 		services[driver.MeterServiceName] = renderMeter(tpl, rec, homeSource)
 		svc["depends_on"] = []string{driver.GateServiceName, driver.MeterServiceName}
-		networks[privateNetworkRef] = map[string]any{"internal": true}
+		private := map[string]any{"internal": true}
+		if rec.PrivateSubnet != "" {
+			// A small block of its own, not one from the daemon's default
+			// pools, which a host exhausts after a few dozen networks.
+			private["ipam"] = map[string]any{"config": []any{map[string]any{"subnet": rec.PrivateSubnet}}}
+		}
+		networks[privateNetworkRef] = private
 	}
 	doc := map[string]any{
 		"name":     rec.Project,
