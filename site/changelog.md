@@ -29,6 +29,8 @@ outline: deep
 
 ## Unreleased
 
+- Runtime proxy pin advances to cllama v0.16.0, whose read-only price export supplies model-family price bounds. Existing subscription and API request routing is unchanged.
+
 - Model families: a model slot may name a version-free family (`openai/@terra`) declared once in pod-level `x-claw.model-families` with a pattern and price ceilings. `claw up` resolves it to the highest-versioned member of the provider's model list that the pinned cllama prices exactly within the ceilings, prints any move, and records the choice in `models.lock`. Supported for `openai`, `xai`, `google` and `meta` API-key routes on their standard endpoints; needs cllama v0.16.0 or later for its price export. Exact model IDs behave as before.
 
 - Docs: correct the v0.32.2 exit-field guidance. Public run status exposes `exit_code`; the original Hermes exit is retained in the persisted ledger at `exit_observed.runner_code`, not in a public `exit.runner_code` field. Runtime behavior is unchanged.
