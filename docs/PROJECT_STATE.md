@@ -7,7 +7,8 @@ of them — do not duplicate their content, point to them.
 
 Maintenance: when a capability lands or a release cuts, update the relevant row here in the
 same change. Trust order when sources disagree: current code → tests → examples → ADRs → plans.
-Last reconciled: 2026-08-03 (issue #353 runner-retirement audit).
+Last updated: 2026-11-10 (task homes and plan routes, #394/#396/#398).
+Other capability rows retain the 2026-08-03 runner-retirement reconciliation.
 
 Status legend: **Shipped** (implemented and in use) · **Partial** (some shipped; gap noted) ·
 **Planned** (designed, not implemented) · **External** (depends on an out-of-tree component,

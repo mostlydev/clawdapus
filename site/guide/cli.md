@@ -477,6 +477,11 @@ claw runs doctor [--remove-orphans]
 
 `serve` holds the pod's run lock for its whole lifetime, so `claw up` and `claw down` refuse to run until it stops. Before accepting connections it runs a revocation self-test against cllama and reconciles every unfinished run. Client commands verify the socket directory's owner and the server's peer UID (`--server-uid`, which defaults to your own).
 
+`doctor` also reports the proxy's plan sign-in state and the operator sign-in command.
+Orchestrators can query `GET /v1/subscriptions` on the same UID-restricted supervisor socket
+before launching work. Task-home status and end callbacks include credential counts when
+available; see [model routes and plan sign-ins](/guide/per-run-workers#model-routes-and-plan-sign-ins).
+
 ## claw audit
 
 Summarize normalized cllama telemetry for the current pod.

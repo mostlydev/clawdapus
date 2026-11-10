@@ -294,3 +294,25 @@ func TestSubscriptionStatusRelay(t *testing.T) {
 		t.Fatalf("no reporter: %d", w.Code)
 	}
 }
+
+func TestMalformedAdvisoryReportDoesNotInvalidateRevocation(t *testing.T) {
+	for _, report := range []string{
+		`"served_by":{"subscription":"bad"}`,
+		`"served_by":[1,2]`,
+		`"boot_id":42`,
+		`"last_plan_failure":true`,
+	} {
+		t.Run(report, func(t *testing.T) {
+			r := revokerFor(t, func(w http.ResponseWriter, req *http.Request) {
+				_, _ = io.WriteString(w, `{"agent_id":"worker-run-1","generation":3,"state":"revoked",`+report+`}`)
+			})
+			got, err := r.RevokeWithReport(context.Background(), "worker-run-1", 3)
+			if err != nil {
+				t.Fatalf("advisory report invalidated a durable revocation ACK: %v", err)
+			}
+			if got == nil || !got.Partial {
+				t.Fatalf("malformed report must be marked partial: %+v", got)
+			}
+		})
+	}
+}

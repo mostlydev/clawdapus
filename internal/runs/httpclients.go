@@ -92,20 +92,44 @@ func (r *CllamaRevoker) RevokeWithReport(ctx context.Context, agentID string, ge
 		// revoke may still be draining. Only a terminal 200 proves the fence.
 		return nil, fmt.Errorf("cllama revoke returned %d", resp.StatusCode)
 	}
-	var ack struct {
-		AgentID     string         `json:"agent_id"`
-		Generation  uint64         `json:"generation"`
-		State       string         `json:"state"`
-		BootID      string         `json:"boot_id"`
-		ServedBy    map[string]int `json:"served_by"`
-		PlanFailure string         `json:"last_plan_failure"`
+	var fence struct {
+		AgentID     string          `json:"agent_id"`
+		Generation  uint64          `json:"generation"`
+		State       string          `json:"state"`
+		BootID      json.RawMessage `json:"boot_id"`
+		ServedBy    json.RawMessage `json:"served_by"`
+		PlanFailure json.RawMessage `json:"last_plan_failure"`
 	}
-	if err := json.Unmarshal(raw, &ack); err != nil || ack.AgentID != agentID || ack.Generation < generation || ack.State != "revoked" {
+	if err := json.Unmarshal(raw, &fence); err != nil || fence.AgentID != agentID || fence.Generation < generation || fence.State != "revoked" {
 		return nil, errors.New("cllama revoke response is not a valid acknowledgement")
 	}
-	// The report is advisory. Anything malformed in it is dropped, never
-	// passed on, and never turns a valid acknowledgement into a failure.
+	// Decode advisory fields independently: a reporting schema error must
+	// not invalidate the durable revocation fence acknowledged above.
 	report := &RevokeReport{}
+	var ack struct {
+		BootID      string
+		ServedBy    map[string]int
+		PlanFailure string
+	}
+	decode := func(raw json.RawMessage, dst any) bool {
+		if len(raw) == 0 {
+			return true
+		}
+		if err := json.Unmarshal(raw, dst); err != nil {
+			report.Partial = true
+			return false
+		}
+		return true
+	}
+	if !decode(fence.BootID, &ack.BootID) {
+		ack.BootID = ""
+	}
+	if !decode(fence.ServedBy, &ack.ServedBy) {
+		ack.ServedBy = nil
+	}
+	if !decode(fence.PlanFailure, &ack.PlanFailure) {
+		ack.PlanFailure = ""
+	}
 	if bootIDRe.MatchString(ack.BootID) {
 		report.BootID = ack.BootID
 	} else if ack.BootID != "" {

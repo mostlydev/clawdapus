@@ -332,22 +332,25 @@ grouping and the vendor's error bodies follow OpenAI's documentation.
 
 ### Trying it before a cllama release
 
-`claw up` runs the cllama image pinned by the installed `claw`. Until a cllama release
-includes plan routes, build the image from a cllama checkout and tag it as the pinned
-reference. This replaces that tag on this machine only; `claw pull` restores the published
-image.
+This contributor workflow builds a distinct local image and a local `claw` binary that pins
+it. Run it from a Clawdapus source checkout containing this feature and the cllama commit to
+try. It does not overwrite a published image tag or change your installed `claw`.
 
 ```bash
-git clone https://github.com/mostlydev/cllama && cd cllama   # at the commit to try
-docker build -t ghcr.io/mostlydev/cllama:v0.14.0 \
-  --build-arg CLLAMA_VERSION=local --build-arg CLLAMA_REVISION="$(git rev-parse --short HEAD)" .
-cd /path/to/pod && claw up -d          # recreates cllama from the local image
-claw runs doctor                        # lists "chatgpt: not_signed_in" under "plan sign-ins:"
+trial_tag="local-$(git -C cllama rev-parse --short HEAD)"
+docker build -t "ghcr.io/mostlydev/cllama:${trial_tag}" \
+  --build-arg CLLAMA_VERSION=local \
+  --build-arg CLLAMA_REVISION="$(git -C cllama rev-parse HEAD)" cllama/
+go build -ldflags "-X main.infraCllamaTag=${trial_tag}" -o /tmp/claw-plan-trial ./cmd/claw
+cd /path/to/pod
+/tmp/claw-plan-trial up -d
+/tmp/claw-plan-trial runs doctor
 ```
 
-Use the tag `claw up` reports for cllama if your `claw` pins a different version. A proxy
-without plan routes makes `claw runs doctor` print `plan sign-ins: not supported by this
-pod's cllama`.
+Use that same local binary for the trial's lifecycle commands. After a release containing
+plan routes is installed, use the installed `claw pull` and `claw up -d` to return the pod to
+published images. A proxy without plan routes makes `claw runs doctor` report that plan
+sign-in status is unsupported.
 
 ## What `claw up` produces
 

@@ -392,7 +392,13 @@ When a reasoning model tries to govern itself, the guardrails are part of the sa
 - **Context blocks:** Operators can compile short per-agent context snippets into `context-blocks.json`; cllama injects enabled blocks into late runtime context so durable operating focus stays visible without expanding the primary contract.
 - **Operator dashboard:** Real-time web UI at host port 8181 by default (container `:8081`) — agent activity, provider status, cost breakdown.
 
-The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a zero-dependency Go binary that implements the transport layer (identity, routing, cost tracking, budget enforcement). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
+The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) — a Go binary that implements the transport layer (identity, routing, cost tracking, budget enforcement). Future proxy types (`cllama-policy`) will add bidirectional interception: evaluating outbound prompts and amending inbound responses against the agent's behavioral contract.
+
+Model chains can select a ChatGPT plan sign-in (`chatgpt/`), API keys, or Vercel AI Gateway
+(`vercel/<provider>/<model>`). cllama holds the sign-in and refreshes it; workers receive only
+their cllama bearer. The [per-run guide](https://clawdapus.dev/guide/per-run-workers#model-routes-and-plan-sign-ins)
+covers the operator command, fallback behavior, and verified scope. Real-account plan serving
+remains unverified; container acceptance uses a synthetic provider.
 
 See the [cllama specification](./docs/CLLAMA_SPEC.md) for the full standard.
 
