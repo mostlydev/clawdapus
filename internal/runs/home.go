@@ -132,6 +132,17 @@ func (s *Supervisor) ensureHome(rec *Record) error {
 			return err
 		}
 	}
+	// The deliverables directory is the supervisor's, so it can always list
+	// it; the worker can write into it. If the worker replaced it with
+	// something of its own, that is left alone and read as found.
+	deliverables := filepath.Join(data, DeliverablesDir)
+	if err := os.Mkdir(deliverables, 0o777); err == nil {
+		if err := os.Chmod(deliverables, 0o777); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrExist) {
+		return err
+	}
 	meta := HomeMeta{Installation: rec.Key.Installation, Home: rec.Spec.Home, CreatedAt: s.cfg.Now().UTC()}
 	var existing HomeMeta
 	if err := readJSONFile(filepath.Join(root, homeMetaFile), &existing); err == nil && !existing.CreatedAt.IsZero() {

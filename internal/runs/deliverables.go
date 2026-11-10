@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -69,10 +70,14 @@ func (s *Supervisor) openDeliverablesDir(installation, home string) (int, error)
 		next, err := unix.Openat(fd, component, flags, 0)
 		unix.Close(fd)
 		if err != nil {
+			// Being refused is not the same as there being nothing. Only a
+			// missing entry, or one that is not a real directory, is absence.
+			if !errors.Is(err, unix.ENOENT) && !errors.Is(err, unix.ENOTDIR) && !errors.Is(err, unix.ELOOP) {
+				return -1, errDeliverablesUnreadable
+			}
 			if i < 2 {
 				return -1, apiErr(http.StatusNotFound, "home_unknown", "no such home")
 			}
-			// Absent, or not a real directory: there are no deliverables.
 			return -1, nil
 		}
 		fd = next
@@ -80,36 +85,43 @@ func (s *Supervisor) openDeliverablesDir(installation, home string) (int, error)
 	return fd, nil
 }
 
+// errDeliverablesUnreadable is returned when the supervisor is refused
+// access to the deliverables directory or a file in it. It is never reported
+// as an empty list or a missing file.
+var errDeliverablesUnreadable = apiErr(http.StatusServiceUnavailable, "deliverables_unreadable",
+	"deliverables exist but the supervisor cannot read them; the worker publishes them at the end of its next turn")
+
 // readDeliverable reads one file relative to an open deliverables directory.
 // ok is false for anything that is not a regular file of acceptable size.
-func readDeliverable(dirFD int, name string) (data []byte, modified time.Time, tooLarge, ok bool) {
+// denied is true when a file is there and the supervisor may not read it.
+func readDeliverable(dirFD int, name string) (data []byte, modified time.Time, tooLarge, ok, denied bool) {
 	if !deliverableNameRe.MatchString(name) {
-		return nil, time.Time{}, false, false
+		return nil, time.Time{}, false, false, false
 	}
 	fd, err := unix.Openat(dirFD, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, time.Time{}, false, false
+		return nil, time.Time{}, false, false, errors.Is(err, unix.EACCES) || errors.Is(err, unix.EPERM)
 	}
 	f := os.NewFile(uintptr(fd), name)
 	defer f.Close()
 	// Stat the descriptor, not the name: the name may already point elsewhere.
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		return nil, time.Time{}, false, false
+		return nil, time.Time{}, false, false, false
 	}
 	if info.Size() > MaxDeliverableBytes {
-		return nil, time.Time{}, true, false
+		return nil, time.Time{}, true, false, false
 	}
 	// The size may change under us: read from this descriptor with a bound
 	// and judge what was actually read.
 	data, err = io.ReadAll(io.LimitReader(f, MaxDeliverableBytes+1))
 	if err != nil {
-		return nil, time.Time{}, false, false
+		return nil, time.Time{}, false, false, false
 	}
 	if len(data) > MaxDeliverableBytes {
-		return nil, time.Time{}, true, false
+		return nil, time.Time{}, true, false, false
 	}
-	return data, info.ModTime().UTC().Truncate(time.Second), false, true
+	return data, info.ModTime().UTC().Truncate(time.Second), false, true, false
 }
 
 func digestOf(data []byte) string {
@@ -131,12 +143,17 @@ func (s *Supervisor) Deliverables(installation, home string) ([]Deliverable, boo
 	defer dir.Close()
 	names, readErr := dir.Readdirnames(maxDeliverableEntries + 1)
 	if readErr != nil && readErr != io.EOF {
-		return nil, false, apiErr(http.StatusServiceUnavailable, "deliverables_unavailable", "deliverables could not be listed")
+		return nil, false, errDeliverablesUnreadable
 	}
 	truncated := len(names) > maxDeliverableEntries
 	sort.Strings(names)
 	for _, name := range names {
-		data, modified, _, ok := readDeliverable(dirFD, name)
+		data, modified, _, ok, denied := readDeliverable(dirFD, name)
+		if denied {
+			// A file is there and cannot be read. Listing the rest would
+			// say it is not there.
+			return nil, false, errDeliverablesUnreadable
+		}
 		if !ok {
 			continue
 		}
@@ -166,7 +183,10 @@ func (s *Supervisor) Deliverable(installation, home, name, wantSHA256 string) (*
 		return nil, apiErr(http.StatusNotFound, "deliverable_unknown", "no such deliverable")
 	}
 	defer unix.Close(dirFD)
-	data, _, tooLarge, ok := readDeliverable(dirFD, name)
+	data, _, tooLarge, ok, denied := readDeliverable(dirFD, name)
+	if denied {
+		return nil, errDeliverablesUnreadable
+	}
 	if tooLarge {
 		return nil, apiErr(http.StatusRequestEntityTooLarge, "deliverable_too_large", "deliverable is larger than %d bytes", MaxDeliverableBytes)
 	}

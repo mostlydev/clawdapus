@@ -165,12 +165,45 @@ def proven_session(prior, after):
         db.close()
 
 
+def publish_deliverables():
+    # The supervisor reads deliverables as another user. Everything else in
+    # the home stays private under the 077 umask; this one directory and the
+    # regular files directly in it are made readable. Each is opened without
+    # following a link and changed through its own descriptor, so a link or
+    # a FIFO placed here is never touched.
+    try:
+        dfd = os.open(home + "/deliverables", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return
+    try:
+        try:
+            os.fchmod(dfd, 0o755)
+        except OSError:
+            pass  # not ours to change: the supervisor made it, already open
+        for name in os.listdir(dfd)[:4096]:
+            try:
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+            except OSError:
+                continue
+            try:
+                if stat.S_ISREG(os.fstat(fd).st_mode):
+                    os.fchmod(fd, 0o644)
+            except OSError:
+                pass
+            finally:
+                os.close(fd)
+    finally:
+        os.close(dfd)
+
+
 os.umask(0o077)
 if len(sys.argv) != 2 or not sys.argv[1].strip():
     die(64, "expected the task as the only argument", "usage")
 task = sys.argv[1]
 for d in (hh, ws, ctl):
     real_dir(d)
+# Files a killed or older turn left unreadable are published now.
+publish_deliverables()
 
 # Managed config and contract are regenerated every run. The run token never
 # touches the home: it reaches Hermes only through that process's environment.
@@ -201,6 +234,8 @@ with tempfile.TemporaryDirectory(prefix="claw-run-", dir="/tmp") as capture:
         f.seek(max(0, f.tell() - 65536))
         tail = f.read().decode("utf-8", "replace")
 ids = re.findall(r"^session_id:\s*(\S+)\s*$", tail, re.M)
+# Whatever the turn's outcome, what it left for the requester is published.
+publish_deliverables()
 if code != 0:
     sys.stderr.write(tail[-4000:])
     die(code if 0 < code < 64 else 1, "hermes exited %d" % code, "runner_exit", code)
