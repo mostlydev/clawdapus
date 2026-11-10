@@ -454,6 +454,7 @@ Launch errors:
 |---|---|---|
 | `digest_invalid` | 400 | `spec_digest` does not match the canonical spec |
 | `digest_mismatch` | 409 | The run exists with a different digest |
+| `network_unavailable` | 503 | No free address block for a task-home run's network, or `CLAW_RUN_SUBNET_BASE` is not a usable private IPv4 range |
 | `template_changed` | 409 | The spec carries a `template_id` and the template has been recompiled since |
 | `cancelled` | 409 | The run was cancelled. A new attempt needs a new `run_id`. |
 | `stale_generation` | 409 | The generation is below the one already recorded |

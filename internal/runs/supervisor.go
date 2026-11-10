@@ -69,6 +69,9 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	Now               func() time.Time
 	Logf              func(format string, args ...any)
+	// PrivateSubnetBase is the IPv4 range task-home run networks are cut
+	// from. Empty means DefaultPrivateSubnetBase.
+	PrivateSubnetBase string
 }
 
 // Supervisor owns per-run worker lifecycle for one pod.
@@ -252,8 +255,20 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 		return nil, false, apiErr(http.StatusUnprocessableEntity, "grant_exceeded", "authority_expires_at exceeds the template max-authority")
 	}
 
-	homeHash := ""
+	homeHash, privateSubnet := "", ""
 	if spec.Home != "" {
+		// Home launches are serialized by homeMu, so two cannot take one block.
+		subnets, err := parsePrivateSubnetBase(s.cfg.PrivateSubnetBase)
+		if err != nil {
+			return nil, false, apiErr(http.StatusServiceUnavailable, "network_unavailable", "run subnet range is misconfigured")
+		}
+		used, err := s.usedPrivateSubnets()
+		if err != nil {
+			return nil, false, apiErr(http.StatusServiceUnavailable, "ledger_unavailable", "run ledger unreadable")
+		}
+		if privateSubnet, err = subnets.allocate(s.podNS, used); err != nil {
+			return nil, false, apiErr(http.StatusServiceUnavailable, "network_unavailable", "no free network block for a task-home run")
+		}
 		homeHash = HomeHash(req.Key.Installation, spec.Home)
 		holder, err := s.homeHolder(homeHash, req.Key)
 		if err != nil {
@@ -285,6 +300,7 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 		RunKey:             req.Key.RunKey(s.podNS),
 		Project:            "clawrun-" + s.podNS + "-" + req.Key.RunKey(s.podNS)[:16],
 		HomeHash:           homeHash,
+		PrivateSubnet:      privateSubnet,
 		State:              StateAccepted,
 		AuthorityExpiresAt: req.AuthorityExpiresAt.UTC(),
 		Credential:         CredentialNone,

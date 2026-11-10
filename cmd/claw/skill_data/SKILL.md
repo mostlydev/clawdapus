@@ -629,3 +629,5 @@ All views are read-only and scoped through `claw-api` principals. Use this befor
 - After feed resolution: `resolveToolSubscriptions` and `resolveMemorySubscriptions` wire capability providers into the internal network and compile manifests into cllama context
 - Generated files are inspectable build artifacts, not hand-edited
 - `claw-internal` Docker network is NOT `internal: true` — agents need egress for APIs
+
+Task-home run networks use individual /29 blocks from `10.213.0.0/16` instead of consuming Docker default address pools. Set `CLAW_RUN_SUBNET_BASE` on `claw runs serve` to choose a different private IPv4 range (/8 through /24) if another host network overlaps. Runs remain on separate internal bridges; no existing host networks are pruned.

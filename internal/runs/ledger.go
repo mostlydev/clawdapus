@@ -183,11 +183,13 @@ type Record struct {
 	TemplateID string `json:"template_id,omitempty"`
 	// Models is the concrete model chain of the template the run was
 	// admitted with, in routing order.
-	Models     []ModelRef `json:"models,omitempty"`
-	ImageID    string     `json:"image_id,omitempty"`
-	RunAgentID string     `json:"run_agent_id,omitempty"`
-	RunKey     string     `json:"run_key,omitempty"` // pod-scoped container label value
-	Project    string     `json:"project,omitempty"`
+	Models []ModelRef `json:"models,omitempty"`
+	// PrivateSubnet is the address block of a task-home run's own network.
+	PrivateSubnet string `json:"private_subnet,omitempty"`
+	ImageID       string `json:"image_id,omitempty"`
+	RunAgentID    string `json:"run_agent_id,omitempty"`
+	RunKey        string `json:"run_key,omitempty"` // pod-scoped container label value
+	Project       string `json:"project,omitempty"`
 	// HomeHash names the task home this run reserves, from accept until the
 	// run is terminal. Empty for a stateless run.
 	HomeHash           string      `json:"home_hash,omitempty"`
