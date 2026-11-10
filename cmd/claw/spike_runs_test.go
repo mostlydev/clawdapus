@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -784,6 +785,8 @@ func runsSpikeProxyStatus(t *testing.T, network, image, token string) int {
 type runsSpikeCallbacks struct {
 	mu    sync.Mutex
 	calls []string // "<run>/<verb>/<credential>"
+	// bodies holds the last request body per "<run>/<verb>".
+	bodies map[string]string
 }
 
 func newRunsSpikeCallbacks() *runsSpikeCallbacks { return &runsSpikeCallbacks{} }
@@ -791,8 +794,13 @@ func newRunsSpikeCallbacks() *runsSpikeCallbacks { return &runsSpikeCallbacks{} 
 func (c *runsSpikeCallbacks) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) == 4 {
+		raw, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		c.mu.Lock()
 		c.calls = append(c.calls, parts[2]+"/"+parts[3]+"/"+strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		if c.bodies == nil {
+			c.bodies = map[string]string{}
+		}
+		c.bodies[parts[2]+"/"+parts[3]] = string(raw)
 		c.mu.Unlock()
 	}
 	w.WriteHeader(http.StatusOK)

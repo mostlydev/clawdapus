@@ -134,7 +134,16 @@ func (n *HTTPNotifier) Ended(ctx context.Context, rec *Record, credential, outco
 		}
 		truncated = true
 	}
-	return n.post(ctx, rec, credential, "end", map[string]any{"outcome": outcome, "reason": reason, "summary": string(summary), "summary_truncated": truncated})
+	body := map[string]any{"outcome": outcome, "reason": reason, "summary": string(summary), "summary_truncated": truncated}
+	// A task-home result also says whether it is an answer or a question, and
+	// which harness session holds the turn (#396). Both values were validated
+	// from the result header and stored on the record; they are sent together
+	// or not at all, so a stateless run's body is unchanged.
+	if r := rec.Result; r != nil && (r.Outcome == OutcomeAnswer || r.Outcome == OutcomeQuestion) && sessionIDRe.MatchString(r.Session) {
+		body["result_outcome"] = r.Outcome
+		body["session"] = r.Session
+	}
+	return n.post(ctx, rec, credential, "end", body)
 }
 
 func (n *HTTPNotifier) post(ctx context.Context, rec *Record, credential, verb string, extra map[string]any) error {
