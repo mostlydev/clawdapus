@@ -126,6 +126,8 @@ type rawClawBlock struct {
 
 	ReasoningEffort map[string]string    `yaml:"reasoning-effort"`
 	DataPolicy      *rawDataPolicyConfig `yaml:"data-policy"`
+	// HostedCapabilities is the grant of provider-hosted capabilities.
+	HostedCapabilities []string `yaml:"hosted-capabilities"`
 
 	ProviderPreferences map[string]*rawProviderPreferences `yaml:"provider-preferences"`
 }
@@ -436,6 +438,9 @@ func Parse(r io.Reader) (*Pod, error) {
 			}
 			if service.Claw.DataPolicy, err = parseDataPolicy(svc.XClaw.DataPolicy); err != nil {
 				return nil, fmt.Errorf("service %q: parse data-policy: %w", name, err)
+			}
+			if service.Claw.HostedCapabilities, err = parseHostedCapabilities(svc.XClaw.HostedCapabilities, lifecycle); err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
 			}
 			if err := validatePerRunService(service); err != nil {
 				return nil, fmt.Errorf("service %q: %w", name, err)
