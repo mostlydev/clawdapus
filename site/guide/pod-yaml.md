@@ -329,14 +329,16 @@ A model the pinned cllama does not price is passed over, so a brand-new model be
 
 ```
 model family openai/@terra: locked gpt-6.1-terra; up to date
-model family openai/@terra: locked gpt-5.6-terra; claw up would move to gpt-6.1-terra
+model family openai/@terra: locked gpt-5.6-terra; family/pricing candidate gpt-6.1-terra
 model family openai/@terra: locked gpt-6.1-terra; newer member gpt-7-terra is not eligible (unpriced)
 model family openai/@terra: locked gpt-6.1-terra; absent from this listing
-model family openai/@terra: locked gpt-6.1-terra, still qualifies; listing unavailable (model listing could not be read)
+model family openai/@terra: locked gpt-6.1-terra, still meets family/pricing constraints; listing unavailable (model listing could not be read)
 ```
 
+Eligibility lines also state `service data policy not assessed; claw up rechecks it`. Doctor does not inspect image `MODEL` labels and cannot establish all consuming services. A family/pricing candidate is not a promise that recompilation will succeed: `claw up` checks every resolved service and cllama enforces policy on every request.
+
 - `absent from this listing` means one complete read of the provider's list did not include the locked model. It is an observation, not a statement that the model was retired, and `claw up` will not move down because of it.
-- `no longer qualifies (<reason>)` means the locked model does not fit the family as the pod writes it now, for example after a ceiling was lowered.
+- `no longer meets family/pricing constraints (<reason>)` means the locked model does not fit the family as the pod writes it now, for example after a ceiling was lowered.
 - A family that is declared but has no lock entry, and a lock entry whose family the pod no longer declares, are each reported.
 
 `models.lock` records, per family, the chosen model, the previous one, the rates it was bounded with, when the model list was read and the cllama image the prices came from. It holds no credential. Commit it with the pod if you want the choice reviewed.

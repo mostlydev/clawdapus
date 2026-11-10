@@ -423,20 +423,20 @@ func TestFamilyDriftReport(t *testing.T) {
 		"up to date": {"gpt-6.1-terra", terraFamily, modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra", "gpt-6.1-terra"}}, false,
 			[]string{"model family openai/@terra: locked gpt-6.1-terra; up to date"}, []string{"would move", "absent"}},
 		"newer member available": {"gpt-5.6-terra", terraFamily, modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra", "gpt-6.1-terra"}}, false,
-			[]string{"locked gpt-5.6-terra; claw up would move to gpt-6.1-terra"}, []string{"absent"}},
+			[]string{"locked gpt-5.6-terra; family/pricing candidate gpt-6.1-terra"}, []string{"absent"}},
 		"newer member not eligible": {"gpt-6.1-terra", terraFamily, modelfamily.Catalog{Complete: true, IDs: []string{"gpt-6.1-terra", "gpt-7-terra"}}, false,
 			[]string{"locked gpt-6.1-terra; newer member gpt-7-terra is not eligible (unpriced)"}, []string{"would move", "absent"}},
 		"locked model absent, nothing newer": {"gpt-6.1-terra", terraFamily, modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra"}}, false,
 			[]string{"locked gpt-6.1-terra; absent from this listing"}, []string{"would move", "retire", "deprecat"}},
 		"locked model absent, newer priced": {"gpt-5.6-terra", terraFamily, modelfamily.Catalog{Complete: true, IDs: []string{"gpt-6.1-terra"}}, false,
-			[]string{"locked gpt-5.6-terra; absent from this listing; claw up would move to gpt-6.1-terra"}, []string{"retire"}},
+			[]string{"locked gpt-5.6-terra; absent from this listing; family/pricing candidate gpt-6.1-terra"}, []string{"retire"}},
 		"listing unavailable": {"gpt-6.1-terra", terraFamily, modelfamily.Catalog{}, true,
-			[]string{"locked gpt-6.1-terra, still qualifies; listing unavailable (model listing could not be read)"}, []string{"would move", "absent"}},
+			[]string{"locked gpt-6.1-terra, still meets family/pricing constraints; listing unavailable (model listing could not be read)"}, []string{"would move", "absent"}},
 		"listing incomplete": {"gpt-6.1-terra", terraFamily, modelfamily.Catalog{Complete: false, IDs: []string{"gpt-9-terra"}}, false,
-			[]string{"locked gpt-6.1-terra, still qualifies; listing unavailable (incomplete)"}, []string{"gpt-9-terra"}},
+			[]string{"locked gpt-6.1-terra, still meets family/pricing constraints; listing unavailable (incomplete)"}, []string{"gpt-9-terra"}},
 		"ceiling tightened below the lock": {"gpt-6.1-terra", modelfamily.Family{Name: "terra", Provider: "openai", Pattern: "gpt-*-terra", MaxInput: 1.5, MaxOutput: 18},
 			modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra", "gpt-6.1-terra"}}, false,
-			[]string{"locked gpt-6.1-terra; no longer qualifies (input_price_over_ceiling)"}, []string{"would move"}},
+			[]string{"locked gpt-6.1-terra; no longer meets family/pricing constraints (input_price_over_ceiling)"}, []string{"would move"}},
 		"version tie in the listing": {"gpt-6-terra-x", terraFamily, modelfamily.Catalog{}, false, nil, nil}, // replaced below
 	}
 	delete(cases, "version tie in the listing")
@@ -498,5 +498,41 @@ func TestFamilyDriftReport(t *testing.T) {
 	custom.storeURL = "https://eu.api.openai.com/v1"
 	if lines := custom.r.familyDrift(context.Background()); len(lines) != 1 || !strings.Contains(lines[0], "listing not read") || len(custom.fetches) != 1 {
 		t.Fatalf("custom endpoint: %q fetches=%v", lines, custom.fetches)
+	}
+}
+
+func TestFamilyDriftDoesNotClaimPolicyAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		declared bool
+		policy   *pod.DataPolicyConfig
+		want     string
+	}{
+		{"refusing consumer", true, pod.DefaultDataPolicy(), "service data policy not assessed; claw up rechecks it"},
+		{"passing consumer", true, attestedPolicy(), "service data policy not assessed; claw up rechecks it"},
+		{"image-only consumer", false, attestedPolicy(), "data policy not assessed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newFamilyRig(t, terraFamily, map[string]string{"OPENAI_API_KEY": "sk-key"})
+			rig.catalog = modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra"}}
+			if _, err := rig.up(map[string]string{"primary": "openai/@terra"}); err != nil {
+				t.Fatal(err)
+			}
+			rig.again(terraFamily)
+			rig.r.pod.Services["worker"].Claw.DataPolicy = tc.policy
+			if tc.declared {
+				rig.r.pod.Services["worker"].Claw.Models = map[string]string{"primary": "openai/@terra"}
+			}
+			rig.catalog = modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra", "gpt-6.1-terra"}}
+			before, _ := os.ReadFile(filepath.Join(rig.dir, modelfamily.LockFileName))
+			got := strings.Join(rig.r.familyDrift(context.Background()), "\n")
+			if !strings.Contains(got, tc.want) || !strings.Contains(got, "family/pricing candidate gpt-6.1-terra") || strings.Contains(got, "claw up would move") {
+				t.Fatalf("misleading policy report: %s", got)
+			}
+			after, _ := os.ReadFile(filepath.Join(rig.dir, modelfamily.LockFileName))
+			if !bytes.Equal(before, after) {
+				t.Fatal("doctor changed the lock")
+			}
+		})
 	}
 }

@@ -477,6 +477,8 @@ claw runs doctor [--remove-orphans]
 
 `serve` holds the pod's run lock for its whole lifetime, so `claw up` and `claw down` refuse to run until it stops. Before accepting connections it runs a revocation self-test against cllama and reconciles every unfinished run. Client commands verify the socket directory's owner and the server's peer UID (`--server-uid`, which defaults to your own).
 
+`doctor` first reports model-family drift without changing locks or templates, even while the supervisor holds the run lock (the remaining ledger checks still refuse then). It reports family/pricing candidates, ineligible newer models, listing absence or unavailability, and explicitly states that service data policy was not assessed. Image-only consumers are not inspected; a candidate is not compile approval. See [checking for drift](/guide/pod-yaml#checking-for-drift).
+
 `doctor` also reports the proxy's plan sign-in state and the operator sign-in command.
 Orchestrators can query `GET /v1/subscriptions` on the same UID-restricted supervisor socket
 before launching work. Task-home status and end callbacks include credential counts when
@@ -484,7 +486,7 @@ available; see [model routes and plan sign-ins](/guide/per-run-workers#model-rou
 
 A launch spec may carry `template_id`, taken from `GET /v1/templates` on the supervisor
 socket, to pin the run to the template it was built against; a stale ID is refused with
-`template_changed`. See [pinning a queued spec](/guide/per-run-workers#pinning-a-queued-spec).
+`template_changed`. Template listing and run status model entries include optional `requested` for a family reference, alongside concrete `ref`; exact pins omit it. This metadata is covered by the template ID. First recompilation after this addition changes IDs for family templates; already queued old IDs remain refused rather than rebound. See [pinning a queued spec](/guide/per-run-workers#pinning-a-queued-spec).
 
 From v0.32.2, task-home wrapper failures have a fixed `worker_*` code in the run's
 failure field and the `end` callback's `reason`. Public status `exit_code` remains

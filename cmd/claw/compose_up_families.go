@@ -469,10 +469,16 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 	sort.Strings(ordered)
 
 	var lines []string
+	var policyNotes []string
 	say := func(key, format string, args ...any) {
-		lines = append(lines, "model family "+key+": "+fmt.Sprintf(format, args...))
+		line := "model family " + key + ": " + fmt.Sprintf(format, args...)
+		if len(policyNotes) > 0 {
+			line += "; " + strings.Join(policyNotes, "; ")
+		}
+		lines = append(lines, line)
 	}
 	for _, key := range ordered {
+		policyNotes = nil
 		provider, name, _ := strings.Cut(key, "/@")
 		locked, hadLock := lock.Families[key]
 		fam, declared := r.families[name]
@@ -488,6 +494,7 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 			say(key, "locked %s; cannot be checked (%v)", locked.ID, err)
 			continue
 		}
+		policyNotes = []string{"service data policy not assessed; claw up rechecks it"}
 		if r.prices == nil {
 			prices, source, err := r.loadPrices(ctx)
 			if err != nil {
@@ -498,9 +505,9 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 		}
 		// The lock is judged against the family as the pod writes it now.
 		lockedReason := fam.Reuse(locked, r.prices, nil)
-		qualifies := "still qualifies"
+		qualifies := "still meets family/pricing constraints"
 		if lockedReason != "" {
-			qualifies = "no longer qualifies (" + lockedReason + ")"
+			qualifies = "no longer meets family/pricing constraints (" + lockedReason + ")"
 		}
 		baseURL, apiKey, err := r.providerEndpoint(provider)
 		if err != nil {
@@ -539,7 +546,7 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 		}
 		if decision.ID != "" && decision.ID != locked.ID {
 			if v, _ := fam.Member(decision.ID); v.Compare(lockedVersion) > 0 || lockedReason != "" {
-				notes = append(notes, fmt.Sprintf("claw up would move to %s", decision.ID))
+				notes = append(notes, fmt.Sprintf("family/pricing candidate %s", decision.ID))
 			}
 		}
 		if len(notes) == 0 {
