@@ -14,6 +14,7 @@ import (
 
 	"github.com/mostlydev/clawdapus/internal/clawapi"
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/modelfamily"
 	"github.com/mostlydev/clawdapus/internal/schedule"
 )
 
@@ -33,6 +34,43 @@ type rawPodClaw struct {
 	Principals            []rawPrincipalEntry    `yaml:"principals"`
 	AlertWebhooks         []string               `yaml:"alert-webhooks"`
 	AlertMentions         []string               `yaml:"alert-mentions"`
+	ModelFamilies         map[string]rawFamily   `yaml:"model-families"`
+}
+
+// rawFamily is one x-claw.model-families entry.
+type rawFamily struct {
+	Provider  string  `yaml:"provider"`
+	Pattern   string  `yaml:"pattern"`
+	MaxInput  float64 `yaml:"max-input"`
+	MaxOutput float64 `yaml:"max-output"`
+}
+
+func (r *rawFamily) UnmarshalYAML(node *yaml.Node) error {
+	if err := rejectUnknownKeys(node, "x-claw.model-families entry", "provider", "pattern", "max-input", "max-output"); err != nil {
+		return err
+	}
+	type plain rawFamily
+	return node.Decode((*plain)(r))
+}
+
+// parseModelFamilies validates the pod's family declarations. Names are
+// returned in sorted order so compilation is deterministic.
+func parseModelFamilies(raw map[string]rawFamily) ([]modelfamily.Family, error) {
+	names := make([]string, 0, len(raw))
+	for name := range raw {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]modelfamily.Family, 0, len(names))
+	for _, name := range names {
+		r := raw[name]
+		fam := modelfamily.Family{Name: name, Provider: strings.TrimSpace(r.Provider), Pattern: strings.TrimSpace(r.Pattern), MaxInput: r.MaxInput, MaxOutput: r.MaxOutput}
+		if err := fam.Validate(); err != nil {
+			return nil, fmt.Errorf("x-claw.model-families: %w", err)
+		}
+		out = append(out, fam)
+	}
+	return out, nil
 }
 
 type rawPrincipalEntry struct {
@@ -201,6 +239,11 @@ func Parse(r io.Reader) (*Pod, error) {
 	delete(preservedRoot, "x-claw")
 	delete(preservedRoot, "services")
 
+	families, err := parseModelFamilies(raw.XClaw.ModelFamilies)
+	if err != nil {
+		return nil, err
+	}
+
 	pod := &Pod{
 		Name:                  raw.XClaw.Pod,
 		Master:                strings.TrimSpace(raw.XClaw.Master),
@@ -208,6 +251,7 @@ func Parse(r io.Reader) (*Pod, error) {
 		Services:              make(map[string]*Service, len(raw.Services)),
 		Compose:               preservedRoot,
 		AlertWebhooks:         raw.XClaw.AlertWebhooks,
+		ModelFamilies:         families,
 		AlertMentions:         raw.XClaw.AlertMentions,
 	}
 	contextConfig, err := parseContextConfig(raw.XClaw.Context)

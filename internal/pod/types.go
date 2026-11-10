@@ -2,6 +2,7 @@ package pod
 
 import (
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"github.com/mostlydev/clawdapus/internal/modelfamily"
 	"github.com/mostlydev/clawdapus/internal/schedule"
 	"time"
 )
@@ -24,6 +25,9 @@ type Pod struct {
 	Principals    []PodPrincipal
 	AlertWebhooks []string // pod-scoped Discord webhook URLs for pool-transition alerts
 	AlertMentions []string // pod-scoped @-mention targets for alerts (e.g. "@wojtek", "@infra")
+	// ModelFamilies are the pod's version-free model families, sorted by
+	// name. A model slot refers to one as "<provider>/@<name>".
+	ModelFamilies []modelfamily.Family
 }
 
 // Service represents a service in a claw-pod.yml.

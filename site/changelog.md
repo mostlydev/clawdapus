@@ -29,6 +29,8 @@ outline: deep
 
 ## Unreleased
 
+- Model families: a model slot may name a version-free family (`openai/@terra`) declared once in pod-level `x-claw.model-families` with a pattern and price ceilings. `claw up` resolves it to the highest-versioned member of the provider's model list that the pinned cllama prices exactly within the ceilings, prints any move, and records the choice in `models.lock`. Supported for `openai`, `xai`, `google` and `meta` API-key routes on their standard endpoints; needs cllama v0.16.0 or later for its price export. Exact model IDs behave as before.
+
 - Docs: correct the v0.32.2 exit-field guidance. Public run status exposes `exit_code`; the original Hermes exit is retained in the persisted ledger at `exit_observed.runner_code`, not in a public `exit.runner_code` field. Runtime behavior is unchanged.
 
 - Per-run launch specs accept an optional `template_id`. A launch is refused with `template_changed` (409) when the template was recompiled after the spec was built, so a spec queued outside the supervisor cannot be rebound to another model chain or tool grant. `GET /v1/templates` lists each compiled template's ID and concrete model chain, and a run's status now carries the `template_id` and `models` it was admitted with.

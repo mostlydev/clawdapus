@@ -29,6 +29,7 @@ import (
 	"github.com/mostlydev/clawdapus/internal/driver"
 	"github.com/mostlydev/clawdapus/internal/driver/shared"
 	"github.com/mostlydev/clawdapus/internal/inspect"
+	"github.com/mostlydev/clawdapus/internal/modelfamily"
 	"github.com/mostlydev/clawdapus/internal/persona"
 	"github.com/mostlydev/clawdapus/internal/pod"
 	"github.com/mostlydev/clawdapus/internal/runs"
@@ -250,6 +251,18 @@ func runComposeUp(podFile string) (err error) {
 		}
 	}
 
+	// Model families are resolved to concrete models here, before anything
+	// reads a claw's model slots.
+	families := newFamilyResolver(podDir, p)
+	// A move is recorded only once the whole compile and apply succeeded.
+	defer func() {
+		if err == nil {
+			if saveErr := families.save(); saveErr != nil {
+				err = fmt.Errorf("write %s: %w", modelfamily.LockFileName, saveErr)
+			}
+		}
+	}()
+
 	for name, svc := range p.Services {
 		if !svc.IsAgentManaged() {
 			continue
@@ -389,6 +402,9 @@ func runComposeUp(podFile string) (err error) {
 			Skills:        skills,
 			Cllama:        resolveCllama(info.Cllama, svc.Claw.Cllama),
 			Hermes:        cloneHermesConfig(svc.Claw.Hermes),
+		}
+		if err := families.apply(context.Background(), rc); err != nil {
+			return err
 		}
 		if resolvedPersona != nil {
 			rc.PersonaHostPath = resolvedPersona.HostPath
