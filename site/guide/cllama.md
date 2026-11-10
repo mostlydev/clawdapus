@@ -53,7 +53,7 @@ model chain to prefer it or an API key; use a single entry for subscription-only
 [operator sign-in command and verified scope](/guide/per-run-workers#model-routes-and-plan-sign-ins).
 A worker receives only its cllama bearer under either route.
 
-Plan failures emit `plan_failure` diagnostics with a fixed internal branch, upstream
+With cllama ≥ v0.15.1, plan failures emit `plan_failure` diagnostics with a fixed internal branch, upstream
 HTTP status, and allowlisted error/event/media-type fields. Stream failures can include
 byte and event counts. These diagnostics never contain upstream body text, sign-in
 tokens, or account identifiers. A headerless HTTP 200 is not success by itself: the
@@ -310,7 +310,7 @@ the unchanged shape. Requests routed this way emit an `intervention` audit
 event with reason `responses_api_adapter`.
 
 The built-in list covers `openai/gpt-5.6*` and `openai/gpt-5-pro*`, and (cllama ≥ v0.12.0) the documented GPT-6 families `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna` plus their dated snapshots. For those GPT-6 families the adapter also drops the `temperature`/`top_p` defaults older runners send, which the models reject, and logs a `responses_adapter_dropped_sampling` intervention. Sampling is kept only for `gpt-6-sol`/`gpt-6-luna` with an explicit `reasoning_effort: none`; an explicit effort a model does not support is rejected with a 400. When
-OpenAI introduces a model before the built-in list catches up, cllama can adapt
+OpenAI introduces a model before the built-in list catches up, cllama ≥ v0.15.1 can adapt
 from a bounded upstream rejection. An explicit Responses endpoint hint, or an OpenAI
 400 with `error.code: unsupported_parameter` and `error.param: max_tokens`, triggers one
 Responses retry. A Responses rejection of `temperature` or `top_p` permits one further

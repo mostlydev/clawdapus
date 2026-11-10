@@ -106,3 +106,19 @@ or hosted multi-user use is outside OpenAI's documentation and outside this deci
 - **Not proven:** a request authorized by a real ChatGPT sign-in. No agent signs in. The
   callback parameter names, the namespaced tool shape and the vendor's error bodies are taken
   from OpenAI's documentation.
+
+
+### Verification update — 2026-11-10
+
+The original unverified-sign-in statement above records the decision's initial evidence.
+For the v0.32.1 / cllama v0.15.1 patch candidates, a collaborating test operator verified
+an existing real ChatGPT sign-in: first turn, exact-session resume, separate-home control,
+and plan-only requests on both gpt-5.6-terra and gpt-6.1-terra. All 23 responses used the
+subscription, and a separate empty-store negative control made no upstream request.
+
+The API compatibility candidate also served 11 openai/gpt-6.1-terra responses across first
+turn, resume and control after one initial max_tokens rejection, with learned Responses
+adaptation reused on later calls. Same-build plan regression and empty-store control passed.
+No agent signed in, copied, read or wrote the sign-in store; cllama may have refreshed it.
+Refresh and quota-limit behavior were not established by this live evidence, and the
+sampling-rejection retry was tested synthetically but not observed live.
