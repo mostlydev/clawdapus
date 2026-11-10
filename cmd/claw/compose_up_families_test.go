@@ -228,7 +228,7 @@ func TestFamilyRefusals(t *testing.T) {
 		"undeclared family":          {terraFamily, key, "openai/@luna", &full, false, "is not declared", false},
 		"family of another provider": {terraFamily, key, "xai/@terra", &full, false, `belongs to provider "openai"`, false},
 		"provider not supported":     {modelfamily.Family{Name: "terra", Provider: "openrouter", Pattern: "openai/gpt-*-terra", MaxInput: 4, MaxOutput: 18}, key, "openrouter/@terra", &full, false, "not supported for provider", false},
-		"anthropic route":                 {modelfamily.Family{Name: "terra", Provider: "anthropic", Pattern: "claude-sonnet-*", MaxInput: 4, MaxOutput: 18}, key, "anthropic/@terra", &full, false, "not supported for provider", false},
+		"anthropic route":            {modelfamily.Family{Name: "terra", Provider: "anthropic", Pattern: "claude-sonnet-*", MaxInput: 4, MaxOutput: 18}, key, "anthropic/@terra", &full, false, "not supported for provider", false},
 		"no key":                     {terraFamily, map[string]string{}, "openai/@terra", &full, false, "no key for provider", false},
 		"custom endpoint":            {terraFamily, map[string]string{"OPENAI_API_KEY": "sk-key", "OPENAI_BASE_URL": "https://eu.api.openai.com/v1"}, "openai/@terra", &full, false, "custom endpoint", false},
 		"malformed reference":        {terraFamily, key, "openai/@Terra", &full, false, "not a family reference", false},
