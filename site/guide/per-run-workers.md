@@ -294,6 +294,8 @@ The last two never move a request to another billing path. The plan route sends 
 `temperature`, `top_p` or output-token limit, refuses hosted tools, and counts a reply only
 once it has completed. The cllama README has the full list.
 
+From cllama v0.17.0, per-run workers also cannot use provider-hosted tools through an API-key fallback, even under a permissive data policy. The final-request guard refuses remote MCP and hosted web search before dispatch. Per-run templates do not accept hosted-capability grants in this version; native function/custom tools are unaffected. The live regression uses a real Hermes worker with a synthetic provider and sign-in, proves ordinary API fallback succeeds, and checks that refused search/MCP requests produce no upstream request. It does not use a real account or move a sign-in store.
+
 ### What a run reports
 
 For a [task-home](#task-homes) run, the status and the `end` callback say which credential

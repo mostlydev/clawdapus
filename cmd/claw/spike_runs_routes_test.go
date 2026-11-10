@@ -450,10 +450,69 @@ services:
 		t.Fatalf("case 8 (plan limit): status: %+v", st)
 	}
 
+	// 9. Hosted capabilities. The plan route is resting after case 8, so the
+	// plan-first worker is on its API-key fallback, under this pod's fully
+	// permissive data policy. With its own run token the worker asks cllama
+	// directly. An ordinary request is served by the API key, which shows
+	// the lane is open. The same request with a vendor-hosted tool is
+	// refused and never reaches the provider, and there is no way around the
+	// adapter through /v1/responses.
+	launch("pf4", "plan-first", "RUN: python3 -c '"+routesSpikeHostedProbe+"'")
+	_, probe := answer("pf4")
+	// The terminal tool reports its result as JSON; the probe's lines are
+	// in its output field.
+	var toolResult struct {
+		Output string `json:"output"`
+	}
+	if json.Unmarshal([]byte(probe), &toolResult) == nil && toolResult.Output != "" {
+		probe = toolResult.Output
+	}
+	if !strings.Contains(probe, "HOSTED-PROBE-DONE") {
+		t.Fatalf("case 9: the probe did not finish:\n%s", probe)
+	}
+	lineOf := func(label string) string {
+		for _, line := range strings.Split(probe, "\n") {
+			if strings.HasPrefix(line, label+" ") {
+				return line
+			}
+		}
+		t.Fatalf("case 9: no %s line in the probe output:\n%s", label, probe)
+		return ""
+	}
+	if line := lineOf("PLAIN"); !strings.HasPrefix(line, "PLAIN 200 ") || !strings.Contains(line, "route=responses model=gpt-5.6-terra key=openai") {
+		t.Fatalf("case 9: an ordinary request was not served by the API key: %s", line)
+	}
+	if line := lineOf("SEARCH"); !strings.HasPrefix(line, "SEARCH 400 ") || !strings.Contains(line, "hosted capability not granted: web_search") {
+		t.Fatalf("case 9: a hosted web search was not refused: %s", line)
+	}
+	if line := lineOf("MCP"); !strings.HasPrefix(line, "MCP 400 ") || !strings.Contains(line, "hosted capability not granted: mcp") {
+		t.Fatalf("case 9: a remote MCP server was not refused: %s", line)
+	}
+	if line := lineOf("RESPONSES"); !strings.HasPrefix(line, "RESPONSES 404 ") {
+		t.Fatalf("case 9: /v1/responses is reachable by a worker: %s", line)
+	}
+	logs = providerLog()
+	if !strings.Contains(logs, "REQUEST route=responses model=gpt-5.6-terra key=openai tls=False task='PROBE-PLAIN-RAW'") {
+		t.Fatalf("case 9: the ordinary request did not reach the provider on the API-key lane:\n%s", logs)
+	}
+	// The provider logs a request's task in an exact field. The outer probe
+	// command names these markers too, so match the field, not the word.
+	for _, marker := range []string{"task='PROBE-SEARCH-RAW'", "task='PROBE-MCP-RAW'", "task='PROBE-RESPONSES-RAW'"} {
+		if strings.Contains(logs, marker) {
+			t.Fatalf("case 9: a refused request reached the provider (%s):\n%s", marker, logs)
+		}
+	}
+	servedOnlyByKey("pf4", endBody("pf4"))
+
 	// The synthetic tokens appear nowhere but the sign-in record: not in the
 	// proxy's log, the callbacks, or anything the pod wrote outside the
 	// store. The log check has a positive control: it does name the class.
 	cllamaLogs, _ := exec.Command("docker", "logs", spikeComposeContainerID(t, generatedPath, "cllama")).CombinedOutput()
+	for _, refusal := range []string{"hosted_capability_refused:web_search", "hosted_capability_refused:mcp"} {
+		if !strings.Contains(string(cllamaLogs), refusal) {
+			t.Fatalf("cllama log does not record %s:\n%.3000s", refusal, cllamaLogs)
+		}
+	}
 	if !strings.Contains(string(cllamaLogs), `"credential":"api_key"`) || !strings.Contains(string(cllamaLogs), `"credential":"subscription"`) {
 		t.Fatalf("cllama log does not record both credential classes:\n%.3000s", cllamaLogs)
 	}
@@ -560,9 +619,24 @@ class Handler(BaseHTTPRequestHandler):
                     "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}}}
                 self.send_json(("data: " + json.dumps({"type": "response.created"}) + "\n\ndata: " + json.dumps(done) + "\n\n").encode(), "text/event-stream")
                 return
+            text = "ANSWER route=responses model=%s key=%s" % (model, key)
+            if "RUN: " in task:
+                # The same scripted terminal call as on the chat route.
+                outs = [i for i in body.get("input", []) if isinstance(i, dict) and i.get("type") == "function_call_output"]
+                names = [t.get("name") for t in body.get("tools", []) if isinstance(t, dict)]
+                if outs:
+                    text = str(outs[-1].get("output", "")).strip() or "EMPTY-TOOL-OUTPUT"
+                elif "terminal" in names:
+                    self.send_json({"id": "resp_routes", "object": "response", "status": "completed", "model": model,
+                        "output": [{"type": "function_call", "id": "fc_routes", "call_id": "call-routes", "name": "terminal",
+                            "arguments": json.dumps({"command": task.split("RUN: ", 1)[1].split("\n\n")[0], "timeout": 120})}],
+                        "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}})
+                    return
+                else:
+                    text = "NO-TERMINAL-TOOL"
             self.send_json({"id": "resp_routes", "object": "response", "status": "completed", "model": model,
                 "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text",
-                    "text": "ANSWER route=responses model=%s key=%s" % (model, key)}]}],
+                    "text": text}]}],
                 "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}})
             return
         messages = body.get("messages", [])
@@ -640,3 +714,34 @@ func routesSpikeCerts(t *testing.T, host string) (caPEM, certPEM, keyPEM string)
 	}
 	return pemOf("CERTIFICATE", caDER), pemOf("CERTIFICATE", der), pemOf("PRIVATE KEY", keyDER)
 }
+
+// routesSpikeHostedProbe is run by a worker with its own run token. It asks
+// cllama for an ordinary completion, the same with a vendor-hosted web
+// search, the same with a remote MCP server, and the Responses API directly.
+// The worker can reach cllama only through its run's gate, so the probe
+// takes the address from the worker's own model configuration. It has no
+// blank line and no single quote, so it survives as one command.
+const routesSpikeHostedProbe = `import os, re, json, urllib.request, urllib.error
+home = os.environ.get("HERMES_HOME") or "/home/task/hermes"
+U = re.search(r"base_url:\s*(\S+)", open(home + "/config.yaml").read()).group(1).strip("\"").rstrip("/")
+K = os.environ["CLAW_MODEL_KEY"]
+M = "openai/gpt-5.6-terra"
+def post(path, body):
+    req = urllib.request.Request(U + path, data=json.dumps(body).encode(), headers={"Authorization": "Bearer " + K, "Content-Type": "application/json"})
+    try:
+        r = urllib.request.urlopen(req, timeout=60)
+        return str(r.status) + " " + " ".join(r.read().decode()[:400].split())
+    except urllib.error.HTTPError as e:
+        return str(e.code) + " " + " ".join(e.read().decode()[:400].split())
+    except Exception as e:
+        return "ERR " + " ".join(repr(e)[:200].split())
+def chat(task, tools=None):
+    body = {"model": M, "messages": [{"role": "user", "content": task}]}
+    if tools:
+        body["tools"] = tools
+    return post("/chat/completions", body)
+print("PLAIN", chat("PROBE-PLAIN-RAW"))
+print("SEARCH", chat("PROBE-SEARCH-RAW", [{"type": "web_search"}]))
+print("MCP", chat("PROBE-MCP-RAW", [{"type": "mcp", "server_label": "x", "server_url": "https://mcp.example/sse"}]))
+print("RESPONSES", post("/responses", {"model": M, "input": "PROBE-RESPONSES-RAW"}))
+print("HOSTED-PROBE-DONE")`

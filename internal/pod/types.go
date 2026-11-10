@@ -96,6 +96,9 @@ type ClawBlock struct {
 	// DataPolicy is the region, training and retention policy cllama
 	// enforces for this service. Nil means the conservative default.
 	DataPolicy *DataPolicyConfig
+	// HostedCapabilities are the provider-hosted capabilities cllama lets
+	// this service's requests use, sorted. Empty means none.
+	HostedCapabilities []string
 }
 
 // LifecyclePerRun marks a claw service as a per-run worker template: claw up

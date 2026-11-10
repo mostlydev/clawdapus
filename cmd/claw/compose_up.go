@@ -406,6 +406,9 @@ func runComposeUp(podFile string) (err error) {
 		if err := families.apply(context.Background(), rc); err != nil {
 			return err
 		}
+		if err := hostedCapabilitiesNeedCllama(name, svc.Claw.HostedCapabilities, rc.Cllama); err != nil {
+			return err
+		}
 		if resolvedPersona != nil {
 			rc.PersonaHostPath = resolvedPersona.HostPath
 		}
@@ -692,14 +695,14 @@ func runComposeUp(podFile string) (err error) {
 						ContextBlocks:     agentContextBlocks(p, name),
 						ServiceAuth:       ordinalAuth,
 						ChannelAllowlist:  conversationWallAllowlists[ordinalName],
-						Metadata: injectAgentDataPolicy(injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
+						Metadata: injectHostedCapabilities(injectAgentDataPolicy(injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
 							"service":  name,
 							"ordinal":  i,
 							"pod":      p.Name,
 							"type":     rc.ClawType,
 							"token":    tokens[ordinalName],
 							"timezone": rc.Timezone,
-						}, rc.Models), agentBudgetPolicy(p, name)), agentDataPolicy(p, name)),
+						}, rc.Models), agentBudgetPolicy(p, name)), agentDataPolicy(p, name)), agentHostedCapabilities(p, name)),
 					})
 				}
 				continue
@@ -741,13 +744,13 @@ func runComposeUp(podFile string) (err error) {
 				ContextBlocks:     agentContextBlocks(p, name),
 				ServiceAuth:       svcAuth,
 				ChannelAllowlist:  conversationWallAllowlists[name],
-				Metadata: injectAgentDataPolicy(injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
+				Metadata: injectHostedCapabilities(injectAgentDataPolicy(injectAgentBudget(cllama.InjectCompiledModelPolicy(map[string]any{
 					"service":  name,
 					"pod":      p.Name,
 					"type":     rc.ClawType,
 					"token":    tokens[name],
 					"timezone": rc.Timezone,
-				}, rc.Models), agentBudgetPolicy(p, name)), agentDataPolicy(p, name)),
+				}, rc.Models), agentBudgetPolicy(p, name)), agentDataPolicy(p, name)), agentHostedCapabilities(p, name)),
 			})
 		}
 		for _, name := range perRunNames {
@@ -1873,6 +1876,34 @@ func agentDataPolicy(p *pod.Pod, serviceName string) *cllama.DataPolicy {
 
 func injectAgentDataPolicy(meta map[string]any, policy *cllama.DataPolicy) map[string]any {
 	meta["data_policy"] = policy
+	return meta
+}
+
+// agentHostedCapabilities is the hosted-capability grant declared on a
+// service, and on no other.
+func agentHostedCapabilities(p *pod.Pod, serviceName string) []string {
+	if svc := p.Services[serviceName]; svc != nil && svc.Claw != nil {
+		return svc.Claw.HostedCapabilities
+	}
+	return nil
+}
+
+// hostedCapabilitiesNeedCllama refuses a grant on a service cllama does not
+// govern: nothing else would enforce it, or its absence.
+func hostedCapabilitiesNeedCllama(serviceName string, capabilities, cllamaProxies []string) error {
+	if len(capabilities) > 0 && len(cllamaProxies) == 0 {
+		return fmt.Errorf("service %q: x-claw.hosted-capabilities needs cllama, which enforces the grant", serviceName)
+	}
+	return nil
+}
+
+// injectHostedCapabilities writes a service's grant into its cllama context.
+// With no grant the metadata is left exactly as it was, so a context
+// compiled without the field is byte-identical to one from before it existed.
+func injectHostedCapabilities(meta map[string]any, capabilities []string) map[string]any {
+	if len(capabilities) > 0 {
+		meta["hosted_capabilities"] = append([]string{}, capabilities...)
+	}
 	return meta
 }
 

@@ -98,7 +98,7 @@ services:
           message: "Run morning market analysis."
 ```
 
-Service-level fields include `agent`, `persona`, `describe-file`, `cllama`, `cllama-env`, `models`, `handles`, `feeds`, `tools`, `tool-policy`, `budget`, `data-policy`, `memory`, `include`, `surfaces`, `skills`, `invoke`, `context`, `claw-api`, `mcp-stdio`, `hermes`, and `count`.
+Service-level fields include `agent`, `persona`, `describe-file`, `cllama`, `cllama-env`, `models`, `handles`, `feeds`, `tools`, `tool-policy`, `budget`, `data-policy`, `hosted-capabilities`, `memory`, `include`, `surfaces`, `skills`, `invoke`, `context`, `claw-api`, `mcp-stdio`, `hermes`, and `count`.
 
 ### Managed-Tool Mediation Policy
 
@@ -150,6 +150,26 @@ services:
 ### Data Policy
 
 Every cllama-managed service runs under a data policy that sets allowed processing regions, whether providers may train on or retain content, and whether cllama keeps content locally. The default is the most conservative: US/EU only, no training, no retention, no local content. `data-policy-defaults` sets it for the pod; a service-level `data-policy` replaces it entirely. See [Data Policy](/guide/data-policy) for the fields, what each provider can establish, and how to allow Japan or other regions.
+
+### Hosted Capabilities
+
+Some request features ask the model vendor to act on the agent's behalf: search the web, run code, read stored files, call a remote server. cllama (v0.17.0 or later) refuses them unless the service is granted them by name. This is separate from the data policy: relaxing the data policy grants nothing, and a grant never gets past a data policy that refuses.
+
+```yaml
+services:
+  researcher:
+    x-claw:
+      cllama: passthrough
+      hosted-capabilities: [web_search]
+```
+
+- The names are `web_search`, `code_interpreter`, `file_search` and `image_generation`. A remote MCP server and vendor plugins cannot be granted.
+- The grant is written on the service that has it. There is no pod-level default, and other services are unaffected.
+- It applies on every model route the service is already allowed to use, where that route supports the feature. It adds no provider, and it does not narrow what the feature can reach: `file_search` and `code_interpreter` use whatever the provider account holds.
+- The service must be cllama-managed. A [per-run](/guide/per-run-workers) service cannot declare a grant in this version, so per-run workers run with none.
+- The agent's own function tools and [managed tools](/guide/tools) are not hosted capabilities and need no grant.
+
+**Upgrading.** Before cllama v0.17.0 a hosted feature was refused only under a constrained data policy. A service with a fully permissive data policy that uses one now needs this grant; without it the request fails with `hosted capability not granted`.
 
 ### Budget And Request-Rate Caps
 
