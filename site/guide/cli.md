@@ -487,8 +487,9 @@ socket, to pin the run to the template it was built against; a stale ID is refus
 `template_changed`. See [pinning a queued spec](/guide/per-run-workers#pinning-a-queued-spec).
 
 From v0.32.2, task-home wrapper failures have a fixed `worker_*` code in the run's
-failure field and the `end` callback's `reason`. `exit.code` remains the container
-exit code; `exit.runner_code` records Hermes's exit code when Hermes failed.
+failure field and the `end` callback's `reason`. Public status `exit_code` remains
+the wrapper exit code. When Hermes fails, its original exit code is retained in
+the persisted run ledger at `exit_observed.runner_code`, not in public status.
 No stderr text is copied into these diagnostics. See the
 [task-home failure reasons](/guide/per-run-workers).
 
