@@ -53,6 +53,12 @@ model chain to prefer it or an API key; use a single entry for subscription-only
 [operator sign-in command and verified scope](/guide/per-run-workers#model-routes-and-plan-sign-ins).
 A worker receives only its cllama bearer under either route.
 
+Plan failures emit `plan_failure` diagnostics with a fixed internal branch, upstream
+HTTP status, and allowlisted error/event/media-type fields. Stream failures can include
+byte and event counts. These diagnostics never contain upstream body text, sign-in
+tokens, or account identifiers. A headerless HTTP 200 is not success by itself: the
+bounded stream parser must receive a valid completed response.
+
 Token validation is fail-closed: unknown or missing tokens are denied before any provider call is made.
 
 ## Transport Model
@@ -304,9 +310,19 @@ the unchanged shape. Requests routed this way emit an `intervention` audit
 event with reason `responses_api_adapter`.
 
 The built-in list covers `openai/gpt-5.6*` and `openai/gpt-5-pro*`, and (cllama ≥ v0.12.0) the documented GPT-6 families `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna` plus their dated snapshots. For those GPT-6 families the adapter also drops the `temperature`/`top_p` defaults older runners send, which the models reject, and logs a `responses_adapter_dropped_sampling` intervention. Sampling is kept only for `gpt-6-sol`/`gpt-6-luna` with an explicit `reasoning_effort: none`; an explicit effort a model does not support is rejected with a 400. When
-OpenAI moves a model before the built-in list catches up, cllama detects the
-upstream rejection and retries once through the adapter automatically. Two
-knobs tune the behavior through the proxy environment:
+OpenAI introduces a model before the built-in list catches up, cllama can adapt
+from a bounded upstream rejection. An explicit Responses endpoint hint, or an OpenAI
+400 with `error.code: unsupported_parameter` and `error.param: max_tokens`, triggers one
+Responses retry. A Responses rejection of `temperature` or `top_p` permits one further
+retry without sampling controls. The provider, model and credential class stay fixed;
+normal key-pool eligibility and data-policy checks still apply. This does not select a
+new model.
+
+Only validated successful replies teach a bounded in-memory hint, keyed by provider
+endpoint and model. Later requests reuse it and still log applied transformations;
+a restart clears it. Unrelated rejections pass through unchanged, and the disable
+switch covers both learned hints and retries. Two knobs tune the behavior through
+the proxy environment:
 
 ```yaml
 x-claw:

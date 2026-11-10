@@ -397,8 +397,9 @@ The reference implementation is [`cllama`](https://github.com/mostlydev/cllama) 
 Model chains can select a ChatGPT plan sign-in (`chatgpt/`), API keys, or Vercel AI Gateway
 (`vercel/<provider>/<model>`). cllama holds the sign-in and refreshes it; workers receive only
 their cllama bearer. The [per-run guide](https://clawdapus.dev/guide/per-run-workers#model-routes-and-plan-sign-ins)
-covers the operator command, fallback behavior, and verified scope. Real-account plan serving
-remains unverified; container acceptance uses a synthetic provider.
+covers the operator command, fallback behavior, and verified scope. Live integration tests
+verified plan-served first turns, exact-session resume, and plan-only Terra requests, plus
+an empty-store negative control. Synthetic-provider tests cover additional failure cases.
 
 See the [cllama specification](./docs/CLLAMA_SPEC.md) for the full standard.
 
