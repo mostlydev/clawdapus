@@ -29,7 +29,11 @@ var familyRefRe = regexp.MustCompile(`^([a-z0-9][a-z0-9-]*)/@([a-z][a-z0-9-]*)$`
 // OpenAI-compatible shape and states no prices. A provider whose listing
 // carries its own prices, or needs another listing protocol, is refused
 // until that is read and bounded properly.
-var familyCatalogProviders = map[string]bool{"openai": true, "xai": true, "google": true, "meta": true}
+var familyCatalogProviders = map[string]bool{"openai": true, "xai": true, "google": true, "meta": true, familyVercel: true}
+
+// familyVercel is the AI Gateway. Its catalog states its own prices, which
+// are the ones bounded: cllama has no table for it.
+const familyVercel = "vercel"
 
 // priceSource is the cllama image a price table was read from.
 type priceSource struct {
@@ -53,6 +57,10 @@ type familyResolver struct {
 	// provider's own endpoint.
 	loadPrices   func(ctx context.Context) (*modelfamily.Prices, priceSource, error)
 	fetchCatalog func(ctx context.Context, baseURL, apiKey string) (modelfamily.Catalog, error)
+	fetchVercel  func(ctx context.Context, baseURL, apiKey string) (modelfamily.Catalog, *modelfamily.Prices, error)
+	// fetchVercelEndpointMax returns the highest price among the providers
+	// that serve a gateway model.
+	fetchVercelEndpointMax func(ctx context.Context, baseURL, apiKey, id string) (float64, float64, error)
 
 	prices   *modelfamily.Prices
 	source   priceSource
@@ -91,6 +99,12 @@ func newFamilyResolver(podDir string, p *pod.Pod) *familyResolver {
 	r.loadPrices = loadPinnedCllamaPrices
 	r.fetchCatalog = func(ctx context.Context, baseURL, apiKey string) (modelfamily.Catalog, error) {
 		return modelfamily.FetchCatalog(ctx, nil, baseURL, apiKey)
+	}
+	r.fetchVercel = func(ctx context.Context, baseURL, apiKey string) (modelfamily.Catalog, *modelfamily.Prices, error) {
+		return modelfamily.FetchVercelCatalog(ctx, nil, baseURL, apiKey)
+	}
+	r.fetchVercelEndpointMax = func(ctx context.Context, baseURL, apiKey, id string) (float64, float64, error) {
+		return modelfamily.FetchVercelEndpointMax(ctx, nil, baseURL, apiKey, id)
 	}
 	return r
 }
@@ -148,15 +162,23 @@ func (r *familyResolver) providerEndpoint(provider string) (baseURL, key string,
 			}
 		}
 	}
+	if provider == familyVercel {
+		for _, envVar := range []string{"AI_GATEWAY_API_KEY", "AI_GATEWAY_API_KEY_1", "AI_GATEWAY_API_KEY_2"} {
+			if v := strings.TrimSpace(r.env[envVar]); v != "" {
+				key = v
+				break
+			}
+		}
+	}
 	if key == "" {
 		return "", "", fmt.Errorf("no key for provider %q in x-claw.cllama-env", provider)
 	}
-	official := defaultBaseURLs[provider]
+	official := familyOfficialBaseURL(provider)
 	// The endpoint cllama will really use: one already in the pod's provider
 	// store is kept by the seed merge, and an x-claw.cllama-env override
 	// replaces the default.
 	effective := []string{r.existingBaseURL(provider)}
-	for envKey, prov := range map[string]string{"OPENAI_BASE_URL": "openai", "XAI_BASE_URL": "xai", "GOOGLE_BASE_URL": "google", "META_BASE_URL": "meta"} {
+	for envKey, prov := range map[string]string{"OPENAI_BASE_URL": "openai", "XAI_BASE_URL": "xai", "GOOGLE_BASE_URL": "google", "META_BASE_URL": "meta", "AI_GATEWAY_BASE_URL": familyVercel} {
 		if prov == provider {
 			effective = append(effective, r.env[envKey])
 		}
@@ -196,7 +218,8 @@ func (r *familyResolver) resolve(ctx context.Context, provider, name string) (st
 	if err != nil {
 		return "", err
 	}
-	if r.prices == nil {
+	vercel := provider == familyVercel
+	if !vercel && r.prices == nil {
 		prices, source, err := r.loadPrices(ctx)
 		if err != nil {
 			return "", fmt.Errorf("price table unavailable: %w", err)
@@ -216,7 +239,28 @@ func (r *familyResolver) resolve(ctx context.Context, provider, name string) (st
 	if err != nil {
 		return "", err
 	}
-	catalog, catalogErr := r.fetchCatalog(ctx, baseURL, apiKey)
+	// prices is what a candidate is bounded with: cllama's table, or for the
+	// gateway its own listing. lockFits judges the locked model as of now.
+	prices := r.prices
+	var catalog modelfamily.Catalog
+	var catalogErr error
+	if vercel {
+		catalog, prices, catalogErr = r.fetchVercel(ctx, baseURL, apiKey)
+	} else {
+		catalog, catalogErr = r.fetchCatalog(ctx, baseURL, apiKey)
+	}
+	lockFits := func() string {
+		if !vercel {
+			return fam.Reuse(locked, prices, nil)
+		}
+		// A gateway model's price is known only from a listing. When the
+		// listing has it, that price is judged; otherwise the price recorded
+		// when the model was chosen is.
+		if _, listed := prices.Exact(provider, locked.ID); listed {
+			return fam.Reuse(locked, prices, nil)
+		}
+		return fam.ReuseRecorded(locked)
+	}
 	if catalogErr != nil || !catalog.Complete {
 		// Only the catalog's freshness is waived. The locked model is judged
 		// against the current family, price table and ceilings.
@@ -227,7 +271,7 @@ func (r *familyResolver) resolve(ctx context.Context, provider, name string) (st
 		if !hadLock {
 			return "", fmt.Errorf("model family %s: the provider's model listing is unavailable (%s) and there is no %s entry; name an exact model or retry", key, why, modelfamily.LockFileName)
 		}
-		if reason := fam.Reuse(locked, r.prices, nil); reason != "" {
+		if reason := lockFits(); reason != "" {
 			return "", fmt.Errorf("model family %s: the provider's model listing is unavailable (%s) and the locked model %s no longer qualifies (%s)", key, why, locked.ID, reason)
 		}
 		fmt.Fprintf(r.out, "[claw] model family %s: listing unavailable (%s); keeping locked %s\n", key, why, locked.ID)
@@ -235,7 +279,26 @@ func (r *familyResolver) resolve(ctx context.Context, provider, name string) (st
 		return locked.ID, nil
 	}
 
-	decision := fam.Choose(catalog, r.prices, nil)
+	decision := fam.Choose(catalog, prices, nil)
+	if vercel {
+		// The gateway may route a model to any provider that serves it. The
+		// candidate is bounded again with the highest endpoint price; one
+		// whose endpoint prices cannot be read whole is not chosen.
+		for attempts := 0; decision.ID != "" && attempts < 16; attempts++ {
+			in, out, err := r.fetchVercelEndpointMax(ctx, baseURL, apiKey, decision.ID)
+			if err != nil {
+				fmt.Fprintf(r.out, "[claw] model family %s: not using %s (endpoint prices unavailable)\n", key, decision.ID)
+				prices.Drop(provider, decision.ID)
+			} else {
+				prices.Raise(provider, decision.ID, in, out)
+				if fam.Eligible(decision.ID, prices, nil) == "" {
+					decision.Price, _ = prices.Exact(provider, decision.ID)
+					break
+				}
+			}
+			decision = fam.Choose(catalog, prices, nil)
+		}
+	}
 	for _, s := range decision.Skipped {
 		fmt.Fprintf(r.out, "[claw] model family %s: not using %s (%s)\n", key, s.ID, s.Reason)
 	}
@@ -243,7 +306,7 @@ func (r *familyResolver) resolve(ctx context.Context, provider, name string) (st
 	// Keep a still-eligible lock when no successor qualifies, even if the
 	// listing omitted it. Changed operator constraints still take effect:
 	// an ineligible lock is not reused.
-	if hadLock && fam.Reuse(locked, r.prices, nil) == "" {
+	if hadLock && lockFits() == "" {
 		lockedVersion, _ := fam.Member(locked.ID)
 		candidateVersion, _ := fam.Member(decision.ID)
 		if decision.ID == "" || candidateVersion.Compare(lockedVersion) < 0 {
@@ -265,6 +328,9 @@ func (r *familyResolver) resolve(ctx context.Context, provider, name string) (st
 		Provider: fam.Provider, Pattern: fam.Pattern, ID: decision.ID,
 		MaxInput: decision.Price.MaxInput, MaxOutput: decision.Price.MaxOutput,
 		CatalogAt: r.now().UTC().Truncate(time.Second), CllamaTag: r.source.Tag, CllamaImageID: r.source.ImageID,
+	}
+	if vercel {
+		entry.CllamaTag, entry.CllamaImageID, entry.PriceSource = "", "", "catalog"
 	}
 	if hadLock {
 		entry.PreviousID = locked.PreviousID
@@ -397,7 +463,7 @@ func familyPolicyError(policy *pod.DataPolicyConfig, provider string) error {
 	for _, a := range policy.Attestations {
 		// An attestation with no endpoint covers the official endpoint, and
 		// so does one that names it. One naming another endpoint does not.
-		if a.Provider == provider && (strings.TrimSpace(a.Endpoint) == "" || sameEndpoint(a.Endpoint, defaultBaseURLs[provider])) {
+		if a.Provider == provider && (strings.TrimSpace(a.Endpoint) == "" || sameEndpoint(a.Endpoint, familyOfficialBaseURL(provider))) {
 			for _, g := range a.Guarantees {
 				guarantees[g] = true
 			}
@@ -495,7 +561,8 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 			continue
 		}
 		policyNotes = []string{"service data policy not assessed; claw up rechecks it"}
-		if r.prices == nil {
+		vercel := provider == familyVercel
+		if !vercel && r.prices == nil {
 			prices, source, err := r.loadPrices(ctx)
 			if err != nil {
 				say(key, "locked %s; price table unavailable", locked.ID)
@@ -503,18 +570,32 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 			}
 			r.prices, r.source = prices, source
 		}
+		prices := r.prices
+		var catalog modelfamily.Catalog
+		var catalogErr error
+		baseURL, apiKey, endpointErr := r.providerEndpoint(provider)
+		if endpointErr == nil {
+			if vercel {
+				catalog, prices, catalogErr = r.fetchVercel(ctx, baseURL, apiKey)
+			} else {
+				catalog, catalogErr = r.fetchCatalog(ctx, baseURL, apiKey)
+			}
+		}
 		// The lock is judged against the family as the pod writes it now.
-		lockedReason := fam.Reuse(locked, r.prices, nil)
+		lockedReason := fam.Reuse(locked, prices, nil)
+		if vercel {
+			if _, listed := prices.Exact(provider, locked.ID); !listed {
+				lockedReason = fam.ReuseRecorded(locked)
+			}
+		}
 		qualifies := "still meets family/pricing constraints"
 		if lockedReason != "" {
 			qualifies = "no longer meets family/pricing constraints (" + lockedReason + ")"
 		}
-		baseURL, apiKey, err := r.providerEndpoint(provider)
-		if err != nil {
-			say(key, "locked %s, %s; listing not read (%v)", locked.ID, qualifies, err)
+		if endpointErr != nil {
+			say(key, "locked %s, %s; listing not read (%v)", locked.ID, qualifies, endpointErr)
 			continue
 		}
-		catalog, catalogErr := r.fetchCatalog(ctx, baseURL, apiKey)
 		if catalogErr != nil || !catalog.Complete {
 			why := "incomplete"
 			if catalogErr != nil {
@@ -528,7 +609,7 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 			present = present || id == locked.ID
 		}
 		lockedVersion, _ := fam.Member(locked.ID)
-		decision := fam.Choose(catalog, r.prices, nil)
+		decision := fam.Choose(catalog, prices, nil)
 		var notes []string
 		if !present {
 			notes = append(notes, "absent from this listing")
@@ -556,4 +637,12 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 		say(key, "locked %s; %s", locked.ID, strings.Join(notes, "; "))
 	}
 	return lines
+}
+
+// familyOfficialBaseURL is the standard endpoint a family resolves against.
+func familyOfficialBaseURL(provider string) string {
+	if provider == familyVercel {
+		return modelfamily.VercelOfficialBaseURL
+	}
+	return defaultBaseURLs[provider]
 }
