@@ -181,6 +181,8 @@ func runProtocol(home string) string {
 		"your files are in `" + home + "/workspace`, and your earlier conversation is resumed for you. " +
 		"Nothing outside `" + home + "` is kept.\n\n" +
 		"Each run is one turn. Your final message is returned as the run's result.\n\n" +
+		"To hand a file to the person who gave you the task, put it in `" + home + "/deliverables/`, directly in that " +
+		"directory with a plain name. Files there of up to 512 KiB can be collected by them; nothing else in your home can.\n\n" +
 		"If you cannot continue without an answer from a person, write the question to `" + home + "/" + runQuestionRel + "` " +
 		"and end your turn. The answer arrives as your next message in a later run. " +
 		"Do not write that file for any other reason.\n"
