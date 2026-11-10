@@ -199,7 +199,7 @@ services:
   | `worker_usage` | The worker was started without a task |
 
   The report is one allowlisted name and, for `worker_runner_exit`, a number. It carries no worker output, session ID or path. A report the supervisor does not recognise leaves the reason as `exit_nonzero`, and a worker that exits 0 can never report a failure of its own choosing.
-- **Session proof.** The wrapper reads the turn's session from the home's store, not from Hermes's output: on a resume it is the saved session or its compression continuation, on a first run the one new session without a parent. Hermes's own `session_id:` line is only a cross-check. That line can be lost when Hermes's background review thread has redirected the process's stderr at the moment it is printed; in releases up to v0.32.1 a lost line ended a stored, successful turn with exit 70.
+- **Session proof.** The wrapper reads the turn's session from the home's store, not from Hermes's output: on a resume it is the saved session or its compression continuation, on a first run the one new session without a parent. Missing session records or incompatible ancestry metadata fail with `worker_session_unproven`; the wrapper does not guess from the newest message. Hermes's own `session_id:` line is only a cross-check. That line can be lost when Hermes's background review thread has redirected the process's stderr at the moment it is printed; in releases up to v0.32.1 a lost line ended a stored, successful turn with exit 70.
 - **Authority.** The run's cllama token is new for every run and is never written into the home.
 
 Inspect and delete homes through the supervisor:

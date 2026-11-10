@@ -1,8 +1,13 @@
 package runs
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A task-home worker that exits non-zero can say which of its own checks
@@ -90,5 +95,60 @@ func TestWorkerFailureReasonNeedsATaskHome(t *testing.T) {
 	rec = h.advance("a")
 	if rec.Failure != ReasonExitNonZero {
 		t.Fatalf("failure = %q", rec.Failure)
+	}
+}
+
+func TestWorkerFailureReasonReachesEndCallback(t *testing.T) {
+	h := taskHomeHarness(t)
+	ends := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/end") {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			ends <- body
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	notifier, err := NewHTTPNotifier(server.URL, "/runs/{run_id}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.sup.cfg.Notifier = notifier
+	raw := json.RawMessage(`{"template":"worker","task":"task","tools":[],"home":"task-a"}`)
+	_, _, digest, err := CanonicalSpec(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.sup.Launch(context.Background(), LaunchRequest{
+		Key: Key{"inst", "a"}, Generation: 1, Spec: raw, SpecDigest: digest,
+		Credential: "test-credential", AuthorityExpiresAt: h.now.Add(30 * time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := h.advance("a")
+	h.exec.mu.Lock()
+	h.exec.stdout = []byte(taskHomeMarker + `{"outcome":"failed","reason":"session_unproven"}` + "\n")
+	h.exec.mu.Unlock()
+	h.exec.exit(rec.RunKey, 70)
+	rec = h.advance("a")
+	if rec.Failure != ReasonWorkerSessionUnproven || rec.Callbacks.End != CallbackAcked {
+		t.Fatalf("failure=%q callback=%q", rec.Failure, rec.Callbacks.End)
+	}
+	select {
+	case body := <-ends:
+		if body["reason"] != ReasonWorkerSessionUnproven || body["outcome"] != "failed" || body["summary"] != "" {
+			t.Fatalf("wrong callback: %+v", body)
+		}
+		for _, field := range []string{"session", "result_outcome", "stderr"} {
+			if _, exists := body[field]; exists {
+				t.Fatalf("unexpected %s in callback", field)
+			}
+		}
+	default:
+		t.Fatal("no end callback delivered")
 	}
 }

@@ -113,13 +113,15 @@ def continuation_tip(db, start):
     cur = start
     for _ in range(MAX_HOPS):
         try:
+            if db.execute("SELECT 1 FROM sessions WHERE id = ?", (cur,)).fetchone() is None:
+                return None
             rows = db.execute(
                 "SELECT c.id FROM sessions c JOIN sessions p ON p.id = c.parent_session_id"
                 " WHERE p.id = ? AND p.end_reason = 'compression' AND c.started_at >= p.ended_at LIMIT 2",
                 (cur,),
             ).fetchall()
         except sqlite3.Error:
-            return cur  # a store without session records has no continuations
+            return None  # missing ancestry cannot prove a continuation or its absence
         if not rows:
             return cur
         if len(rows) > 1 or not isinstance(rows[0][0], str) or not SID.match(rows[0][0]):
@@ -149,11 +151,10 @@ def proven_session(prior, after):
                 return None
             if db.execute("SELECT 1 FROM messages WHERE session_id = ? AND id <= ? LIMIT 1", (sid, after)).fetchone():
                 continue  # existed before this run
-            try:
-                parent = db.execute("SELECT parent_session_id FROM sessions WHERE id = ?", (sid,)).fetchone()
-            except sqlite3.Error:
-                parent = None
-            if not parent or not parent[0]:
+            parent = db.execute("SELECT parent_session_id FROM sessions WHERE id = ?", (sid,)).fetchone()
+            if parent is None:
+                return None
+            if parent[0] is None:
                 roots.append(sid)
         if len(roots) != 1:
             return None

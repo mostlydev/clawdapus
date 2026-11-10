@@ -17,7 +17,7 @@ resumed=sys.argv[sys.argv.index('--resume')+1] if '--resume' in sys.argv else ''
 sid=resumed or sid
 db=sqlite3.connect(hh/'state.db')
 db.execute('CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT)')
-has_sessions='sessions' in task
+has_sessions=True
 if has_sessions:
     db.execute('CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, parent_session_id TEXT, end_reason TEXT, started_at REAL, ended_at REAL)')
     db.execute('INSERT OR IGNORE INTO sessions VALUES(?,NULL,NULL,1,NULL)',(sid,))
@@ -58,6 +58,9 @@ if task!='user-only':
     answer='é'*100 if task=='large' else 'stored-answer'
     db.execute('INSERT INTO messages(session_id,role,content) VALUES(?,?,?)',(sid,'assistant',answer))
 if 'subagent' in task: say('session-child','child-late')
+if 'missing-table' in task: db.execute('DROP TABLE sessions')
+if 'missing-row' in task: db.execute('DELETE FROM sessions')
+if 'missing-column' in task: db.execute('ALTER TABLE sessions RENAME COLUMN ended_at TO incompatible')
 db.commit(); db.close()
 question=home/'.claw-run/question.md'
 if task=='question': question.write_text('Which branch?')
@@ -191,7 +194,7 @@ class WrapperTests(unittest.TestCase):
             ('sessions', 'silent sessions continued twice', 'session_unproven'),
             ('sessions', 'silent sessions continued loop', 'session_unproven'),
             # Resume with no session records: another session is not a continuation.
-            ('answer', 'silent continued', 'turn_not_stored'),
+            ('answer', 'silent missing-table', 'session_unproven'),
             # First run: two new sessions without a parent.
             (None, 'silent sessions second-root', 'session_unproven'),
             (None, 'sessions second-root', 'session_unproven'),
@@ -205,6 +208,18 @@ class WrapperTests(unittest.TestCase):
                     self.assertEqual(self.session(home), 'session-1')
                 else:
                     self.assertFalse(Path(home, '.claw-run', 'session').exists())
+
+    def test_missing_ancestry_is_not_session_proof(self):
+        for first in (None, 'answer'):
+            for damage in ('missing-table', 'missing-row', 'missing-column'):
+                with self.subTest(first=first, damage=damage), tempfile.TemporaryDirectory() as home:
+                    if first:
+                        self.framed(self.invoke(home, first))
+                    self.failure(self.invoke(home, 'silent ' + damage), 70, 'session_unproven')
+                    if first:
+                        self.assertEqual(self.session(home), 'session-1')
+                    else:
+                        self.assertFalse(Path(home, '.claw-run', 'session').exists())
 
     def test_first_run_cannot_adopt_a_session_that_already_existed(self):
         with tempfile.TemporaryDirectory() as home:
