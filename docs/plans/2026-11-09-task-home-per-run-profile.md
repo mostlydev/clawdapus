@@ -311,6 +311,10 @@ browser and web toolsets are off: there is no channel, no schedule and no route 
 
 ## Model access through a subscription sign-in (placeholder)
 
+> Decided later in ADR-028 (`docs/decisions/028-plan-sign-in-model-routes.md`): a plan is a
+> cllama provider, and the declared model chain is the routing order. The text below is the
+> placeholder as written before that decision.
+
 Out of scope for this profile's first version, which uses API keys held by cllama. The intended
 direction is a cllama provider adapter that holds a provider sign-in and gives the worker only its
 per-run cllama token, so this profile needs no change. It gets its own issue and decision record.

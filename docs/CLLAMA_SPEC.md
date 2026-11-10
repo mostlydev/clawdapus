@@ -133,7 +133,27 @@ Event-specific fields may also be present:
 - `context_block_id`, `context_block_kind`, `context_block_status`, `context_block_cadence`, `context_block_placement`, and `context_block_reason` for context block events
 - `kind`, `channels`, `retained`, `returned`, `omitted`, byte counts, and source/status fields for channel context operations
 - `provider`, `key_id`, `action`, `reason`, `cooldown_until` for provider-pool events
+- `provider` and `credential` on response events. `credential` is the class of credential that served the request, `subscription` or `api_key`, and never a credential value
 - `memory_service`, `memory_op`, `memory_status`, `memory_blocks`, `memory_bytes`, `memory_removed` for memory telemetry events
+
+### Plan sign-in routes
+
+A proxy MAY serve a provider from an operator's plan sign-in in place of an API key, where the
+vendor documents that use. The reference proxy does so for the `chatgpt` provider. A proxy
+that does MUST:
+
+- hold the sign-in itself, outside every agent's context, and send it only to endpoints fixed
+  in the proxy, never to an operator-configured base URL or a redirect target;
+- treat the declared model chain as the only routing order;
+- report `subscription_signin_required`, `subscription_limit_reached`,
+  `subscription_unavailable`, `subscription_not_eligible` or
+  `subscription_unsupported_request` as `error.code` when the plan route is the last entry
+  and cannot serve, and never move an eligibility or unsupported-feature refusal to another
+  billing path;
+- name the credential class on each upstream attempt it records;
+- expose sign-in state on the operator port (`GET /subscriptions`) without any token;
+- include `boot_id`, and for the revoked identity `served_by` and `last_plan_failure`, in a
+  revocation acknowledgement.
 
 ## 6. Session History
 

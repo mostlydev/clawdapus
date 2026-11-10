@@ -277,6 +277,7 @@ var runsDoctorCmd = &cobra.Command{
 		for _, k := range live {
 			fmt.Fprintf(out, "  unfinished: %s/%s\n", k.Installation, k.RunID)
 		}
+		printSubscriptions(cmd.Context(), out, sup)
 		if len(orphans) == 0 {
 			fmt.Fprintln(out, "orphans: none")
 			return nil
@@ -409,4 +410,38 @@ func init() {
 	runsHomeCmd.AddCommand(runsHomeStatusCmd, runsHomeRmCmd)
 	runsCmd.AddCommand(runsServeCmd, runsLaunchCmd, runsStatusCmd, runsCancelCmd, runsResultCmd, runsDoctorCmd, runsHomeCmd)
 	rootCmd.AddCommand(runsCmd)
+}
+
+// printSubscriptions reports the pod's plan sign-ins. It is informational:
+// a pod with no plan route, or a proxy that is down, does not fail doctor.
+func printSubscriptions(ctx context.Context, out io.Writer, sup *runs.Supervisor) {
+	statuses, err := sup.Subscriptions(ctx)
+	switch {
+	case errors.Is(err, runs.ErrSubscriptionsUnsupported):
+		fmt.Fprintln(out, "plan sign-ins: not supported by this pod's cllama")
+		return
+	case err != nil:
+		fmt.Fprintf(out, "plan sign-ins: unavailable (%v)\n", err)
+		return
+	case len(statuses) == 0:
+		fmt.Fprintln(out, "plan sign-ins: none")
+		return
+	}
+	fmt.Fprintln(out, "plan sign-ins:")
+	for _, st := range statuses {
+		line := "  " + st.Provider + ": " + st.State
+		if st.Account != "" {
+			line += " (" + st.Account + ")"
+		}
+		if st.LimitedUntil != "" {
+			line += ", usage limit reached, resting until " + st.LimitedUntil
+		}
+		if st.Reason != "" {
+			line += " - " + st.Reason
+		}
+		fmt.Fprintln(out, line)
+		if st.State != "signed_in" {
+			fmt.Fprintf(out, "    sign in: claw compose run --rm -p 127.0.0.1:1455:1455 cllama auth login %s --listen 0.0.0.0:1455\n", st.Provider)
+		}
+	}
 }

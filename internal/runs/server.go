@@ -217,6 +217,7 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/runs/{installation}/{run}/cancel", srv.handleCancel)
 	mux.HandleFunc("POST /v1/runs/{installation}/{run}/credential", srv.handleCredential)
 	mux.HandleFunc("GET /v1/runs/{installation}/{run}/result", srv.handleResult)
+	mux.HandleFunc("GET /v1/subscriptions", srv.handleSubscriptions)
 	mux.HandleFunc("GET /v1/homes/{installation}/{home}", srv.handleHomeStatus)
 	mux.HandleFunc("DELETE /v1/homes/{installation}/{home}", srv.handleHomeDelete)
 	return mux
@@ -229,6 +230,24 @@ func (srv *Server) handleHomeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
+}
+
+// handleSubscriptions relays the state of the pod's plan sign-ins, so an
+// orchestrator can decline to queue work a plan-only template cannot serve.
+// It carries no token and no per-run data.
+func (srv *Server) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), requestDeadline)
+	defer cancel()
+	statuses, err := srv.Sup.Subscriptions(ctx)
+	if errors.Is(err, ErrSubscriptionsUnsupported) {
+		writeHomeError(w, apiErr(http.StatusNotImplemented, "subscriptions_unsupported", "the pod's cllama does not report plan sign-ins"))
+		return
+	}
+	if err != nil {
+		writeHomeError(w, apiErr(http.StatusServiceUnavailable, "cllama_unavailable", "plan sign-in state is unavailable"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"subscriptions": statuses})
 }
 
 func (srv *Server) handleHomeDelete(w http.ResponseWriter, r *http.Request) {
@@ -440,6 +459,8 @@ type StatusView struct {
 
 	CaptureEpoch           string     `json:"capture_epoch,omitempty"`
 	CaptureEpochObservedAt *time.Time `json:"capture_epoch_observed_at,omitempty"`
+
+	Served *ServedInfo `json:"served,omitempty"`
 }
 
 func statusView(rec *Record) *StatusView {
@@ -452,6 +473,7 @@ func statusView(rec *Record) *StatusView {
 		Revoked: rec.Revoked, RevocationProof: rec.RevocationProof, Failure: rec.Failure, Result: rec.Result, Credential: rec.Credential,
 		Callbacks: rec.Callbacks, Deadline: rec.Deadline, Timestamps: rec.Timestamps, Pending: rec.LastError,
 		CaptureEpoch: rec.CaptureEpoch, CaptureEpochObservedAt: rec.CaptureEpochObservedAt,
+		Served: rec.Served,
 	}
 	if rec.Spec != nil {
 		v.Template = rec.Spec.Template

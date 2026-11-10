@@ -172,6 +172,26 @@ type Record struct {
 	// started. Observed once at spawn; it does not prove the live process.
 	CaptureEpoch           string     `json:"capture_epoch,omitempty"`
 	CaptureEpochObservedAt *time.Time `json:"capture_epoch_observed_at,omitempty"`
+
+	// ProxyBoot names the cllama process that answered the revocation
+	// self-test just before the worker was started.
+	ProxyBoot string `json:"proxy_boot,omitempty"`
+	// Served is what cllama reported about the run's model access when it
+	// acknowledged the revocation.
+	Served *ServedInfo `json:"served,omitempty"`
+}
+
+// ServedInfo says which credential classes served a run's model requests.
+type ServedInfo struct {
+	// By counts served requests by credential class.
+	By map[string]int `json:"by,omitempty"`
+	// Complete is true when the proxy process that reported the counts is
+	// the one that was running when the worker started. Otherwise the proxy
+	// restarted during the run and the counts are partial.
+	Complete bool `json:"complete"`
+	// PlanFailure is the run's most recent plan-route failure reason. It can
+	// be set on a run that a later entry of the chain then served.
+	PlanFailure string `json:"plan_failure,omitempty"`
 }
 
 // Callback outcomes. Only CallbackAcked means the orchestrator acknowledged.

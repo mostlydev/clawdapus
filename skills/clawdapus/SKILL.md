@@ -168,8 +168,19 @@ through a fixed cllama forwarder, plus a separate networkless read-only home
 meter. `run.home.max-bytes` defaults to 1 GiB; exceeding it cancels the run as
 `home_full`. Meter loss fails closed. This watchdog is not a hard storage
 quota: host disk exhaustion before detection remains possible. After a killed
-turn, inspect durable effects before repeating them. Subscription sign-in is
-not supported by this profile; provider keys remain behind cllama.
+turn, inspect durable effects before repeating them.
+
+Model routing is the declared chain: `x-claw.models` `primary`, `fallback`,
+`fallback-2`. `chatgpt/<model>` serves from the operator's ChatGPT plan (needs
+a cllama release with plan routes); `vercel/<provider>/<model>` uses
+`AI_GATEWAY_API_KEY`; other prefixes use their API key. `chatgpt/…` first and a
+keyed entry after it means plan first, key second; `chatgpt/…` alone never
+uses a key. The operator signs in on the host, never an agent:
+`claw compose run --rm -p 127.0.0.1:1455:1455 cllama auth login chatgpt --listen 0.0.0.0:1455`.
+`claw runs doctor` and `GET /v1/subscriptions` show sign-in state. A task-home
+run's status and `end` callback report `served_by`, `served_by_complete` and
+`last_plan_failure` (`subscription_signin_required`,
+`subscription_limit_reached`, ...). Keys and the sign-in stay behind cllama.
 
 For stateless PicoClaw, a service with `x-claw.lifecycle: per-run` is compiled by `claw up` into a run template under `.claw-runs/templates/` and is never a long-lived compose service. `claw runs serve` (a host process) launches one worker per run as its own Compose project on an `internal` network shared with cllama, with a fresh cllama identity, read-only rootfs, tmpfs `/tmp`, uid 65534 and no host mounts. Cancel tombstones the run, revokes the identity through cllama's durable fence (requires cllama v0.11.0+), then removes the container. Workers speak OpenAI chat/completions; direct Anthropic keys and current OpenAI GPT-6 models need cllama v0.12.0+. `x-claw.reasoning-effort: {<slot>: none|minimal|low|medium|high}` (per-run only) makes the worker send that `reasoning_effort` for the slot. With cllama v0.13.0+, `CLLAMA_TRACE_JOURNAL: "on"` in `cllama-defaults.env` records a durable, verifiable segment per request, and each revoke writes a coverage seal proving every request of a run was captured. `claw up` and `claw down` refuse while the supervisor holds the pod lock; `claw up` also refuses while any run is unfinished. See `site/guide/per-run-workers.md` for the socket API, spec digest (RFC 8785) and callback contract.
 

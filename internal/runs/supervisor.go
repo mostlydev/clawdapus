@@ -740,9 +740,11 @@ func (s *Supervisor) stepSpawn(ctx context.Context, rec *Record, now time.Time) 
 	}
 	// Never start a worker the proxy could not later revoke. The run stays
 	// accepted and retries until its authority expires.
-	if err := s.CheckRevocationSupport(ctx); err != nil {
+	boot, err := s.probeRevocation(ctx)
+	if err != nil {
 		return false, err
 	}
+	rec.ProxyBoot = boot
 	token, ok, err := s.ledger.Secret(rec.Key, "cllama")
 	if err != nil || !ok {
 		rec.Failure = ReasonSpawnError
@@ -1156,7 +1158,11 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 			if err := emptyRunTools(s.contextDir(rec.RunAgentID)); err != nil {
 				return false, fmt.Errorf("empty run tools: %w", err)
 			}
-			revokeErr = s.cfg.Revoker.Revoke(ctx, rec.RunAgentID, rec.Generation)
+			var report *RevokeReport
+			report, revokeErr = s.revoke(ctx, rec.RunAgentID, rec.Generation)
+			if revokeErr == nil && report != nil && report.BootID != "" && (len(report.ServedBy) > 0 || report.PlanFailure != "") {
+				rec.Served = &ServedInfo{By: report.ServedBy, Complete: !report.Partial && rec.ProxyBoot != "" && report.BootID == rec.ProxyBoot, PlanFailure: report.PlanFailure}
+			}
 		}
 		if revokeErr == nil {
 			rec.Revoked = true
@@ -1543,8 +1549,43 @@ func (s *Supervisor) probeAgentID() string { return "_claw-runs-probe-" + s.podN
 // revocation (cllama#54) before any worker is started. An older or
 // misconfigured proxy (no endpoint, no revocation dir) fails this check.
 func (s *Supervisor) CheckRevocationSupport(ctx context.Context) error {
-	if err := s.cfg.Revoker.Revoke(ctx, s.probeAgentID(), 1); err != nil {
-		return fmt.Errorf("the pod's cllama does not acknowledge durable revocation (needs cllama with revocation support and CLAW_REVOCATION_DIR): %w", err)
+	_, err := s.probeRevocation(ctx)
+	return err
+}
+
+// probeRevocation runs the revocation self-test and returns the boot ID of
+// the proxy process that answered, when the proxy reports one.
+func (s *Supervisor) probeRevocation(ctx context.Context) (string, error) {
+	report, err := s.revoke(ctx, s.probeAgentID(), 1)
+	if err != nil {
+		return "", fmt.Errorf("the pod's cllama does not acknowledge durable revocation (needs cllama with revocation support and CLAW_REVOCATION_DIR): %w", err)
 	}
-	return nil
+	if report == nil {
+		return "", nil
+	}
+	return report.BootID, nil
+}
+
+// revoke closes an identity and returns the proxy's report when the
+// configured Revoker provides one.
+func (s *Supervisor) revoke(ctx context.Context, agentID string, generation uint64) (*RevokeReport, error) {
+	if reporting, ok := s.cfg.Revoker.(ReportingRevoker); ok {
+		return reporting.RevokeWithReport(ctx, agentID, generation)
+	}
+	return nil, s.cfg.Revoker.Revoke(ctx, agentID, generation)
+}
+
+// SubscriptionReporter is optionally implemented by a Revoker that can ask
+// cllama for the state of its plan sign-ins.
+type SubscriptionReporter interface {
+	Subscriptions(ctx context.Context) ([]SubscriptionStatus, error)
+}
+
+// Subscriptions reports the state of the pod's plan sign-ins.
+func (s *Supervisor) Subscriptions(ctx context.Context) ([]SubscriptionStatus, error) {
+	reporter, ok := s.cfg.Revoker.(SubscriptionReporter)
+	if !ok {
+		return nil, ErrSubscriptionsUnsupported
+	}
+	return reporter.Subscriptions(ctx)
 }

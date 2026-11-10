@@ -213,6 +213,142 @@ but does not provide exactly-once shell execution.
 
 `go test -tags spike -run '^TestSpikeTaskHomeWorkers$' ./cmd/claw` proves this profile end to end with a local fake provider.
 
+## Model routes and plan sign-ins
+
+A template's model chain is its routing order. `x-claw.models` declares it: `primary`, then
+`fallback`, `fallback-2` and so on. cllama tries each entry in order and moves on when one
+cannot serve. The chain is part of the template ID, so a run accepted under one chain is
+refused at spawn if the template was recompiled with another. A launch carries no routing.
+
+```yaml
+services:
+  worker:
+    x-claw:
+      lifecycle: per-run
+      models:
+        primary: chatgpt/gpt-5.6-terra        # the operator's ChatGPT plan
+        fallback: openai/gpt-5.6-terra        # API key, when the plan cannot serve
+        fallback-2: vercel/openai/gpt-4.1-nano  # a cheaper model through Vercel AI Gateway
+      run:
+        home: {}
+```
+
+| Provider prefix | Credential | Where it is set |
+|---|---|---|
+| `openai/`, `anthropic/`, `xai/`, `google/`, `meta/`, `openrouter/` | API key | `x-claw.cllama-env`, for example `OPENAI_API_KEY` |
+| `vercel/<provider>/<model>` | Vercel AI Gateway key | `AI_GATEWAY_API_KEY` in `x-claw.cllama-env` |
+| `chatgpt/` | The operator's ChatGPT plan sign-in | The sign-in command below. No key, and nothing in the pod file |
+
+### The `chatgpt` plan route
+
+cllama can serve requests from a ChatGPT plan through OpenAI's
+[Sign in with ChatGPT plan usage](https://developers.openai.com/siwc/token-sharing-open-source).
+OpenAI documents it for open-source, locally hosted apps: the operator's own plan serving the
+operator's own agents. It is not for paid or hosted multi-user use. It requires a cllama
+release that includes plan routes.
+
+- **Plan first, key second:** put `chatgpt/<model>` first and a keyed entry after it.
+- **Plan only:** declare `chatgpt/<model>` alone. No request of that template ever uses a key.
+
+The operator signs in once, on the host. No agent signs in, and a worker cannot reach the
+sign-in: it lives only in cllama's auth directory (`.claw-auth/subscriptions/`, owner-only),
+which no worker mounts.
+
+```bash
+claw compose run --rm -p 127.0.0.1:1455:1455 cllama auth login chatgpt --listen 0.0.0.0:1455
+```
+
+The command prints a URL. Open it in a browser on the same machine and sign in; the command
+finishes when the browser returns to `127.0.0.1:1455`. The running proxy uses the sign-in
+from the next request. `claw compose run --rm cllama auth status` shows the state, and
+`claw compose run --rm cllama auth logout chatgpt` signs out.
+
+When the plan route cannot serve, cllama records one of these reasons:
+
+| Reason | Meaning | With a later chain entry | As the last entry |
+|---|---|---|---|
+| `subscription_signin_required` | Nobody is signed in, or the sign-in expired. The operator signs in again | Moves on | The request fails |
+| `subscription_limit_reached` | The plan's usage limit is spent. cllama rests the route (15 minutes by default) and tries it again | Moves on | The request fails |
+| `subscription_unavailable` | A temporary fault | Moves on | The request fails |
+| `subscription_not_eligible` | The account or its policy does not permit plan usage | The request fails | The request fails |
+| `subscription_unsupported_request` | The request uses a feature the plan route does not support | The request fails | The request fails |
+
+The [data policy](/guide/data-policy) applies to the plan route as to any provider. Under a
+constrained policy, attest its guarantees for provider `chatgpt` at endpoint
+`https://api.openai.com/v1`; an attestation for `openai` does not cover it.
+
+The last two never move a request to another billing path. The plan route sends no
+`temperature`, `top_p` or output-token limit, refuses hosted tools, and counts a reply only
+once it has completed. The cllama README has the full list.
+
+### What a run reports
+
+For a [task-home](#task-homes) run, the status and the `end` callback say which credential
+class served the run's model calls:
+
+- `served_by`: completed model calls by class, for example `{"subscription": 12, "api_key": 3}`.
+- `served_by_complete`: `true` when one cllama process counted the whole run. `false` means
+  cllama restarted during the run, or its report was malformed, and the counts are a subset.
+- `last_plan_failure`: the most recent plan-route reason from the table above. It is attempt
+  history, not the run's result: on a run that succeeded it means a later entry served what
+  the plan could not.
+
+The fields are absent when cllama reported nothing, which includes every cllama release
+before plan routes. With the trace journal on, each `upstream_request` record also names the
+`credential` class, and is the durable per-call record.
+
+### Sign-in state without a run
+
+```
+GET /v1/subscriptions   ->   {"subscriptions":[{"provider":"chatgpt","state":"signed_in","account":"you@example.com"}]}
+```
+
+`state` is `signed_in`, `not_signed_in` or `signin_required`; `limited_until` is set while
+the usage limit is resting. It never carries a token. The call returns
+`501 subscriptions_unsupported` when the pod's cllama has no plan routes. `claw runs doctor`
+prints the same state, with the sign-in command when one is needed. An orchestrator can use
+it to hold work for a plan-only template instead of launching a run that will fail.
+
+### What is proven
+
+`go test -tags spike -run '^TestSpikeTaskHomeRoutes$' ./cmd/claw` runs real Hermes task-home
+workers through cllama against a local fake provider. It covers:
+
+- OpenAI direct (`openai/gpt-5.6-terra`) and Vercel AI Gateway (`vercel/openai/gpt-4.1-nano`),
+  each with its own key;
+- plan first with nobody signed in: the key serves, and the callback names
+  `subscription_signin_required`;
+- plan only with nobody signed in: the run fails, and the provider receives no request for it;
+- the sign-in and status commands above, with a forged callback refused;
+- with a synthetic sign-in, the plan serving both templates, the request shape the vendor
+  requires, and a spent plan falling back to the key;
+- a worker that dumps its environment and mounts and finds no sign-in, key or operator token;
+- no sign-in token in the proxy log, the callbacks or the pod directory outside the store.
+
+For the plan cases the fixture stands in for OpenAI's endpoint on the pod's own network, with
+a certificate authority only that test's cllama trusts. **No request authorized by a real
+ChatGPT sign-in has been run**, because no agent signs in: the callback parameters, the tool
+grouping and the vendor's error bodies follow OpenAI's documentation.
+
+### Trying it before a cllama release
+
+`claw up` runs the cllama image pinned by the installed `claw`. Until a cllama release
+includes plan routes, build the image from a cllama checkout and tag it as the pinned
+reference. This replaces that tag on this machine only; `claw pull` restores the published
+image.
+
+```bash
+git clone https://github.com/mostlydev/cllama && cd cllama   # at the commit to try
+docker build -t ghcr.io/mostlydev/cllama:v0.14.0 \
+  --build-arg CLLAMA_VERSION=local --build-arg CLLAMA_REVISION="$(git rev-parse --short HEAD)" .
+cd /path/to/pod && claw up -d          # recreates cllama from the local image
+claw runs doctor                        # lists "chatgpt: not_signed_in" under "plan sign-ins:"
+```
+
+Use the tag `claw up` reports for cllama if your `claw` pins a different version. A proxy
+without plan routes makes `claw runs doctor` print `plan sign-ins: not supported by this
+pod's cllama`.
+
 ## What `claw up` produces
 
 - **`compose.generated.yml`** does not contain the per-run service. It adds a `claw-runs-<pod-ns>` network with `internal: true` and attaches cllama to it. Workers join only that network, keeping them off the tool-service and outbound pod networks. Managed business tool calls go through cllama.
@@ -275,6 +411,7 @@ A run is identified by `installation` (`[a-z0-9][a-z0-9-]{0,63}`) and `run_id` (
 | `POST /v1/runs/{installation}/{run_id}/cancel` | `{generation}` | Status. Idempotent, and also tombstones an unknown key. Accepts `?wait=`. |
 | `POST /v1/runs/{installation}/{run_id}/credential` | `{generation, credential, authority_expires_at?}` | Replaces the held credential and optionally extends authority. Persisted before the ACK. |
 | `GET /v1/runs/{installation}/{run_id}/result` | — | The bounded answer (`X-Claw-Result-Truncated` header) |
+| `GET /v1/subscriptions` | — | State of the pod's [plan sign-ins](#sign-in-state-without-a-run). Never a token. |
 | `GET /v1/identity`, `GET /v1/health` | — | Protocol version, pod and supervisor UID |
 
 Launch errors:
@@ -350,6 +487,7 @@ POST {origin}{path}/start      {installation, run_id, generation}
 POST {origin}{path}/heartbeat  {installation, run_id, generation}       every --heartbeat
 POST {origin}{path}/end        {installation, run_id, generation, outcome, reason, summary, summary_truncated}
                                task-home result only: + {result_outcome, session}
+                               task-home, when cllama reports it: + {served_by, served_by_complete, last_plan_failure}
 ```
 
 For a [task-home](#task-homes) run that has a result, the `end` body carries two more fields: `result_outcome` (`answer` or `question`) and `session` (the harness session ID that holds the turn). They are the values in the run's status (`result.outcome`, `result.session`). They are absent for stateless templates and for any run without a result, whose bodies are unchanged. Callbacks are authenticated by the bearer credential only; the body is not signed.
@@ -390,7 +528,7 @@ The one-shot contract is pinned and verified against PicoClaw v0.2.7.
 | `claw runs status <inst> <run> [--wait stopped]` | Show a run's status |
 | `claw runs cancel <inst> <run> --generation N [--wait stopped]` | Cancel a run |
 | `claw runs result <inst> <run>` | Print the answer |
-| `claw runs doctor [--remove-orphans]` | Check the ledger and find orphaned workers |
+| `claw runs doctor [--remove-orphans]` | Check the ledger, find orphaned workers and show plan sign-in state |
 
 Durable state lives in `<pod>/.claw-runs/` (mode `0700`):
 

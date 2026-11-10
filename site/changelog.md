@@ -34,6 +34,12 @@ outline: deep
   - Each run has its own network and a fresh cllama token that is never written into the home.
   - A run can end with a question for a person, reported as `result.outcome: question`. The `end` callback of a task-home run carries `result_outcome` and `session` ([#396](https://github.com/mostlydev/clawdapus/issues/396)); stateless callbacks are unchanged.
   - A networkless read-only meter cancels oversized homes at `run.home.max-bytes` (default 1 GiB). This watchdog is not a hard quota; see the [guide](/guide/per-run-workers#task-homes).
+- **Plan sign-in routes for per-run workers** ([#398](https://github.com/mostlydev/clawdapus/issues/398)). With a cllama release that includes plan routes, a model chain can name `chatgpt/<model>`: requests are served from the operator's ChatGPT plan through OpenAI's documented Sign in with ChatGPT plan usage, for an operator's own agents on their own host.
+  - Order and fallback are the declared chain. `chatgpt/…` then `openai/…` tries the plan first and the API key second; `chatgpt/…` alone never uses a key. The chain is part of the template ID.
+  - The operator signs in with one command on the host. The sign-in lives only in cllama's auth directory, and no worker can reach it.
+  - A task-home run's status and `end` callback report `served_by`, `served_by_complete` and `last_plan_failure`. Stateless callbacks are unchanged.
+  - `GET /v1/subscriptions` on the run supervisor and `claw runs doctor` show sign-in state without a run.
+  - Vercel AI Gateway (`vercel/<provider>/<model>`) and OpenAI direct routes are covered by the same live test on the Hermes task-home worker. See the [guide](/guide/per-run-workers#model-routes-and-plan-sign-ins).
 
 ## v0.31.0 <Badge type="tip" text="Latest" /> {#v0-31-0}
 
