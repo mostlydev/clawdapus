@@ -3,13 +3,13 @@ package infraimages
 import "fmt"
 
 const (
-	DefaultClawInfraTag         = "v0.32.0"
+	DefaultClawInfraTag         = "v0.32.1"
 	DefaultClawAPITag           = DefaultClawInfraTag
 	DefaultClawdashTag          = DefaultClawInfraTag
 	DefaultClawWallTag          = DefaultClawInfraTag
 	DefaultClawChannelMemoryTag = DefaultClawInfraTag
 	DefaultClawMCPStdioTag      = DefaultClawInfraTag
-	DefaultCllamaTag            = "v0.15.0"
+	DefaultCllamaTag            = "v0.15.1"
 	DefaultHermesBaseTag        = "v2026.6.19-claw.3"
 )
 
