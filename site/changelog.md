@@ -27,7 +27,9 @@ outline: deep
 | Phase 5 -- Fleet Governance: Master Claw, telemetry, context feeds | Done (ADRs 012-015) |
 | Phase 6 -- Recipe promotion + worker mode | Planned |
 
-## Unreleased
+## v0.33.0 <Badge type="tip" text="Latest" /> {#v0-33-0}
+
+*2026-11-10*
 
 - Runtime proxy pin advances to cllama v0.16.0, whose read-only price export supplies model-family price bounds. Existing subscription and API request routing is unchanged. cllama v0.16.0 also prices `openai/gpt-6.1-terra` and `openai/gpt-6.1-sol`, so their requests are now costed and count toward budget caps; before, their cost was recorded as unknown.
 
@@ -37,7 +39,7 @@ outline: deep
 
 - Per-run launch specs accept an optional `template_id`. A launch is refused with `template_changed` (409) when the template was recompiled after the spec was built, so a spec queued outside the supervisor cannot be rebound to another model chain or tool grant. `GET /v1/templates` lists each compiled template's ID and concrete model chain, and a run's status now carries the `template_id` and `models` it was admitted with.
 
-## v0.32.2 <Badge type="tip" text="Latest" /> {#v0-32-2}
+## v0.32.2 {#v0-32-2}
 
 *2026-11-10*
 
