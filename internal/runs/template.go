@@ -244,6 +244,59 @@ func LoadTemplate(podDir, name string) (*Template, *ContextTemplate, error) {
 	return &tpl, &ctx, nil
 }
 
+// templateModels returns the concrete model chain compiled into a template's
+// context, in routing order. It is empty when the template declares none.
+func templateModels(ctx *ContextTemplate) []ModelRef {
+	if ctx == nil {
+		return nil
+	}
+	raw, err := json.Marshal(ctx.Input.Metadata["model_policy"])
+	if err != nil {
+		return nil
+	}
+	var policy struct {
+		Allowed []ModelRef `json:"allowed"`
+	}
+	if json.Unmarshal(raw, &policy) != nil {
+		return nil
+	}
+	return policy.Allowed
+}
+
+// TemplateInfo is what an orchestrator may know about a compiled template:
+// its identity and the concrete models it routes to. It carries no
+// credential, no context body and no task content.
+type TemplateInfo struct {
+	Name          string     `json:"name"`
+	ID            string     `json:"id"`
+	ContextDigest string     `json:"context_digest"`
+	Models        []ModelRef `json:"models"`
+}
+
+// DescribeTemplates lists the compiled templates that pass their digest
+// checks, and names those that do not. A template is described only from
+// files that verify against its own ID and context digest.
+func DescribeTemplates(podDir string) (valid []TemplateInfo, invalid []string, err error) {
+	names, err := ListTemplates(podDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	valid, invalid = []TemplateInfo{}, []string{}
+	for _, name := range names {
+		tpl, ctx, err := LoadTemplate(podDir, name)
+		if err != nil {
+			invalid = append(invalid, name)
+			continue
+		}
+		models := templateModels(ctx)
+		if models == nil {
+			models = []ModelRef{}
+		}
+		valid = append(valid, TemplateInfo{Name: tpl.Name, ID: tpl.ID, ContextDigest: tpl.ContextDigest, Models: models})
+	}
+	return valid, invalid, nil
+}
+
 // ListTemplates returns the names of compiled templates.
 func ListTemplates(podDir string) ([]string, error) {
 	entries, err := os.ReadDir(TemplateDir(podDir))

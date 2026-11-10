@@ -184,7 +184,7 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 	if req.Credential != "" && s.cfg.Notifier == nil {
 		return nil, false, apiErr(http.StatusUnprocessableEntity, "callbacks_disabled", "this supervisor has no callback origin configured")
 	}
-	tpl, _, tplErr := LoadTemplate(s.cfg.PodDir, spec.Template)
+	tpl, tplCtx, tplErr := LoadTemplate(s.cfg.PodDir, spec.Template)
 
 	if spec.Home != "" {
 		s.homeMu.Lock()
@@ -234,6 +234,11 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 	if tplErr != nil {
 		return nil, false, apiErr(http.StatusUnprocessableEntity, "template_unknown", "the requested template is not compiled for this pod")
 	}
+	if spec.TemplateID != "" && spec.TemplateID != tpl.ID {
+		// The caller built this spec against a template that has since been
+		// recompiled. Binding it to the new one would change what it asked for.
+		return nil, false, apiErr(http.StatusConflict, "template_changed", "the template was recompiled after this spec was built")
+	}
 	if err := checkGrant(tpl, spec); err != nil {
 		return nil, false, err
 	}
@@ -272,6 +277,7 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 		SpecDigest:         digest,
 		Spec:               spec,
 		TemplateID:         tpl.ID,
+		Models:             templateModels(tplCtx),
 		ImageID:            tpl.ImageID,
 		RunAgentID:         tpl.Name + "-run-" + idSuffix,
 		RunKey:             req.Key.RunKey(s.podNS),

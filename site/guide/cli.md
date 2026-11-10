@@ -482,6 +482,10 @@ Orchestrators can query `GET /v1/subscriptions` on the same UID-restricted super
 before launching work. Task-home status and end callbacks include credential counts when
 available; see [model routes and plan sign-ins](/guide/per-run-workers#model-routes-and-plan-sign-ins).
 
+A launch spec may carry `template_id`, taken from `GET /v1/templates` on the supervisor
+socket, to pin the run to the template it was built against; a stale ID is refused with
+`template_changed`. See [pinning a queued spec](/guide/per-run-workers#pinning-a-queued-spec).
+
 From v0.32.2, task-home wrapper failures have a fixed `worker_*` code in the run's
 failure field and the `end` callback's `reason`. `exit.code` remains the container
 exit code; `exit.runner_code` records Hermes's exit code when Hermes failed.

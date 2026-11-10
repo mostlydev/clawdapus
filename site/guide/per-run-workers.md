@@ -443,6 +443,7 @@ A run is identified by `installation` (`[a-z0-9][a-z0-9-]{0,63}`) and `run_id` (
 | `POST /v1/runs/{installation}/{run_id}/credential` | `{generation, credential, authority_expires_at?}` | Replaces the held credential and optionally extends authority. Persisted before the ACK. |
 | `GET /v1/runs/{installation}/{run_id}/result` | — | The bounded answer (`X-Claw-Result-Truncated` header) |
 | `GET /v1/subscriptions` | — | State of the pod's [plan sign-ins](#sign-in-state-without-a-run). Never a token. |
+| `GET /v1/templates` | — | The compiled templates: `name`, `id`, `context_digest` and `models`, the concrete chain in routing order. See [pinning a queued spec](#pinning-a-queued-spec) |
 | `GET /v1/identity`, `GET /v1/health` | — | Protocol version, pod and supervisor UID |
 
 Launch errors:
@@ -451,6 +452,7 @@ Launch errors:
 |---|---|---|
 | `digest_invalid` | 400 | `spec_digest` does not match the canonical spec |
 | `digest_mismatch` | 409 | The run exists with a different digest |
+| `template_changed` | 409 | The spec carries a `template_id` and the template has been recompiled since |
 | `cancelled` | 409 | The run was cancelled. A new attempt needs a new `run_id`. |
 | `stale_generation` | 409 | The generation is below the one already recorded |
 | `grant_exceeded` | 422 | The spec or `authority_expires_at` exceeds the template |
@@ -473,6 +475,32 @@ The spec allows only strings, integers in ±(2^53−1), and string arrays. Unkno
 - every other character, including U+2028 and U+2029, is literal.
 
 Ruby's `JSON.generate` over a key-sorted hash produces the same bytes for this subset.
+
+### Pinning a queued spec
+
+A spec names its template, and the supervisor binds the run to that template's ID when it admits the launch. An orchestrator that builds a spec and launches it later should pin it, so a pod recompiled in between cannot give the run another model chain, tool grant or contract:
+
+```
+GET /v1/templates
+->  {"templates":[{"name":"worker","id":"sha256:9f2c…","context_digest":"sha256:41ab…",
+                   "models":[{"slot":"primary","ref":"openai/gpt-6.1-terra"},
+                             {"slot":"fallback","ref":"chatgpt/gpt-6.1-terra"}]}],
+     "invalid":[]}
+```
+
+Put the `id` in the spec as `template_id`:
+
+```json
+{"template":"worker","template_id":"sha256:9f2c…","task":"Summarize ticket 42","tools":[]}
+```
+
+- `template_id` is part of the spec and so of `spec_digest`.
+- A launch whose `template_id` is not the template's current ID is refused with `template_changed`. No run is created and no home is reserved. Read the listing again and build a new spec.
+- A repeat of a launch that was already admitted returns that run unchanged, whatever was compiled since.
+- Without `template_id` the run binds to whatever is compiled at admission, as before.
+- The listing shows only templates whose files verify against their own ID and context digest; any other is named in `invalid`. It carries no credential, context body or task content.
+
+Each run's status carries `template_id` and `models`, the chain it was admitted with.
 
 `tools` must be a subset of the template grant, and an empty list removes every managed tool. The credential is outside the spec, so the digest never covers a token.
 
