@@ -56,8 +56,9 @@ stays as built for every service that does not opt in.
    process environment. Nothing the infrastructure writes into the home is a credential, and
    nothing in the home grants authority to a later run.
 10. **A separate meter watches home size.** It mounts only that home read-only, runs as the
-    worker UID with no network or credentials, and exits when the logical-byte threshold or scan
-    budget is exceeded. The supervisor then revokes and removes the run as `home_full`.
+    worker UID with no network or credentials, and exits when the logical-byte threshold is
+    exceeded. The supervisor then revokes and removes the run as `home_full`. A home the meter
+    cannot measure ends the run as `home_meter_unavailable`.
 
 ## What this amends
 

@@ -200,9 +200,10 @@ The same verbs are `GET` and `DELETE /v1/homes/{installation}/{home}` on the soc
 
 ::: warning Storage is not capped
 `run.home.max-bytes` sets a logical-byte watchdog threshold (default 1073741824, or 1 GiB).
-A separate meter mounts the home read-only with no network or credentials. Crossing the threshold,
-exceeding the scan budget, or making the home unreadable ends the run as `home_full` through normal
-revocation and teardown. A missing or failed meter ends it as `home_meter_unavailable`.
+A separate meter mounts the home read-only with no network or credentials. Crossing the threshold
+ends the run as `home_full` through normal revocation and teardown. A home the meter cannot measure
+(over 5,000,000 entries, or an unreadable directory) and a missing or failed meter end it as
+`home_meter_unavailable`.
 
 This is a watchdog, not a hard quota: a fast writer can fill the host disk before detection or
 teardown. Use the profile where you accept that limitation; it was accepted for the internal trial.

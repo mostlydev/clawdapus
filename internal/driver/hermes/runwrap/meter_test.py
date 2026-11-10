@@ -53,8 +53,24 @@ class MeterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             for n in range(4):
                 Path(home, str(n)).touch()
-            with self.assertRaises(meter.BudgetExceeded):
+            with self.assertRaises(meter.Unmeasured):
                 meter.home_size(home, 100, max_entries=3)
+            # Many small files under the byte threshold are not "too big".
+            self.assertEqual(meter.home_size(home, 100), 0)
+
+    def test_unmeasurable_home_is_not_reported_as_full(self):
+        with tempfile.TemporaryDirectory() as home:
+            Path(home, "locked").mkdir()
+            Path(home, "locked", "f").write_bytes(b"x")
+            os.chmod(Path(home, "locked"), 0)
+            source = Path(__file__).with_name('meter.py').read_text()
+            try:
+                result = subprocess.run([sys.executable, '-I', '-S', '-c', source, home, '100'],
+                                        capture_output=True, timeout=10)
+            finally:
+                os.chmod(Path(home, "locked"), 0o700)
+            self.assertEqual(result.returncode, meter.EXIT_UNMEASURED, result.stderr)
+            self.assertIn(b'home_unmeasured', result.stdout)
 
     def test_root_symlink_is_refused(self):
         with tempfile.TemporaryDirectory() as parent:

@@ -7,10 +7,21 @@ import time
 
 
 class BudgetExceeded(Exception):
-    pass
+    """The home holds more bytes than its threshold."""
 
 
-def home_size(path, max_bytes, max_entries=100000, max_seconds=2):
+class Unmeasured(Exception):
+    """The home could not be measured within the scan caps."""
+
+
+# Exit codes the supervisor distinguishes: 75 means too big; anything else,
+# including 76, means the meter could not do its job.
+EXIT_FULL, EXIT_UNMEASURED = 75, 76
+
+
+# The scan caps exist to stop a pathological tree, not an ordinary checkout:
+# a repository with its dependencies can hold hundreds of thousands of files.
+def home_size(path, max_bytes, max_entries=5_000_000, max_seconds=60):
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     deadline = time.monotonic() + max_seconds
     total = entries = 0
@@ -18,12 +29,12 @@ def home_size(path, max_bytes, max_entries=100000, max_seconds=2):
     def walk(fd, depth):
         nonlocal total, entries
         if depth > 128:
-            raise BudgetExceeded("depth")
+            raise Unmeasured("depth")
         with os.scandir(fd) as children:
             for child in children:
                 entries += 1
                 if entries > max_entries or time.monotonic() > deadline:
-                    raise BudgetExceeded("scan budget")
+                    raise Unmeasured("scan budget")
                 try:
                     info = os.stat(child.name, dir_fd=fd, follow_symlinks=False)
                     if stat.S_ISREG(info.st_mode):
@@ -57,12 +68,15 @@ def main():
     while True:
         try:
             home_size(path, maximum)
-        except (BudgetExceeded, PermissionError):
+        except BudgetExceeded:
             print("home_full", flush=True)
-            return 75
-        except OSError:
-            print("home_unreadable", flush=True)
-            return 75
+            return EXIT_FULL
+        except (Unmeasured, OSError):
+            # Too many entries to count in time, too deep, or unreadable. The
+            # run still ends, but it is reported as a meter failure, so an
+            # operator can tell "too big" from "could not be measured".
+            print("home_unmeasured", flush=True)
+            return EXIT_UNMEASURED
         time.sleep(1)
 
 

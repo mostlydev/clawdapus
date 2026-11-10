@@ -181,9 +181,11 @@ networks:
   the supervisor's view of a run stays one container. A gate with no ledger record is an orphan,
   like a worker, and blocks `claw runs serve` until removed.
 - The meter carries the same run association, with role `run-meter`. It checks logical regular-file
-  sizes every second using descriptor-relative, no-follow traversal. A scan exceeding 100000
-  entries, 128 directory levels, two seconds of checked work, or the byte threshold exits 75.
-  Unreadable directories also exit 75. Meter loss or unexpected exit fails closed as `home_meter_unavailable`.
+  sizes every second using descriptor-relative, no-follow traversal. Crossing the byte threshold
+  exits 75, which the monitor reports as `home_full`. A home it cannot measure exits 76: more than
+  5,000,000 entries, more than 128 directory levels, a pass longer than 60 seconds, or an
+  unreadable directory. The caps are set to stop a pathological tree, not an ordinary repository
+  checkout. Exit 76, meter loss and any other exit fail closed as `home_meter_unavailable`.
   The monitor revokes and tears down an over-budget run as `home_full`. This does not bound
   write-rate overshoot or prevent host exhaustion. The operator accepted that risk for the internal
   trial with this watchdog. No host process needs to traverse Linux worker-owned `0700` directories.
