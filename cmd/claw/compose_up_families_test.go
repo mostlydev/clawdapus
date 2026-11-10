@@ -336,3 +336,24 @@ func TestFamilyNeedsCllamaAndTheServicePolicy(t *testing.T) {
 		t.Fatalf("stored official endpoint: %v", err)
 	}
 }
+
+func TestFamilyCatalogCannotDowngradeAnEligibleLock(t *testing.T) {
+	rig := newFamilyRig(t, terraFamily, map[string]string{"OPENAI_API_KEY": "sk-key"})
+	rig.catalog = modelfamily.Catalog{Complete: true, IDs: []string{"gpt-6.1-terra"}}
+	if _, err := rig.up(map[string]string{"primary": "openai/@terra"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(rig.dir, modelfamily.LockFileName))
+	for _, ids := range [][]string{{"gpt-5.6-terra"}, {}, {"gpt-7-terra"}} {
+		rig.again(terraFamily)
+		rig.catalog = modelfamily.Catalog{Complete: true, IDs: ids}
+		got, err := rig.up(map[string]string{"primary": "openai/@terra"})
+		if err != nil || got["primary"] != "openai/gpt-6.1-terra" {
+			t.Fatalf("catalog %v: %v %v", ids, got, err)
+		}
+		after, _ := os.ReadFile(filepath.Join(rig.dir, modelfamily.LockFileName))
+		if !bytes.Equal(before, after) || !strings.Contains(rig.out.String(), "keeping locked gpt-6.1-terra") {
+			t.Fatalf("lock changed or no diagnostic: %s", rig.out.String())
+		}
+	}
+}

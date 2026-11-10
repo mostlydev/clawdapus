@@ -305,6 +305,8 @@ A model the pinned cllama does not price is passed over, so a brand-new model be
 
 `models.lock` records, per family, the chosen model, the previous one, the rates it was bounded with, when the model list was read and the cllama image the prices came from. It holds no credential. Commit it with the pod if you want the choice reviewed.
 
+A catalog that omits the locked model does not authorize a downgrade. If the lock still satisfies the current constraints and no newer eligible model is listed, `claw up` keeps it and explains why. Changing the family or ceilings can invalidate the lock; in that case the highest eligible member under the new constraints is selected.
+
 ## Mixed Cognitive and Non-Cognitive Services
 
 A pod is a mixed cluster. Regular API containers, databases, and message queues participate as first-class pod members alongside agents. Non-cognitive services do not need `x-claw` blocks but still benefit from the pod:

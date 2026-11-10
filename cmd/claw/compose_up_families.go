@@ -235,6 +235,19 @@ func (r *familyResolver) resolve(ctx context.Context, provider, name string) (st
 	for _, s := range decision.Skipped {
 		fmt.Fprintf(r.out, "[claw] model family %s: not using %s (%s)\n", key, s.ID, s.Reason)
 	}
+	// A listing is evidence of availability, not permission to downgrade.
+	// Keep a still-eligible lock when no successor qualifies, even if the
+	// listing omitted it. Changed operator constraints still take effect:
+	// an ineligible lock is not reused.
+	if hadLock && fam.Reuse(locked, r.prices, nil) == "" {
+		lockedVersion, _ := fam.Member(locked.ID)
+		candidateVersion, _ := fam.Member(decision.ID)
+		if decision.ID == "" || candidateVersion.Compare(lockedVersion) < 0 {
+			fmt.Fprintf(r.out, "[claw] model family %s: no newer member qualifies; keeping locked %s (catalog absence is not retirement)\n", key, locked.ID)
+			r.resolved[key] = locked.ID
+			return locked.ID, nil
+		}
+	}
 	if decision.ID == "" {
 		return "", fmt.Errorf("model family %s: no model can be chosen (%s); adjust the family or name an exact model", key, decision.Reason)
 	}
@@ -305,7 +318,9 @@ func loadPinnedCllamaPrices(ctx context.Context) (*modelfamily.Prices, priceSour
 		return nil, source, err
 	}
 	defer func() {
-		down := exec.Command("docker", "compose", "-p", project, "-f", composeFile, "down", "--remove-orphans")
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		down := exec.CommandContext(cleanupCtx, "docker", "compose", "-p", project, "-f", composeFile, "down", "--remove-orphans")
 		down.Env = scrubbedComposeEnv()
 		_ = down.Run()
 	}()
