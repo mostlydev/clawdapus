@@ -187,11 +187,11 @@ services:
 - **Network.** Each run has its own internal network holding the worker and a small forwarder. The forwarder relays to cllama's API port and nowhere else. Two workers cannot reach each other.
 - **Resume.** The first run starts a Hermes session. Each later run for the same home resumes that exact session, and its task text arrives as the next message. A worker killed mid-turn resumes from the last stored turn.
 - **Result.** A finished run's status carries `result.outcome` (`answer` or `question`) and `result.session`. A worker that needs a person writes its question to `.claw-run/question.md` in its home and ends its turn; the run then ends with `outcome: question` and the question as its result. Launch a new run for the same home with the answer as the task.
-- **Failure reason.** When the worker's wrapper ends a run itself, the failure code names why, in the run's status and in the `end` callback's `reason`. The worker's exit code stays in `exit.code`.
+- **Failure reason.** When the worker's wrapper ends a run itself, the failure code names why, in the run's status and in the `end` callback's `reason`. Public status exposes the wrapper's exit code as `exit_code`.
 
   | Reason | Meaning |
   |---|---|
-  | `worker_runner_exit` | Hermes exited non-zero. `exit.runner_code` is its exit code |
+  | `worker_runner_exit` | Hermes exited non-zero. The persisted ledger records its exit code at `exit_observed.runner_code` |
   | `worker_turn_not_stored` | Hermes exited 0 but stored no reply for this turn in the home |
   | `worker_session_unproven` | A reply was stored, but the home's store does not show which session it belongs to, or Hermes reported another session |
   | `worker_session_locator_malformed` | The home's saved session ID is not a valid ID |
