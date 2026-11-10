@@ -184,7 +184,7 @@ type Record struct {
 	// Models is the concrete model chain of the template the run was
 	// admitted with, in routing order.
 	Models []ModelRef `json:"models,omitempty"`
-	// PrivateSubnet is the address block of a task-home run\'s own network.
+	// PrivateSubnet is the address block of a task-home run's own network.
 	PrivateSubnet string `json:"private_subnet,omitempty"`
 	ImageID       string `json:"image_id,omitempty"`
 	RunAgentID    string `json:"run_agent_id,omitempty"`

@@ -745,3 +745,5 @@ Error: claw-pod.yml is newer than compose.generated.yml — run 'claw up' to reg
 | `claw update` | -- | No | Re-runs the latest-release installer |
 
 Vercel model families use the authenticated AI Gateway catalog and bound all listed endpoint prices, including tiers. `claw doctor` reports catalog drift; `claw up` also checks endpoint prices before selecting a member. Fresh missing or invalid prices do not fall back to an older lock price.
+
+`CLAW_RUN_SUBNET_BASE` on `claw runs serve` selects the private IPv4 range used for task-home run bridges (default `10.213.0.0/16`, allowed /8 through /24). Each admitted home run reserves a /29 recorded as `private_subnet`. Choose a non-overlapping range if other host networks use the default; the supervisor does not modify foreign networks.
