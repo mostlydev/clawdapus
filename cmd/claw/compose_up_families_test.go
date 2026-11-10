@@ -272,10 +272,12 @@ func TestFamilyNeedsCllamaAndTheServicePolicy(t *testing.T) {
 		policy func(*pod.DataPolicyConfig)
 		want   string
 	}{
-		"no attestation at all":         {func(p *pod.DataPolicyConfig) { p.Attestations = nil }, "no no-training attestation"},
-		"attested for another provider": {func(p *pod.DataPolicyConfig) { p.Attestations[0].Provider = "xai" }, "no no-training attestation"},
-		"attested for another endpoint": {func(p *pod.DataPolicyConfig) { p.Attestations[0].Endpoint = "https://eu.api.openai.com/v1" }, "no no-training attestation"},
-		"no retention guarantee":        {func(p *pod.DataPolicyConfig) { p.Attestations[0].Guarantees = []string{"no-training", "processing:us"} }, "no zero-data-retention attestation"},
+		"no attestation at all":                 {func(p *pod.DataPolicyConfig) { p.Attestations = nil }, "no no-training attestation"},
+		"attested for another provider":         {func(p *pod.DataPolicyConfig) { p.Attestations[0].Provider = "xai" }, "no no-training attestation"},
+		"explicit port differs from runtime":    {func(p *pod.DataPolicyConfig) { p.Attestations[0].Endpoint = "https://api.openai.com:443/v1" }, "no no-training attestation"},
+		"encoded endpoint differs from runtime": {func(p *pod.DataPolicyConfig) { p.Attestations[0].Endpoint = "https://api.openai.com/%761" }, "no no-training attestation"},
+		"attested for another endpoint":         {func(p *pod.DataPolicyConfig) { p.Attestations[0].Endpoint = "https://eu.api.openai.com/v1" }, "no no-training attestation"},
+		"no retention guarantee":                {func(p *pod.DataPolicyConfig) { p.Attestations[0].Guarantees = []string{"no-training", "processing:us"} }, "no zero-data-retention attestation"},
 		"no region guarantee": {func(p *pod.DataPolicyConfig) {
 			p.Attestations[0].Guarantees = []string{"no-training", "zero-data-retention"}
 		}, "no processing-region attestation"},
@@ -295,7 +297,7 @@ func TestFamilyNeedsCllamaAndTheServicePolicy(t *testing.T) {
 	}
 
 	// An attestation that names the official endpoint itself counts.
-	for _, endpoint := range []string{"https://api.openai.com/v1", "https://API.openai.com:443/v1/"} {
+	for _, endpoint := range []string{"https://api.openai.com/v1", "https://API.openai.com/v1/"} {
 		rig := newFamilyRig(t, terraFamily, map[string]string{"OPENAI_API_KEY": "sk-key"})
 		rig.catalog = full
 		rig.policy.Attestations[0].Endpoint = endpoint

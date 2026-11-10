@@ -424,15 +424,15 @@ func familyPolicyError(policy *pod.DataPolicyConfig, provider string) error {
 }
 
 // sameEndpoint compares two endpoint URLs as cllama does: scheme and host
-// without case, the default https port dropped, and no trailing slash.
+// without case, explicit ports preserved, and no trailing slash.
 func sameEndpoint(a, b string) bool {
 	norm := func(raw string) (string, bool) {
 		u, err := url.Parse(strings.TrimSpace(raw))
-		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || u.Opaque != "" {
 			return "", false
 		}
 		host := strings.ToLower(u.Hostname())
-		if port := u.Port(); port != "" && !(u.Scheme == "https" && port == "443") {
+		if port := u.Port(); port != "" {
 			host += ":" + port
 		}
 		return strings.ToLower(u.Scheme) + "://" + host + strings.TrimRight(u.Path, "/"), true
