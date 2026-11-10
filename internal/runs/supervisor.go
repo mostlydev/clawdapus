@@ -237,7 +237,9 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 	if spec.TemplateID != "" && spec.TemplateID != tpl.ID {
 		// The caller built this spec against a template that has since been
 		// recompiled. Binding it to the new one would change what it asked for.
-		return nil, false, apiErr(http.StatusConflict, "template_changed", "the template was recompiled after this spec was built")
+		refusal := apiErr(http.StatusConflict, "template_changed", "the template was recompiled after this spec was built")
+		refusal.CurrentTemplateID = tpl.ID
+		return nil, false, refusal
 	}
 	if err := checkGrant(tpl, spec); err != nil {
 		return nil, false, err

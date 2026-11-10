@@ -22,6 +22,14 @@ func (h *harness) recompile(models map[string]string) string {
 		h.t.Fatal(err)
 	}
 	ctx.Input.Metadata = cllama.InjectCompiledModelPolicy(ctx.Input.Metadata, models)
+	ctx.Input.Metadata["data_policy"] = cllama.DataPolicy{
+		Version: 1, Regions: []string{"us", "eu"}, Training: "none", Retention: "none", LocalRetention: "metadata",
+		Attestations: []cllama.DataPolicyAttestation{
+			{Provider: "openai", Endpoint: "https://internal.example/v1", Guarantees: []string{"zdr"}},
+			{Provider: "chatgpt", Guarantees: []string{"zdr"}},
+			{Provider: "openai", Guarantees: []string{"no_training"}},
+		},
+	}
 	if err := WriteTemplates(h.podDir, []*Template{tpl}, map[string]*ContextTemplate{"worker": ctx}); err != nil {
 		h.t.Fatal(err)
 	}
@@ -92,8 +100,9 @@ func TestLaunchPinnedToATemplateID(t *testing.T) {
 		if !errors.As(err, &apiE) || apiE.Code != "template_changed" || apiE.Status != http.StatusConflict {
 			t.Fatalf("stale pin: %v", err)
 		}
-		if strings.Contains(apiE.Message, first) || strings.Contains(apiE.Message, second) {
-			t.Fatalf("error echoes a template ID: %q", apiE.Message)
+		// The refusal names the template's current ID and nothing else.
+		if apiE.CurrentTemplateID != second || strings.Contains(apiE.Message, "sha256:") {
+			t.Fatalf("refusal = %+v", apiE)
 		}
 		if got, _ := h.sup.Get(Key{"inst", runID}); got != nil {
 			t.Fatalf("a refused launch left a record: %+v", got)
@@ -178,9 +187,17 @@ func TestTemplatesListing(t *testing.T) {
 	if len(tpl.Models) != 2 || tpl.Models[0] != (ModelRef{"primary", "openai/gpt-6.1-terra"}) || tpl.Models[1] != (ModelRef{"fallback", "chatgpt/gpt-6.1-terra"}) {
 		t.Fatalf("models = %+v", tpl.Models)
 	}
-	// The harness context holds a service credential, tool endpoints and the
-	// contract. None of it is listed.
-	for _, private := range []string{"svc-secret", "http://api:80", "# worker", "# clawdapus", "api.get", "sha256:img"} {
+	if tpl.Profile != ProfileStateless || len(tpl.ContentTargets) != 0 {
+		t.Fatalf("profile = %q, content = %v", tpl.Profile, tpl.ContentTargets)
+	}
+	dp := tpl.DataPolicy
+	if dp == nil || strings.Join(dp.Regions, ",") != "us,eu" || dp.Training != "none" || dp.Retention != "none" ||
+		dp.LocalRetention != "metadata" || strings.Join(dp.AttestedProviders, ",") != "chatgpt,openai" {
+		t.Fatalf("data policy = %+v", dp)
+	}
+	// The harness context holds a service credential, tool endpoints, the
+	// contract and an attestation endpoint. None of it is listed.
+	for _, private := range []string{"svc-secret", "http://api:80", "# worker", "# clawdapus", "api.get", "sha256:img", "internal.example", "zdr"} {
 		if strings.Contains(string(raw), private) {
 			t.Fatalf("listing leaks %q: %s", private, raw)
 		}
@@ -213,5 +230,31 @@ func TestTemplatesListing(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "gpt-9.9-other") || !strings.Contains(string(raw), `"invalid":["worker"]`) {
 		t.Fatalf("tampered template was described: %s", raw)
+	}
+}
+
+func TestTemplatesListingNamesTaskHomeProfile(t *testing.T) {
+	h := taskHomeHarness(t)
+	valid, invalid, err := DescribeTemplates(h.podDir)
+	if err != nil || len(invalid) != 0 || len(valid) != 1 {
+		t.Fatalf("listing: %v %v %v", valid, invalid, err)
+	}
+	if valid[0].Profile != ProfileTaskHome {
+		t.Fatalf("profile = %q", valid[0].Profile)
+	}
+	tpl, _, err := LoadTemplate(h.podDir, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, mount := range tpl.Content {
+		if valid[0].ContentTargets[i] != mount.Target {
+			t.Fatalf("content targets = %v", valid[0].ContentTargets)
+		}
+	}
+	raw, _ := json.Marshal(valid)
+	for _, mount := range tpl.Content {
+		if mount.Source != "" && strings.Contains(string(raw), mount.Source) {
+			t.Fatalf("listing leaks a host path: %s", raw)
+		}
 	}
 }

@@ -22,6 +22,9 @@ type APIError struct {
 	Status  int    `json:"-"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// CurrentTemplateID accompanies template_changed: the ID the named
+	// template has now, which the templates listing shows to the same peer.
+	CurrentTemplateID string `json:"current_template_id,omitempty"`
 }
 
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }

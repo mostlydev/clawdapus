@@ -484,7 +484,10 @@ A spec names its template, and the supervisor binds the run to that template's I
 GET /v1/templates
 ->  {"templates":[{"name":"worker","id":"sha256:9f2c…","context_digest":"sha256:41ab…",
                    "models":[{"slot":"primary","ref":"openai/gpt-6.1-terra"},
-                             {"slot":"fallback","ref":"chatgpt/gpt-6.1-terra"}]}],
+                             {"slot":"fallback","ref":"chatgpt/gpt-6.1-terra"}],
+                   "profile":"task_home","content_targets":["/claw/reference/handbook"],
+                   "data_policy":{"regions":["us","eu"],"training":"none","retention":"none",
+                                  "local_retention":"metadata","attested_providers":["openai"]}}],
      "invalid":[]}
 ```
 
@@ -495,7 +498,8 @@ Put the `id` in the spec as `template_id`:
 ```
 
 - `template_id` is part of the spec and so of `spec_digest`.
-- A launch whose `template_id` is not the template's current ID is refused with `template_changed`. No run is created and no home is reserved. Read the listing again and build a new spec.
+- A launch whose `template_id` is not the template's current ID is refused with `template_changed`. The refusal is permanent for that spec: it is made before any run record, home reservation or credential custody, and its error carries `current_template_id`. Build a new spec against the current template.
+- `profile` is `task_home` or `stateless`. `content_targets` lists a task-home template's reference mounts by their path in the worker, never the host path. `data_policy` is what cllama enforces for the template's model calls, with attestations named by provider only.
 - A repeat of a launch that was already admitted returns that run unchanged, whatever was compiled since.
 - Without `template_id` the run binds to whatever is compiled at admission, as before.
 - The listing shows only templates whose files verify against their own ID and context digest; any other is named in `invalid`. It carries no credential, context body or task content.
