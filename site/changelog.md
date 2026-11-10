@@ -29,6 +29,8 @@ outline: deep
 
 ## Unreleased
 
+- Model families now resolve on the ChatGPT plan route: `chatgpt/@<family>` with a pattern and no price ceilings. The pinned cllama (v0.18.0 or later) reads the signed-in account's own model list; `claw` never reads the sign-in and the API-key model list is not used in its place.
+
 - Fix: each task-home run's private network now takes a /29 from one range set aside for runs (`10.213.0.0/16` by default, `CLAW_RUN_SUBNET_BASE` on `claw runs serve` to change it) instead of a whole block from Docker's default address pools. A host no longer runs out of network address space after a few dozen concurrent or leftover run networks. A run that cannot get a block is refused with `network_unavailable`.
 
 - Model families now resolve on the Vercel AI Gateway: `vercel/@<family>` with a pattern over the gateway ID. Members are the language models the gateway reports as eligible for the team, and the price ceiling is checked against the gateway's own listed prices, tiers and the highest price among the providers serving the model.
