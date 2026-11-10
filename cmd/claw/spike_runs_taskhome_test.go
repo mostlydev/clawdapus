@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -152,20 +154,40 @@ services:
 	}
 	defer os.RemoveAll(sockDir)
 	_ = os.Chmod(sockDir, 0o700)
-	sup = startRunsSpikeSupervisor(t, workDir, sockDir, "http://127.0.0.1:1")
+	// Callback receiver standing in for the orchestrator.
+	cb := newRunsSpikeCallbacks()
+	cbServer := httptest.NewServer(cb)
+	defer cbServer.Close()
+	sup = startRunsSpikeSupervisor(t, workDir, sockDir, cbServer.URL)
 	client, err := runs.Dial(sockDir, uint32(os.Geteuid()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
 
+	// Every run hands over a credential, so its end callback is delivered.
 	launch := func(runID, home, task string) error {
 		raw, _ := json.Marshal(map[string]any{"template": "worker", "task": task, "tools": []string{}, "home": home})
 		_, _, digest, _ := runs.CanonicalSpec(raw)
 		return client.Do(ctx, "POST", "/v1/runs", map[string]any{
 			"installation": "inst", "run_id": runID, "generation": 1, "spec_digest": digest,
 			"spec": json.RawMessage(raw), "authority_expires_at": time.Now().Add(20 * time.Minute),
+			"credential": "cred-" + runID,
 		}, nil)
+	}
+	// endBody returns the end callback a run delivered, decoded strictly
+	// enough to see exactly which fields it carried.
+	endBody := func(runID string) map[string]any {
+		t.Helper()
+		runsSpikeWaitCallback(t, cb, runID, "end", "cred-"+runID)
+		cb.mu.Lock()
+		raw := cb.bodies[runID+"/end"]
+		cb.mu.Unlock()
+		var body map[string]any
+		if err := json.Unmarshal([]byte(raw), &body); err != nil {
+			t.Fatalf("end callback of %s is not JSON: %q", runID, raw)
+		}
+		return body
 	}
 	finish := func(runID string) (runs.StatusView, string) {
 		t.Helper()
@@ -196,6 +218,29 @@ services:
 	t.Logf("first run launch-to-stopped: %s", time.Since(started))
 	if body != "MARK-ONE" || a1.Result.Outcome != runs.OutcomeAnswer || a1.Result.Session == "" {
 		t.Fatalf("case 1: %q %+v", body, a1.Result)
+	}
+
+	// storedSession reads the locator the wrapper wrote in the home. On a
+	// Linux host that file belongs to the worker user and may be unreadable.
+	storedSession := func(home string) (string, bool) {
+		raw, err := os.ReadFile(filepath.Join(homeDir(home), ".claw-run", "session"))
+		if errors.Is(err, fs.ErrPermission) && runtime.GOOS == "linux" {
+			t.Logf("session locator of %s belongs to the worker user and is not readable from this host: %v", home, err)
+			return "", false
+		}
+		if err != nil {
+			t.Fatalf("session locator of %s: %v", home, err)
+		}
+		return strings.TrimSpace(string(raw)), true
+	}
+	// The end callback of an answer carries the outcome and the same session
+	// the status reports, with the answer as its summary (#396).
+	if got := endBody("a1"); got["result_outcome"] != runs.OutcomeAnswer || got["session"] != a1.Result.Session ||
+		got["summary"] != "MARK-ONE" || got["outcome"] != "succeeded" || len(got) != 9 {
+		t.Fatalf("case 1: end callback: %v", got)
+	}
+	if stored, ok := storedSession("task-a"); ok && stored != a1.Result.Session {
+		t.Fatalf("case 1: callback session %q is not the stored locator %q", a1.Result.Session, stored)
 	}
 
 	// 2. A second, separate container resumes that exact session.
@@ -321,6 +366,13 @@ services:
 	if q.Result.Outcome != runs.OutcomeQuestion || body != "Which branch?" {
 		t.Fatalf("case 5 (question): %q %+v", body, q.Result)
 	}
+	if got := endBody("a4"); got["result_outcome"] != runs.OutcomeQuestion || got["session"] != q.Result.Session ||
+		got["summary"] != "Which branch?" || got["outcome"] != "succeeded" || len(got) != 9 {
+		t.Fatalf("case 5: end callback of a question: %v", got)
+	}
+	if stored, ok := storedSession("task-a"); ok && stored != q.Result.Session {
+		t.Fatalf("case 5: callback session %q is not the stored locator %q", q.Result.Session, stored)
+	}
 	a5, body := run("a5", "task-a", "the answer is main")
 	if a5.Result.Outcome != runs.OutcomeAnswer || body != "HISTORY-SEEN" || a5.Result.Session != a1.Result.Session {
 		t.Fatalf("case 5 (answer): %q %+v", body, a5.Result)
@@ -349,6 +401,10 @@ services:
 	}
 	if view := runsSpikeWait(t, client, "a6", "failed"); view.State != runs.StateFailed || view.Result != nil {
 		t.Fatalf("case 6: killed run: %+v", view)
+	}
+	// A run with no result delivers the unchanged seven-field end body.
+	if got := endBody("a6"); got["outcome"] != "failed" || len(got) != 7 {
+		t.Fatalf("case 6: end callback of a killed run: %v", got)
 	}
 	a7, body := run("a7", "task-a", "RUN: cat /home/task/workspace/effects")
 	if a7.Result.Session != a1.Result.Session || a7.Result.Outcome != runs.OutcomeAnswer || strings.Count(body, "EFFECT-ONCE") != 1 {

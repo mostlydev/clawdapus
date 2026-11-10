@@ -349,7 +349,10 @@ If the supervisor was started with `--callback-origin`, a launch may hand over a
 POST {origin}{path}/start      {installation, run_id, generation}
 POST {origin}{path}/heartbeat  {installation, run_id, generation}       every --heartbeat
 POST {origin}{path}/end        {installation, run_id, generation, outcome, reason, summary, summary_truncated}
+                               task-home result only: + {result_outcome, session}
 ```
+
+For a [task-home](#task-homes) run that has a result, the `end` body carries two more fields: `result_outcome` (`answer` or `question`) and `session` (the harness session ID that holds the turn). They are the values in the run's status (`result.outcome`, `result.session`). They are absent for stateless templates and for any run without a result, whose bodies are unchanged. Callbacks are authenticated by the bearer credential only; the body is not signed.
 
 `outcome` is `succeeded` or `failed`; `reason` is empty on success or the failure code. `summary` contains at most 64 KiB of UTF-8 text. `summary_truncated` is true if either the stored result was truncated or the callback summary limit shortened it. The bounded stored answer remains available through the result endpoint.
 
