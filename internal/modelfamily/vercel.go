@@ -167,8 +167,10 @@ func FetchVercelEndpointMax(ctx context.Context, client *http.Client, baseURL, a
 			ID        string `json:"id"`
 			Endpoints []struct {
 				Pricing *struct {
-					Prompt     any `json:"prompt"`
-					Completion any `json:"completion"`
+					Prompt          any          `json:"prompt"`
+					Completion      any          `json:"completion"`
+					PromptTiers     []vercelTier `json:"prompt_tiers"`
+					CompletionTiers []vercelTier `json:"completion_tiers"`
 				} `json:"pricing"`
 			} `json:"endpoints"`
 		} `json:"data"`
@@ -183,8 +185,8 @@ func FetchVercelEndpointMax(ctx context.Context, client *http.Client, baseURL, a
 		if endpoint.Pricing == nil {
 			return 0, 0, errors.New("gateway endpoint listing has an endpoint with no price")
 		}
-		in, okIn := perMillion(endpoint.Pricing.Prompt)
-		out, okOut := perMillion(endpoint.Pricing.Completion)
+		in, okIn := maxRate(endpoint.Pricing.Prompt, endpoint.Pricing.PromptTiers)
+		out, okOut := maxRate(endpoint.Pricing.Completion, endpoint.Pricing.CompletionTiers)
 		if !okIn || !okOut {
 			return 0, 0, errors.New("gateway endpoint listing has a malformed price")
 		}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -52,7 +53,7 @@ func (f Family) ReuseRecorded(entry LockEntry) string {
 	if _, ok := f.Member(entry.ID); !ok {
 		return ReasonNoMember
 	}
-	if entry.PriceSource != "catalog" || entry.MaxInput <= 0 && entry.MaxOutput <= 0 {
+	if entry.PriceSource != "catalog" || entry.MaxInput < 0 || entry.MaxOutput < 0 || math.IsNaN(entry.MaxInput) || math.IsNaN(entry.MaxOutput) || math.IsInf(entry.MaxInput, 0) || math.IsInf(entry.MaxOutput, 0) {
 		return ReasonUnpriced
 	}
 	if entry.MaxInput > f.MaxInput {

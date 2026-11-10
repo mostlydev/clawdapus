@@ -249,17 +249,32 @@ func (r *familyResolver) resolve(ctx context.Context, provider, name string) (st
 	} else {
 		catalog, catalogErr = r.fetchCatalog(ctx, baseURL, apiKey)
 	}
+	checkedEndpoints := map[string]bool{}
+	checkEndpoint := func(id string) bool {
+		if checked, ok := checkedEndpoints[id]; ok {
+			return checked
+		}
+		in, out, err := r.fetchVercelEndpointMax(ctx, baseURL, apiKey, id)
+		if err != nil {
+			prices.Drop(provider, id)
+		} else {
+			prices.Raise(provider, id, in, out)
+		}
+		checkedEndpoints[id] = err == nil && fam.Eligible(id, prices, nil) == ""
+		return checkedEndpoints[id]
+	}
 	lockFits := func() string {
 		if !vercel {
 			return fam.Reuse(locked, prices, nil)
 		}
-		// A gateway model's price is known only from a listing. When the
-		// listing has it, that price is judged; otherwise the price recorded
-		// when the model was chosen is.
-		if _, listed := prices.Exact(provider, locked.ID); listed {
-			return fam.Reuse(locked, prices, nil)
+		if catalogErr != nil || !catalog.Complete {
+			return fam.ReuseRecorded(locked)
 		}
-		return fam.ReuseRecorded(locked)
+		// Fresh evidence must never be replaced with an older recorded price.
+		if fam.Reuse(locked, prices, nil) != "" || !checkEndpoint(locked.ID) {
+			return modelfamily.ReasonUnpriced
+		}
+		return ""
 	}
 	if catalogErr != nil || !catalog.Complete {
 		// Only the catalog's freshness is waived. The locked model is judged
@@ -281,22 +296,19 @@ func (r *familyResolver) resolve(ctx context.Context, provider, name string) (st
 
 	decision := fam.Choose(catalog, prices, nil)
 	if vercel {
-		// The gateway may route a model to any provider that serves it. The
-		// candidate is bounded again with the highest endpoint price; one
-		// whose endpoint prices cannot be read whole is not chosen.
+		validated := false
 		for attempts := 0; decision.ID != "" && attempts < 16; attempts++ {
-			in, out, err := r.fetchVercelEndpointMax(ctx, baseURL, apiKey, decision.ID)
-			if err != nil {
-				fmt.Fprintf(r.out, "[claw] model family %s: not using %s (endpoint prices unavailable)\n", key, decision.ID)
-				prices.Drop(provider, decision.ID)
-			} else {
-				prices.Raise(provider, decision.ID, in, out)
-				if fam.Eligible(decision.ID, prices, nil) == "" {
-					decision.Price, _ = prices.Exact(provider, decision.ID)
-					break
-				}
+			if checkEndpoint(decision.ID) {
+				decision.Price, _ = prices.Exact(provider, decision.ID)
+				validated = true
+				break
 			}
+			fmt.Fprintf(r.out, "[claw] model family %s: not using %s (endpoint prices unavailable or over ceiling)\n", key, decision.ID)
 			decision = fam.Choose(catalog, prices, nil)
+		}
+		if !validated && decision.ID != "" {
+			decision.ID = ""
+			decision.Reason = "endpoint price lookup limit reached"
 		}
 	}
 	for _, s := range decision.Skipped {
@@ -546,6 +558,9 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 	for _, key := range ordered {
 		policyNotes = nil
 		provider, name, _ := strings.Cut(key, "/@")
+		if provider == familyVercel {
+			policyNotes = append(policyNotes, "gateway endpoint prices not assessed; claw up checks them")
+		}
 		locked, hadLock := lock.Families[key]
 		fam, declared := r.families[name]
 		if !declared || fam.Provider != provider {
@@ -560,7 +575,7 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 			say(key, "locked %s; cannot be checked (%v)", locked.ID, err)
 			continue
 		}
-		policyNotes = []string{"service data policy not assessed; claw up rechecks it"}
+		policyNotes = append(policyNotes, "service data policy not assessed; claw up rechecks it")
 		vercel := provider == familyVercel
 		if !vercel && r.prices == nil {
 			prices, source, err := r.loadPrices(ctx)
@@ -584,7 +599,7 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 		// The lock is judged against the family as the pod writes it now.
 		lockedReason := fam.Reuse(locked, prices, nil)
 		if vercel {
-			if _, listed := prices.Exact(provider, locked.ID); !listed {
+			if catalogErr != nil || !catalog.Complete {
 				lockedReason = fam.ReuseRecorded(locked)
 			}
 		}

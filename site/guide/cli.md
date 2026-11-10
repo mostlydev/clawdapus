@@ -743,3 +743,5 @@ Error: claw-pod.yml is newer than compose.generated.yml — run 'claw up' to reg
 | `claw memory forget` | -- | Yes | Tombstones a retained entry for one or more `--agent` IDs |
 | `claw skill install` | -- | No | Installs the bundled Clawdapus CLI skill for coding agents |
 | `claw update` | -- | No | Re-runs the latest-release installer |
+
+Vercel model families use the authenticated AI Gateway catalog and bound all listed endpoint prices, including tiers. `claw doctor` reports catalog drift; `claw up` also checks endpoint prices before selecting a member. Fresh missing or invalid prices do not fall back to an older lock price.

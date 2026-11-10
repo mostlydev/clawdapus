@@ -90,7 +90,7 @@ func TestFetchVercelCatalog(t *testing.T) {
 func TestFetchVercelEndpointMax(t *testing.T) {
 	reply := `{"data":{"id":"openai/gpt-6.1-terra","endpoints":[
 	 {"provider_name":"openai","pricing":{"prompt":"0.000001","completion":"0.000005"}},
-	 {"provider_name":"azure","pricing":{"prompt":"0.0000015","completion":"0.000004"}}]}}`
+	 {"provider_name":"azure","pricing":{"prompt":"0.0000015","completion":"0.000004","prompt_tiers":[{"cost":"0.000003"}]}}]}}`
 	var path string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
@@ -98,7 +98,7 @@ func TestFetchVercelEndpointMax(t *testing.T) {
 	}))
 	defer srv.Close()
 	in, out, err := FetchVercelEndpointMax(context.Background(), nil, srv.URL+"/v1", "gw-key", "openai/gpt-6.1-terra")
-	if err != nil || in != 1.5 || out != 5 || path != "/v1/models/openai/gpt-6.1-terra/endpoints" {
+	if err != nil || in != 3 || out != 5 || path != "/v1/models/openai/gpt-6.1-terra/endpoints" {
 		t.Fatalf("max = %v %v %v path=%s", in, out, err, path)
 	}
 	for name, bad := range map[string]string{
@@ -106,6 +106,7 @@ func TestFetchVercelEndpointMax(t *testing.T) {
 		"endpoint without price": `{"data":{"id":"openai/gpt-6.1-terra","endpoints":[{"pricing":{"prompt":"0.000001","completion":"0.000005"}},{"provider_name":"x"}]}}`,
 		"missing completion":     `{"data":{"id":"openai/gpt-6.1-terra","endpoints":[{"pricing":{"prompt":"0.000001"}}]}}`,
 		"malformed price":        `{"data":{"id":"openai/gpt-6.1-terra","endpoints":[{"pricing":{"prompt":"free","completion":"0.000005"}}]}}`,
+		"bad tier":               `{"data":{"id":"openai/gpt-6.1-terra","endpoints":[{"pricing":{"prompt":"0.000001","completion":"0.000005","completion_tiers":[{}]}}]}}`,
 		"negative price":         `{"data":{"id":"openai/gpt-6.1-terra","endpoints":[{"pricing":{"prompt":"-0.000001","completion":"0.000005"}}]}}`,
 		"overflowing price":      `{"data":{"id":"openai/gpt-6.1-terra","endpoints":[{"pricing":{"prompt":"1e400","completion":"0.000005"}}]}}`,
 		"another model":          `{"data":{"id":"openai/gpt-5.6-terra","endpoints":[{"pricing":{"prompt":"0.000001","completion":"0.000005"}}]}}`,
@@ -142,5 +143,13 @@ func TestReuseRecorded(t *testing.T) {
 		if got := tc.fam.ReuseRecorded(tc.entry); got != tc.want {
 			t.Errorf("%s: %q, want %q", name, got, tc.want)
 		}
+	}
+}
+
+func TestReuseRecordedRejectsNegativeRate(t *testing.T) {
+	f := Family{Name: "terra", Provider: "vercel", Pattern: "openai/gpt-*-terra", MaxInput: 4, MaxOutput: 18}
+	e := LockEntry{Provider: "vercel", Pattern: f.Pattern, ID: "openai/gpt-6.1-terra", MaxInput: -1, MaxOutput: 5, PriceSource: "catalog"}
+	if f.ReuseRecorded(e) != ReasonUnpriced {
+		t.Fatal("negative rate accepted")
 	}
 }

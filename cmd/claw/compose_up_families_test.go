@@ -608,12 +608,41 @@ func TestVercelFamily(t *testing.T) {
 	// Endpoint prices that cannot be read whole rule a model out too.
 	rig = setup(t, map[string]endpoint{"openai/gpt-6.1-terra": {0, 0, errors.New("gateway endpoint listing has an endpoint with no price")}, "openai/gpt-5.6-terra": {2, 12, nil}})
 	models, err = rig.up(map[string]string{"primary": "vercel/@terra"})
-	if err != nil || models["primary"] != "vercel/openai/gpt-5.6-terra" || !strings.Contains(rig.out.String(), "not using openai/gpt-6.1-terra (endpoint prices unavailable)") {
+	if err != nil || models["primary"] != "vercel/openai/gpt-5.6-terra" || !strings.Contains(rig.out.String(), "not using openai/gpt-6.1-terra (endpoint prices unavailable or over ceiling)") {
 		t.Fatalf("models = %v, %v, out=%q", models, err, rig.out.String())
 	}
 	rig = setup(t, map[string]endpoint{"openai/gpt-6.1-terra": {0, 0, errors.New("x")}, "openai/gpt-5.6-terra": {0, 0, errors.New("x")}})
 	if _, err := rig.up(map[string]string{"primary": "vercel/@terra"}); err == nil || !strings.Contains(err.Error(), "no model can be chosen") {
 		t.Fatalf("no readable endpoint prices: %v", err)
+	}
+
+	// A fresh failed endpoint check cannot be replaced with an old lock price.
+	rig = setup(t, map[string]endpoint{"openai/gpt-6.1-terra": {0, 0, errors.New("unavailable")}, "openai/gpt-5.6-terra": {2, 12, nil}})
+	rig.r.lock = &modelfamily.Lock{Version: 1, Families: map[string]modelfamily.LockEntry{"vercel/@terra": {Provider: "vercel", Pattern: fam.Pattern, ID: "openai/gpt-6.1-terra", MaxInput: 2, MaxOutput: 7.5, PriceSource: "catalog"}}}
+	models, err = rig.up(map[string]string{"primary": "vercel/@terra"})
+	if err != nil || models["primary"] != "vercel/openai/gpt-5.6-terra" {
+		t.Fatalf("stale endpoint price reused: %v %v", models, err)
+	}
+
+	// The bounded lookup loop must not admit the next unchecked candidate.
+	rig = setup(t, nil)
+	rates := map[string][2]float64{}
+	var ids []string
+	for i := 1; i <= 17; i++ {
+		id := fmt.Sprintf("openai/gpt-%d-terra", i)
+		ids = append(ids, id)
+		rates[id] = [2]float64{1, 1}
+	}
+	rig.r.fetchVercel = func(context.Context, string, string) (modelfamily.Catalog, *modelfamily.Prices, error) {
+		return modelfamily.Catalog{Complete: true, IDs: ids}, vercelPrices(t, rates), nil
+	}
+	calls := 0
+	rig.r.fetchVercelEndpointMax = func(context.Context, string, string, string) (float64, float64, error) {
+		calls++
+		return 0, 0, errors.New("unavailable")
+	}
+	if _, err := rig.up(map[string]string{"primary": "vercel/@terra"}); err == nil || calls != 16 {
+		t.Fatalf("unchecked candidate admitted: calls=%d err=%v", calls, err)
 	}
 
 	// Listing unavailable: the locked model stands on its recorded price,
