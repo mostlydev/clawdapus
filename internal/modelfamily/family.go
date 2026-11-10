@@ -34,6 +34,10 @@ var (
 	versionRe = regexp.MustCompile(`^(0|[1-9][0-9]{0,3})(\.(0|[1-9][0-9]{0,3})){0,2}$`)
 )
 
+// PlanProvider reports whether a provider is a plan sign-in route, served
+// from a subscription and not billed per token.
+func PlanProvider(provider string) bool { return provider == "chatgpt" }
+
 // Validate checks a family declaration.
 func (f Family) Validate() error {
 	if !nameRe.MatchString(f.Name) {
@@ -44,6 +48,14 @@ func (f Family) Validate() error {
 	}
 	if _, _, err := splitPattern(f.Pattern); err != nil {
 		return fmt.Errorf("model family %q: %w", f.Name, err)
+	}
+	if PlanProvider(f.Provider) {
+		// A plan sign-in is not billed per token, so there is no price to
+		// bound. A ceiling here would claim a limit nothing enforces.
+		if f.MaxInput != 0 || f.MaxOutput != 0 {
+			return fmt.Errorf("model family %q: a plan route has no per-token price; omit max-input and max-output", f.Name)
+		}
+		return nil
 	}
 	for label, v := range map[string]float64{"max-input": f.MaxInput, "max-output": f.MaxOutput} {
 		if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
@@ -150,6 +162,14 @@ type Decision struct {
 func (f Family) Eligible(id string, prices *Prices, policy func(id string) error) string {
 	if _, ok := f.Member(id); !ok {
 		return ReasonNoMember
+	}
+	if PlanProvider(f.Provider) {
+		// Eligibility on a plan route is membership of the account's own
+		// model list, which the caller supplies as the catalog.
+		if policy != nil && policy(id) != nil {
+			return ReasonPolicy
+		}
+		return ""
 	}
 	price, ok := prices.Exact(f.Provider, id)
 	if !ok {

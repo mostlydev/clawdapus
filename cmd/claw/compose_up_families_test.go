@@ -228,7 +228,7 @@ func TestFamilyRefusals(t *testing.T) {
 		"undeclared family":          {terraFamily, key, "openai/@luna", &full, false, "is not declared", false},
 		"family of another provider": {terraFamily, key, "xai/@terra", &full, false, `belongs to provider "openai"`, false},
 		"provider not supported":     {modelfamily.Family{Name: "terra", Provider: "openrouter", Pattern: "openai/gpt-*-terra", MaxInput: 4, MaxOutput: 18}, key, "openrouter/@terra", &full, false, "not supported for provider", false},
-		"plan route":                 {modelfamily.Family{Name: "terra", Provider: "chatgpt", Pattern: "gpt-*-terra", MaxInput: 4, MaxOutput: 18}, key, "chatgpt/@terra", &full, false, "not supported for provider", false},
+		"anthropic route":            {modelfamily.Family{Name: "terra", Provider: "anthropic", Pattern: "claude-sonnet-*", MaxInput: 4, MaxOutput: 18}, key, "anthropic/@terra", &full, false, "not supported for provider", false},
 		"no key":                     {terraFamily, map[string]string{}, "openai/@terra", &full, false, "no key for provider", false},
 		"custom endpoint":            {terraFamily, map[string]string{"OPENAI_API_KEY": "sk-key", "OPENAI_BASE_URL": "https://eu.api.openai.com/v1"}, "openai/@terra", &full, false, "custom endpoint", false},
 		"malformed reference":        {terraFamily, key, "openai/@Terra", &full, false, "not a family reference", false},
@@ -677,5 +677,106 @@ func TestVercelFamily(t *testing.T) {
 	policy(rig)
 	if _, err := rig.up(map[string]string{"primary": "vercel/@terra"}); err == nil || !strings.Contains(err.Error(), "custom endpoint") {
 		t.Fatalf("custom gateway: %v", err)
+	}
+}
+
+// A plan family is resolved from the account's own model list, which only
+// cllama can read. It has no price ceiling and never touches an API key.
+func TestPlanFamily(t *testing.T) {
+	fam := modelfamily.Family{Name: "terra", Provider: "chatgpt", Pattern: "gpt-*-terra"}
+	if err := fam.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (modelfamily.Family{Name: "terra", Provider: "chatgpt", Pattern: "gpt-*-terra", MaxInput: 4, MaxOutput: 18}).Validate(); err == nil {
+		t.Fatal("a plan family accepted a price ceiling")
+	}
+	setup := func(t *testing.T) (*familyRig, *[]string, *error) {
+		rig := newFamilyRig(t, fam, map[string]string{"OPENAI_API_KEY": "sk-key"})
+		rig.policy.Attestations = []pod.DataPolicyAttestation{{Provider: "chatgpt", Guarantees: []string{"no-training", "zero-data-retention", "processing:us"}}}
+		ids := []string{"gpt-5.6-terra", "gpt-6.1-terra", "gpt-6.1-sol"}
+		var failure error
+		rig.r.fetchPlanCatalog = func(_ context.Context, podDir, provider string) (modelfamily.Catalog, priceSource, error) {
+			rig.fetches = append(rig.fetches, "plan "+provider)
+			if failure != nil {
+				return modelfamily.Catalog{}, priceSource{}, failure
+			}
+			return modelfamily.Catalog{Complete: true, IDs: ids}, priceSource{Tag: "v0.18.0", ImageID: "sha256:img"}, nil
+		}
+		return rig, &ids, &failure
+	}
+
+	rig, ids, failure := setup(t)
+	models, err := rig.up(map[string]string{"primary": "chatgpt/@terra", "fallback": "openai/gpt-6.1-terra"})
+	if err != nil || models["primary"] != "chatgpt/gpt-6.1-terra" || models["fallback"] != "openai/gpt-6.1-terra" {
+		t.Fatalf("models = %v, %v", models, err)
+	}
+	// Only the plan's list was read: no price table, no API-key listing.
+	if rig.priceRuns != 0 || len(rig.fetches) != 1 || rig.fetches[0] != "plan chatgpt" {
+		t.Fatalf("prices=%d fetches=%v", rig.priceRuns, rig.fetches)
+	}
+	entry := rig.lockEntry("chatgpt/@terra")
+	if entry.ID != "gpt-6.1-terra" || entry.PriceSource != "plan" || entry.MaxInput != 0 || entry.CllamaTag != "v0.18.0" {
+		t.Fatalf("lock = %+v", entry)
+	}
+
+	// The plan stops listing the locked model and offers only an older one:
+	// the lock stands.
+	*ids = []string{"gpt-5.6-terra"}
+	rig.again(fam)
+	rig.r.fetchPlanCatalog = func(context.Context, string, string) (modelfamily.Catalog, priceSource, error) {
+		return modelfamily.Catalog{Complete: true, IDs: *ids}, priceSource{}, nil
+	}
+	if models, err := rig.up(map[string]string{"primary": "chatgpt/@terra"}); err != nil || models["primary"] != "chatgpt/gpt-6.1-terra" || !strings.Contains(rig.out.String(), "keeping locked gpt-6.1-terra") {
+		t.Fatalf("absent locked model: %v %v %q", models, err, rig.out.String())
+	}
+
+	// Not signed in, or the list cannot be read: the lock stands; with no
+	// lock there is nothing to fall back to, least of all an API key.
+	*failure = errors.New("the plan's model list could not be read")
+	rig.again(fam)
+	rig.r.fetchPlanCatalog = func(context.Context, string, string) (modelfamily.Catalog, priceSource, error) {
+		return modelfamily.Catalog{}, priceSource{}, *failure
+	}
+	if models, err := rig.up(map[string]string{"primary": "chatgpt/@terra"}); err != nil || models["primary"] != "chatgpt/gpt-6.1-terra" {
+		t.Fatalf("unavailable list with a lock: %v %v", models, err)
+	}
+	fresh, _, freshFailure := setup(t)
+	*freshFailure = errors.New("the plan's model list could not be read")
+	if _, err := fresh.up(map[string]string{"primary": "chatgpt/@terra"}); err == nil || !strings.Contains(err.Error(), "plan's model list is unavailable") || fresh.priceRuns != 0 {
+		t.Fatalf("unavailable list without a lock: %v", err)
+	}
+
+	// The plan offers nothing of the family.
+	none, noneIDs, _ := setup(t)
+	*noneIDs = []string{"gpt-6.1-sol"}
+	if _, err := none.up(map[string]string{"primary": "chatgpt/@terra"}); err == nil || !strings.Contains(err.Error(), "offers no model of this family") {
+		t.Fatalf("no member: %v", err)
+	}
+}
+
+func TestParsePlanCatalog(t *testing.T) {
+	got, err := parsePlanCatalog([]byte(`{"provider":"chatgpt","complete":true,"ids":["gpt-5.6-terra","gpt-6.1-terra"],"read_at":"2026-11-10T21:00:00Z"}`), "chatgpt")
+	if err != nil || !got.Complete || len(got.IDs) != 2 {
+		t.Fatalf("catalog = %+v %v", got, err)
+	}
+	for name, raw := range map[string]string{
+		"not complete":     `{"provider":"chatgpt","complete":false,"ids":["a"]}`,
+		"another provider": `{"provider":"openai","complete":true,"ids":["a"]}`,
+		"no ids":           `{"provider":"chatgpt","complete":true}`,
+		"id not a string":  `{"provider":"chatgpt","complete":true,"ids":[7]}`,
+		"repeated":         `{"provider":"chatgpt","complete":true,"ids":["a","a"]}`,
+		"trailing":         `{"provider":"chatgpt","complete":true,"ids":["a"]} {}`,
+		"empty":            ``,
+	} {
+		if got, err := parsePlanCatalog([]byte(raw), "chatgpt"); err == nil {
+			t.Errorf("%s: accepted %+v", name, got)
+		}
+	}
+}
+
+func TestParsePlanCatalogRejectsOversize(t *testing.T) {
+	raw := []byte(`{"provider":"chatgpt","complete":true,"ids":[]}` + strings.Repeat(" ", 1<<20))
+	if _, err := parsePlanCatalog(raw, "chatgpt"); err == nil {
+		t.Fatal("accepted oversized catalog")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -29,7 +30,7 @@ var familyRefRe = regexp.MustCompile(`^([a-z0-9][a-z0-9-]*)/@([a-z][a-z0-9-]*)$`
 // OpenAI-compatible shape and states no prices. A provider whose listing
 // carries its own prices, or needs another listing protocol, is refused
 // until that is read and bounded properly.
-var familyCatalogProviders = map[string]bool{"openai": true, "xai": true, "google": true, "meta": true, familyVercel: true}
+var familyCatalogProviders = map[string]bool{"openai": true, "xai": true, "google": true, "meta": true, familyVercel: true, "chatgpt": true}
 
 // familyVercel is the AI Gateway. Its catalog states its own prices, which
 // are the ones bounded: cllama has no table for it.
@@ -58,6 +59,9 @@ type familyResolver struct {
 	loadPrices   func(ctx context.Context) (*modelfamily.Prices, priceSource, error)
 	fetchCatalog func(ctx context.Context, baseURL, apiKey string) (modelfamily.Catalog, error)
 	fetchVercel  func(ctx context.Context, baseURL, apiKey string) (modelfamily.Catalog, *modelfamily.Prices, error)
+	// fetchPlanCatalog asks the pinned cllama, which holds the sign-in, for
+	// the models the plan account may use.
+	fetchPlanCatalog func(ctx context.Context, podDir, provider string) (modelfamily.Catalog, priceSource, error)
 	// fetchVercelEndpointMax returns the highest price among the providers
 	// that serve a gateway model.
 	fetchVercelEndpointMax func(ctx context.Context, baseURL, apiKey, id string) (float64, float64, error)
@@ -100,6 +104,7 @@ func newFamilyResolver(podDir string, p *pod.Pod) *familyResolver {
 	r.fetchCatalog = func(ctx context.Context, baseURL, apiKey string) (modelfamily.Catalog, error) {
 		return modelfamily.FetchCatalog(ctx, nil, baseURL, apiKey)
 	}
+	r.fetchPlanCatalog = loadPinnedPlanCatalog
 	r.fetchVercel = func(ctx context.Context, baseURL, apiKey string) (modelfamily.Catalog, *modelfamily.Prices, error) {
 		return modelfamily.FetchVercelCatalog(ctx, nil, baseURL, apiKey)
 	}
@@ -217,6 +222,9 @@ func (r *familyResolver) resolve(ctx context.Context, provider, name string) (st
 	fam, err := r.lookup(provider, name)
 	if err != nil {
 		return "", err
+	}
+	if modelfamily.PlanProvider(provider) {
+		return r.resolvePlan(ctx, fam, key)
 	}
 	vercel := provider == familyVercel
 	if !vercel && r.prices == nil {
@@ -576,6 +584,41 @@ func (r *familyResolver) familyDrift(ctx context.Context) []string {
 			continue
 		}
 		policyNotes = append(policyNotes, "service data policy not assessed; claw up rechecks it")
+		if modelfamily.PlanProvider(provider) {
+			fits := "still a member of the family"
+			if reason := fam.Reuse(locked, nil, nil); reason != "" {
+				fits = "no longer fits the family (" + reason + ")"
+			}
+			catalog, _, err := r.fetchPlanCatalog(ctx, r.podDir, provider)
+			if err != nil || !catalog.Complete {
+				why := "incomplete"
+				if err != nil {
+					why = err.Error()
+				}
+				say(key, "locked %s, %s; plan model list unavailable (%s)", locked.ID, fits, why)
+				continue
+			}
+			present := false
+			for _, id := range catalog.IDs {
+				present = present || id == locked.ID
+			}
+			var notes []string
+			if !present {
+				notes = append(notes, "absent from the plan's list")
+			}
+			lockedVersion, _ := fam.Member(locked.ID)
+			if d := fam.Choose(catalog, nil, nil); d.ID != "" && d.ID != locked.ID {
+				if v, _ := fam.Member(d.ID); v.Compare(lockedVersion) > 0 {
+					notes = append(notes, "newer member "+d.ID+" is offered")
+				}
+			}
+			if len(notes) == 0 {
+				say(key, "locked %s; up to date", locked.ID)
+			} else {
+				say(key, "locked %s; %s", locked.ID, strings.Join(notes, "; "))
+			}
+			continue
+		}
 		vercel := provider == familyVercel
 		if !vercel && r.prices == nil {
 			prices, source, err := r.loadPrices(ctx)
@@ -659,5 +702,167 @@ func familyOfficialBaseURL(provider string) string {
 	if provider == familyVercel {
 		return modelfamily.VercelOfficialBaseURL
 	}
+	if modelfamily.PlanProvider(provider) {
+		// The plan route's endpoint is fixed in cllama.
+		return "https://api.openai.com/v1"
+	}
 	return defaultBaseURLs[provider]
+}
+
+// resolvePlan resolves a family on a plan sign-in route. Its members are the
+// models the signed-in account may use, as cllama reads them with the
+// sign-in it alone holds. There is no price to bound, and the API-key model
+// list is never consulted: a plan family never becomes an API-key route.
+func (r *familyResolver) resolvePlan(ctx context.Context, fam modelfamily.Family, key string) (string, error) {
+	if r.lock == nil {
+		lock, err := modelfamily.LoadLock(filepath.Join(r.podDir, modelfamily.LockFileName))
+		if err != nil {
+			return "", err
+		}
+		r.lock = lock
+	}
+	locked, hadLock := r.lock.Families[key]
+	lockFits := hadLock && fam.Reuse(locked, nil, nil) == ""
+	catalog, source, err := r.fetchPlanCatalog(ctx, r.podDir, fam.Provider)
+	if err != nil || !catalog.Complete {
+		why := "incomplete"
+		if err != nil {
+			why = err.Error()
+		}
+		if !lockFits {
+			return "", fmt.Errorf("model family %s: the plan's model list is unavailable (%s) and no usable %s entry exists; sign in, or name an exact model", key, why, modelfamily.LockFileName)
+		}
+		fmt.Fprintf(r.out, "[claw] model family %s: plan model list unavailable (%s); keeping locked %s\n", key, why, locked.ID)
+		r.resolved[key] = locked.ID
+		return locked.ID, nil
+	}
+	decision := fam.Choose(catalog, nil, nil)
+	for _, skipped := range decision.Skipped {
+		fmt.Fprintf(r.out, "[claw] model family %s: not using %s (%s)\n", key, skipped.ID, skipped.Reason)
+	}
+	if lockFits {
+		lockedVersion, _ := fam.Member(locked.ID)
+		candidateVersion, _ := fam.Member(decision.ID)
+		if decision.ID == "" || candidateVersion.Compare(lockedVersion) < 0 {
+			fmt.Fprintf(r.out, "[claw] model family %s: no newer member is offered; keeping locked %s (absence from the list is not retirement)\n", key, locked.ID)
+			r.resolved[key] = locked.ID
+			return locked.ID, nil
+		}
+	}
+	if decision.ID == "" {
+		return "", fmt.Errorf("model family %s: the plan offers no model of this family (%s); adjust the family or name an exact model", key, decision.Reason)
+	}
+	switch {
+	case !hadLock:
+		fmt.Fprintf(r.out, "[claw] model family %s: %s\n", key, decision.ID)
+	case locked.ID != decision.ID:
+		fmt.Fprintf(r.out, "[claw] model family %s: %s -> %s\n", key, locked.ID, decision.ID)
+	}
+	entry := modelfamily.LockEntry{
+		Provider: fam.Provider, Pattern: fam.Pattern, ID: decision.ID,
+		CatalogAt: r.now().UTC().Truncate(time.Second), CllamaTag: source.Tag, CllamaImageID: source.ImageID, PriceSource: "plan",
+	}
+	if hadLock {
+		entry.PreviousID = locked.PreviousID
+		if locked.ID != decision.ID {
+			entry.PreviousID = locked.ID
+		}
+	}
+	r.lock.Families[key] = entry
+	r.dirty = true
+	r.resolved[key] = decision.ID
+	return decision.ID, nil
+}
+
+// loadPinnedPlanCatalog runs "cllama auth catalog <plan> --json" from the
+// pinned cllama image, by image ID, with the pod's auth directory mounted
+// and nothing else. cllama uses the sign-in there and prints model names
+// only; claw never reads the sign-in.
+func loadPinnedPlanCatalog(ctx context.Context, podDir, provider string) (modelfamily.Catalog, priceSource, error) {
+	ref := taggedInfraRef("ghcr.io/mostlydev/cllama", infraCllamaTag)
+	source := priceSource{Tag: infraCllamaTag}
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	idOut, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", ref).Output()
+	imageID := strings.TrimSpace(string(idOut))
+	if err != nil || !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(imageID) {
+		return modelfamily.Catalog{}, source, fmt.Errorf("the pinned cllama image is not present; run claw pull")
+	}
+	source.ImageID = imageID
+	authDir := filepath.Join(podDir, ".claw-auth")
+	if info, err := os.Stat(authDir); err != nil || !info.IsDir() {
+		return modelfamily.Catalog{}, source, fmt.Errorf("no sign-in store; run cllama auth login")
+	}
+	dir, err := os.MkdirTemp("", "claw-plan-catalog-")
+	if err != nil {
+		return modelfamily.Catalog{}, source, err
+	}
+	defer os.RemoveAll(dir)
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		return modelfamily.Catalog{}, source, err
+	}
+	project := "claw-plan-catalog-" + hex.EncodeToString(suffix)
+	composeFile := filepath.Join(dir, "compose.yml")
+	authDir, err = filepath.Abs(authDir)
+	if err != nil {
+		return modelfamily.Catalog{}, source, err
+	}
+	volume, _ := json.Marshal(map[string]any{"type": "bind", "source": strings.ReplaceAll(authDir, "$", "$$"), "target": "/claw/auth", "read_only": false, "bind": map[string]any{"create_host_path": false}})
+	compose := "services:\n  catalog:\n    image: " + imageID + "\n" +
+		"    entrypoint: [\"/cllama\"]\n    command: [\"auth\", \"catalog\", \"" + provider + "\", \"--json\"]\n" +
+		"    read_only: true\n    cap_drop: [ALL]\n    security_opt: [\"no-new-privileges:true\"]\n    pull_policy: never\n" +
+		"    environment:\n      CLAW_AUTH_DIR: /claw/auth\n    volumes:\n      - " + string(volume) + "\n"
+	if err := os.WriteFile(composeFile, []byte(compose), 0o600); err != nil {
+		return modelfamily.Catalog{}, source, err
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		down := exec.CommandContext(cleanupCtx, "docker", "compose", "-p", project, "-f", composeFile, "down", "--remove-orphans")
+		down.Env = scrubbedComposeEnv()
+		_ = down.Run()
+	}()
+	run := exec.CommandContext(ctx, "docker", "compose", "-p", project, "-f", composeFile, "run", "--rm", "--no-deps", "-T", "catalog")
+	run.Env = scrubbedComposeEnv()
+	var stdout bytes.Buffer
+	run.Stdout = &limitedWriter{w: &stdout, n: (1 << 20) + 1}
+	if err := run.Run(); err != nil {
+		return modelfamily.Catalog{}, source, fmt.Errorf("the plan's model list could not be read; check the sign-in with cllama auth status (needs cllama v0.18.0 or later)")
+	}
+	catalog, err := parsePlanCatalog(stdout.Bytes(), provider)
+	return catalog, source, err
+}
+
+// parsePlanCatalog reads cllama's plan catalog output.
+func parsePlanCatalog(raw []byte, provider string) (modelfamily.Catalog, error) {
+	if len(raw) > 1<<20 {
+		return modelfamily.Catalog{}, fmt.Errorf("the plan model list is too large")
+	}
+	var out struct {
+		Provider string `json:"provider"`
+		Complete bool   `json:"complete"`
+		IDs      []any  `json:"ids"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := dec.Decode(&out); err != nil || out.Provider != provider || !out.Complete || out.IDs == nil {
+		return modelfamily.Catalog{}, fmt.Errorf("the plan's model list is not a complete listing")
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return modelfamily.Catalog{}, fmt.Errorf("the plan's model list has trailing content")
+	}
+	if len(out.IDs) > 5000 {
+		return modelfamily.Catalog{}, fmt.Errorf("the plan's model list has too many entries")
+	}
+	seen := map[string]bool{}
+	ids := make([]string, 0, len(out.IDs))
+	for _, item := range out.IDs {
+		id, ok := item.(string)
+		if !ok || id == "" || len(id) > 256 || seen[id] {
+			return modelfamily.Catalog{}, fmt.Errorf("the plan's model list has a malformed entry")
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return modelfamily.Catalog{Complete: true, IDs: ids}, nil
 }
