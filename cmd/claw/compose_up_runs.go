@@ -209,8 +209,9 @@ func writePerRunTemplates(podDir string, p *pod.Pod, templates map[string]*perRu
 				Memory:              limits.Memory,
 				Pids:                limits.Pids,
 			},
-			Worker:  *spec,
-			Content: t.content,
+			Worker:          *spec,
+			Content:         t.content,
+			RequestedModels: requestedModelChain(t.rc),
 		})
 		contexts[name] = &runs.ContextTemplate{Input: *t.context}
 	}
@@ -344,4 +345,25 @@ func finalizeRunsBeforeDown(podDir, generatedPath string) (afterDown func() erro
 func exec2Output(ctx context.Context, name string, args ...string) (string, error) {
 	out, err := osexec.CommandContext(ctx, name, args...).Output()
 	return string(out), err
+}
+
+// requestedModelChain returns, aligned with a claw's compiled model chain,
+// the family reference each entry was resolved from, or "" for an exact
+// model. It is nil when no slot named a family, so a template of exact
+// models is compiled exactly as before.
+func requestedModelChain(rc *driver.ResolvedClaw) []string {
+	if rc == nil || len(rc.RequestedModels) == 0 {
+		return nil
+	}
+	keys := cllama.PolicySlotKeys(rc.Models)
+	out := make([]string, len(keys))
+	any := false
+	for i, slot := range keys {
+		out[i] = rc.RequestedModels[slot]
+		any = any || out[i] != ""
+	}
+	if !any {
+		return nil
+	}
+	return out
 }

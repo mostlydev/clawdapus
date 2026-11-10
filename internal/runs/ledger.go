@@ -108,6 +108,9 @@ type Spec struct {
 type ModelRef struct {
 	Slot string `json:"slot"`
 	Ref  string `json:"ref"`
+	// Requested is the model family reference the pod wrote for this
+	// entry, when the concrete Ref was resolved from one.
+	Requested string `json:"requested,omitempty"`
 }
 
 // ExitInfo records an observed worker exit. Observing an exit is not terminal.

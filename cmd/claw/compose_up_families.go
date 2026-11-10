@@ -130,6 +130,10 @@ func (r *familyResolver) apply(ctx context.Context, rc *driver.ResolvedClaw) err
 		if err != nil {
 			return fmt.Errorf("service %q: model slot %q: %w", rc.ServiceName, slot, err)
 		}
+		if rc.RequestedModels == nil {
+			rc.RequestedModels = map[string]string{}
+		}
+		rc.RequestedModels[slot] = ref
 		rc.Models[slot] = m[1] + "/" + id
 	}
 	return nil

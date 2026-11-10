@@ -359,3 +359,41 @@ func TestFamilyCatalogCannotDowngradeAnEligibleLock(t *testing.T) {
 		}
 	}
 }
+
+// The requested names are aligned with the compiled chain, which orders
+// slots and drops a repeated model.
+func TestRequestedModelChainFollowsThePolicyOrder(t *testing.T) {
+	rig := newFamilyRig(t, terraFamily, map[string]string{"OPENAI_API_KEY": "sk-key"})
+	rig.catalog = modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra", "gpt-6.1-terra"}}
+	rc := &driver.ResolvedClaw{ServiceName: "worker", Cllama: []string{"passthrough"}, Models: map[string]string{
+		"fallback-2": "openai/@terra", // resolves to the same model as primary and is dropped from the chain
+		"primary":    "openai/@terra",
+		"fallback":   "chatgpt/gpt-6.1-terra",
+		"vision":     "openai/gpt-4o",
+	}}
+	if err := rig.r.apply(context.Background(), rc); err != nil {
+		t.Fatal(err)
+	}
+	if rc.RequestedModels["primary"] != "openai/@terra" || rc.RequestedModels["fallback-2"] != "openai/@terra" || len(rc.RequestedModels) != 2 {
+		t.Fatalf("requested = %v", rc.RequestedModels)
+	}
+	got := requestedModelChain(rc)
+	want := []string{"openai/@terra", "", ""} // primary, fallback, vision
+	if len(got) != len(want) {
+		t.Fatalf("chain = %q", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain = %q, want %q", got, want)
+		}
+	}
+
+	// A claw of exact models has no requested list at all.
+	exact := &driver.ResolvedClaw{ServiceName: "worker", Cllama: []string{"passthrough"}, Models: map[string]string{"primary": "openai/gpt-6.1-terra"}}
+	if err := rig.r.apply(context.Background(), exact); err != nil {
+		t.Fatal(err)
+	}
+	if exact.RequestedModels != nil || requestedModelChain(exact) != nil {
+		t.Fatalf("exact claw: %v %v", exact.RequestedModels, requestedModelChain(exact))
+	}
+}

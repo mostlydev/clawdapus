@@ -279,7 +279,7 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 		SpecDigest:         digest,
 		Spec:               spec,
 		TemplateID:         tpl.ID,
-		Models:             templateModels(tplCtx),
+		Models:             templateModels(tpl, tplCtx),
 		ImageID:            tpl.ImageID,
 		RunAgentID:         tpl.Name + "-run-" + idSuffix,
 		RunKey:             req.Key.RunKey(s.podNS),

@@ -18,6 +18,8 @@ import (
 
 	"github.com/mostlydev/clawdapus/internal/cllama"
 	"github.com/mostlydev/clawdapus/internal/driver"
+	"regexp"
+	"strings"
 )
 
 const (
@@ -70,7 +72,15 @@ type Template struct {
 	// Content lists read-only mounts compiled for a task-home template. It is
 	// omitted when empty so a stateless template's identity does not change.
 	Content []ContentMount `json:"content,omitempty"`
+	// RequestedModels is aligned with the compiled model chain: for each
+	// entry, the model family reference the pod wrote, or "" when it named
+	// an exact model. It is omitted when no entry came from a family, so a
+	// template of exact models keeps its bytes and its ID.
+	RequestedModels []string `json:"requested_models,omitempty"`
 }
+
+// familyRefRe is a model family reference as a pod writes it.
+var familyRefRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*/@[a-z][a-z0-9-]*$`)
 
 // ContentMount is one compiled read-only reference mount. Source is an
 // absolute host path resolved and checked by claw up.
@@ -241,12 +251,60 @@ func LoadTemplate(podDir, name string) (*Template, *ContextTemplate, error) {
 	if ctxDigest != tpl.ContextDigest {
 		return nil, nil, fmt.Errorf("template %q: context digest mismatch; rerun claw up", name)
 	}
+	if err := validRequestedModels(tpl.RequestedModels, contextModels(&ctx)); err != nil {
+		return nil, nil, fmt.Errorf("template %q: %v; rerun claw up", name, err)
+	}
 	return &tpl, &ctx, nil
 }
 
 // templateModels returns the concrete model chain compiled into a template's
 // context, in routing order. It is empty when the template declares none.
-func templateModels(ctx *ContextTemplate) []ModelRef {
+func templateModels(tpl *Template, ctx *ContextTemplate) []ModelRef {
+	models := contextModels(ctx)
+	if tpl == nil || len(tpl.RequestedModels) == 0 {
+		return models
+	}
+	// LoadTemplate has checked the list against the chain. A mismatch here
+	// labels nothing: a requested name is never attached to the wrong model.
+	if len(tpl.RequestedModels) != len(models) {
+		return models
+	}
+	out := make([]ModelRef, len(models))
+	for i, m := range models {
+		m.Requested = tpl.RequestedModels[i]
+		out[i] = m
+	}
+	return out
+}
+
+// validRequestedModels checks a template's requested-model list against its
+// compiled chain: one entry per chain entry, each empty or a family
+// reference whose provider is the provider of the model it resolved to.
+func validRequestedModels(requested []string, chain []ModelRef) error {
+	if len(requested) == 0 {
+		return nil
+	}
+	if len(requested) != len(chain) {
+		return fmt.Errorf("requested_models has %d entries for a chain of %d", len(requested), len(chain))
+	}
+	named := false
+	for i, ref := range requested {
+		if ref == "" {
+			continue
+		}
+		named = true
+		provider, _, _ := strings.Cut(chain[i].Ref, "/")
+		if !familyRefRe.MatchString(ref) || !strings.HasPrefix(ref, provider+"/@") {
+			return fmt.Errorf("requested_models entry %d is not a family reference for its model's provider", i)
+		}
+	}
+	if !named {
+		return fmt.Errorf("requested_models names no family")
+	}
+	return nil
+}
+
+func contextModels(ctx *ContextTemplate) []ModelRef {
 	if ctx == nil {
 		return nil
 	}
@@ -339,7 +397,7 @@ func DescribeTemplates(podDir string) (valid []TemplateInfo, invalid []string, e
 			invalid = append(invalid, name)
 			continue
 		}
-		models := templateModels(ctx)
+		models := templateModels(tpl, ctx)
 		if models == nil {
 			models = []ModelRef{}
 		}

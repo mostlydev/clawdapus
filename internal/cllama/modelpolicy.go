@@ -46,8 +46,22 @@ func InjectCompiledModelPolicy(meta map[string]any, models map[string]string) ma
 }
 
 func orderedAllowedModels(models map[string]string) []AllowedModel {
+	allowed, _ := orderedAllowedWithSlots(models)
+	return allowed
+}
+
+// PolicySlotKeys returns, for each entry of the compiled model policy in
+// order, the slot key in models that produced it. It is the same ordering
+// and de-duplication CompileModelPolicy applies, so a caller can attach
+// per-slot information to policy entries without re-deriving the order.
+func PolicySlotKeys(models map[string]string) []string {
+	_, keys := orderedAllowedWithSlots(models)
+	return keys
+}
+
+func orderedAllowedWithSlots(models map[string]string) ([]AllowedModel, []string) {
 	if len(models) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Slot keys in policy order: primary, the fallback chain (fallback,
@@ -72,6 +86,7 @@ func orderedAllowedModels(models map[string]string) []AllowedModel {
 
 	seen := make(map[string]struct{}, len(slots))
 	allowed := make([]AllowedModel, 0, len(slots))
+	keys := make([]string, 0, len(slots))
 	for _, slot := range slots {
 		ref := strings.TrimSpace(models[slot])
 		if ref == "" {
@@ -89,8 +104,9 @@ func orderedAllowedModels(models map[string]string) []AllowedModel {
 			Slot: name,
 			Ref:  ref,
 		})
+		keys = append(keys, slot)
 	}
-	return allowed
+	return allowed, keys
 }
 
 // FallbackSlotOrdinal returns the 1-based chain position for fallback-family
