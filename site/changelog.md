@@ -29,9 +29,13 @@ outline: deep
 
 ## Unreleased
 
+## v0.36.1 <Badge type="tip" text="Latest" /> {#v0-36-1}
+
+*2026-11-10*
+
 - Fix: deliverables written by a worker on a Linux host could not be read by the supervisor, which runs as another user, and were reported as an empty list. The worker's wrapper now makes `deliverables/` and the regular files directly in it readable at the start and end of every turn, leaving the rest of the home private, and the supervisor creates the directory with each home. A directory or file the supervisor is refused is now `deliverables_unreadable` (503), never an empty list or `deliverable_unknown`. Files from a turn killed mid-way are published when the next run for that home starts. Recompile to pick up the wrapper change.
 
-## v0.36.0 <Badge type="tip" text="Latest" /> {#v0-36-0}
+## v0.36.0 {#v0-36-0}
 
 *2026-11-10*
 
