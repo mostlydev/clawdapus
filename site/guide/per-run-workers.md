@@ -330,7 +330,7 @@ a certificate authority only that test's cllama trusts. **No request authorized 
 ChatGPT sign-in has been run**, because no agent signs in: the callback parameters, the tool
 grouping and the vendor's error bodies follow OpenAI's documentation.
 
-### Trying it before a cllama release
+### Contributor workflow: trying a local cllama build
 
 This contributor workflow builds a distinct local image and a local `claw` binary that pins
 it. Run it from a Clawdapus source checkout containing this feature and the cllama commit to
@@ -347,9 +347,8 @@ cd /path/to/pod
 /tmp/claw-plan-trial runs doctor
 ```
 
-Use that same local binary for the trial's lifecycle commands. After a release containing
-plan routes is installed, use the installed `claw pull` and `claw up -d` to return the pod to
-published images. A proxy without plan routes makes `claw runs doctor` report that plan
+Use that same local binary for the trial's lifecycle commands. With Clawdapus v0.32.0 or later
+installed, use the installed `claw pull` and `claw up -d` to return the pod to published images. A proxy without plan routes makes `claw runs doctor` report that plan
 sign-in status is unsupported.
 
 ## What `claw up` produces

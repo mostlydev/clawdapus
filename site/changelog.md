@@ -29,6 +29,10 @@ outline: deep
 
 ## Unreleased
 
+## v0.32.0 <Badge type="tip" text="Latest" /> {#v0-32-0}
+
+*2026-11-10*
+
 - **Task homes for per-run workers** ([#394](https://github.com/mostlydev/clawdapus/issues/394), [ADR-027](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/027-task-home-per-run-profile.md)). A per-run service can opt in with `x-claw.run.home` to a second profile: a persistent home per task, a Hermes worker with a shell and files, and each later run resuming the worker's own session. The stateless PicoClaw profile is unchanged.
   - A launch names a home by an opaque ID; one run at a time may use it. `claw runs home status` and `claw runs home rm` inspect and delete homes.
   - Each run has its own network and a fresh cllama token that is never written into the home.
@@ -44,7 +48,7 @@ outline: deep
 - **Runtime pins:** the five Clawdapus infra images move to `v0.32.0`; cllama moves to [v0.15.0](https://github.com/mostlydev/cllama/releases/tag/v0.15.0). Hermes stays at `v2026.6.19-claw.3`.
 - **Verification limits:** live routing checks used real Hermes containers and synthetic provider responses. Real ChatGPT sign-in/inference, a real Vercel key, and a native Linux host task-home run remain unverified.
 
-## v0.31.0 <Badge type="tip" text="Latest" /> {#v0-31-0}
+## v0.31.0 {#v0-31-0}
 
 *2026-10-25*
 

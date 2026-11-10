@@ -46,7 +46,7 @@ When a request arrives, the proxy:
 3. Validates the `<secure-secret>` against `metadata.json` principals.
 4. Checks the requested model against the agent's allowed models.
 
-With a cllama release supporting plan routes, `chatgpt/<model>` uses the operator's ChatGPT
+With cllama v0.15.0+, `chatgpt/<model>` uses the operator's ChatGPT
 sign-in, held and refreshed in cllama's private auth store. Declare its position in the
 model chain to prefer it or an API key; use a single entry for subscription-only operation.
 `vercel/<provider>/<model>` uses `AI_GATEWAY_API_KEY`. See the

@@ -172,7 +172,7 @@ turn, inspect durable effects before repeating them.
 
 Model routing is the declared chain: `x-claw.models` `primary`, `fallback`,
 `fallback-2`. `chatgpt/<model>` serves from the operator's ChatGPT plan (needs
-a cllama release with plan routes); `vercel/<provider>/<model>` uses
+cllama v0.15.0+); `vercel/<provider>/<model>` uses
 `AI_GATEWAY_API_KEY`; other prefixes use their API key. `chatgpt/…` first and a
 keyed entry after it means plan first, key second; `chatgpt/…` alone never
 uses a key. The operator signs in on the host, never an agent:
