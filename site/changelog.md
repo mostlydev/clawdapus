@@ -29,11 +29,15 @@ outline: deep
 
 ## Unreleased
 
+## v0.32.1 <Badge type="tip" text="Latest" /> {#v0-32-1}
+
+*2026-11-10*
+
 - Fix: ChatGPT plan replies without a Content-Type header are parsed under the existing stream bounds and require a valid completed response. Safe failure diagnostics identify the HTTP status and internal branch without logging body text or sign-in data.
 - Fix: OpenAI models absent from the built-in compatibility list can recover from structured token-limit and sampling-parameter rejections through bounded Responses retries. Validated replies teach an endpoint-specific in-memory hint; exact model selections stay unchanged.
 - Live verification now covers plan-first first turns, exact-session resume, separate-home control, plan-only Terra requests, an empty-store negative control, and API-key GPT-6.1 Terra adaptation with reuse across runs.
 
-## v0.32.0 <Badge type="tip" text="Latest" /> {#v0-32-0}
+## v0.32.0 {#v0-32-0}
 
 *2026-11-10*
 
