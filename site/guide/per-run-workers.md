@@ -187,6 +187,19 @@ services:
 - **Network.** Each run has its own internal network holding the worker and a small forwarder. The forwarder relays to cllama's API port and nowhere else. Two workers cannot reach each other.
 - **Resume.** The first run starts a Hermes session. Each later run for the same home resumes that exact session, and its task text arrives as the next message. A worker killed mid-turn resumes from the last stored turn.
 - **Result.** A finished run's status carries `result.outcome` (`answer` or `question`) and `result.session`. A worker that needs a person writes its question to `.claw-run/question.md` in its home and ends its turn; the run then ends with `outcome: question` and the question as its result. Launch a new run for the same home with the answer as the task.
+- **Failure reason.** When the worker's wrapper ends a run itself, the failure code names why, in the run's status and in the `end` callback's `reason`. The worker's exit code stays in `exit.code`.
+
+  | Reason | Meaning |
+  |---|---|
+  | `worker_runner_exit` | Hermes exited non-zero. `exit.runner_code` is its exit code |
+  | `worker_turn_not_stored` | Hermes exited 0 but stored no reply for this turn in the home |
+  | `worker_session_unproven` | A reply was stored, but the home's store does not show which session it belongs to, or Hermes reported another session |
+  | `worker_session_locator_malformed` | The home's saved session ID is not a valid ID |
+  | `worker_home_invalid` | A managed path in the home is not what the wrapper can safely write |
+  | `worker_usage` | The worker was started without a task |
+
+  The report is one allowlisted name and, for `worker_runner_exit`, a number. It carries no worker output, session ID or path. A report the supervisor does not recognise leaves the reason as `exit_nonzero`, and a worker that exits 0 can never report a failure of its own choosing.
+- **Session proof.** The wrapper reads the turn's session from the home's store, not from Hermes's output: on a resume it is the saved session or its compression continuation, on a first run the one new session without a parent. Missing session records or incompatible ancestry metadata fail with `worker_session_unproven`; the wrapper does not guess from the newest message. Hermes's own `session_id:` line is only a cross-check. That line can be lost when Hermes's background review thread has redirected the process's stderr at the moment it is printed; in releases up to v0.32.1 a lost line ended a stored, successful turn with exit 70.
 - **Authority.** The run's cllama token is new for every run and is never written into the home.
 
 Inspect and delete homes through the supervisor:
@@ -472,7 +485,8 @@ Ruby's `JSON.generate` over a key-sorted hash produces the same bytes for this s
 ```
 accepted ─► running ─► stopped    (exit 0 and an answer was found)
    │           ├─────► failed     (exit_nonzero, timeout, authority_expired,
-   │           │                   spawn_error, result_missing, mismatch)
+   │           │                   spawn_error, result_missing, mismatch,
+   │           │                   task-home: worker_*)
    │           └cancel► revoking ─► revoked ─► stopped
    └─cancel──────────► revoking ─► revoked ─► stopped   (no container ever created)
 ```

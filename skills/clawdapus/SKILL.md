@@ -163,6 +163,13 @@ read-only. Hermes resumes its exact session and can return `result.outcome:
 question`; answer it by launching a later run for the same home. Use
 `claw runs home status|rm <installation> <home>` to inspect or reset it.
 
+From v0.32.2, the wrapper proves the session from the home's stored conversation
+and compression ancestry, so a missing Hermes stderr session hint can be recovered.
+Missing or ambiguous ancestry fails with `worker_session_unproven`. Wrapper failures
+carry fixed `worker_*` codes in run status and the end callback's `reason`; a failed
+runner also has `exit.runner_code`. Arbitrary stderr is not retained. See the
+per-run workers guide for the reason table.
+
 Task-home workers have native terminal/file tools. Each has its own network
 through a fixed cllama forwarder, plus a separate networkless read-only home
 meter. `run.home.max-bytes` defaults to 1 GiB; exceeding it cancels the run as

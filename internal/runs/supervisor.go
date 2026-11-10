@@ -934,12 +934,18 @@ func (s *Supervisor) stepMonitor(ctx context.Context, rec *Record, now time.Time
 		return true, nil
 	}
 	if c.Exited {
-		if err := s.captureResult(ctx, rec, c); err != nil {
+		worker, err := s.captureResult(ctx, rec, c)
+		if err != nil {
 			return false, err
 		}
 		rec.Exit = &ExitInfo{Code: c.ExitCode, At: now}
 		if c.ExitCode != 0 {
 			rec.Failure = ReasonExitNonZero
+			if worker != nil {
+				// The wrapper named which of its own checks ended the run.
+				rec.Failure = worker.Reason
+				rec.Exit.RunnerCode = worker.RunnerCode
+			}
 		}
 		return true, nil
 	}
@@ -1018,24 +1024,48 @@ func (s *Supervisor) callbackFailed(rec *Record, err error) (bool, error) {
 	return false, fmt.Errorf("callback delivery failed")
 }
 
-func (s *Supervisor) captureResult(ctx context.Context, rec *Record, c Container) error {
+// workerFailure is what a task-home worker's wrapper said about its own
+// non-zero exit: one allowlisted reason and, for a failed runner, its code.
+type workerFailure struct {
+	Reason     string
+	RunnerCode *int
+}
+
+// captureResult stores the worker's answer. For a task-home worker that
+// exited non-zero it returns the wrapper's own failure report instead, when
+// there is a well-formed one naming a known reason.
+func (s *Supervisor) captureResult(ctx context.Context, rec *Record, c Container) (*workerFailure, error) {
 	if rec.Result != nil || rec.Failure == ReasonResultMissing {
-		return nil
+		return nil, nil
 	}
 	tpl, _, err := LoadTemplate(s.cfg.PodDir, rec.Spec.Template)
 	if err != nil {
-		return fmt.Errorf("load template: %w", err)
+		return nil, fmt.Errorf("load template: %w", err)
 	}
 	limit := tpl.Limits.MaxResultBytes
 	// Read past the answer limit to allow for the runner banner, but bound it.
 	raw, sourceTruncated, err := s.cfg.Executor.Stdout(ctx, c.ID, limit+resultPreambleBytes+headerAllowance(tpl))
 	if err != nil {
-		return fmt.Errorf("read worker stdout: %w", err)
+		return nil, fmt.Errorf("read worker stdout: %w", err)
 	}
 	answer, truncated, found := extractAnswer(raw, tpl.Worker.Result.Marker, limit+headerAllowance(tpl))
 	var header *resultHeader
 	if found && tpl.Worker.Result.Header == driver.RunResultHeaderJSONLine {
 		header, answer, found = splitResultHeader(answer)
+		if found && header.Outcome == OutcomeFailed {
+			// A failure report is never a result. It is honored only for a
+			// task-home worker that really exited non-zero; with a zero exit
+			// the result is simply missing.
+			if c.ExitCode == 0 {
+				rec.Failure = ReasonResultMissing
+				return nil, nil
+			}
+			reason := workerReasonPrefix + header.Reason
+			if rec.HomeHash == "" || !workerReasons[reason] {
+				return nil, nil
+			}
+			return &workerFailure{Reason: reason, RunnerCode: header.RunnerExit}, nil
+		}
 		if found && len(answer) > limit {
 			answer, truncated = cutAtRune(answer, limit), true
 		}
@@ -1046,10 +1076,10 @@ func (s *Supervisor) captureResult(ctx context.Context, rec *Record, c Container
 		if c.ExitCode == 0 {
 			rec.Failure = ReasonResultMissing
 		}
-		return nil
+		return nil, nil
 	}
 	if err := writeFileAtomic(s.resultPath(rec.Key), answer, 0o600); err != nil {
-		return err
+		return nil, err
 	}
 	rec.Result = &ResultInfo{Bytes: len(answer), Truncated: truncated || sourceTruncated}
 	if header != nil {
@@ -1057,7 +1087,7 @@ func (s *Supervisor) captureResult(ctx context.Context, rec *Record, c Container
 		rec.Result.Session = header.Session
 		rec.Result.Truncated = rec.Result.Truncated || header.Truncated
 	}
-	return nil
+	return nil, nil
 }
 
 // resultPreambleBytes bounds runner output (banner, notices) read before the
@@ -1105,7 +1135,16 @@ type resultHeader struct {
 	Outcome   string `json:"outcome"`
 	Session   string `json:"session"`
 	Truncated bool   `json:"truncated"`
+	// Reason and RunnerExit belong to a failure report only.
+	Reason     string `json:"reason"`
+	RunnerExit *int   `json:"runner_exit"`
 }
+
+// OutcomeFailed marks a wrapper's report of its own failure. It is never a
+// result outcome.
+const OutcomeFailed = "failed"
+
+var workerReasonRe = regexp.MustCompile(`^[a-z][a-z_]{0,47}$`)
 
 func headerAllowance(tpl *Template) int {
 	if tpl.Worker.Result.Header == driver.RunResultHeaderJSONLine {
@@ -1136,6 +1175,20 @@ func splitResultHeader(framed []byte) (*resultHeader, []byte, bool) {
 	}
 	// Exactly one JSON value: anything after it, even a stray token, is refused.
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return nil, nil, false
+	}
+	if h.Outcome == OutcomeFailed {
+		// A failure report is a header alone: a reason name, optionally the
+		// runner's exit code, and nothing that belongs to a result.
+		if h.Session != "" || h.Truncated || len(bytes.TrimSpace(body)) != 0 || !workerReasonRe.MatchString(h.Reason) {
+			return nil, nil, false
+		}
+		if h.RunnerExit != nil && (*h.RunnerExit < -255 || *h.RunnerExit > 255) {
+			return nil, nil, false
+		}
+		return &h, nil, true
+	}
+	if h.Reason != "" || h.RunnerExit != nil {
 		return nil, nil, false
 	}
 	if h.Outcome != OutcomeAnswer && h.Outcome != OutcomeQuestion {
@@ -1188,7 +1241,7 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 	}
 	if needsDown {
 		if !rec.Cancelled && rec.Result == nil && len(containers) == 1 && containers[0].Exited {
-			if err := s.captureResult(ctx, rec, containers[0]); err != nil {
+			if _, err := s.captureResult(ctx, rec, containers[0]); err != nil {
 				return false, err
 			}
 		}
