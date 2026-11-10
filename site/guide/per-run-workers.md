@@ -325,10 +325,26 @@ workers through cllama against a local fake provider. It covers:
 - a worker that dumps its environment and mounts and finds no sign-in, key or operator token;
 - no sign-in token in the proxy log, the callbacks or the pod directory outside the store.
 
-For the plan cases the fixture stands in for OpenAI's endpoint on the pod's own network, with
-a certificate authority only that test's cllama trusts. **No request authorized by a real
-ChatGPT sign-in has been run**, because no agent signs in: the callback parameters, the tool
-grouping and the vendor's error bodies follow OpenAI's documentation.
+For the synthetic plan cases the fixture stands in for OpenAI's endpoint on the pod's own
+network, with a certificate authority only that test's cllama trusts.
+
+On 2026-11-10, a collaborating test operator also verified an existing real ChatGPT sign-in
+with Hermes task-home workers: plan-first first turn, exact-session resume with a durable
+file check, separate-home control, and plan-only calls on `chatgpt/gpt-5.6-terra` and
+`chatgpt/gpt-6.1-terra`. All 23 responses used the subscription, with no API-key fallback or
+plan-failure events. A separate empty-store control failed with
+`subscription_signin_required` and zero upstream requests. The sign-in store was not copied, no agent read or wrote it, and the test performed
+no sign-in; cllama may have refreshed the record itself. These results establish those
+inference paths, not every account, token-refresh, or quota-limit case.
+
+### Live API compatibility verification
+
+On 2026-11-10, the same integration workflow verified `openai/gpt-6.1-terra` through
+an API key: first turn (4 responses), exact-session resume (5), and separate-home control
+(2). One initial `max_tokens` rejection triggered the Responses adapter; all 11 responses
+succeeded, and later calls reused the learned shape without another rejection. A same-build plan regression served six subscription
+responses, and the empty-store control again made no upstream request. No sampling
+rejection occurred in this live test; that retry branch is covered by synthetic tests.
 
 ### Contributor workflow: trying a local cllama build
 
