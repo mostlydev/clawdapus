@@ -337,6 +337,15 @@ plan-failure events. A separate empty-store control failed with
 no sign-in; cllama may have refreshed the record itself. These results establish those
 inference paths, not every account, token-refresh, or quota-limit case.
 
+### Live API compatibility verification
+
+On 2026-11-10, the same integration workflow verified `openai/gpt-6.1-terra` through
+an API key: first turn (4 responses), exact-session resume (5), and separate-home control
+(2). One initial `max_tokens` rejection triggered the Responses adapter; all 11 responses
+succeeded, and later calls reused the learned shape without another rejection. A same-build plan regression served six subscription
+responses, and the empty-store control again made no upstream request. No sampling
+rejection occurred in this live test; that retry branch is covered by synthetic tests.
+
 ### Contributor workflow: trying a local cllama build
 
 This contributor workflow builds a distinct local image and a local `claw` binary that pins
@@ -551,14 +560,3 @@ Durable state lives in `<pod>/.claw-runs/` (mode `0700`):
 cllama's revocation ledger in `.claw-revocations/` grows by about 80 bytes per run, up to a 16 MiB bound. See the cllama README for capacity planning.
 
 Already-dispatched remote tool effects are never undone by a cancel. cllama's audit records which dispatches were admitted before the revocation.
-
-
-### Live API compatibility verification
-
-On 2026-11-10, the same integration workflow verified `openai/gpt-6.1-terra` through
-an API key: first turn (4 responses), exact-session resume (5), and separate-home control
-(2). One initial `max_tokens` rejection triggered the Responses adapter; all 11 responses
-succeeded, and later calls reused the learned shape without another rejection. The data
-policy checks remained active. A same-build plan regression served six subscription
-responses, and the empty-store control again made no upstream request. No sampling
-rejection occurred in this live test; that retry branch is covered by synthetic tests.
