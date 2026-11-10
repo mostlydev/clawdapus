@@ -19,6 +19,7 @@ import (
 type fakeExec struct {
 	mu         sync.Mutex
 	containers map[string][]Container
+	aux        map[string][]Container
 	ups        int
 	downs      int
 	lastEnv    map[string]string
@@ -28,7 +29,9 @@ type fakeExec struct {
 	upNoop     bool
 }
 
-func newFakeExec() *fakeExec { return &fakeExec{containers: map[string][]Container{}} }
+func newFakeExec() *fakeExec {
+	return &fakeExec{containers: map[string][]Container{}, aux: map[string][]Container{}}
+}
 
 func (f *fakeExec) Up(_ context.Context, project, file string, env map[string]string) error {
 	f.mu.Lock()
@@ -58,6 +61,11 @@ func (f *fakeExec) Up(_ context.Context, project, file string, env map[string]st
 	w := doc.Services[workerService]
 	key := w.Labels[LabelRunKey]
 	f.containers[key] = append(f.containers[key], Container{ID: project + "-worker", Running: true, ImageID: w.Image, Labels: w.Labels})
+	for name, svc := range doc.Services {
+		if name != workerService {
+			f.aux[key] = append(f.aux[key], Container{ID: project + "-" + name, Running: true, ImageID: svc.Image, Labels: svc.Labels})
+		}
+	}
 	return nil
 }
 
@@ -68,9 +76,21 @@ func (f *fakeExec) Down(_ context.Context, project, _ string) error {
 	for key, cs := range f.containers {
 		if len(cs) > 0 && strings.HasPrefix(cs[0].ID, project) {
 			delete(f.containers, key)
+			delete(f.aux, key)
+		}
+	}
+	for key, cs := range f.aux {
+		if len(cs) > 0 && strings.HasPrefix(cs[0].ID, project) {
+			delete(f.aux, key)
 		}
 	}
 	return nil
+}
+
+func (f *fakeExec) AuxContainers(_ context.Context, key string) ([]Container, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]Container(nil), f.aux[key]...), nil
 }
 
 func (f *fakeExec) Containers(_ context.Context, keyHash string) ([]Container, error) {

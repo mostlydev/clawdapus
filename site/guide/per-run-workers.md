@@ -22,7 +22,7 @@ Clawdapus configures per-run PicoClaw workers to use OpenAI chat/completions. cl
 
 To keep a verifiable trace of every run, enable the cllama [trace journal](/guide/cllama#trace-journal) (cllama v0.13.0 or newer). Revoking a run identity then writes a coverage seal that accounts for every request the run made. `GET /v1/health` reports the capture epoch cllama last wrote, read fresh on each call (`null` when there is no usable epoch file, which does not by itself mean the journal is off), so an orchestrator can pin it before launching. Each run's status records the epoch observed just before its worker started. Both are read from cllama's epoch file and don't prove which proxy process is live: a valid file can outlive a stopped or restarting proxy. The seal's epoch remains the check.
 
-v1 supports the **PicoClaw** runner only. Any other `CLAW_TYPE` with `lifecycle: per-run` fails `claw up`.
+The stateless profile described on this page supports the **PicoClaw** runner only. The opt-in [task-home profile](#task-homes) supports **Hermes**. Any other combination fails `claw up`.
 
 ## Declaring a template
 
@@ -156,6 +156,62 @@ Credential-only rotation does not change the template identity; endpoint, tool
 and policy changes do. Recompile through the normal drain/stop-supervisor,
 `claw up`, start-supervisor sequence when changing credentials. Do not edit
 generated manifests or mutate live run contexts as a rotation mechanism.
+
+## Task homes
+
+A stateless worker answers from what it is handed. A **task-home** worker carries one unit of work across several runs: it has a shell and files, and each later run resumes its own conversation. The rule is: *a task has a home; a run is a clean container visiting it.* The design and its reasons are in [ADR-027](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/027-task-home-per-run-profile.md).
+
+The Hermes task-home profile rejects `reasoning-effort` and `provider-preferences` until request-option projection is supported; it never silently drops those settings.
+
+A service opts in with `x-claw.run.home`. Everything above still applies unless this section says otherwise, and a service that does not opt in is unchanged.
+
+```yaml
+services:
+  worker:
+    image: my-hermes-worker:latest   # CLAW_TYPE hermes
+    x-claw:
+      agent: ./AGENTS.md
+      lifecycle: per-run
+      run:
+        max-runtime: 30m
+        home: {}                     # opts in; mount defaults to /home/task
+        content:                     # optional read-only reference mounts
+          - source: ./reference/handbook
+            target: /reference/handbook
+```
+
+- **Home.** A launch names a home with the spec field `home`: an opaque ID of 1 to 128 characters from `A-Z a-z 0-9 . _ -`, not starting with a dot. The supervisor maps the installation and the ID to a private directory under `.claw-homes/`; the caller never names a path. Two installations that use the same ID get different homes. `home` is required for a task-home template and refused for a stateless one.
+- **One live run per home.** A home is reserved from the moment a launch is accepted until that run's container is removed and its authority is revoked. Another launch for it is refused with `409 home_busy`. A run still waiting for cllama's revocation acknowledgement keeps its home; other homes are unaffected.
+- **Mounts.** The home is the only persistent writable path. `content` sources are resolved at `claw up`, must stay inside the pod directory, and are mounted read-only. The root filesystem stays read-only.
+- **Native tools.** The worker has Hermes's terminal, file, memory, skills and todo tools, working inside its home. Managed business tools still reach it through cllama.
+- **Network.** Each run has its own internal network holding the worker and a small forwarder. The forwarder relays to cllama's API port and nowhere else. Two workers cannot reach each other.
+- **Resume.** The first run starts a Hermes session. Each later run for the same home resumes that exact session, and its task text arrives as the next message. A worker killed mid-turn resumes from the last stored turn.
+- **Result.** A finished run's status carries `result.outcome` (`answer` or `question`) and `result.session`. A worker that needs a person writes its question to `.claw-run/question.md` in its home and ends its turn; the run then ends with `outcome: question` and the question as its result. Launch a new run for the same home with the answer as the task.
+- **Authority.** The run's cllama token is new for every run and is never written into the home.
+
+Inspect and delete homes through the supervisor:
+
+```bash
+claw runs home status <installation> <home>
+claw runs home rm <installation> <home>      # refused while a run reserves it
+```
+
+The same verbs are `GET` and `DELETE /v1/homes/{installation}/{home}` on the socket. Deleting a home is how to reset a task: the next run for that ID starts with an empty home and a new session. `claw up` and `claw down` leave homes in place.
+
+::: warning Storage is not capped
+`run.home.max-bytes` sets a logical-byte watchdog threshold (default 1073741824, or 1 GiB).
+A separate meter mounts the home read-only with no network or credentials. Crossing the threshold
+ends the run as `home_full` through normal revocation and teardown. A home the meter cannot measure
+(over 5,000,000 entries, or an unreadable directory) and a missing or failed meter end it as
+`home_meter_unavailable`.
+
+This is a watchdog, not a hard quota: a fast writer can fill the host disk before detection or
+teardown. Use the profile where you accept that limitation; it was accepted for the internal trial.
+After a killed turn, inspect durable effects before repeating them. Resume preserves history,
+but does not provide exactly-once shell execution.
+:::
+
+`go test -tags spike -run '^TestSpikeTaskHomeWorkers$' ./cmd/claw` proves this profile end to end with a local fake provider.
 
 ## What `claw up` produces
 

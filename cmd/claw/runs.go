@@ -213,6 +213,32 @@ var runsResultCmd = &cobra.Command{
 	},
 }
 
+var runsHomeCmd = &cobra.Command{
+	Use:   "home",
+	Short: "Inspect and delete task homes (x-claw.run.home)",
+}
+
+var runsHomeStatusCmd = &cobra.Command{
+	Use:   "status <installation> <home>",
+	Short: "Show whether a task home exists and which run reserves it",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runsRequest(cmd, "GET", runs.HomePath(args[0], args[1]), nil)
+	},
+}
+
+var runsHomeRmCmd = &cobra.Command{
+	Use:   "rm <installation> <home>",
+	Short: "Delete a task home; refused while a run reserves it",
+	Long: `Delete a task home and everything in it, including the worker's session
+history. The next run that names this home starts with an empty one. The
+request is refused with home_busy while an unfinished run reserves the home.`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runsRequest(cmd, "DELETE", runs.HomePath(args[0], args[1]), nil)
+	},
+}
+
 var runsDoctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check the run ledger and list run workers it does not know",
@@ -380,6 +406,7 @@ func init() {
 		c.Flags().StringVar(&runsWait, "wait", "", "Long-poll until this state (running, revoked, stopped, failed)")
 	}
 	runsDoctorCmd.Flags().BoolVar(&runsRemoveOrphans, "remove-orphans", false, "Remove orphaned run workers of this pod through Compose")
-	runsCmd.AddCommand(runsServeCmd, runsLaunchCmd, runsStatusCmd, runsCancelCmd, runsResultCmd, runsDoctorCmd)
+	runsHomeCmd.AddCommand(runsHomeStatusCmd, runsHomeRmCmd)
+	runsCmd.AddCommand(runsServeCmd, runsLaunchCmd, runsStatusCmd, runsCancelCmd, runsResultCmd, runsDoctorCmd, runsHomeCmd)
 	rootCmd.AddCommand(runsCmd)
 }

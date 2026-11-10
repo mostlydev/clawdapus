@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mostlydev/clawdapus/internal/cllama"
+	"github.com/mostlydev/clawdapus/internal/driver"
 )
 
 // Container is the read-only view of a worker container.
@@ -84,9 +87,15 @@ type Supervisor struct {
 	runtimeDir string
 	admitLocks sync.Map // key hash -> *sync.Mutex
 	stepLocks  sync.Map // key hash -> *sync.Mutex
-	changed    chan struct{}
-	watchMu    sync.Mutex
-	watchers   map[string][]chan struct{}
+	// homeMu serializes every decision about task homes: admitting a run that
+	// names one, and deleting one. It is taken before a key's admit lock.
+	homeMu sync.Mutex
+	// trashMu serializes removal of detached homes. It is never held with
+	// homeMu, so removal cannot delay admission.
+	trashMu  sync.Mutex
+	changed  chan struct{}
+	watchMu  sync.Mutex
+	watchers map[string][]chan struct{}
 
 	testHookBeforeAccept func()
 	testHookBeforeUp     func()
@@ -177,6 +186,10 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 	}
 	tpl, _, tplErr := LoadTemplate(s.cfg.PodDir, spec.Template)
 
+	if spec.Home != "" {
+		s.homeMu.Lock()
+		defer s.homeMu.Unlock()
+	}
 	unlock := s.admit(req.Key)
 	defer unlock()
 
@@ -232,6 +245,19 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 		return nil, false, apiErr(http.StatusUnprocessableEntity, "grant_exceeded", "authority_expires_at exceeds the template max-authority")
 	}
 
+	homeHash := ""
+	if spec.Home != "" {
+		homeHash = HomeHash(req.Key.Installation, spec.Home)
+		holder, err := s.homeHolder(homeHash, req.Key)
+		if err != nil {
+			// An unreadable ledger cannot show the home is free.
+			return nil, false, apiErr(http.StatusServiceUnavailable, "ledger_unavailable", "run ledger unreadable")
+		}
+		if holder != nil {
+			return nil, false, apiErr(http.StatusConflict, "home_busy", "home is reserved by run %s", holder.Key.RunID)
+		}
+	}
+
 	secret, err := randomHex(24)
 	if err != nil {
 		return nil, false, apiErr(http.StatusServiceUnavailable, "entropy_unavailable", "cannot mint run identity")
@@ -250,6 +276,7 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 		RunAgentID:         tpl.Name + "-run-" + idSuffix,
 		RunKey:             req.Key.RunKey(s.podNS),
 		Project:            "clawrun-" + s.podNS + "-" + req.Key.RunKey(s.podNS)[:16],
+		HomeHash:           homeHash,
 		State:              StateAccepted,
 		AuthorityExpiresAt: req.AuthorityExpiresAt.UTC(),
 		Credential:         CredentialNone,
@@ -289,6 +316,14 @@ func checkGrant(tpl *Template, spec *Spec) error {
 	}
 	if spec.MaxRuntimeSeconds < 0 || spec.MaxRuntimeSeconds > tpl.Limits.MaxRuntimeSeconds {
 		return apiErr(http.StatusUnprocessableEntity, "grant_exceeded", "spec.max_runtime_seconds exceeds %d", tpl.Limits.MaxRuntimeSeconds)
+	}
+	switch {
+	case tpl.Worker.Home == nil && spec.Home != "":
+		return apiErr(http.StatusBadRequest, "spec_invalid", "spec.home is not accepted by a stateless template")
+	case tpl.Worker.Home != nil && spec.Home == "":
+		return apiErr(http.StatusBadRequest, "spec_invalid", "spec.home is required by a task-home template")
+	case spec.Home != "" && !ValidHomeID(spec.Home):
+		return apiErr(http.StatusBadRequest, "spec_invalid", "spec.home must be 1-128 characters of A-Z a-z 0-9 . _ - and not start with a dot")
 	}
 	grant := make(map[string]struct{}, len(tpl.ToolsGrant))
 	for _, name := range tpl.ToolsGrant {
@@ -717,7 +752,19 @@ func (s *Supervisor) stepSpawn(ctx context.Context, rec *Record, now time.Time) 
 		rec.Failure = ReasonSpawnError
 		return true, fmt.Errorf("write run context: %w", err)
 	}
-	project, err := renderProject(tpl, rec)
+	homeSource := ""
+	if tpl.Worker.Home != nil {
+		if rec.HomeHash == "" {
+			rec.Failure = ReasonMismatch
+			return true, nil
+		}
+		if err := s.ensureHome(rec); err != nil {
+			rec.Failure = ReasonSpawnError
+			return true, fmt.Errorf("prepare task home: %w", err)
+		}
+		homeSource = s.homeMountSource(rec.HomeHash)
+	}
+	project, err := renderProject(tpl, rec, homeSource)
 	if err != nil {
 		rec.Failure = ReasonSpawnError
 		return true, err
@@ -859,6 +906,14 @@ func verifyContainers(rec *Record, containers []Container) string {
 }
 
 func (s *Supervisor) stepMonitor(ctx context.Context, rec *Record, now time.Time) (bool, error) {
+	if rec.HomeHash != "" {
+		if reason, err := s.checkHomeMeter(ctx, rec); err != nil {
+			return false, err
+		} else if reason != "" {
+			rec.Failure = reason
+			return true, nil
+		}
+	}
 	containers, err := s.cfg.Executor.Containers(ctx, rec.RunKey)
 	if err != nil {
 		return false, fmt.Errorf("list containers: %w", err)
@@ -887,6 +942,40 @@ func (s *Supervisor) stepMonitor(ctx context.Context, rec *Record, now time.Time
 		return true, nil
 	}
 	return s.deliverProgress(ctx, rec, now)
+}
+
+type auxContainerLister interface {
+	AuxContainers(context.Context, string) ([]Container, error)
+}
+
+func (s *Supervisor) checkHomeMeter(ctx context.Context, rec *Record) (string, error) {
+	lister, ok := s.cfg.Executor.(auxContainerLister)
+	if !ok {
+		return ReasonHomeMeterUnavailable, nil
+	}
+	cs, err := lister.AuxContainers(ctx, rec.RunKey)
+	if err != nil {
+		return ReasonHomeMeterUnavailable, nil
+	}
+	var meter *Container
+	for i := range cs {
+		if cs[i].Labels[LabelRole] == RoleRunMeter {
+			if meter != nil {
+				return ReasonHomeMeterUnavailable, nil
+			}
+			meter = &cs[i]
+		}
+	}
+	if meter == nil {
+		return ReasonHomeMeterUnavailable, nil
+	}
+	if meter.Exited && meter.ExitCode == 75 {
+		return ReasonHomeFull, nil
+	}
+	if !meter.Running {
+		return ReasonHomeMeterUnavailable, nil
+	}
+	return "", nil
 }
 
 // deliverProgress sends start and heartbeat callbacks while running.
@@ -937,11 +1026,18 @@ func (s *Supervisor) captureResult(ctx context.Context, rec *Record, c Container
 	}
 	limit := tpl.Limits.MaxResultBytes
 	// Read past the answer limit to allow for the runner banner, but bound it.
-	raw, sourceTruncated, err := s.cfg.Executor.Stdout(ctx, c.ID, limit+resultPreambleBytes)
+	raw, sourceTruncated, err := s.cfg.Executor.Stdout(ctx, c.ID, limit+resultPreambleBytes+headerAllowance(tpl))
 	if err != nil {
 		return fmt.Errorf("read worker stdout: %w", err)
 	}
-	answer, truncated, found := extractAnswer(raw, tpl.Worker.Result.Marker, limit)
+	answer, truncated, found := extractAnswer(raw, tpl.Worker.Result.Marker, limit+headerAllowance(tpl))
+	var header *resultHeader
+	if found && tpl.Worker.Result.Header == driver.RunResultHeaderJSONLine {
+		header, answer, found = splitResultHeader(answer)
+		if found && len(answer) > limit {
+			answer, truncated = cutAtRune(answer, limit), true
+		}
+	}
 	if !found {
 		// No answer marker in the readable stream: the result is missing,
 		// never a known-complete empty answer.
@@ -954,6 +1050,11 @@ func (s *Supervisor) captureResult(ctx context.Context, rec *Record, c Container
 		return err
 	}
 	rec.Result = &ResultInfo{Bytes: len(answer), Truncated: truncated || sourceTruncated}
+	if header != nil {
+		rec.Result.Outcome = header.Outcome
+		rec.Result.Session = header.Session
+		rec.Result.Truncated = rec.Result.Truncated || header.Truncated
+	}
 	return nil
 }
 
@@ -975,13 +1076,73 @@ func extractAnswer(stdout []byte, marker string, limit int) (answer []byte, trun
 	}
 	answer = bytes.TrimSuffix(answer, []byte("\n"))
 	if len(answer) > limit {
-		cut := limit
-		for cut > 0 && !utf8.RuneStart(answer[cut]) {
-			cut--
-		}
-		return append([]byte(nil), answer[:cut]...), true, true
+		return cutAtRune(answer, limit), true, true
 	}
 	return append([]byte(nil), answer...), false, true
+}
+
+func cutAtRune(b []byte, limit int) []byte {
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(b[cut]) {
+		cut--
+	}
+	return append([]byte(nil), b[:cut]...)
+}
+
+// Result header bounds. The header is produced inside the worker container,
+// so it is parsed strictly and nothing in it is trusted beyond its shape.
+const (
+	maxResultHeaderBytes = 1024
+	OutcomeAnswer        = "answer"
+	OutcomeQuestion      = "question"
+)
+
+var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+
+type resultHeader struct {
+	Outcome   string `json:"outcome"`
+	Session   string `json:"session"`
+	Truncated bool   `json:"truncated"`
+}
+
+func headerAllowance(tpl *Template) int {
+	if tpl.Worker.Result.Header == driver.RunResultHeaderJSONLine {
+		return maxResultHeaderBytes + 1
+	}
+	return 0
+}
+
+// splitResultHeader parses the one-line JSON header that starts a task-home
+// result and returns the body after it. Any deviation is a missing result.
+func splitResultHeader(framed []byte) (*resultHeader, []byte, bool) {
+	line, body, ok := bytes.Cut(framed, []byte("\n"))
+	if !ok {
+		// A header with an empty body: extractAnswer trimmed the final newline.
+		line, body = framed, nil
+	}
+	if len(line) == 0 || len(line) > maxResultHeaderBytes {
+		return nil, nil, false
+	}
+	if !utf8.Valid(line) || rejectDuplicateKeys(line) != nil {
+		return nil, nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(line))
+	dec.DisallowUnknownFields()
+	var h resultHeader
+	if err := dec.Decode(&h); err != nil {
+		return nil, nil, false
+	}
+	// Exactly one JSON value: anything after it, even a stray token, is refused.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return nil, nil, false
+	}
+	if h.Outcome != OutcomeAnswer && h.Outcome != OutcomeQuestion {
+		return nil, nil, false
+	}
+	if !sessionIDRe.MatchString(h.Session) {
+		return nil, nil, false
+	}
+	return &h, body, true
 }
 
 func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Time) (bool, error) {
@@ -1009,7 +1170,17 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 	if err != nil {
 		return false, fmt.Errorf("list containers: %w", err)
 	}
-	if len(containers) > 0 {
+	needsDown := len(containers) > 0
+	if rec.HomeHash != "" {
+		if lister, ok := s.cfg.Executor.(auxContainerLister); ok {
+			aux, err := lister.AuxContainers(ctx, rec.RunKey)
+			if err != nil {
+				return false, fmt.Errorf("list auxiliary containers: %w", err)
+			}
+			needsDown = needsDown || len(aux) > 0
+		}
+	}
+	if needsDown {
 		if !rec.Cancelled && rec.Result == nil && len(containers) == 1 && containers[0].Exited {
 			if err := s.captureResult(ctx, rec, containers[0]); err != nil {
 				return false, err
@@ -1024,6 +1195,14 @@ func (s *Supervisor) stepTeardown(ctx context.Context, rec *Record, now time.Tim
 		}
 		if len(remaining) > 0 {
 			return false, fmt.Errorf("%d labelled containers remain after compose down", len(remaining))
+		}
+		if rec.HomeHash != "" {
+			if lister, ok := s.cfg.Executor.(auxContainerLister); ok {
+				aux, err := lister.AuxContainers(ctx, rec.RunKey)
+				if err != nil || len(aux) > 0 {
+					return false, fmt.Errorf("auxiliary container removal not verified")
+				}
+			}
 		}
 		if revokeErr != nil {
 			return true, fmt.Errorf("worker removed; cllama revoke not acknowledged: %w", revokeErr)
@@ -1228,7 +1407,7 @@ func (s *Supervisor) Orphans(ctx context.Context) ([]Container, error) {
 	}
 	var orphans []Container
 	for _, w := range workers {
-		if _, ok := known[w.Labels[LabelRunKey]]; !ok {
+		if _, ok := known[containerRunKey(w)]; !ok {
 			orphans = append(orphans, w)
 		}
 	}
@@ -1274,6 +1453,14 @@ func (s *Supervisor) FinalizeWithoutProxy(ctx context.Context, k Key, proxyGone 
 	}
 	if len(containers) > 0 {
 		return fmt.Errorf("run %s/%s still has %d worker container(s)", k.Installation, k.RunID, len(containers))
+	}
+	if rec.HomeHash != "" {
+		if lister, ok := s.cfg.Executor.(auxContainerLister); ok {
+			aux, err := lister.AuxContainers(ctx, rec.RunKey)
+			if err != nil || len(aux) > 0 {
+				return fmt.Errorf("run auxiliary container removal not verified")
+			}
+		}
 	}
 	gone, err := proxyGone(ctx)
 	if err != nil {
@@ -1322,7 +1509,7 @@ func (s *Supervisor) FinalizeWithoutProxy(ctx context.Context, k Key, proxyGone 
 // executor passes an empty project on stdin, never an ambient file.
 func (s *Supervisor) RemoveOrphan(ctx context.Context, c Container) error {
 	project := c.Labels["com.docker.compose.project"]
-	if c.Labels[LabelPodNS] != s.podNS || !strings.HasPrefix(project, "clawrun-"+s.podNS+"-") || c.Labels[LabelRunKey] == "" {
+	if c.Labels[LabelPodNS] != s.podNS || !strings.HasPrefix(project, "clawrun-"+s.podNS+"-") || containerRunKey(c) == "" {
 		return fmt.Errorf("container %s is not a run worker of this pod", c.ID)
 	}
 	recs, err := s.ledger.All()
@@ -1330,11 +1517,20 @@ func (s *Supervisor) RemoveOrphan(ctx context.Context, c Container) error {
 		return err
 	}
 	for _, r := range recs {
-		if r.RunKey == c.Labels[LabelRunKey] {
+		if r.RunKey == containerRunKey(c) {
 			return fmt.Errorf("container %s belongs to a known run; it is not an orphan", c.ID)
 		}
 	}
 	return s.cfg.Executor.Down(ctx, project, "")
+}
+
+// containerRunKey returns the run a labelled container belongs to: a worker
+// by its run-key label, a task-home gate by the run it forwards for.
+func containerRunKey(c Container) string {
+	if key := c.Labels[LabelRunKey]; key != "" {
+		return key
+	}
+	return c.Labels[LabelGateFor]
 }
 
 // probeAgentID is a reserved identity that can never belong to a worker or a

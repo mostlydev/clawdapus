@@ -67,6 +67,16 @@ type Template struct {
 	ContextDigest string               `json:"context_digest"`
 	Limits        Limits               `json:"limits"`
 	Worker        driver.RunWorkerSpec `json:"worker"`
+	// Content lists read-only mounts compiled for a task-home template. It is
+	// omitted when empty so a stateless template's identity does not change.
+	Content []ContentMount `json:"content,omitempty"`
+}
+
+// ContentMount is one compiled read-only reference mount. Source is an
+// absolute host path resolved and checked by claw up.
+type ContentMount struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
 }
 
 // computeID digests every field except the ID itself.

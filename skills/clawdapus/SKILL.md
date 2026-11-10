@@ -48,7 +48,7 @@ claw api schedule <subcommand>      # inspect/control scheduled invocations via 
     # list | get <id> | pause <id> | resume <id> | skip-next <id> |
     # clear-skip-next <id> | fire <id>
 
-# Per-run workers (x-claw.lifecycle: per-run; PicoClaw only)
+# Per-run workers (stateless PicoClaw; opt-in task-home Hermes)
 claw runs serve [--socket-dir DIR] [--allow-uid UID] [--callback-origin URL]   # supervisor; holds the pod run lock
 claw runs launch|status|cancel|result <installation> <run-id> [...]            # Unix-socket clients
 claw runs doctor [--remove-orphans]                                            # ledger check, orphaned workers
@@ -155,7 +155,23 @@ Service skills: `claw.skill.emit` label > operator override > fallback stub.
 
 ## Per-Run Workers
 
-A service with `x-claw.lifecycle: per-run` is compiled by `claw up` into a run template under `.claw-runs/templates/` and is never a long-lived compose service. `claw runs serve` (a host process) launches one worker per run as its own Compose project on an `internal` network shared with cllama, with a fresh cllama identity, read-only rootfs, tmpfs `/tmp`, uid 65534 and no host mounts. Cancel tombstones the run, revokes the identity through cllama's durable fence (requires cllama v0.11.0+), then removes the container. Workers speak OpenAI chat/completions; direct Anthropic keys and current OpenAI GPT-6 models need cllama v0.12.0+. `x-claw.reasoning-effort: {<slot>: none|minimal|low|medium|high}` (per-run only) makes the worker send that `reasoning_effort` for the slot. With cllama v0.13.0+, `CLLAMA_TRACE_JOURNAL: "on"` in `cllama-defaults.env` records a durable, verifiable segment per request, and each revoke writes a coverage seal proving every request of a run was captured. `claw up` and `claw down` refuse while the supervisor holds the pod lock; `claw up` also refuses while any run is unfinished. See `site/guide/per-run-workers.md` for the socket API, spec digest (RFC 8785) and callback contract.
+The default profile remains stateless PicoClaw. Hermes can opt into a persistent
+task home with `x-claw.run.home: {}`. Launch specs then require an opaque `home`
+ID, scoped by installation; the supervisor admits one live run per home. Only
+that home is mounted read-write; pod `run.content` mounts reference content
+read-only. Hermes resumes its exact session and can return `result.outcome:
+question`; answer it by launching a later run for the same home. Use
+`claw runs home status|rm <installation> <home>` to inspect or reset it.
+
+Task-home workers have native terminal/file tools. Each has its own network
+through a fixed cllama forwarder, plus a separate networkless read-only home
+meter. `run.home.max-bytes` defaults to 1 GiB; exceeding it cancels the run as
+`home_full`. Meter loss fails closed. This watchdog is not a hard storage
+quota: host disk exhaustion before detection remains possible. After a killed
+turn, inspect durable effects before repeating them. Subscription sign-in is
+not supported by this profile; provider keys remain behind cllama.
+
+For stateless PicoClaw, a service with `x-claw.lifecycle: per-run` is compiled by `claw up` into a run template under `.claw-runs/templates/` and is never a long-lived compose service. `claw runs serve` (a host process) launches one worker per run as its own Compose project on an `internal` network shared with cllama, with a fresh cllama identity, read-only rootfs, tmpfs `/tmp`, uid 65534 and no host mounts. Cancel tombstones the run, revokes the identity through cllama's durable fence (requires cllama v0.11.0+), then removes the container. Workers speak OpenAI chat/completions; direct Anthropic keys and current OpenAI GPT-6 models need cllama v0.12.0+. `x-claw.reasoning-effort: {<slot>: none|minimal|low|medium|high}` (per-run only) makes the worker send that `reasoning_effort` for the slot. With cllama v0.13.0+, `CLLAMA_TRACE_JOURNAL: "on"` in `cllama-defaults.env` records a durable, verifiable segment per request, and each revoke writes a coverage seal proving every request of a run was captured. `claw up` and `claw down` refuse while the supervisor holds the pod lock; `claw up` also refuses while any run is unfinished. See `site/guide/per-run-workers.md` for the socket API, spec digest (RFC 8785) and callback contract.
 
 ## claw-pod.yml Reference
 

@@ -29,7 +29,11 @@ outline: deep
 
 ## Unreleased
 
-<!-- Nothing yet -->
+- **Task homes for per-run workers** ([#394](https://github.com/mostlydev/clawdapus/issues/394), [ADR-027](https://github.com/mostlydev/clawdapus/blob/master/docs/decisions/027-task-home-per-run-profile.md)). A per-run service can opt in with `x-claw.run.home` to a second profile: a persistent home per task, a Hermes worker with a shell and files, and each later run resuming the worker's own session. The stateless PicoClaw profile is unchanged.
+  - A launch names a home by an opaque ID; one run at a time may use it. `claw runs home status` and `claw runs home rm` inspect and delete homes.
+  - Each run has its own network and a fresh cllama token that is never written into the home.
+  - A run can end with a question for a person, reported as `result.outcome: question`.
+  - A networkless read-only meter cancels oversized homes at `run.home.max-bytes` (default 1 GiB). This watchdog is not a hard quota; see the [guide](/guide/per-run-workers#task-homes).
 
 ## v0.31.0 <Badge type="tip" text="Latest" /> {#v0-31-0}
 
