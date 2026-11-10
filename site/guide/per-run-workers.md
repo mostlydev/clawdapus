@@ -508,6 +508,14 @@ Put the `id` in the spec as `template_id`:
 
 Each run's status carries `template_id` and `models`, the chain it was admitted with.
 
+When a chain entry was resolved from a [model family](/guide/pod-yaml#model-families), its `models` entry also carries `requested`, the reference the pod wrote:
+
+```json
+{"slot":"primary","ref":"openai/gpt-6.1-terra","requested":"openai/@terra"}
+```
+
+An entry for an exact model has no `requested`. The value comes from the compiled template and is part of its ID, so a template that uses a family has a new ID after upgrading to a version that records it; a spec pinned to the old ID is refused with `template_changed` as usual. A run keeps the `ref` and `requested` it was admitted with.
+
 `tools` must be a subset of the template grant, and an empty list removes every managed tool. The credential is outside the spec, so the digest never covers a token.
 
 ### Generation
@@ -594,7 +602,7 @@ The one-shot contract is pinned and verified against PicoClaw v0.2.7.
 | `claw runs status <inst> <run> [--wait stopped]` | Show a run's status |
 | `claw runs cancel <inst> <run> --generation N [--wait stopped]` | Cancel a run |
 | `claw runs result <inst> <run>` | Print the answer |
-| `claw runs doctor [--remove-orphans]` | Check the ledger, find orphaned workers and show plan sign-in state |
+| `claw runs doctor [--remove-orphans]` | Report [model family drift](/guide/pod-yaml#checking-for-drift), check the ledger, find orphaned workers and show plan sign-in state |
 
 Durable state lives in `<pod>/.claw-runs/` (mode `0700`):
 

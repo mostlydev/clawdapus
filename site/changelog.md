@@ -29,6 +29,8 @@ outline: deep
 
 ## Unreleased
 
+- Model families: `GET /v1/templates` and a run's status now show `requested` beside the concrete `ref` for a chain entry resolved from a family (`openai/@terra`). The value is part of the compiled template and its ID, so a template that uses a family gets a new ID on the next `claw up`; exact-model templates are unchanged. `claw runs doctor` reports family drift read-only: up to date, a newer member that `claw up` would move to, a newer member that is not eligible and why, a locked model absent from the current listing, or an unavailable listing.
+
 ## v0.34.0 <Badge type="tip" text="Latest" /> {#v0-34-0}
 
 *2026-11-10*

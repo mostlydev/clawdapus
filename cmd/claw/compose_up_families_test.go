@@ -397,3 +397,106 @@ func TestRequestedModelChainFollowsThePolicyOrder(t *testing.T) {
 		t.Fatalf("exact claw: %v %v", exact.RequestedModels, requestedModelChain(exact))
 	}
 }
+
+// Drift reporting says how each locked model compares with the provider's
+// listing now. It reads only.
+func TestFamilyDriftReport(t *testing.T) {
+	lockPath := func(rig *familyRig) string { return filepath.Join(rig.dir, modelfamily.LockFileName) }
+	// seeded returns a rig whose lock holds the given model, resolved from a
+	// listing that offered it.
+	seeded := func(t *testing.T, locked string) *familyRig {
+		rig := newFamilyRig(t, terraFamily, map[string]string{"OPENAI_API_KEY": "sk-key"})
+		rig.catalog = modelfamily.Catalog{Complete: true, IDs: []string{locked}}
+		if _, err := rig.up(map[string]string{"primary": "openai/@terra"}); err != nil {
+			t.Fatal(err)
+		}
+		return rig
+	}
+	cases := map[string]struct {
+		locked  string
+		fam     modelfamily.Family
+		catalog modelfamily.Catalog
+		offline bool
+		want    []string
+		not     []string
+	}{
+		"up to date": {"gpt-6.1-terra", terraFamily, modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra", "gpt-6.1-terra"}}, false,
+			[]string{"model family openai/@terra: locked gpt-6.1-terra; up to date"}, []string{"would move", "absent"}},
+		"newer member available": {"gpt-5.6-terra", terraFamily, modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra", "gpt-6.1-terra"}}, false,
+			[]string{"locked gpt-5.6-terra; claw up would move to gpt-6.1-terra"}, []string{"absent"}},
+		"newer member not eligible": {"gpt-6.1-terra", terraFamily, modelfamily.Catalog{Complete: true, IDs: []string{"gpt-6.1-terra", "gpt-7-terra"}}, false,
+			[]string{"locked gpt-6.1-terra; newer member gpt-7-terra is not eligible (unpriced)"}, []string{"would move", "absent"}},
+		"locked model absent, nothing newer": {"gpt-6.1-terra", terraFamily, modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra"}}, false,
+			[]string{"locked gpt-6.1-terra; absent from this listing"}, []string{"would move", "retire", "deprecat"}},
+		"locked model absent, newer priced": {"gpt-5.6-terra", terraFamily, modelfamily.Catalog{Complete: true, IDs: []string{"gpt-6.1-terra"}}, false,
+			[]string{"locked gpt-5.6-terra; absent from this listing; claw up would move to gpt-6.1-terra"}, []string{"retire"}},
+		"listing unavailable": {"gpt-6.1-terra", terraFamily, modelfamily.Catalog{}, true,
+			[]string{"locked gpt-6.1-terra, still qualifies; listing unavailable (model listing could not be read)"}, []string{"would move", "absent"}},
+		"listing incomplete": {"gpt-6.1-terra", terraFamily, modelfamily.Catalog{Complete: false, IDs: []string{"gpt-9-terra"}}, false,
+			[]string{"locked gpt-6.1-terra, still qualifies; listing unavailable (incomplete)"}, []string{"gpt-9-terra"}},
+		"ceiling tightened below the lock": {"gpt-6.1-terra", modelfamily.Family{Name: "terra", Provider: "openai", Pattern: "gpt-*-terra", MaxInput: 1.5, MaxOutput: 18},
+			modelfamily.Catalog{Complete: true, IDs: []string{"gpt-5.6-terra", "gpt-6.1-terra"}}, false,
+			[]string{"locked gpt-6.1-terra; no longer qualifies (input_price_over_ceiling)"}, []string{"would move"}},
+		"version tie in the listing": {"gpt-6-terra-x", terraFamily, modelfamily.Catalog{}, false, nil, nil}, // replaced below
+	}
+	delete(cases, "version tie in the listing")
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rig := seeded(t, tc.locked)
+			before, _ := os.ReadFile(lockPath(rig))
+			rig.again(tc.fam)
+			rig.catalog, rig.catalogOK = tc.catalog, !tc.offline
+			lines := rig.r.familyDrift(context.Background())
+			got := strings.Join(lines, "\n")
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("report = %q, want %q", got, want)
+				}
+			}
+			for _, not := range append(tc.not, "sk-key") {
+				if strings.Contains(got, not) {
+					t.Fatalf("report mentions %q: %q", not, got)
+				}
+			}
+			if len(lines) != 1 {
+				t.Fatalf("lines = %q", lines)
+			}
+			// Nothing was written, and nothing was announced as a move.
+			after, _ := os.ReadFile(lockPath(rig))
+			if !bytes.Equal(before, after) || rig.r.dirty || rig.out.Len() != 0 {
+				t.Fatalf("drift reporting changed state: dirty=%v out=%q", rig.r.dirty, rig.out.String())
+			}
+		})
+	}
+
+	// A pod with no family and no lock reports nothing and reads nothing.
+	plain := newFamilyRig(t, terraFamily, map[string]string{"OPENAI_API_KEY": "sk-key"})
+	plain.r.families = map[string]modelfamily.Family{}
+	if lines := plain.r.familyDrift(context.Background()); len(lines) != 0 || plain.priceRuns != 0 || len(plain.fetches) != 0 {
+		t.Fatalf("plain pod: %q", lines)
+	}
+	if _, err := os.Stat(lockPath(plain)); !os.IsNotExist(err) {
+		t.Fatal("drift reporting created a lock file")
+	}
+
+	// A declared family that was never resolved, and a lock entry whose
+	// family the pod no longer declares.
+	fresh := newFamilyRig(t, terraFamily, map[string]string{"OPENAI_API_KEY": "sk-key"})
+	if lines := fresh.r.familyDrift(context.Background()); len(lines) != 1 || !strings.Contains(lines[0], "not resolved yet") || len(fresh.fetches) != 0 {
+		t.Fatalf("unresolved family: %q", lines)
+	}
+	orphan := seeded(t, "gpt-6.1-terra")
+	orphan.again(modelfamily.Family{Name: "luna", Provider: "openai", Pattern: "gpt-*-luna", MaxInput: 1, MaxOutput: 2})
+	lines := orphan.r.familyDrift(context.Background())
+	if len(lines) != 2 || !strings.Contains(lines[0], "openai/@luna: declared, not resolved yet") || !strings.Contains(lines[1], "openai/@terra: locked gpt-6.1-terra, but the pod declares no such family") {
+		t.Fatalf("removed family: %q", lines)
+	}
+
+	// A provider the resolver cannot read, and a custom endpoint, are said so.
+	custom := seeded(t, "gpt-6.1-terra")
+	custom.again(terraFamily)
+	custom.storeURL = "https://eu.api.openai.com/v1"
+	if lines := custom.r.familyDrift(context.Background()); len(lines) != 1 || !strings.Contains(lines[0], "listing not read") || len(custom.fetches) != 1 {
+		t.Fatalf("custom endpoint: %q fetches=%v", lines, custom.fetches)
+	}
+}

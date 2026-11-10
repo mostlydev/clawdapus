@@ -77,11 +77,11 @@ type ResolvedClaw struct {
 	ServiceName     string
 	ImageRef        string
 	ClawType        string
-	Agent           string                            // filename from image labels (e.g., "AGENTS.md")
-	AgentHostPath   string                            // resolved host path for bind mount
-	Persona         string                            // runtime persona ref from x-claw or image metadata
-	PersonaHostPath string                            // resolved host path for persona workspace mount
-	Models          map[string]string                 // slot -> provider/model
+	Agent           string            // filename from image labels (e.g., "AGENTS.md")
+	AgentHostPath   string            // resolved host path for bind mount
+	Persona         string            // runtime persona ref from x-claw or image metadata
+	PersonaHostPath string            // resolved host path for persona workspace mount
+	Models          map[string]string // slot -> provider/model
 	// RequestedModels holds, for each slot that named a model family, the
 	// reference the pod wrote ("openai/@terra"). Models holds what it
 	// resolved to. Slots that named an exact model are absent.

@@ -312,13 +312,25 @@ func contextModels(ctx *ContextTemplate) []ModelRef {
 	if err != nil {
 		return nil
 	}
+	// Only the slot and the concrete reference are read from the context. A
+	// requested name comes from the verified template and nowhere else.
 	var policy struct {
-		Allowed []ModelRef `json:"allowed"`
+		Allowed []struct {
+			Slot string `json:"slot"`
+			Ref  string `json:"ref"`
+		} `json:"allowed"`
 	}
 	if json.Unmarshal(raw, &policy) != nil {
 		return nil
 	}
-	return policy.Allowed
+	if policy.Allowed == nil {
+		return nil
+	}
+	out := make([]ModelRef, len(policy.Allowed))
+	for i, m := range policy.Allowed {
+		out[i] = ModelRef{Slot: m.Slot, Ref: m.Ref}
+	}
+	return out
 }
 
 // TemplateInfo is what an orchestrator may know about a compiled template:

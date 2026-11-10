@@ -394,3 +394,31 @@ func TestMalformedRequestedModelsInvalidateTheTemplate(t *testing.T) {
 		}
 	}
 }
+
+// A requested name written into the context cannot label a model: only the
+// template's own list does.
+func TestRequestedNameInTheContextIsIgnored(t *testing.T) {
+	h := newHarness(t, false)
+	tpl, ctx, err := LoadTemplate(h.podDir, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx.Input.Metadata["model_policy"] = map[string]any{"mode": "clamp", "allowed": []any{
+		map[string]any{"slot": "primary", "ref": "openai/gpt-6.1-terra", "requested": "openai/@terra"},
+	}}
+	if err := WriteTemplates(h.podDir, []*Template{tpl}, map[string]*ContextTemplate{"worker": ctx}); err != nil {
+		t.Fatal(err)
+	}
+	listing, invalid, err := DescribeTemplates(h.podDir)
+	if err != nil || len(invalid) != 0 || len(listing) != 1 || len(listing[0].Models) != 1 {
+		t.Fatalf("listing: %v %v %v", listing, invalid, err)
+	}
+	if m := listing[0].Models[0]; m.Ref != "openai/gpt-6.1-terra" || m.Requested != "" {
+		t.Fatalf("a context-side requested name surfaced: %+v", m)
+	}
+	raw, digest := pinnedSpec(t, "task", listing[0].ID)
+	rec, err := h.launchSpec("a", raw, digest)
+	if err != nil || len(rec.Models) != 1 || rec.Models[0].Requested != "" {
+		t.Fatalf("run record: %v %+v", err, rec)
+	}
+}
