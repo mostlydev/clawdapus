@@ -467,27 +467,28 @@ func (srv *Server) handleResult(w http.ResponseWriter, r *http.Request) {
 
 // StatusView is the public run status.
 type StatusView struct {
-	Installation       string      `json:"installation"`
-	RunID              string      `json:"run_id"`
-	Generation         uint64      `json:"generation"`
-	SpecDigest         string      `json:"spec_digest,omitempty"`
-	Template           string      `json:"template,omitempty"`
-	TemplateID         string      `json:"template_id,omitempty"`
-	Models             []ModelRef  `json:"models,omitempty"`
-	RunAgentID         string      `json:"run_agent_id,omitempty"`
-	State              State       `json:"state"`
-	Cancelled          bool        `json:"cancelled"`
-	Revoked            bool        `json:"revoked"`
-	RevocationProof    string      `json:"revocation_proof,omitempty"`
-	ExitCode           *int        `json:"exit_code"`
-	Failure            string      `json:"failure,omitempty"`
-	Result             *ResultInfo `json:"result,omitempty"`
-	Credential         string      `json:"credential"`
-	Callbacks          Callbacks   `json:"callbacks"`
-	AuthorityExpiresAt *time.Time  `json:"authority_expires_at,omitempty"`
-	Deadline           *time.Time  `json:"deadline,omitempty"`
-	Timestamps         Timestamps  `json:"timestamps"`
-	Pending            string      `json:"pending,omitempty"`
+	Content            []ContentSelection `json:"content,omitempty"`
+	Installation       string             `json:"installation"`
+	RunID              string             `json:"run_id"`
+	Generation         uint64             `json:"generation"`
+	SpecDigest         string             `json:"spec_digest,omitempty"`
+	Template           string             `json:"template,omitempty"`
+	TemplateID         string             `json:"template_id,omitempty"`
+	Models             []ModelRef         `json:"models,omitempty"`
+	RunAgentID         string             `json:"run_agent_id,omitempty"`
+	State              State              `json:"state"`
+	Cancelled          bool               `json:"cancelled"`
+	Revoked            bool               `json:"revoked"`
+	RevocationProof    string             `json:"revocation_proof,omitempty"`
+	ExitCode           *int               `json:"exit_code"`
+	Failure            string             `json:"failure,omitempty"`
+	Result             *ResultInfo        `json:"result,omitempty"`
+	Credential         string             `json:"credential"`
+	Callbacks          Callbacks          `json:"callbacks"`
+	AuthorityExpiresAt *time.Time         `json:"authority_expires_at,omitempty"`
+	Deadline           *time.Time         `json:"deadline,omitempty"`
+	Timestamps         Timestamps         `json:"timestamps"`
+	Pending            string             `json:"pending,omitempty"`
 
 	CaptureEpoch           string     `json:"capture_epoch,omitempty"`
 	CaptureEpochObservedAt *time.Time `json:"capture_epoch_observed_at,omitempty"`
@@ -500,6 +501,7 @@ func statusView(rec *Record) *StatusView {
 		return nil
 	}
 	v := &StatusView{
+		Content:      rec.Content,
 		Installation: rec.Key.Installation, RunID: rec.Key.RunID, Generation: rec.Generation,
 		SpecDigest: rec.SpecDigest, TemplateID: rec.TemplateID, Models: rec.Models, RunAgentID: rec.RunAgentID, State: rec.State, Cancelled: rec.Cancelled,
 		Revoked: rec.Revoked, RevocationProof: rec.RevocationProof, Failure: rec.Failure, Result: rec.Result, Credential: rec.Credential,

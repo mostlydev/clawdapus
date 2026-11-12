@@ -85,8 +85,9 @@ var familyRefRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*/@[a-z][a-z0-9-]*$`)
 // ContentMount is one compiled read-only reference mount. Source is an
 // absolute host path resolved and checked by claw up.
 type ContentMount struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
+	Versioned bool   `json:"versioned,omitempty"`
+	Source    string `json:"source"`
+	Target    string `json:"target"`
 }
 
 // computeID digests every field except the ID itself.
@@ -346,7 +347,8 @@ type TemplateInfo struct {
 	Profile string `json:"profile"`
 	// ContentTargets are the in-worker paths of a task-home template's
 	// read-only reference mounts. Host paths are not listed.
-	ContentTargets []string `json:"content_targets,omitempty"`
+	ContentTargets          []string `json:"content_targets,omitempty"`
+	VersionedContentTargets []string `json:"versioned_content_targets,omitempty"`
 	// DataPolicy summarizes what cllama enforces for the template's model
 	// calls. It is absent when the template compiled none.
 	DataPolicy *DataPolicySummary `json:"data_policy,omitempty"`
@@ -420,6 +422,9 @@ func DescribeTemplates(podDir string) (valid []TemplateInfo, invalid []string, e
 		}
 		for _, mount := range tpl.Content {
 			info.ContentTargets = append(info.ContentTargets, mount.Target)
+			if mount.Versioned {
+				info.VersionedContentTargets = append(info.VersionedContentTargets, mount.Target)
+			}
 		}
 		valid = append(valid, info)
 	}

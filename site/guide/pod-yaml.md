@@ -447,3 +447,7 @@ The wall serves `mode=tail` (non-consuming, latest-N walk) by default. Starting 
 ## Generated Output
 
 `claw up` reads the pod YAML, inspects images, runs driver enforcement, generates per-agent configs, wires the cllama proxy, and calls `docker compose`. The output is `compose.generated.yml` -- a standard compose file written next to the pod file. Inspect it freely, but do not hand-edit it; it is regenerated on every `claw up`.
+
+### Versioned task-home references
+
+A `run.content` entry may set `versioned: true`; its `source` must be a directory root inside the pod directory. A task-home launch must select an immutable snapshot ID for every versioned target using its `content` map. Fixed mounts and stateless workers retain their current behavior. See [versioned reference snapshots](./per-run-workers#versioned-reference-snapshots) for sealing, bounds, provenance, and publisher retention requirements.

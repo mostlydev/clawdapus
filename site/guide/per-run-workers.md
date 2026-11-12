@@ -202,6 +202,39 @@ services:
 - **Session proof.** The wrapper reads the turn's session from the home's store, not from Hermes's output: on a resume it is the saved session or its compression continuation, on a first run the one new session without a parent. Missing session records or incompatible ancestry metadata fail with `worker_session_unproven`; the wrapper does not guess from the newest message. Hermes's own `session_id:` line is only a cross-check. That line can be lost when Hermes's background review thread has redirected the process's stderr at the moment it is printed; in releases up to v0.32.1 a lost line ended a stored, successful turn with exit 70.
 - **Authority.** The run's cllama token is new for every run and is never written into the home.
 
+### Versioned reference snapshots
+
+For fresh reference exports without recompiling the pod, declare a task-home content root:
+
+```yaml
+run:
+  home: {}
+  content:
+    - source: snapshots/handbook
+      target: /reference/handbook
+      versioned: true
+```
+
+The host publisher writes `snapshots/handbook/<id>/`, then seals the directory and every entry with `chmod -R a+rX,a-w`. Directories must have `o+rx` and regular files `o+r` so the container user can read them. Only directories and regular files are accepted: no symlinks, FIFOs or devices. IDs match `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`. The launch spec selects each versioned target:
+
+```json
+{"template":"worker","home":"task-42","task":"Read the reference","content":{"/reference/handbook":"export-20261112"}}
+```
+
+`content` is a nonempty string map covered by the canonical spec digest (nested keys use JCS UTF-16 order). Every declared versioned target must be supplied; fixed or unknown targets cannot be selected. Stateless templates refuse this field. Omission never mounts the root or chooses a latest version. Existing fixed content mounts keep their behavior. Adding `versioned` changes the compiled template ID; publishing another snapshot does not. `GET /v1/templates` adds `versioned_content_targets`, without exposing host roots.
+
+Admission time scales with snapshot size and currently serializes other home admissions while hashing. Admission walks the selected directory descriptor-relative, without following links, and verifies sealed modes. Bounds are 20,000 entries including the root, 32 levels below the root, and 256 MiB of regular-file bytes. Run status records sorted `content` entries with `target`, `snapshot`, and `manifest_digest`. The supervisor computes the digest; the publisher does not need to compute it. It hashes JSON entries sorted by relative path, including the root (`path: ""`), with type, permission bits, file size and file SHA256. It rechecks this manifest before spawning, including after supervisor restart when a run has not yet spawned.
+
+| Refusal | Meaning |
+|---|---|
+| `spec_invalid` (400) | Invalid ID/map, stateless selection, or unknown/fixed target |
+| `content_selection_missing` (400) | A versioned target was omitted |
+| `content_snapshot_unknown` (422) | Selected directory does not exist |
+| `content_snapshot_invalid` (422) | Unreadable, writable, unsafe, or oversized snapshot |
+| `content_snapshot_changed` (run failure) | Snapshot no longer matches admission before spawn |
+
+The **trusted host publisher must retain each issued directory unchanged while any unfinished run names it**. No snapshot garbage collection is performed by claw. Sealed modes and read-only mounts prevent worker writes; the host owner can still change modes or replace paths. Descriptor checks do not bind Docker's later path lookup to the checked inode, so this contract does not defend against a host publisher that mutates the directory between verification and bind. Do not swap version directories. Sync, scanning, and publishing stay on the host; a launch accepts no host command or Git credential.
+
 ### Deliverables
 
 A worker hands files to the person who gave it the task by putting them in `deliverables/` at the top of its home. The worker's contract tells it so. The supervisor serves that one directory, flat, and nothing else in the home.

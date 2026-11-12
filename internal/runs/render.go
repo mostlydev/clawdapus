@@ -2,6 +2,7 @@ package runs
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -151,6 +152,19 @@ func renderProject(tpl *Template, rec *Record, homeSource string) ([]byte, error
 			"bind":   map[string]any{"create_host_path": false},
 		}}
 		for _, c := range tpl.Content {
+			if c.Versioned {
+				id := ""
+				for _, selected := range rec.Content {
+					if selected.Target == c.Target {
+						id = selected.Snapshot
+						break
+					}
+				}
+				if !snapshotIDRe.MatchString(id) {
+					return nil, fmt.Errorf("missing versioned content selection")
+				}
+				c.Source = filepath.Join(c.Source, id)
+			}
 			volumes = append(volumes, map[string]any{
 				"type":      "bind",
 				"source":    composeLiteral(c.Source),

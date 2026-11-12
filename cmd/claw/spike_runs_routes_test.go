@@ -118,7 +118,25 @@ func TestSpikeTaskHomeRoutes(t *testing.T) {
         max-runtime: 5m
         max-authority: 30m
         home: {}
+        content:
+          - source: snapshots
+            target: /ref
+            versioned: true
 `, name, workerImage, models)
+	}
+	for _, id := range []string{"v1", "v2"} {
+		dir := filepath.Join(workDir, "snapshots", id)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		spikeWriteFile(t, filepath.Join(dir, "version.txt"), "SNAPSHOT-"+id)
+		if err := os.Chmod(filepath.Join(dir, "version.txt"), 0444); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(dir, 0555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0755) })
 	}
 	spikeWriteFile(t, podFile, fmt.Sprintf(`name: %[1]s
 
@@ -252,9 +270,13 @@ services:
 		t.Fatalf("a refused callback changed the sign-in state: %+v", st)
 	}
 
-	launch := func(runID, template, task string) {
+	launch := func(runID, template, task string, version ...string) {
+		snapshot := "v1"
+		if len(version) > 0 {
+			snapshot = version[0]
+		}
 		t.Helper()
-		raw, _ := json.Marshal(map[string]any{"template": template, "task": task, "tools": []string{}, "home": "home-" + runID})
+		raw, _ := json.Marshal(map[string]any{"template": template, "task": task, "tools": []string{}, "home": "home-" + runID, "content": map[string]string{"/ref": snapshot}})
 		_, _, digest, _ := runs.CanonicalSpec(raw)
 		if err := client.Do(ctx, "POST", "/v1/runs", map[string]any{
 			"installation": "inst", "run_id": runID, "generation": 1, "spec_digest": digest,
@@ -531,6 +553,19 @@ services:
 	}
 	if err := client.Do(ctx, "GET", "/v1/homes/inst/home-dl1/deliverables/private.txt", nil, &fetched); err == nil {
 		t.Fatal("case 10: a workspace file was served as a deliverable")
+	}
+
+	// 11. The same compiled template selects distinct immutable references.
+	for _, id := range []string{"v1", "v2"} {
+		runID := "snapshot-" + id
+		launch(runID, "gateway", "RUN: cat /ref/version.txt; if echo BAD > /ref/version.txt 2>/dev/null; then echo WRITABLE; fi", id)
+		view, out := answer(runID)
+		if !strings.Contains(out, "SNAPSHOT-"+id) || strings.Contains(out, "WRITABLE") {
+			t.Fatalf("snapshot %s: %s", id, out)
+		}
+		if len(view.Content) != 1 || view.Content[0].Snapshot != id || view.Content[0].ManifestDigest == "" {
+			t.Fatalf("snapshot status: %+v", view.Content)
+		}
 	}
 
 	// The synthetic tokens appear nowhere but the sign-in record: not in the

@@ -130,8 +130,9 @@ type RunHome struct {
 // RunContent is one declared read-only mount. Source is relative to the pod
 // file and is resolved and checked by claw up.
 type RunContent struct {
-	Source string
-	Target string
+	Versioned bool
+	Source    string
+	Target    string
 }
 
 // DefaultRunHomeMount is where a task home is mounted unless the pod says

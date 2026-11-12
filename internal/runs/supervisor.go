@@ -280,6 +280,10 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 		}
 	}
 
+	content, err := resolveContentSelections(tpl, spec)
+	if err != nil {
+		return nil, false, err
+	}
 	secret, err := randomHex(24)
 	if err != nil {
 		return nil, false, apiErr(http.StatusServiceUnavailable, "entropy_unavailable", "cannot mint run identity")
@@ -289,6 +293,7 @@ func (s *Supervisor) Launch(ctx context.Context, req LaunchRequest) (*Record, bo
 		return nil, false, apiErr(http.StatusServiceUnavailable, "entropy_unavailable", "cannot mint run identity")
 	}
 	rec := &Record{
+		Content:            content,
 		Key:                req.Key,
 		Generation:         req.Generation,
 		SpecDigest:         digest,
@@ -348,6 +353,9 @@ func checkGrant(tpl *Template, spec *Spec) error {
 		return apiErr(http.StatusBadRequest, "spec_invalid", "spec.home is required by a task-home template")
 	case spec.Home != "" && !ValidHomeID(spec.Home):
 		return apiErr(http.StatusBadRequest, "spec_invalid", "spec.home must be 1-128 characters of A-Z a-z 0-9 . _ - and not start with a dot")
+	}
+	if err := checkContentGrant(tpl, spec); err != nil {
+		return err
 	}
 	grant := make(map[string]struct{}, len(tpl.ToolsGrant))
 	for _, name := range tpl.ToolsGrant {
@@ -789,6 +797,10 @@ func (s *Supervisor) stepSpawn(ctx context.Context, rec *Record, now time.Time) 
 			return true, fmt.Errorf("prepare task home: %w", err)
 		}
 		homeSource = s.homeMountSource(rec.HomeHash)
+	}
+	if err := verifyContentSelections(tpl, rec); err != nil {
+		rec.Failure = ReasonContentSnapshotChanged
+		return true, nil
 	}
 	project, err := renderProject(tpl, rec, homeSource)
 	if err != nil {
