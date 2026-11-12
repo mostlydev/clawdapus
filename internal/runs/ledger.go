@@ -30,16 +30,17 @@ func (s State) Terminal() bool { return s == StateStopped || s == StateFailed }
 
 // Failure reasons.
 const (
-	ReasonExitNonZero          = "exit_nonzero"
-	ReasonTimeout              = "timeout"
-	ReasonAuthorityExpired     = "authority_expired"
-	ReasonSpawnError           = "spawn_error"
-	ReasonContainerMissing     = "container_missing"
-	ReasonDuplicate            = "duplicate"
-	ReasonMismatch             = "mismatch"
-	ReasonResultMissing        = "result_missing"
-	ReasonHomeFull             = "home_full"
-	ReasonHomeMeterUnavailable = "home_meter_unavailable"
+	ReasonExitNonZero            = "exit_nonzero"
+	ReasonTimeout                = "timeout"
+	ReasonAuthorityExpired       = "authority_expired"
+	ReasonContentSnapshotChanged = "content_snapshot_changed"
+	ReasonSpawnError             = "spawn_error"
+	ReasonContainerMissing       = "container_missing"
+	ReasonDuplicate              = "duplicate"
+	ReasonMismatch               = "mismatch"
+	ReasonResultMissing          = "result_missing"
+	ReasonHomeFull               = "home_full"
+	ReasonHomeMeterUnavailable   = "home_meter_unavailable"
 )
 
 var (
@@ -90,10 +91,11 @@ func (k Key) RunKey(podNS string) string {
 
 // Spec is the immutable, digest-covered launch request body.
 type Spec struct {
-	Template          string   `json:"template"`
-	Task              string   `json:"task"`
-	Tools             []string `json:"tools"`
-	MaxRuntimeSeconds int64    `json:"max_runtime_seconds,omitempty"`
+	Content           map[string]string `json:"content,omitempty"`
+	Template          string            `json:"template"`
+	Task              string            `json:"task"`
+	Tools             []string          `json:"tools"`
+	MaxRuntimeSeconds int64             `json:"max_runtime_seconds,omitempty"`
 	// Home is the opaque task-home ID. It is required by a task-home template
 	// and refused by a stateless one.
 	Home string `json:"home,omitempty"`
@@ -175,12 +177,13 @@ const (
 
 // Record is one run's durable ledger entry.
 type Record struct {
-	Version    int    `json:"version"`
-	Key        Key    `json:"key"`
-	Generation uint64 `json:"generation"`
-	SpecDigest string `json:"spec_digest,omitempty"`
-	Spec       *Spec  `json:"spec,omitempty"`
-	TemplateID string `json:"template_id,omitempty"`
+	Content    []ContentSelection `json:"content,omitempty"`
+	Version    int                `json:"version"`
+	Key        Key                `json:"key"`
+	Generation uint64             `json:"generation"`
+	SpecDigest string             `json:"spec_digest,omitempty"`
+	Spec       *Spec              `json:"spec,omitempty"`
+	TemplateID string             `json:"template_id,omitempty"`
 	// Models is the concrete model chain of the template the run was
 	// admitted with, in routing order.
 	Models []ModelRef `json:"models,omitempty"`

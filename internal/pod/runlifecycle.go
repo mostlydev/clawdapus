@@ -29,8 +29,9 @@ type rawRunHome struct {
 }
 
 type rawRunContent struct {
-	Source string `yaml:"source"`
-	Target string `yaml:"target"`
+	Versioned bool   `yaml:"versioned"`
+	Source    string `yaml:"source"`
+	Target    string `yaml:"target"`
 }
 
 // Defaults for per-run templates. max-authority bounds how far ahead an
@@ -159,7 +160,7 @@ func parseRunHome(raw *rawRunLimits, limits *RunLimits) error {
 			}
 		}
 		seen[target] = struct{}{}
-		limits.Home.Content = append(limits.Home.Content, RunContent{Source: source, Target: target})
+		limits.Home.Content = append(limits.Home.Content, RunContent{Source: source, Target: target, Versioned: c.Versioned})
 	}
 	return nil
 }

@@ -29,6 +29,8 @@ outline: deep
 
 ## Unreleased
 
+- Task-home launches can select sealed reference snapshots from template-declared versioned roots. Selected IDs and manifest digests are recorded in status, and changed snapshots are refused before worker spawn.
+
 ## v0.36.1 <Badge type="tip" text="Latest" /> {#v0-36-1}
 
 *2026-11-10*

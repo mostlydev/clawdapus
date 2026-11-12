@@ -52,3 +52,10 @@ func TestParseRunHomeWatchdogThreshold(t *testing.T) {
 		t.Fatal("excessive threshold accepted")
 	}
 }
+
+func TestVersionedRunContent(t *testing.T) {
+	_, limits, err := parseRunLifecycle("per-run", &rawRunLimits{Home: &rawRunHome{}, Content: []rawRunContent{{Source: "snapshots", Target: "/ref", Versioned: true}}})
+	if err != nil || !limits.Home.Content[0].Versioned {
+		t.Fatalf("versioned content lost: %+v %v", limits, err)
+	}
+}

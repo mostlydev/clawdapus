@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -34,6 +35,7 @@ func apiErr(status int, code, format string, args ...any) *APIError {
 }
 
 var specFields = map[string]string{
+	"content":             "stringmap",
 	"template":            "string",
 	"task":                "string",
 	"tools":               "strings",
@@ -48,7 +50,7 @@ var templateIDRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 // CanonicalSpec validates a raw launch spec and returns its canonical JSON
 // form (sorted keys, no insignificant whitespace, no HTML escaping), the
 // parsed Spec, and the digest "sha256:<hex>" over the canonical bytes.
-// Only strings, integers and string arrays are accepted, so the canonical
+// Only strings, integers, string arrays and the content string map are accepted, so the canonical
 // form is unambiguous across languages.
 func CanonicalSpec(raw json.RawMessage) ([]byte, *Spec, string, error) {
 	if !utf8.Valid(raw) {
@@ -84,6 +86,17 @@ func CanonicalSpec(raw json.RawMessage) ([]byte, *Spec, string, error) {
 		case "string":
 			if _, ok := v.(string); !ok {
 				return nil, nil, "", apiErr(http.StatusBadRequest, "spec_invalid", "spec.%s must be a string", k)
+			}
+		case "stringmap":
+			m, ok := v.(map[string]any)
+			if !ok || len(m) == 0 {
+				return nil, nil, "", apiErr(http.StatusBadRequest, "spec_invalid", "spec.content must be a nonempty object")
+			}
+			for _, v := range m {
+				id, ok := v.(string)
+				if !ok || !snapshotIDRe.MatchString(id) {
+					return nil, nil, "", apiErr(http.StatusBadRequest, "spec_invalid", "invalid content snapshot ID")
+				}
 			}
 		case "strings":
 			arr, ok := v.([]any)
@@ -198,6 +211,25 @@ func encodeCanonical(v map[string]any, keys []string) ([]byte, error) {
 				return nil, apiErr(http.StatusBadRequest, "spec_invalid", "spec integers must be within ±(2^53-1)")
 			}
 			b.WriteString(strconv.FormatInt(n, 10))
+		case map[string]any:
+			nested := make([]string, 0, len(val))
+			for k := range val {
+				nested = append(nested, k)
+			}
+			sort.Slice(nested, func(i, j int) bool {
+				a, b := utf16.Encode([]rune(nested[i])), utf16.Encode([]rune(nested[j]))
+				for k := 0; k < len(a) && k < len(b); k++ {
+					if a[k] != b[k] {
+						return a[k] < b[k]
+					}
+				}
+				return len(a) < len(b)
+			})
+			raw, err := encodeCanonical(val, nested)
+			if err != nil {
+				return nil, err
+			}
+			b.Write(raw)
 		case []any:
 			b.WriteByte('[')
 			for j, item := range val {

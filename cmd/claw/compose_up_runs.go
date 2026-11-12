@@ -141,7 +141,10 @@ func resolveRunContent(name, podDir string, home *pod.RunHome) ([]runs.ContentMo
 		if err != nil || !(info.IsDir() || info.Mode().IsRegular()) {
 			return nil, fmt.Errorf("service %q: x-claw.run.content source %q must be a directory or a regular file", name, c.Source)
 		}
-		out = append(out, runs.ContentMount{Source: resolved, Target: c.Target})
+		if c.Versioned && !info.IsDir() {
+			return nil, fmt.Errorf("service %q: versioned content source must be a directory", name)
+		}
+		out = append(out, runs.ContentMount{Source: resolved, Target: c.Target, Versioned: c.Versioned})
 	}
 	return out, nil
 }

@@ -274,3 +274,5 @@ The spike tests are the heavy end-to-end path. They build images, run Docker, an
 - Auto-deploys to `clawdapus.dev` on merge to master when `site/**` changes (`.github/workflows/deploy-site.yml`).
 - Sidebar/nav config: `site/.vitepress/config.mts`. Guide pages: `site/guide/`. Top-level pages: `site/index.md`, `site/manifesto.md`, `site/changelog.md`.
 - **Changelog:** `site/changelog.md` is manually maintained. Release notes do NOT sync from GitHub releases automatically — add an entry to `site/changelog.md` when cutting a release or landing significant features on master.
+
+- Task-home versioned references: `run.content[].versioned` declares an authorized snapshot root; launch `content` selects opaque IDs for all versioned targets. `internal/runs/content.go` validates sealed bounded trees, records manifest provenance, and rechecks before spawn. The trusted host publisher owns immutability/retention; descriptor validation does not freeze Docker's later path lookup. Stateless workers do not accept content selections.
